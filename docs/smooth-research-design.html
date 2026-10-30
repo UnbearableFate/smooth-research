@@ -1,0 +1,1245 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Smooth Research 设计：插件只记录，不执行</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='4' fill='%230d1520'/%3E%3Cpath d='M14 20h24M14 32h24M14 44h14' stroke='%2392a6bb' stroke-width='4' stroke-linecap='round'/%3E%3Ccircle cx='46' cy='44' r='6' fill='%23ffb547'/%3E%3C/svg%3E">
+<!-- Blueprint register (visual-explainer style guide): IBM Plex + Noto Sans SC for the Chinese text. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  /* tokens: Blueprint register */
+  :root {
+    color-scheme: light dark;
+    --bg: #0d1520; --surface: #132031; --border: #22324a; --border-bright: #596b87;
+    --text: #e3ecf5; --text-dim: #92a6bb; --accent: #ffb547; --accent-dim: rgba(255,181,71,.14);
+    --ok: #6fd3a0; --warn: #e8d36a; --risk: #ff7b6b; --info: #7cc0f0;
+    --node-top: color-mix(in srgb, var(--text) 7%, var(--surface)); --lift: rgb(0 0 0 / .45); --halo: 32%;
+    --grid: color-mix(in srgb, var(--border) 55%, transparent);
+    --font-body: 'IBM Plex Sans', 'Noto Sans SC', sans-serif;
+    --font-mono: 'IBM Plex Mono', 'Noto Sans SC', monospace;
+    --t-label: .75rem; --t-small: .875rem; --t-body: 1rem; --t-lead: 1.25rem; --t-h2: 1.625rem; --t-h1: clamp(2.25rem, 5.5vw, 4rem);
+    --s-1: .25rem; --s-2: .5rem; --s-3: .75rem; --s-4: 1rem; --s-5: 1.5rem; --s-6: 2rem; --s-7: 3rem; --s-8: 4.5rem;
+    --r-1: 4px; --r-2: 10px;
+    --ease: cubic-bezier(.16,1,.3,1); --fast: 150ms; --med: 300ms; --slow: 500ms;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f2f6fa; --surface: #ffffff; --border: #d6e0ea; --border-bright: #818f9e;
+      --text: #0f1a26; --text-dim: #4d6074; --accent: #a34700; --accent-dim: rgba(163,71,0,.12);
+      --ok: #1c7443; --warn: #776300; --risk: #b0341e; --info: #145f99;
+      --node-top: var(--surface); --lift: rgb(18 22 20 / .12); --halo: 22%;
+    }
+  }
+
+  /* base */
+  html { font-size: 17px; scroll-behavior: smooth; }
+  * { box-sizing: border-box; margin: 0; }
+  body { background: var(--bg); color: var(--text); font: 400 var(--t-body)/1.7 var(--font-body); text-wrap: pretty; font-kerning: normal; font-synthesis: none; -webkit-font-smoothing: antialiased; line-break: strict; }
+  ::selection { background: var(--accent-dim); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .shell { display: grid; grid-template-columns: minmax(0, 1fr); }
+  main { width: 100%; max-width: 64rem; margin: 0 auto; padding: var(--s-6) var(--s-5) var(--s-8); display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s-8); }
+  section, figure, header { min-width: 0; }
+  section { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s-7); }
+  section > .sec-intro { display: grid; gap: var(--s-4); }
+  header { display: grid; gap: var(--s-4); }
+  header + figure { margin-top: calc(var(--s-6) - var(--s-8)); }
+  h1, h2, .kpi .val { text-box: trim-both cap alphabetic; }
+  h1 { font-size: var(--t-h1); line-height: 1.1; font-weight: 600; letter-spacing: -.02em; text-wrap: balance; max-width: 13em; margin-bottom: var(--s-2); }
+  h2 { font-size: var(--t-h2); line-height: 1.3; font-weight: 600; letter-spacing: -.01em; text-wrap: balance; }
+  .sec-head { display: grid; gap: var(--s-3) var(--s-5); align-items: baseline; border-top: 1px solid var(--border); padding-top: var(--s-5); }
+  @media (min-width: 52rem) { .sec-head { grid-template-columns: 3fr 9fr; } }
+  h3 { font-size: var(--t-body); line-height: 1.4; font-weight: 600; }
+  p { max-width: 40em; }
+  .eyebrow { display: flex; align-items: center; gap: var(--s-2); font: 600 var(--t-label) var(--font-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+  .eyebrow::before { content: ''; width: 1.25rem; height: 2px; background: currentColor; }
+  .ve-label { font: 500 var(--t-label) var(--font-mono); color: var(--text-dim); }
+  .caps { letter-spacing: .08em; font-weight: 600; color: var(--text); }
+  .lead { font-size: var(--t-lead); line-height: 1.6; color: var(--text-dim); max-width: 31em; }
+  .lead b, p b { color: var(--text); font-weight: 600; }
+  .sec-intro p { color: var(--text-dim); }
+  .meta { font: 500 var(--t-label) var(--font-mono); color: var(--text-dim); font-variant-numeric: tabular-nums; }
+  .unit { font-size: .5em; font-weight: 500; color: var(--text-dim); letter-spacing: 0; }
+  code { font: .875em var(--font-mono); font-variant-ligatures: none; overflow-wrap: anywhere; }
+
+  /* table of contents: side rail on wide screens, sticky top bar below 1240px */
+  .toc { font: 500 var(--t-small) var(--font-mono); }
+  .toc-t { font: 600 var(--t-label) var(--font-mono); color: var(--text-dim); letter-spacing: .06em; margin-bottom: var(--s-3); padding-left: var(--s-3); }
+  .toc ol { list-style: none; padding: 0; display: grid; gap: var(--s-1); }
+  .toc a { color: var(--text-dim); text-decoration: none; display: block; padding: var(--s-1) var(--s-3); border-left: 2px solid transparent; border-radius: 0; transition: color var(--fast) var(--ease), border-color var(--fast) var(--ease); }
+  .toc a:hover, .toc a:focus-visible { color: var(--text); }
+  .toc a.is-on { color: var(--text); border-left-color: var(--accent); }
+  @media (min-width: 1240px) {
+    .shell { grid-template-columns: 9rem minmax(0, 64rem); gap: var(--s-6); justify-content: center; }
+    main { margin: 0; }
+    .toc { position: sticky; top: 0; align-self: start; padding: var(--s-6) 0; max-height: 100vh; overflow-y: auto; }
+  }
+  @media (max-width: 1239.98px) {
+    .toc { position: sticky; top: 0; z-index: 10; background: var(--bg); border-bottom: 1px solid var(--border); padding: 0 var(--s-4); }
+    .toc-t { display: none; }
+    .toc ol { display: flex; gap: var(--s-1); overflow-x: auto; scrollbar-width: none; mask-image: linear-gradient(90deg, #000 86%, transparent); }
+    .toc ol::-webkit-scrollbar { display: none; }
+    .toc a { white-space: nowrap; border-left: 0; border-bottom: 2px solid transparent; padding: var(--s-3) var(--s-2); }
+    .toc a.is-on { border-bottom-color: var(--accent); }
+    section[id], header[id] { scroll-margin-top: 3.5rem; }
+  }
+
+  /* figure: Blueprint stage is a 24px line grid */
+  .frame { background-color: var(--bg); background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px); background-size: 24px 24px; border: 1px solid var(--border); border-radius: var(--r-1); padding: var(--s-5); overflow-x: auto; }
+  figcaption { font-size: var(--t-body); color: var(--text-dim); margin-top: var(--s-3); max-width: 42em; }
+  .fig-n { font: 600 var(--t-label) var(--font-mono); color: var(--text); margin-right: var(--s-2); }
+
+  /* diagram kit (references/diagrams.md) */
+  /* min-width keeps 13-unit labels at 12px or more as rendered; narrow screens scroll the frame instead. */
+  .ve-svg { width: 100%; min-width: 930px; height: auto; display: block; font: 500 17px var(--font-body); }
+  .ve-n .sh { fill: url(#ve-node); stroke: var(--border-bright); stroke-width: 1.5; filter: drop-shadow(0 6px 14px var(--lift)); transition: stroke var(--fast) var(--ease), opacity var(--med) var(--ease); }
+  .ve-n .lid { fill: var(--node-top); }
+  .ve-n.is-key .sh { fill: color-mix(in srgb, var(--accent) 11%, var(--surface)); stroke: var(--accent); stroke-width: 2; filter: drop-shadow(0 0 16px color-mix(in srgb, var(--accent) var(--halo), transparent)); }
+  .ve-n text { fill: var(--text); text-anchor: middle; dominant-baseline: central; font-weight: 600; }
+  .ve-n text.m { font: 600 16px var(--font-mono); }
+  .ve-n .sub { fill: var(--text-dim); font: 500 14px var(--font-mono); }
+  .ve-n .gl { fill: none; stroke: var(--text-dim); stroke-width: 1.5; stroke-linejoin: round; }
+  .ve-n .ve-kind { fill: var(--text-dim); font: 600 14px var(--font-mono); letter-spacing: .06em; }
+  .ve-n text.l { text-anchor: start; }
+  .ve-n.is-key .gl { stroke: var(--accent); }
+  .ve-e { fill: none; stroke: var(--text-dim); stroke-width: 1.75; marker-end: url(#ve-ah); }
+  .ve-e.is-hot { stroke: var(--accent); stroke-width: 2.75; filter: drop-shadow(0 0 5px color-mix(in srgb, var(--accent) 55%, transparent)); }
+  .ve-e.is-async { stroke-dasharray: 6 5; }
+  .ve-e.no-ah { marker-end: none; }
+  .ve-el { fill: var(--text-dim); font: 500 14px var(--font-mono); text-anchor: middle; paint-order: stroke; stroke: var(--bg); stroke-width: 5px; stroke-linejoin: round; }
+  .ve-el.l { text-anchor: end; } .ve-el.r { text-anchor: start; }
+  .ve-el.is-risk { fill: var(--risk); }
+  /* boundaries, blocked edges, markers */
+  .ve-bd { fill: none; stroke: var(--border-bright); stroke-width: 1.25; stroke-dasharray: 6 5; }
+  .ve-bd-t { fill: var(--text-dim); font: 600 13px var(--font-mono); letter-spacing: .06em; }
+  .ve-blk { fill: none; stroke: var(--risk); stroke-width: 1.75; stroke-dasharray: 6 5; }
+  .ve-x { fill: none; stroke: var(--risk); stroke-width: 2.5; stroke-linecap: round; }
+  .mk { fill: var(--text-dim); font: 500 14px var(--font-mono); text-anchor: middle; }
+  .ann { fill: none; stroke: var(--text-dim); stroke-width: 1; }
+  .ve-dim path { fill: none; stroke-width: 1; } .ve-dim .ext { stroke: var(--border-bright); } .ve-dim .ln { stroke: var(--text-dim); }
+  .ve-dim text { fill: var(--text); font: 500 14px var(--font-mono); text-anchor: middle; paint-order: stroke; stroke: var(--bg); stroke-width: 5px; }
+  .ve-dim.is-key .ln { stroke: var(--accent); } .ve-dim.is-key text { fill: var(--accent); }
+  .ve-co circle { fill: var(--surface); stroke: var(--accent); stroke-width: 1.75; }
+  .ve-co text { fill: var(--accent); font: 600 14px var(--font-mono); text-anchor: middle; dominant-baseline: central; }
+  .ve-co.now circle { fill: var(--accent); } .ve-co.now text { fill: var(--surface); }
+  .ve-co.q circle { stroke: var(--border-bright); } .ve-co.q text { fill: var(--text-dim); }
+  .ve-co.q.now circle { fill: var(--accent); stroke: var(--accent); } .ve-co.q.now text { fill: var(--surface); }
+
+  /* state tape (Fig. 7) */
+  .pill rect { fill: var(--surface); stroke: var(--border); stroke-width: 1; }
+  .pill text { fill: var(--text-dim); font: 500 14px var(--font-mono); text-anchor: middle; dominant-baseline: central; }
+  .pill.sel rect { fill: color-mix(in srgb, var(--accent) 14%, var(--surface)); stroke: var(--accent); stroke-width: 2; }
+  .pill.sel text { fill: var(--text); font-weight: 600; }
+  .trace { fill: none; stroke: var(--accent); stroke-width: 2.5; stroke-linejoin: round; filter: drop-shadow(0 0 4px color-mix(in srgb, var(--accent) 45%, transparent)); }
+  .hd { fill: var(--text); font: 600 15px var(--font-body); text-anchor: middle; }
+  .hd-f { fill: var(--text-dim); font: 500 13px var(--font-mono); text-anchor: middle; }
+  .neq { fill: var(--text-dim); font: 500 18px var(--font-body); text-anchor: middle; }
+  .brk { fill: none; stroke: var(--border-bright); stroke-width: 1; }
+  .rec { fill: var(--text); font: 600 14px var(--font-mono); text-anchor: middle; }
+  .note { fill: var(--text-dim); font: 500 14px var(--font-mono); text-anchor: middle; }
+
+  /* ledger replay (Fig. 9) */
+  .lg text { font: 500 14px var(--font-mono); fill: var(--text); dominant-baseline: central; }
+  .lg .num, .lg .hdr { fill: var(--text-dim); }
+  .lg .hdr { font-weight: 600; }
+  .lg .seq { text-anchor: middle; }
+  .rule { stroke: var(--border); stroke-width: 1; }
+  .fx rect { fill: var(--surface); stroke: var(--st); stroke-width: 1.25; }
+  .lg .fx text { fill: var(--st); font-weight: 600; }
+  .fx .g { fill: var(--st); stroke: none; }
+  .fx.ok { --st: var(--ok); } .fx.warn { --st: var(--warn); } .fx.risk { --st: var(--risk); } .fx.info { --st: var(--info); } .fx.dim { --st: var(--text-dim); }
+  .fx.dim .g { fill: none; stroke: var(--st); stroke-width: 1.5; }
+  .panel { fill: var(--surface); stroke: var(--border-bright); stroke-width: 1.5; }
+  .pt { fill: var(--text); font: 600 17px var(--font-body); }
+  .pk { fill: var(--text-dim); font: 500 14px var(--font-mono); dominant-baseline: central; }
+  .pv text { fill: var(--text); font: 600 15px var(--font-mono); text-anchor: end; dominant-baseline: central; }
+
+  /* lanes: epoch timeline and timing staff */
+  .lane { stroke: var(--border); stroke-width: 1; }
+  .lane-t { fill: var(--text); font: 600 15px var(--font-body); }
+  .lane-m { fill: var(--text); font: 600 14px var(--font-mono); }
+  .lane-s { fill: var(--text-dim); font: 500 13px var(--font-mono); }
+  .bar rect { fill: url(#ve-node); stroke: var(--border-bright); stroke-width: 1.5; }
+  .bar text { fill: var(--text); font: 500 14px var(--font-mono); dominant-baseline: central; }
+  .bar.cur rect { stroke: var(--accent); stroke-width: 2; }
+  .job { fill: url(#ve-node); stroke: var(--border-bright); stroke-width: 1.5; }
+  .job-t { fill: var(--text); font: 500 13px var(--font-mono); dominant-baseline: central; }
+  .job-w { fill: var(--text-dim); font: 500 13px var(--font-mono); dominant-baseline: central; }
+  .tick { stroke: var(--border-bright); stroke-width: 1; }
+  .tick-t { fill: var(--text-dim); font: 500 13px var(--font-mono); text-anchor: middle; }
+  .ev { fill: var(--accent); }
+  .ev-d { fill: var(--surface); stroke: var(--text-dim); stroke-width: 1.5; }
+
+  /* strip plot (Fig. 17) */
+  .gridv { stroke: var(--border); stroke-width: 1; }
+  .dot { fill: var(--text-dim); stroke: var(--bg); stroke-width: 1.5; }
+  .dot.hot { fill: var(--accent); }
+  .band { fill: color-mix(in srgb, var(--text) 6%, transparent); stroke: var(--border-bright); stroke-width: 1; stroke-dasharray: 4 3; }
+  .mean { stroke: var(--text); stroke-width: 2; }
+  .row-t { fill: var(--text); font: 500 14px var(--font-mono); dominant-baseline: central; }
+  .lbl { fill: var(--text-dim); font: 500 14px var(--font-mono); }
+
+  /* bar charts (Fig. 21) */
+  .bars text { fill: var(--text-dim); font: 500 14px var(--font-mono); dominant-baseline: central; }
+  .bars .lab { text-anchor: end; fill: var(--text); }
+  .bars .hd2 { font: 600 13px var(--font-mono); }
+  .bars rect { fill: var(--border-bright); transform-box: fill-box; transform-origin: left; transition: transform 900ms var(--ease) 150ms; }
+  .bars rect.hot { fill: var(--accent); }
+
+  /* flow dots */
+  [data-flow] { fill: none; stroke: none; }
+  .ve-dots circle { fill: var(--text); }
+  .ve-steps:not(.is-full) .ve-dots { display: none; }
+
+  /* linked highlighting: same data-ref lights up together */
+  .ve-ref { text-decoration: underline dotted var(--text-dim) 1px; text-underline-offset: .22em; border-radius: var(--r-1); transition: background var(--fast) var(--ease); }
+  .ve-ref.is-lit { background: var(--accent-dim); text-decoration-color: var(--accent); }
+  svg [data-ref] { transition: opacity var(--med) var(--ease); }
+  svg.has-lit path[data-ref]:not(.is-lit), svg.has-lit g[data-ref]:not(.is-lit) .sh { opacity: .25; }
+  svg.has-lit g[data-ref]:not(.is-lit) text, svg.has-lit text[data-ref]:not(.is-lit) { fill: var(--text-dim); }
+  .ve-n.is-lit .sh { stroke: var(--accent); }
+  .ve-e.is-lit { stroke: var(--accent); }
+  .ve-el.is-lit { fill: var(--text); }
+  .dot.is-lit { fill: var(--accent); }
+  .case.is-lit { border-color: var(--accent); }
+
+  /* stepper / scene player */
+  .ve-steps [data-s] { transition: opacity var(--slow) var(--ease), stroke-dashoffset var(--slow) var(--ease); }
+  .ve-steps [data-s]:not(.on) { opacity: .15; }
+  .ve-steps g[data-s]:not(.on) text, .ve-steps text[data-s]:not(.on) { opacity: 0; }
+  .ve-steps path[pathLength][data-s] { stroke-dasharray: 1; stroke-dashoffset: 1; }
+  .ve-steps path[pathLength][data-s].on { stroke-dashoffset: 0; }
+  .ve-steps .ve-n.now > .sh { stroke: var(--accent); }
+  .ve-steps:not(.is-full) .ve-e.now { stroke: var(--accent); stroke-width: 2.75; }
+  .ve-tok { fill: var(--accent); visibility: hidden; }
+  .ve-steps:not(.is-still) .ve-tok.now { visibility: visible; animation: ve-run var(--dur, 900ms) ease-in-out var(--d, 0ms) both; }
+  @keyframes ve-run { from { offset-distance: 0%; opacity: 0; } 10%, 75% { opacity: 1; } to { offset-distance: 100%; opacity: 0; } }
+  .ve-steps .ve-vals text { transition: none; }
+  .ve-vals text.on:has(~ text.on) { opacity: 0; }
+  .ve-player { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; align-items: center; gap: var(--s-2) var(--s-3); margin-top: var(--s-4); }
+  .ve-cap { grid-column: 1 / -1; list-style: none; padding: 0; min-height: 3.4em; }
+  .ve-cap li::before { content: attr(data-n); font: 600 var(--t-label) var(--font-mono); color: var(--accent); margin-right: var(--s-3); font-variant-numeric: tabular-nums; }
+  .ve-player input { accent-color: var(--accent); min-width: 0; }
+  button { font: 500 var(--t-small) var(--font-mono); color: var(--text); background: var(--surface); border: 1px solid var(--border-bright); border-radius: var(--r-1); padding: var(--s-2) var(--s-3); cursor: pointer; transition: border-color var(--fast) var(--ease); }
+  button:hover, button:focus-visible { border-color: var(--accent); }
+
+  /* numbered notes under a figure */
+  .co-list { list-style: none; padding: 0; display: grid; gap: var(--s-2); margin-top: var(--s-4); max-width: 46em; }
+  .co-list li { display: grid; grid-template-columns: 1.5rem minmax(0, 1fr); gap: var(--s-3); align-items: start; color: var(--text-dim); }
+  .co-list .n { font: 600 var(--t-label) var(--font-mono); color: var(--accent); border: 1.5px solid var(--accent); border-radius: 50%; width: 1.4rem; height: 1.4rem; display: inline-grid; place-items: center; margin-top: .2rem; }
+
+  /* close-up record cards */
+  .specs { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 24rem), 1fr)); gap: var(--s-4); }
+  .spec { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-1); padding: var(--s-4) var(--s-5); display: grid; gap: var(--s-4); align-content: start; min-width: 0; }
+  .spec-h { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--s-2) var(--s-3); border-bottom: 1px solid var(--border); padding-bottom: var(--s-3); }
+  .spec-h h3 { font: 600 var(--t-body) var(--font-mono); }
+  .spec dl { display: grid; grid-template-columns: minmax(0, 10.5rem) minmax(0, 1fr); gap: var(--s-3) var(--s-4); }
+  .spec dt { font: 500 var(--t-label) var(--font-mono); color: var(--text-dim); padding-top: .3em; overflow-wrap: anywhere; }
+  .spec dd { margin: 0; min-width: 0; overflow-wrap: anywhere; line-height: 1.6; }
+  .spec dd.mono { font: 500 var(--t-small) var(--font-mono); padding-top: .15em; }
+  .spec dd .dim { color: var(--text-dim); }
+  @media (max-width: 40rem) { .spec dl { grid-template-columns: minmax(0, 1fr); gap: var(--s-1) 0; } .spec dt { padding-top: var(--s-3); } }
+  .checks { list-style: none; padding: 0; display: grid; gap: var(--s-2); border-top: 1px solid var(--border); padding-top: var(--s-3); }
+  .checks li { display: grid; grid-template-columns: 5.5rem minmax(0, 1fr); gap: var(--s-3); align-items: baseline; }
+
+  /* KPI strip */
+  .kpis { display: flex; flex-wrap: wrap; gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: var(--r-1); overflow: hidden; }
+  .kpi { flex: 1 1 13rem; background: var(--surface); padding: var(--s-5); display: grid; grid-template-rows: auto auto 1fr; gap: var(--s-3); min-width: 0; }
+  .kpi .val { font: 600 2.75rem/1 var(--font-body); font-variant-numeric: tabular-nums; letter-spacing: -.04em; }
+  .ve-waffle { align-self: end; width: 11rem; height: auto; font: 500 15px var(--font-mono); overflow: visible; }
+  .ve-waffle text { fill: var(--text-dim); dominant-baseline: central; }
+  .ve-waffle .on { fill: var(--accent); } .ve-waffle .off { fill: none; stroke: var(--text-dim); stroke-width: 1.25; }
+  .ve-bars { align-self: end; width: 100%; max-width: 16rem; height: auto; font: 500 15px var(--font-mono); overflow: visible; }
+  .ve-bars text { fill: var(--text-dim); dominant-baseline: central; }
+  .ve-bars rect { fill: var(--border-bright); transform-box: fill-box; transform-origin: left; transition: transform 900ms var(--ease) 150ms; }
+  .ve-bars .hot { fill: var(--accent); }
+  .ve-bars .hot + text { fill: var(--text); }
+
+  /* small multiples */
+  .cases { display: grid; grid-template-columns: repeat(auto-fit, minmax(14.5rem, 1fr)); gap: var(--s-4); }
+  .case { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-1); padding: var(--s-4); display: grid; gap: var(--s-3); align-content: start; min-width: 0; transition: border-color var(--fast) var(--ease); }
+  .case[data-st=ok] { --st: var(--ok); } .case[data-st=warn] { --st: var(--warn); } .case[data-st=risk] { --st: var(--risk); }
+  .case p { color: var(--text-dim); }
+  .case code { color: var(--text); }
+  .case .rel { display: grid; gap: var(--s-1); }
+  .case .rel code { overflow-wrap: normal; }
+  .case .rel span { font: 500 var(--t-small) var(--font-mono); }
+  .ve-mini { width: 100%; height: auto; font: 600 15px var(--font-body); overflow: visible; }
+  .ve-mini .ve-n .sh { filter: none; }
+  .ve-mini .ve-n .sub { font-size: 14px; }
+  .ve-mini .is-st.ve-e { stroke: var(--st); stroke-width: 2.75; }
+  .ve-mini .is-st .sh { stroke: var(--st); stroke-width: 2; }
+  .ve-mini .is-st .sub { fill: var(--st); }
+  .ve-mini .is-off { stroke-dasharray: 5 4; }
+  .ve-mini .ve-e.is-off { opacity: .45; }
+  .mn { fill: var(--text-dim); font: 500 14px var(--font-mono); text-anchor: middle; }
+  .mn.l { text-anchor: start; }
+  .rng { font: 500 14px var(--font-mono); }
+  .rng .ax, .rng .tk { stroke: var(--border-bright); stroke-width: 1; fill: none; }
+  .rng rect { fill: var(--border-bright); }
+  .rng rect.hot { fill: var(--accent); }
+  .rng text { fill: var(--text-dim); dominant-baseline: central; }
+  .rng .rv { fill: var(--text); text-anchor: middle; }
+  .rng .rm { text-anchor: middle; } .rng .re { text-anchor: end; }
+
+  /* chips */
+  .chip { display: inline-flex; align-items: center; gap: var(--s-2); font: 600 var(--t-label) var(--font-mono); padding: 2px var(--s-2); border: 1px solid currentColor; border-radius: var(--r-1); white-space: nowrap; justify-self: start; line-height: 1.5; }
+  .chip::before { content: ''; width: .5rem; height: .5rem; background: currentColor; flex: none; }
+  .chip.ok { color: var(--ok); } .chip.ok::before { border-radius: 50%; }
+  .chip.warn { color: var(--warn); } .chip.warn::before { clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+  .chip.risk { color: var(--risk); }
+  .chip.info { color: var(--info); } .chip.info::before { clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); }
+
+  /* tables */
+  .table-scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--r-1); }
+  table { border-collapse: collapse; width: 100%; min-width: 48rem; }
+  th { background: var(--surface); font: 600 var(--t-label) var(--font-mono); color: var(--text-dim); text-align: left; padding: var(--s-3) var(--s-4); letter-spacing: .04em; white-space: nowrap; }
+  td { padding: var(--s-3) var(--s-4); border-top: 1px solid var(--border); vertical-align: top; }
+  td.k { font: 500 var(--t-small) var(--font-mono); color: var(--text-dim); white-space: nowrap; }
+  tr.grp td { background: color-mix(in srgb, var(--surface) 70%, transparent); font: 600 var(--t-label) var(--font-mono); color: var(--text-dim); letter-spacing: .04em; }
+  td .chip { margin-top: .2em; }
+  .num { font-variant-numeric: tabular-nums; }
+  .t-issues td:first-child:not([colspan]) { white-space: nowrap; }
+  .nb { white-space: nowrap; }
+
+  /* callout */
+  .callout { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-1); padding: var(--s-4); display: grid; gap: var(--s-3); }
+  .tags { display: flex; flex-wrap: wrap; gap: var(--s-2); list-style: none; padding: 0; }
+  .tags li { font: 500 var(--t-small) var(--font-mono); color: var(--text-dim); border: 1px dashed var(--border-bright); border-radius: var(--r-1); padding: 2px var(--s-2); }
+
+  .sources { border-top: 1px solid var(--border); padding-top: var(--s-4); display: grid; gap: var(--s-2); }
+  .sources ul { padding-left: 1.1em; display: grid; gap: var(--s-1); color: var(--text-dim); }
+
+  /* entrance: blocks rise in once; bars grow as their block arrives */
+  .js-motion main > * { transition: opacity var(--slow) var(--ease), transform var(--slow) var(--ease); }
+  .js-motion main > :not(.in) { opacity: 0; transform: translateY(1rem); }
+  .js-motion main > :not(.in) .ve-bars rect, .js-motion main > :not(.in) .bars rect { transform: scaleX(0); }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } * { transition: none !important; } .ve-tok { display: none; } }
+
+  @media print {
+    :root { --bg: #fff; --surface: #fff; --border: #d6e0ea; --border-bright: #818f9e; --text: #0f1a26; --text-dim: #4d6074; --accent: #a34700; --ok: #1c7443; --warn: #776300; --risk: #b0341e; --info: #145f99; --node-top: #fff; --grid: transparent; }
+    .toc { display: none; } .shell { display: block; } main { max-width: none; }
+    .ve-player button, .ve-player input, .ve-dots { display: none; }
+    .frame { overflow: visible; background: #fff; } .ve-svg { min-width: 0; }
+    .frame, .case, .kpi, .spec, tr { break-inside: avoid; } h2 { break-after: avoid; }
+    svg * { filter: none !important; }
+    .js-motion main > * { opacity: 1 !important; transform: none !important; }
+    .js-motion .ve-bars rect, .js-motion .bars rect { transform: none !important; }
+    .ve-steps [data-s]:not(.on), .ve-steps g[data-s]:not(.on) text, .ve-steps text[data-s]:not(.on) { opacity: 1; }
+    .ve-steps path[pathLength][data-s] { stroke-dashoffset: 0; }
+    .ve-tok, .ve-vals text:not(:last-child) { display: none; }
+  }
+</style>
+</head>
+<body>
+<!-- Shared defs: one arrowhead (context-stroke follows each edge's color) and the node fill. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <marker id="ve-ah" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto"><path d="M0 0L10 5L0 10z" fill="context-stroke"/></marker>
+    <linearGradient id="ve-node" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color:var(--node-top)"/><stop offset="1" style="stop-color:var(--surface)"/></linearGradient>
+  </defs>
+</svg>
+<div class="shell">
+<nav class="toc" aria-label="章节">
+  <p class="toc-t"><span class="nb">smooth-research</span></p>
+  <ol>
+    <li><a href="#top">总览</a></li>
+    <li><a href="#loop">研究循环</a></li>
+    <li><a href="#graph">图模型</a></li>
+    <li><a href="#runs">运行记录</a></li>
+    <li><a href="#team">团队与审查</a></li>
+    <li><a href="#miyabi">Miyabi 分工</a></li>
+    <li><a href="#e2e">端到端结果</a></li>
+    <li><a href="#build">实现</a></li>
+    <li><a href="#sources">来源</a></li>
+  </ol>
+</nav>
+<main>
+
+  <header id="top">
+    <p class="eyebrow"><span class="nb">smooth-research</span> · 设计总览</p>
+    <h1>插件只记录，不执行</h1>
+    <p class="lead">它把研究计划变成可检验的假说，用成本逐级增加的实验积累证据，把每次运行的事实<span class="ve-ref" data-ref="rec" tabindex="0">登记</span>进 <span class="ve-ref" data-ref="db" tabindex="0">LatticeDB</span>。<b>启动、轮询和取消实验，都由 agent 用自己的<span class="ve-ref" data-ref="tools" tabindex="0">执行工具</span>完成。</b></p>
+    <p class="meta">v0.1.0 · 设计文档 v0.2 · 实施记录 v0.3（§21）· 51 项测试 · <span class="nb">2026-10-30</span></p>
+  </header>
+
+  <!-- Fig. 1: one run through the system, as a replay. Everything is drawn from the start ("0"); each step lights its edges. -->
+  <figure class="ve-steps">
+    <div class="frame">
+      <svg class="ve-svg" viewBox="0 0 1000 470" role="img" aria-label="研究计划交给研究 agent。agent 用 rl CLI 登记 RunSpec，用执行工具（shell、pi-env-mcp、miyabi-mcp）在本机或 Miyabi PBS 上运行；工具交回状态、工件和用量，agent 再用 rl 登记。rl 写入 LatticeDB 并封存文档，提供恢复包，并把审查包和咨询包交给另一模型族。rl 到执行工具之间没有控制通道：从不启动、轮询或取消。">
+        <rect class="ve-bd" x="20" y="166" width="340" height="290" rx="4"/>
+        <text class="ve-bd-t" x="34" y="189">插件 · SMOOTH-RESEARCH</text>
+        <rect class="ve-bd" x="640" y="166" width="340" height="290" rx="4"/>
+        <text class="ve-bd-t" x="654" y="189">插件之外</text>
+
+        <path class="ve-e" data-s="0 1" d="M210 72H398"/>
+        <text class="ve-el" data-s="0 1" x="304" y="63">给出方向</text>
+        <path class="ve-e is-hot" data-s="0 1 4" data-ref="rec" d="M440 126V222H332"/>
+        <text class="ve-el r" data-s="0 1 4" data-ref="rec" x="452" y="182">登记事实</text>
+        <path class="ve-e" data-s="0 5" d="M290 200V96H398"/>
+        <text class="ve-el l" data-s="0 5" x="280" y="150">恢复包 · 上下文包</text>
+        <path class="ve-e" data-s="0 2" data-ref="tools" d="M600 60H810V198"/>
+        <text class="ve-el" data-s="0 2" x="705" y="51">运行 · 提交</text>
+        <path class="ve-e is-async" data-s="0 3" data-ref="tools" d="M760 200V100H602"/>
+        <text class="ve-el" data-s="0 3" x="681" y="91">观测 · 结果 · 用量</text>
+        <path class="ve-e" data-s="0 2" d="M780 292V338"/>
+        <text class="ve-el l" data-s="0 2" x="770" y="319">启动作业</text>
+        <path class="ve-e" data-s="0 3" d="M840 340V294"/>
+        <text class="ve-el r" data-s="0 3" x="850" y="319">状态 · 工件</text>
+        <path class="ve-blk" d="M332 256H626"/>
+        <path class="ve-x" d="M629 249l14 14M643 249l-14 14"/>
+        <text class="ve-el is-risk" x="480" y="247">从不启动 · 轮询 · 取消</text>
+        <path class="ve-e" data-s="0 4" data-ref="db" d="M115 292V338"/>
+        <text class="ve-el l" data-s="0 4" x="105" y="319">事务写入</text>
+        <path class="ve-e" data-s="0 4" d="M265 292V338"/>
+        <text class="ve-el r" data-s="0 4" x="275" y="319">封存</text>
+        <path class="ve-e" data-s="0 5" d="M315 292V316H500V338"/>
+        <text class="ve-el" data-s="0 5" x="430" y="307">审查包 · 咨询包</text>
+        <path class="ve-e" data-s="0 5" d="M410 392H332"/>
+        <text class="ve-el" data-s="0 5" x="371" y="383">回答</text>
+
+        <circle class="ve-tok" data-s="1" r="5" style="offset-path: path('M210 72H398')"/>
+        <circle class="ve-tok" data-s="1" r="5" style="offset-path: path('M440 126V222H332'); --d: 800ms"/>
+        <circle class="ve-tok" data-s="2" r="5" style="offset-path: path('M600 60H810V198')"/>
+        <circle class="ve-tok" data-s="2" r="5" style="offset-path: path('M780 292V338'); --d: 900ms"/>
+        <circle class="ve-tok" data-s="3" r="5" style="offset-path: path('M840 340V294')"/>
+        <circle class="ve-tok" data-s="3" r="5" style="offset-path: path('M760 200V100H602'); --d: 800ms"/>
+        <circle class="ve-tok" data-s="4" r="5" style="offset-path: path('M440 126V222H332')"/>
+        <circle class="ve-tok" data-s="4" r="5" style="offset-path: path('M115 292V338'); --d: 900ms"/>
+        <circle class="ve-tok" data-s="4" r="5" style="offset-path: path('M265 292V338'); --d: 900ms"/>
+        <circle class="ve-tok" data-s="5" r="5" style="offset-path: path('M290 200V96H398')"/>
+        <circle class="ve-tok" data-s="5" r="5" style="offset-path: path('M315 292V316H500V338'); --d: 300ms"/>
+
+        <g class="ve-n" data-s="0 1" transform="translate(40 30)"><path class="sh" d="M0 0H150L170 20V84H0Z"/><path class="gl" d="M150 0V20H170"/><text x="85" y="34">研究计划</text><text class="sub" x="85" y="60">用户 + GPT</text></g>
+        <g class="ve-n" data-s="0" transform="translate(400 30)"><rect class="sh" width="200" height="96" rx="4"/><text x="100" y="38">研究 agent</text><text class="sub" x="100" y="66">Claude · Codex</text></g>
+        <g class="ve-n is-key" data-s="0 1 4 5" data-ref="rec" transform="translate(50 200)"><rect class="sh" width="280" height="92" rx="4"/><text x="140" y="36">rl CLI</text><text class="sub" x="140" y="64">记录核心 · 3 个 skill</text></g>
+        <g class="ve-n" data-s="0 4" data-ref="db" transform="translate(50 340)"><path class="sh" d="M0 10V80A65 10 0 0 0 130 80V10"/><ellipse class="sh lid" cx="65" cy="10" rx="65" ry="10"/><text x="65" y="48">LatticeDB</text><text class="sub" x="65" y="72">0.15.0</text></g>
+        <g class="ve-n" data-s="0 4 5" transform="translate(200 340)"><path class="sh" d="M0 0H112L130 18V90H0Z"/><path class="gl" d="M112 0V18H130"/><text x="65" y="40">封存文档</text><text class="sub" x="65" y="66">DOC@rev</text></g>
+        <g class="ve-n" data-s="0 5" transform="translate(410 340)"><rect class="sh" width="180" height="90" rx="4"/><text x="90" y="36">审查 · 顾问</text><text class="sub" x="90" y="62">另一模型族</text></g>
+        <g class="ve-n" data-s="0 2 3" data-ref="tools" transform="translate(670 200)"><rect class="sh" width="280" height="92" rx="4"/><text x="140" y="36">执行工具</text><text class="sub" x="140" y="64">shell · pi-env-mcp · miyabi-mcp</text></g>
+        <g class="ve-n" data-s="0 2 3" transform="translate(670 340)"><rect class="sh" width="280" height="90" rx="4"/><text x="140" y="36">计算环境</text><text class="sub" x="140" y="62">本机 · Miyabi PBS</text></g>
+
+        <g class="ve-co q" data-s="0 1" transform="translate(418 176)"><circle r="11"/><text>1</text></g>
+        <g class="ve-co q" data-s="0 2" transform="translate(834 130)"><circle r="11"/><text>2</text></g>
+        <g class="ve-co q" data-s="0 3" transform="translate(600 282)"><circle r="11"/><text>3</text></g>
+        <g class="ve-co q" data-s="0 4" transform="translate(190 318)"><circle r="11"/><text>4</text></g>
+        <g class="ve-co q" data-s="0 5" transform="translate(312 130)"><circle r="11"/><text>5</text></g>
+      </svg>
+    </div>
+    <div class="ve-player">
+      <ol class="ve-cap">
+        <li data-n="1/6">计划给出方向。agent 先用 <code>rl run register</code> 登记不可变的 RunSpec，得到 RUN 与 ATT 编号。</li>
+        <li data-n="2/6">agent 用自己的工具运行：本机 shell，或经 <span class="nb">miyabi-mcp</span> 提交 PBS 作业。</li>
+        <li data-n="3/6">工具把状态、工件和用量交回 agent。插件从不启动、轮询或取消作业。</li>
+        <li data-n="4/6">agent 用 <code>rl run record</code> 和 <code>rl run <span class="nb">import-result</span></code> 登记事实；核心在一个事务里写入 LatticeDB，并封存文档。</li>
+        <li data-n="5/6">新 session 用 <code>rl resume</code> 拿回恢复包；审查包和咨询包交给另一模型族，回答也封存。</li>
+        <li data-n="6/6">全图：① 登记 ② 运行 ③ 回传 ④ 写入与封存 ⑤ 恢复与审查。插件一侧只有记录和读取。</li>
+      </ol>
+      <button data-go="-1" aria-label="上一步">←</button>
+      <button data-play>播放</button>
+      <input type="range" min="0" value="0" aria-label="步骤">
+      <button data-go="1" aria-label="下一步">→</button>
+    </div>
+    <figcaption><span class="fig-n">Fig. 1</span>插件只记录。实验由 agent 用自己的工具执行，事实再登记回来；从插件到执行一侧没有任何控制通道。</figcaption>
+  </figure>
+
+  <section id="loop">
+    <div class="sec-intro">
+      <div class="sec-head"><p class="ve-label caps">研究循环</p><h2>每个结果都要指向下一步</h2></div>
+      <p>插件不规定研究路线。它要求每个实验在运行前写下<b>哪个结果导致哪一步</b>，结果出来后再决定继续、收窄、诊断还是咨询。</p>
+    </div>
+
+    <figure>
+      <div class="frame">
+        <svg class="ve-svg" viewBox="0 -12 1000 452" role="img" aria-label="循环：当前不确定性，最小可区分实验，实现与数据是否有效。无效则工程修复后重做。有效则看观测怎样改变判断：支持则有限扩展，反对则收窄、剪枝或换机制，两者都回到下一个不确定性；不确定则做一次更有区分力的检验，仍有瓶颈时由最强模型提出替代机制，再设计新实验。bf16 测试走的是有效、不确定、更强检验这条路。">
+          <path class="ve-e" d="M920 44V20H95V68"/>
+          <text class="ve-el" x="500" y="11">回到当前最重要的不确定性</text>
+          <path class="ve-e no-ah" d="M990 162H998V20H922"/>
+          <path class="ve-e" d="M500 154V228"/>
+          <text class="ve-el r" x="510" y="196">否</text>
+          <path class="ve-e" d="M434 262H330V148"/>
+          <text class="ve-el" x="382" y="253">修复后重做</text>
+          <path class="ve-e" d="M790 108V72H848"/>
+          <text class="ve-el" x="819" y="63">支持</text>
+          <path class="ve-e" d="M790 108V162H848"/>
+          <text class="ve-el" x="819" y="153">反对</text>
+          <path class="ve-e" d="M920 290V320"/>
+          <path class="ve-e" d="M856 360H762"/>
+          <text class="ve-el" x="809" y="351">是</text>
+          <path class="ve-e" d="M560 360H280V148"/>
+          <text class="ve-el" x="420" y="351">新机制 → 新实验</text>
+          <path class="ve-e is-hot" d="M170 108H218"/>
+          <path class="ve-e is-hot" d="M390 108H432"/>
+          <path class="ve-e is-hot" d="M566 108H622"/>
+          <text class="ve-el" x="594" y="99">是</text>
+          <path class="ve-e is-hot" d="M756 108H790V258H848"/>
+          <text class="ve-el" x="819" y="249">不确定</text>
+
+          <g class="ve-n" transform="translate(20 70)"><rect class="sh" width="150" height="76" rx="4"/><text x="75" y="28">当前不确定性</text><text class="sub" x="75" y="54">H-0001@1</text></g>
+          <g class="ve-n" transform="translate(220 70)"><rect class="sh" width="170" height="76" rx="4"/><text x="85" y="28">最小可区分实验</text><text class="sub" x="85" y="54">E-0001 · E2</text></g>
+          <g class="ve-n"><path class="sh" d="M434 108L500 62L566 108L500 154Z"/><text x="500" y="108">有效？</text></g>
+          <g class="ve-n"><path class="sh" d="M624 108L690 62L756 108L690 154Z"/><text x="690" y="108">改变判断？</text></g>
+          <g class="ve-n" transform="translate(434 230)"><rect class="sh" width="132" height="64" rx="4"/><text x="66" y="24">工程修复</text><text class="sub" x="66" y="46">或改进测量</text></g>
+          <g class="ve-n" transform="translate(850 44)"><rect class="sh" width="140" height="56" rx="4"/><text x="70" y="20">有限扩展</text><text class="sub" x="70" y="41">速度 1.91×</text></g>
+          <g class="ve-n" transform="translate(850 130)"><rect class="sh" width="140" height="64" rx="4"/><text x="70" y="24">收窄或剪枝</text><text class="sub" x="70" y="46">或换机制</text></g>
+          <g class="ve-n is-key" transform="translate(850 226)"><rect class="sh" width="140" height="64" rx="4"/><text x="70" y="24">更强的检验</text><text class="sub" x="70" y="46">continue_probe</text></g>
+          <g class="ve-n"><path class="sh" d="M856 360L920 322L984 360L920 398Z"/><text x="920" y="360">仍有瓶颈？</text></g>
+          <g class="ve-n" transform="translate(560 328)"><rect class="sh" width="200" height="64" rx="4"/><text x="100" y="24">顾问：替代机制</text><text class="sub" x="100" y="46">最强模型</text></g>
+        </svg>
+      </div>
+      <figcaption><span class="fig-n">Fig. 2</span>每个结果都对应一个默认动作，没有“永久开放”的状态。高亮的是 bf16 测试实际走过的路：结果有效，精度仍不确定，于是选择一次更有区分力的检验（<span class="nb">D-0003</span>）。</figcaption>
+    </figure>
+
+    <figure>
+      <div class="frame">
+        <svg class="ve-svg" viewBox="0 0 1000 330" role="img" aria-label="四个实验层级，成本逐级增加：E0 结构与实现，E1 隔离机制，E2 最小模型，E3 有限确认。成熟代码上的新问题可以从 E0 直接跳到 E2。本机端到端测试用了 E0 和 E1 两份契约，Miyabi 测试的 E-0001 在 E2，E3 尚未进入。">
+          <path class="ve-e is-hot is-async" d="M132 156C132 40 622 30 622 96"/>
+          <text class="ve-el" x="377" y="44">成熟代码上的新问题可以直接做 E2</text>
+          <g class="ve-n" transform="translate(20 160)"><rect class="sh" width="225" height="120" rx="4"/><text class="ve-kind l" x="16" y="24">E0</text><text class="l" x="16" y="52">结构与实现</text><text class="sub l" x="16" y="78">公式一致？算子对吗？</text><text class="sub l" x="16" y="100">维度 · 梯度 · 等价性</text></g>
+          <g class="ve-n" transform="translate(265 130)"><rect class="sh" width="225" height="150" rx="4"/><text class="ve-kind l" x="16" y="24">E1</text><text class="l" x="16" y="52">隔离机制</text><text class="sub l" x="16" y="78">有利条件下机制有效吗？</text><text class="sub l" x="16" y="100">合成数据 · oracle · 对照</text></g>
+          <g class="ve-n" transform="translate(510 100)"><rect class="sh" width="225" height="180" rx="4"/><text class="ve-kind l" x="16" y="24">E2</text><text class="l" x="16" y="52">最小模型</text><text class="sub l" x="16" y="78">放进真实模型还有信号吗？</text><text class="sub l" x="16" y="100">小模型 · 单模块 · 固定预算</text></g>
+          <g class="ve-n" transform="translate(755 70)"><rect class="sh" width="225" height="210" rx="4"/><text class="ve-kind l" x="16" y="24">E3</text><text class="l" x="16" y="52">有限确认</text><text class="sub l" x="16" y="78">足以支持正式投入吗？</text><text class="sub l" x="16" y="100">预先固定的比较 · 消融</text></g>
+          <path class="ann" d="M20 292V298H490V292"/>
+          <text class="mk" x="255" y="318">本机 e2e：E0 · E1 两份契约</text>
+          <path class="ann" d="M510 292V298H735V292"/>
+          <text class="mk" x="622" y="318">Miyabi e2e：E-0001</text>
+          <path class="ann" d="M755 292V298H980V292"/>
+          <text class="mk" x="867" y="318">尚未进入</text>
+        </svg>
+      </div>
+      <figcaption><span class="fig-n">Fig. 3</span>四个层级是默认的思考顺序，成本逐级增加，但不是必须逐级通过的门。</figcaption>
+    </figure>
+
+    <figure>
+      <div class="specs">
+        <div class="spec">
+          <div class="spec-h"><h3><span class="nb">E-0001</span>@1</h3><span class="meta">实验契约 · <span class="nb">DOC-0002</span>@1 · 首次登记 run 时封存</span></div>
+          <dl>
+            <dt>question</dt><dd>Does bf16 autocast change final val accuracy (&lt;1pp) and give &gt;=1.3x step speedup?</dd>
+            <dt>hypothesis_ref</dt><dd class="mono"><span class="nb">H-0001</span>@1 · <span class="nb">H-0002</span>@1</dd>
+            <dt>intervention</dt><dd>bf16 autocast; extra arm fp32 forward with grads rounded to bf16</dd>
+            <dt>comparator</dt><dd>fp32 (TF32 off)</dd>
+            <dt>metric · scope</dt><dd>final val acc (4000 <span class="nb">full-batch</span> steps), mean step ms <span class="dim">·</span> 3 seeds, one MIG, p=97, 50% train</dd>
+            <dt>outcome_actions</dt><dd>gap&lt;1pp and speedup&gt;=1.3x → recommend_formal; gap&gt;=1pp → diagnose via <span class="nb">grad-rounding</span> arm; speedup&lt;1.3x → continue_probe/pause</dd>
+            <dt>budget · stop</dt><dd>3 jobs of &lt;=10&nbsp;min on <span class="nb">debug-mig</span> (cap 6) <span class="dim">·</span> a job fails twice for same reason</dd>
+          </dl>
+          <ul class="checks" aria-label="结果与判据">
+            <li><span class="chip ok">达到</span><span>步速提升 ≥ 1.3× → 实测 1.91×</span></li>
+            <li><span class="chip warn">未达到</span><span>精度差距 &lt; 1&nbsp;pp → 实测 2.3&nbsp;pp，来自未学完的 fp32 seed 1</span></li>
+          </ul>
+        </div>
+        <div class="spec">
+          <div class="spec-h"><h3><span class="nb">D-0003</span></h3><span class="meta">阶段交付 · decides <span class="nb">H-0001</span>@1</span></div>
+          <dl>
+            <dt>implementation_ready</dt><dd>Code, three arms, timing and manifest path work on <span class="nb">Miyabi-G</span> <span class="nb">debug-mig</span>; cost measured (~3&nbsp;min and 0.052 <span class="nb">MIG-instance-h</span> per <span class="nb">seed-job</span>, all 3 arms). Not reviewed <span class="nb">cross-model</span>; manifest metric string must match the registered metric before a formal run.</dd>
+            <dt>evidence_scope</dt><dd>Screening only: 3 seeds, one fixed <span class="nb">4000-step</span> budget, one hardware. Speed claim supported (1.91x); <span class="nb">accuracy-equivalence</span> not yet shown because fp32 seed 1 had not finished grokking, so seed/<span class="nb">step-budget</span> variance is unresolved.</dd>
+            <dt>investment_decision</dt><dd><span class="chip info">continue_probe</span> Recommend a small probe (more seeds, or 8000 steps, 3 reserve jobs left) before a formal comparison.</dd>
+          </dl>
+        </div>
+      </div>
+      <figcaption><span class="fig-n">Fig. 4</span>契约在运行前写下“哪个结果导致哪一步”；阶段交付把代码是否就绪、证据支持什么、是否投入分成三个字段。两张都是 bf16 测试的原始记录。</figcaption>
+    </figure>
+  </section>
+
+  <section id="graph">
+    <div class="sec-intro">
+      <div class="sec-head"><p class="ve-label caps">图模型</p><h2>关系绑定到具体版本，状态分维记录</h2></div>
+      <p>六类核心对象（假说、任务、实验、证据、决策、论文）和辅助记录在同一个 LatticeDB 0.15.0 库里。<b>tests、supports、challenges、based_on 都指向目标的某一版</b>，例如 <span class="ve-ref" data-ref="h1" tabindex="0"><span class="nb">H-0001</span>@1</span>，而不是一个会变的文件路径。</p>
+    </div>
+
+    <figure>
+      <div class="frame">
+        <svg class="ve-svg" viewBox="0 0 1000 490" role="img" aria-label="bf16 测试的记录图。决策 D-0001（route continue）和 D-0003（stage continue_probe）决定 H-0001@1；D-0002（route pause）决定 H-0002@1。EV-0001（速度）和 EV-0002（精度）支持 H-0001@1。实验 E-0001@1 检验两个假说。EV-0003 是关于 E-0001 的诊断。底部是不画成图节点的辅助记录：3 个 RUN、3 个 ATT、9 条观测、3 个结果、3 条用量。">
+          <path class="ve-e" d="M300 86V148"/><text class="ve-el l" x="290" y="122">decides</text>
+          <path class="ve-e" d="M470 86V148"/><text class="ve-el r" x="480" y="122">decides</text>
+          <path class="ve-e" d="M800 86V148"/><text class="ve-el r" x="810" y="122">decides</text>
+          <path class="ve-e" data-ref="h1" d="M110 320V198H258"/><text class="ve-el l" x="100" y="262">supports</text>
+          <path class="ve-e" data-ref="h1" d="M330 320V248"/><text class="ve-el r" x="340" y="290">supports</text>
+          <path class="ve-e" d="M530 320V248"/><text class="ve-el l" x="520" y="290">tests</text>
+          <path class="ve-e" d="M700 320V248"/><text class="ve-el r" x="710" y="290">tests</text>
+          <path class="ve-e" d="M400 360H468"/><text class="ve-el" x="434" y="351">about</text>
+          <path class="ve-e" d="M790 360H732"/><text class="ve-el" x="761" y="351">about</text>
+          <path class="ve-e is-async" d="M310 400V438"/><text class="ve-el r" x="320" y="424">from_attempt</text>
+          <path class="ve-e is-async" d="M600 438V402"/><text class="ve-el r" x="610" y="424">of_experiment</text>
+
+          <g class="ve-n" transform="translate(140 20)"><path class="sh" d="M10 0H190L200 10V56L190 66H10L0 56V10Z"/><text x="100" y="24">D-0001</text><text class="sub" x="100" y="46">route · continue</text></g>
+          <g class="ve-n" transform="translate(370 20)"><path class="sh" d="M10 0H190L200 10V56L190 66H10L0 56V10Z"/><text x="100" y="24">D-0003</text><text class="sub" x="100" y="46">stage · continue_probe</text></g>
+          <g class="ve-n" transform="translate(700 20)"><path class="sh" d="M10 0H190L200 10V56L190 66H10L0 56V10Z"/><text x="100" y="24">D-0002</text><text class="sub" x="100" y="46">route · pause</text></g>
+          <g class="ve-n is-key" data-ref="h1" transform="translate(260 150)"><rect class="sh" width="300" height="96" rx="4"/><text class="ve-kind" x="150" y="22">H-0001@1</text><text x="150" y="50">bf16 精度相同且更快</text><text class="sub" x="150" y="76">active · inconclusive</text></g>
+          <g class="ve-n" transform="translate(660 150)"><rect class="sh" width="280" height="96" rx="4"/><text class="ve-kind" x="140" y="22">H-0002@1</text><text x="140" y="50">差异来自梯度舍入</text><text class="sub" x="140" y="76">paused · untested</text></g>
+          <g class="ve-n" data-ref="h1" transform="translate(20 320)"><path class="sh" d="M0 0H162L180 18V80H0Z"/><path class="gl" d="M162 0V18H180"/><text class="ve-kind" x="90" y="20">EV-0001</text><text x="90" y="44">速度 1.91×</text><text class="sub" x="90" y="66">screening · valid</text></g>
+          <g class="ve-n" data-ref="h1" transform="translate(220 320)"><path class="sh" d="M0 0H162L180 18V80H0Z"/><path class="gl" d="M162 0V18H180"/><text class="ve-kind" x="90" y="20">EV-0002</text><text x="90" y="44">精度对比</text><text class="sub" x="90" y="66">screening · valid</text></g>
+          <g class="ve-n" transform="translate(470 320)"><rect class="sh" width="260" height="80" rx="4"/><text class="ve-kind" x="130" y="20">E-0001@1 · E2</text><text x="130" y="44">fp32 vs bf16 筛选</text><text class="sub" x="130" y="66">3 runs · 3 arms</text></g>
+          <g class="ve-n" transform="translate(790 320)"><path class="sh" d="M0 0H172L190 18V80H0Z"/><path class="gl" d="M172 0V18H190"/><text class="ve-kind" x="95" y="20">EV-0003</text><text x="95" y="44">metric 文字不符</text><text class="sub" x="95" y="66">diagnostic · valid</text></g>
+          <rect class="ve-bd" x="20" y="440" width="960" height="42" rx="4"/>
+          <text class="mk" x="500" y="466">辅助记录（不画成图节点）：RUN-0001…0003 · ATT ×3 · OBS ×9 · RES ×3 · U ×3</text>
+        </svg>
+      </div>
+      <figcaption><span class="fig-n">Fig. 5</span>bf16 测试的实际记录图。一个实验同时检验两个假说；证据和决策都绑定到 <span class="nb">H-0001</span> 的第 1 版。about 与 from_attempt 只画了一部分。</figcaption>
+    </figure>
+
+    <figure>
+      <div class="cases">
+        <div class="case" data-st="ok"><span class="chip ok">已绑定</span><h3>证据绑定到 <span class="nb">H-0001</span>@1</h3>
+          <svg class="ve-mini" viewBox="0 0 240 128" role="img" aria-label="EV-0001 supports H@1。">
+            <path class="ve-e is-st" d="M80 64H148"/>
+            <text class="mn" x="114" y="52">supports</text>
+            <g class="ve-n"><rect class="sh" x="2" y="44" width="78" height="40" rx="4"/><text x="41" y="64">EV-0001</text></g>
+            <g class="ve-n is-st"><rect class="sh" x="150" y="44" width="86" height="40" rx="4"/><text x="193" y="64">H@1</text></g>
+          </svg></div>
+        <div class="case" data-st="warn"><span class="chip warn">不自动继承</span><h3>修订为 @2 后</h3>
+          <svg class="ve-mini" viewBox="0 0 240 128" role="img" aria-label="H@2 替代 H@1。EV-0001 仍支持 H@1，到 H@2 没有引用。">
+            <path class="ve-e" d="M80 56C112 56 116 26 148 26"/>
+            <path class="ve-e is-off is-st" d="M80 72C112 72 116 102 148 102"/>
+            <path class="ve-x" d="M107 81l9 9M116 81l-9 9"/>
+            <path class="ve-e" d="M193 84V46"/>
+            <text class="mn l" x="200" y="69">替代</text>
+            <g class="ve-n"><rect class="sh" x="2" y="44" width="78" height="40" rx="4"/><text x="41" y="64">EV-0001</text></g>
+            <g class="ve-n"><rect class="sh" x="150" y="8" width="86" height="36" rx="4"/><text x="193" y="26">H@1</text></g>
+            <g class="ve-n is-st"><rect class="sh" x="150" y="84" width="86" height="36" rx="4"/><text x="193" y="102">H@2</text></g>
+          </svg></div>
+        <div class="case" data-st="ok"><span class="chip ok">显式重新绑定</span><h3>核对 scope 后另建引用</h3>
+          <svg class="ve-mini" viewBox="0 0 240 128" role="img" aria-label="核对后 EV-0001 同时支持 H@1 与 H@2，旧关联保留。">
+            <path class="ve-e" d="M80 56C112 56 116 26 148 26"/>
+            <path class="ve-e is-st" d="M80 72C112 72 116 102 148 102"/>
+            <path class="ve-e" d="M193 84V46"/>
+            <text class="mn l" x="200" y="69">替代</text>
+            <g class="ve-n"><rect class="sh" x="2" y="44" width="78" height="40" rx="4"/><text x="41" y="64">EV-0001</text></g>
+            <g class="ve-n"><rect class="sh" x="150" y="8" width="86" height="36" rx="4"/><text x="193" y="26">H@1</text></g>
+            <g class="ve-n is-st"><rect class="sh" x="150" y="84" width="86" height="36" rx="4"/><text x="193" y="102">H@2</text></g>
+          </svg></div>
+      </div>
+      <figcaption><span class="fig-n">Fig. 6</span>修订假说后，旧证据留在旧版本上；只有核对 scope 仍适用，才另建到新版本的引用，旧关联保留。契约测试见 <code>tests/test_records.py</code>。</figcaption>
+    </figure>
+
+    <figure>
+      <div class="frame">
+        <svg class="ve-svg" viewBox="0 0 1040 320" style="min-width:960px" role="img" aria-label="同一次运行的八个维度：执行状态 ended，执行结果 success，结果导入 complete，预设比较 false，证据有效性 valid，证据层级 screening，假说证据 inconclusive，投入处置 active。">
+          <text class="hd" x="65" y="22">执行状态</text><text class="hd-f" x="65" y="44">execution_state</text>
+          <text class="hd" x="195" y="22">执行结果</text><text class="hd-f" x="195" y="44">outcome</text>
+          <text class="hd" x="325" y="22">结果导入</text><text class="hd-f" x="325" y="44">result_status</text>
+          <text class="hd" x="455" y="22">预设比较</text><text class="hd-f" x="455" y="44">spec_match</text>
+          <text class="hd" x="585" y="22">证据有效性</text><text class="hd-f" x="585" y="44">validity</text>
+          <text class="hd" x="715" y="22">证据层级</text><text class="hd-f" x="715" y="44">evidence_level</text>
+          <text class="hd" x="845" y="22">假说证据</text><text class="hd-f" x="845" y="44">evidence_status</text>
+          <text class="hd" x="975" y="22">投入处置</text><text class="hd-f" x="975" y="44">disposition</text>
+          <text class="neq" x="130" y="30">≠</text><text class="neq" x="260" y="30">≠</text><text class="neq" x="390" y="30">≠</text><text class="neq" x="520" y="30">≠</text><text class="neq" x="650" y="30">≠</text><text class="neq" x="780" y="30">≠</text><text class="neq" x="910" y="30">≠</text>
+
+          <path class="trace" d="M65 192L195 84L325 156L455 120L585 120L715 120L845 192L975 120"/>
+
+          <g class="pill"><rect x="10" y="71" width="110" height="26" rx="4"/><text x="65" y="84">prepared</text></g>
+          <g class="pill"><rect x="10" y="107" width="110" height="26" rx="4"/><text x="65" y="120">queued</text></g>
+          <g class="pill"><rect x="10" y="143" width="110" height="26" rx="4"/><text x="65" y="156">running</text></g>
+          <g class="pill sel"><rect x="10" y="179" width="110" height="26" rx="4"/><text x="65" y="192">ended</text></g>
+          <g class="pill"><rect x="10" y="215" width="110" height="26" rx="4"/><text x="65" y="228">unknown</text></g>
+
+          <g class="pill sel"><rect x="140" y="71" width="110" height="26" rx="4"/><text x="195" y="84">success</text></g>
+          <g class="pill"><rect x="140" y="107" width="110" height="26" rx="4"/><text x="195" y="120">failed</text></g>
+          <g class="pill"><rect x="140" y="143" width="110" height="26" rx="4"/><text x="195" y="156">cancelled</text></g>
+          <g class="pill"><rect x="140" y="179" width="110" height="26" rx="4"/><text x="195" y="192">unknown</text></g>
+
+          <g class="pill"><rect x="270" y="71" width="110" height="26" rx="4"/><text x="325" y="84">absent</text></g>
+          <g class="pill"><rect x="270" y="107" width="110" height="26" rx="4"/><text x="325" y="120">partial</text></g>
+          <g class="pill sel"><rect x="270" y="143" width="110" height="26" rx="4"/><text x="325" y="156">complete</text></g>
+          <g class="pill"><rect x="270" y="179" width="110" height="26" rx="4"/><text x="325" y="192">rejected</text></g>
+
+          <g class="pill"><rect x="400" y="71" width="110" height="26" rx="4"/><text x="455" y="84">true</text></g>
+          <g class="pill sel"><rect x="400" y="107" width="110" height="26" rx="4"/><text x="455" y="120">false</text></g>
+
+          <g class="pill"><rect x="530" y="71" width="110" height="26" rx="4"/><text x="585" y="84">pending</text></g>
+          <g class="pill sel"><rect x="530" y="107" width="110" height="26" rx="4"/><text x="585" y="120">valid</text></g>
+          <g class="pill"><rect x="530" y="143" width="110" height="26" rx="4"/><text x="585" y="156">invalid</text></g>
+
+          <g class="pill"><rect x="660" y="71" width="110" height="26" rx="4"/><text x="715" y="84">diagnostic</text></g>
+          <g class="pill sel"><rect x="660" y="107" width="110" height="26" rx="4"/><text x="715" y="120">screening</text></g>
+          <g class="pill"><rect x="660" y="143" width="110" height="26" rx="4"/><text x="715" y="156">exploratory</text></g>
+          <g class="pill"><rect x="660" y="179" width="110" height="26" rx="4"/><text x="715" y="192">confirmatory</text></g>
+
+          <g class="pill"><rect x="790" y="71" width="110" height="26" rx="4"/><text x="845" y="84">untested</text></g>
+          <g class="pill"><rect x="790" y="107" width="110" height="26" rx="4"/><text x="845" y="120">supported</text></g>
+          <g class="pill"><rect x="790" y="143" width="110" height="26" rx="4"/><text x="845" y="156">challenged</text></g>
+          <g class="pill sel"><rect x="790" y="179" width="110" height="26" rx="4"/><text x="845" y="192">inconclusive</text></g>
+
+          <g class="pill"><rect x="920" y="71" width="110" height="26" rx="4"/><text x="975" y="84">candidate</text></g>
+          <g class="pill sel"><rect x="920" y="107" width="110" height="26" rx="4"/><text x="975" y="120">active</text></g>
+          <g class="pill"><rect x="920" y="143" width="110" height="26" rx="4"/><text x="975" y="156">paused</text></g>
+          <g class="pill"><rect x="920" y="179" width="110" height="26" rx="4"/><text x="975" y="192">retired</text></g>
+
+          <path class="brk" d="M12 252V260H248V252M272 252V260H508V252M532 252V260H768V252M792 252V260H1028V252"/>
+          <text class="rec" x="130" y="282">ATT-0001-1</text>
+          <text class="rec" x="390" y="282">RES-0001</text>
+          <text class="rec" x="650" y="282">EV-0002</text>
+          <text class="rec" x="910" y="282">H-0001@1</text>
+          <text class="note" x="390" y="308">metric 文字与 RunSpec 不同</text>
+          <text class="note" x="910" y="308">fp32 seed 1 未学完</text>
+        </svg>
+      </div>
+      <figcaption><span class="fig-n">Fig. 7</span>同一次运行（bf16 测试 seed 0）在八个维度上各有一个值。作业 ended 且 success、结果 complete，却不能作预设比较；证据 valid 但只是 screening；假说仍是 inconclusive。</figcaption>
+    </figure>
+  </section>
+
+  <section id="runs">
+    <div class="sec-intro">
+      <div class="sec-head"><p class="ve-label caps">运行记录</p><h2>只登记事实，从不控制执行</h2></div>
+      <p>register、record、<span class="nb">import-result</span> 三条写命令共用一个 store 入口，每次写入是一个事务。<b>它们不启动、不查询、不重试</b>；request_id 让调用方可以放心重试。</p>
+    </div>
+
+    <figure>
+      <div class="frame">
+        <svg class="ve-svg" viewBox="0 0 1000 400" role="img" aria-label="真实记录链：实验 E-0001@1 对多个 RUN；RUN-0001 的 RunSpec 摘要为 17383a2283b0，对多个 Attempt；ATT-0001-1 绑定外部执行引用 hpc_job miyabi-pbs/3737671.opbs。rl run register 写 RunSpec 和首个 ATT；rl run record 写绑定、3 条观测和用量 U-0001（0.053 MIG 实例·小时）；rl run import-result 写结果 RES-0001（complete）。">
+          <path class="ve-e" d="M190 195H248"/><text class="ve-el" x="219" y="186">1 : n</text>
+          <path class="ve-e" d="M470 195H528"/><text class="ve-el" x="499" y="186">1 : n</text>
+          <path class="ve-e" d="M730 195H788"/><text class="ve-el" x="759" y="186">n : 1</text>
+          <path class="ve-e is-hot" d="M430 72V148"/><text class="ve-el l" x="420" y="114">RunSpec</text>
+          <path class="ve-e is-hot" d="M570 72V148"/><text class="ve-el r" x="580" y="114">首个 ATT</text>
+          <path class="ve-e" d="M885 72V148"/><text class="ve-el r" x="895" y="114">绑定</text>
+          <path class="ve-e" d="M560 240V298"/><text class="ve-el l" x="550" y="274">record</text>
+          <path class="ve-e" d="M700 240V298"/><text class="ve-el r" x="710" y="274">import-result</text>
+          <path class="ve-e" d="M910 240V298"/><text class="ve-el r" x="920" y="274">record</text>
+
+          <g class="ve-n" transform="translate(380 30)"><rect class="sh" width="240" height="42" rx="4"/><text class="m" x="120" y="21">$ rl run register</text></g>
+          <g class="ve-n" transform="translate(790 30)"><rect class="sh" width="190" height="42" rx="4"/><text class="m" x="95" y="21">$ rl run record</text></g>
+          <g class="ve-n" transform="translate(20 150)"><rect class="sh" width="170" height="90" rx="4"/><text class="ve-kind" x="85" y="22">EXPERIMENT</text><text x="85" y="48">E-0001@1</text><text class="sub" x="85" y="72">DOC-0002@1</text></g>
+          <g class="ve-n is-key" transform="translate(250 150)"><rect class="sh" width="220" height="90" rx="4"/><text class="ve-kind" x="110" y="22">RUN · RunSpec</text><text x="110" y="48">RUN-0001</text><text class="sub" x="110" y="72">spec 17383a2283b0</text></g>
+          <g class="ve-n" transform="translate(530 150)"><rect class="sh" width="200" height="90" rx="4"/><text class="ve-kind" x="100" y="22">ATTEMPT</text><text x="100" y="48">ATT-0001-1</text><text class="sub" x="100" y="72">ended · success</text></g>
+          <g class="ve-n" transform="translate(790 150)"><rect class="sh" width="190" height="90" rx="4"/><text class="ve-kind" x="95" y="22">EXECREF · hpc_job</text><text x="95" y="48">3737671.opbs</text><text class="sub" x="95" y="72">miyabi-pbs</text></g>
+          <g class="ve-n" transform="translate(420 300)"><rect class="sh" width="200" height="80" rx="4"/><text class="ve-kind" x="100" y="20">OBSERVATION</text><text x="100" y="44">OBS ×3</text><text class="sub" x="100" y="66">queued→running→ended</text></g>
+          <g class="ve-n" transform="translate(650 300)"><rect class="sh" width="160" height="80" rx="4"/><text class="ve-kind" x="80" y="20">RESULT</text><text x="80" y="44">RES-0001</text><text class="sub" x="80" y="66">complete</text></g>
+          <g class="ve-n" transform="translate(840 300)"><rect class="sh" width="140" height="80" rx="4"/><text class="ve-kind" x="70" y="20">USAGE</text><text x="70" y="44">U-0001</text><text class="sub" x="70" y="66">0.053 MIG·h</text></g>
+
+          <g class="ve-co" transform="translate(250 140)"><circle r="11"/><text>1</text></g>
+          <g class="ve-co" transform="translate(499 216)"><circle r="11"/><text>2</text></g>
+          <g class="ve-co" transform="translate(980 140)"><circle r="11"/><text>3</text></g>
+          <g class="ve-co" transform="translate(840 290)"><circle r="11"/><text>4</text></g>
+        </svg>
+      </div>
+      <ol class="co-list">
+        <li><span class="n">1</span><span>RunSpec 不可变，摘要用 blake2b。科学内容变了就登记新 Run；同一 request_id 同内容返回原记录，内容不同返回 CONFLICT。</span></li>
+        <li><span class="n">2</span><span>重新执行登记为新的 Attempt（<span class="nb">ATT-0001-2</span>），失败的那次保留。本地运行不必经过 queued。</span></li>
+        <li><span class="n">3</span><span>ExecRef 只存 kind、命名空间和外部 ID；核心不解析调度器 ID。多个 attempt 可以共享一个作业。</span></li>
+        <li><span class="n">4</span><span>用量按 accounting_ref（<span class="nb">miyabi-pbs</span>:3737671.opbs）只记一次；单位不同不相加，未报告不是零。</span></li>
+      </ol>
+      <figcaption><span class="fig-n">Fig. 8</span>bf16 测试 seed 0 的真实记录链：一个不可变的 RunSpec，一次执行尝试，一个 Miyabi 作业。三条写命令各写一部分。</figcaption>
+    </figure>
+
+    <figure class="ve-steps">
+      <div class="frame">
+        <svg class="ve-svg" viewBox="0 0 1000 380" role="img" aria-label="观测回放。1 ended/success 先到，被应用。2 较旧的 running 后到，stale。3 同一记录重发，duplicate。4 同一 ID 内容不同，CONFLICT 拒绝。5 终态后查询得到 unknown，只记观测问题。6 另一个终态 failed，conflict 待核对。7 带依据的显式更正，correction，结果改为 failed。">
+          <g class="lg">
+            <text class="hdr" x="24" y="26">#</text><text class="hdr" x="60" y="26">到达的观测（来源 miyabi-mcp）</text><text class="hdr seq" x="398" y="26">seq</text><text class="hdr" x="440" y="26">效果</text>
+            <path class="rule" d="M20 44H640M20 88H640M20 132H640M20 176H640M20 220H640M20 264H640M20 308H640M20 352H640"/>
+            <g data-s="1"><text class="num" x="24" y="66">1</text><text x="60" y="66">…:3  ended / success</text><text class="seq" x="398" y="66">3</text>
+              <g class="fx ok"><rect x="440" y="53" width="190" height="26" rx="4"/><circle class="g" cx="456" cy="66" r="4"/><text x="468" y="66">applied</text></g></g>
+            <g data-s="2"><text class="num" x="24" y="110">2</text><text x="60" y="110">…:2  running</text><text class="seq" x="398" y="110">2</text>
+              <g class="fx dim"><rect x="440" y="97" width="190" height="26" rx="4"/><circle class="g" cx="456" cy="110" r="4"/><text x="468" y="110">stale</text></g></g>
+            <g data-s="3"><text class="num" x="24" y="154">3</text><text x="60" y="154">…:3  重发，内容相同</text><text class="seq" x="398" y="154">3</text>
+              <g class="fx dim"><rect x="440" y="141" width="190" height="26" rx="4"/><circle class="g" cx="456" cy="154" r="4"/><text x="468" y="154">duplicate</text></g></g>
+            <g data-s="4"><text class="num" x="24" y="198">4</text><text x="60" y="198">…:3  同一 ID，内容不同</text><text class="seq" x="398" y="198">3</text>
+              <g class="fx risk"><rect x="440" y="185" width="190" height="26" rx="4"/><rect class="g" x="452" y="194" width="8" height="8"/><text x="468" y="198">CONFLICT · 拒绝</text></g></g>
+            <g data-s="5"><text class="num" x="24" y="242">5</text><text x="60" y="242">…:4  unknown（查询失败）</text><text class="seq" x="398" y="242">4</text>
+              <g class="fx warn"><rect x="440" y="229" width="190" height="26" rx="4"/><path class="g" d="M456 237L461 246H451Z"/><text x="468" y="242">observation_issue</text></g></g>
+            <g data-s="6"><text class="num" x="24" y="286">6</text><text x="60" y="286">…:5  ended / failed</text><text class="seq" x="398" y="286">5</text>
+              <g class="fx warn"><rect x="440" y="273" width="190" height="26" rx="4"/><path class="g" d="M456 281L461 290H451Z"/><text x="468" y="286">conflict · 待核对</text></g></g>
+            <g data-s="7"><text class="num" x="24" y="330">7</text><text x="60" y="330">…:6  更正 …:3，附依据</text><text class="seq" x="398" y="330">6</text>
+              <g class="fx info"><rect x="440" y="317" width="190" height="26" rx="4"/><path class="g" d="M456 325L461 330L456 335L451 330Z"/><text x="468" y="330">correction</text></g></g>
+          </g>
+
+          <circle class="ve-tok" data-s="1" r="5" style="offset-path: path('M632 66H678')"/>
+          <circle class="ve-tok" data-s="5" r="5" style="offset-path: path('M632 242H678')"/>
+          <circle class="ve-tok" data-s="6" r="5" style="offset-path: path('M632 286H678')"/>
+          <circle class="ve-tok" data-s="7" r="5" style="offset-path: path('M632 330H678')"/>
+
+          <rect class="panel" x="680" y="20" width="300" height="340" rx="4"/>
+          <text class="pt" x="700" y="52">ATT 的投影状态</text>
+          <path class="rule" d="M680 70H980"/>
+          <text class="pk" x="700" y="104">execution_state</text>
+          <g class="ve-vals pv"><text data-s="1" x="960" y="104">ended</text></g>
+          <text class="pk" x="700" y="148">outcome</text>
+          <g class="ve-vals pv"><text data-s="1" x="960" y="148">success</text><text data-s="7" x="960" y="148">failed</text></g>
+          <text class="pk" x="700" y="192">needs_check</text>
+          <g class="ve-vals pv"><text data-s="1" x="960" y="192">否</text><text data-s="6" x="960" y="192">是</text><text data-s="7" x="960" y="192">否</text></g>
+          <text class="pk" x="700" y="236">issues</text>
+          <g class="ve-vals pv"><text data-s="1" x="960" y="236">0</text><text data-s="5" x="960" y="236">1</text><text data-s="6" x="960" y="236">2</text><text data-s="7" x="960" y="236">3</text></g>
+          <text class="pk" x="700" y="280">已存观测</text>
+          <g class="ve-vals pv"><text data-s="1" x="960" y="280">1</text><text data-s="2" x="960" y="280">2</text><text data-s="5" x="960" y="280">3</text><text data-s="6" x="960" y="280">4</text><text data-s="7" x="960" y="280">5</text></g>
+          <text class="pk" x="700" y="324">last_record</text>
+          <g class="ve-vals pv"><text data-s="1" x="960" y="324">…:3</text><text data-s="7" x="960" y="324">…:6</text></g>
+        </svg>
+      </div>
+      <div class="ve-player">
+        <ol class="ve-cap">
+          <li data-n="1/8">终态先到：<code>…:3 ended/success</code> 被应用，ATT 进入 ended。</li>
+          <li data-n="2/8">较旧的 <code>running</code>（seq 2 &lt; 3）后到：只存档，不覆盖终态（stale）。</li>
+          <li data-n="3/8">同一条记录整批重发：只计一次（duplicate），所以重发整个导出文件是安全的。</li>
+          <li data-n="4/8">同一 record_id 带着不同内容到达：整条拒绝（CONFLICT），什么都不写。</li>
+          <li data-n="5/8">终态之后查询失败（unknown）：只记一个观测问题，终态保留。</li>
+          <li data-n="6/8">来源报告了另一个终态 <code>failed</code>：保留原结果，标记待核对（needs_check）。</li>
+          <li data-n="7/8">显式更正 <code>--correction-of …:3 --note "&lt;依据&gt;"</code>：结果改为 failed，待核对解除。</li>
+          <li data-n="8/8">全图：原始观测全部追加保留，ATT 的状态是从它们投影出来的。</li>
+        </ol>
+        <button data-go="-1" aria-label="上一步">←</button>
+        <button data-play>播放</button>
+        <input type="range" min="0" value="0" aria-label="步骤">
+        <button data-go="1" aria-label="下一步">→</button>
+      </div>
+      <figcaption><span class="fig-n">Fig. 9</span>新旧按来源序号判断，没有序号时按 observed_at；终态只能被带依据的显式更正改变。规则取自 <code>runs.py</code> 的投影逻辑，事件序列按契约测试构造；e2e 中三条观测按序到达，全部 applied。</figcaption>
+    </figure>
+  </section>
+
+  <section id="team">
+    <div class="sec-intro">
+      <div class="sec-head"><p class="ve-label caps">团队与审查</p><h2>角色持续，session 可换，审查跨模型</h2></div>
+      <p>稳定的是角色、任务和封存文档，不是某个聊天上下文。<b>新 session 用 rl resume 接续</b>；旧 session 的写入被 epoch 挡住。</p>
+    </div>
+
+    <figure>
+      <div class="frame">
+        <svg class="ve-svg" viewBox="0 0 1000 250" role="img" aria-label="示意。协调者 lane：S-0001 epoch 1，之后 session start 使 epoch 变为 2，S-0002 接管；S-0001 之后的写入被拒。研究者 lane：协调者发 TASK，R1 以 owner_epoch 1 领取 T-0001，HANDOFF 后 R2 以 owner_epoch 2 接手并发 RESULT；R1 之后的交付被拒，产物封存并以 NOTE 交给协调者。">
+          <text class="lane-t" x="20" y="72">协调者</text><text class="lane-s" x="20" y="94">epoch</text>
+          <text class="lane-t" x="20" y="172">研究者</text><text class="lane-s" x="20" y="194">owner_epoch</text>
+          <path class="ve-e" d="M250 92V162"/><text class="ve-el r" x="260" y="132">TASK</text>
+          <path class="ve-e" d="M700 162V92"/><text class="ve-el l" x="690" y="146">HANDOFF</text>
+          <path class="ve-e" d="M955 162V92"/><text class="ve-el l" x="945" y="132">RESULT</text>
+          <path class="ann" d="M430 52V104" stroke-dasharray="3 3"/>
+          <text class="ve-el" x="430" y="42">session start → epoch 2</text>
+          <path class="ve-e is-async no-ah" d="M420 112H516"/>
+          <path class="ve-x" d="M523 105l14 14M537 105l-14 14"/>
+          <text class="ve-el r is-risk" x="548" y="117">epoch 1 的写入被拒</text>
+          <path class="ve-e is-async no-ah" d="M690 212H826"/>
+          <path class="ve-x" d="M833 205l14 14M847 205l-14 14"/>
+          <text class="ve-el r is-risk" x="858" y="217">旧 owner 交付被拒</text>
+          <text class="ve-el r" x="858" y="240">产物封存 → NOTE</text>
+          <g class="bar"><rect x="180" y="64" width="240" height="26" rx="4"/><text x="192" y="77">S-0001 · epoch 1</text></g>
+          <g class="bar cur"><rect x="440" y="64" width="540" height="26" rx="4"/><text x="452" y="77">S-0002 · epoch 2</text></g>
+          <g class="bar"><rect x="240" y="164" width="450" height="26" rx="4"/><text x="252" y="177">T-0001 · R1 · owner_epoch 1</text></g>
+          <g class="bar cur"><rect x="710" y="164" width="250" height="26" rx="4"/><text x="722" y="177">R2 · owner_epoch 2</text></g>
+        </svg>
+      </div>
+      <figcaption><span class="fig-n">Fig. 10</span>示意，按契约测试的场景绘制。协调者和任务 owner 都带 epoch，校验与写入在同一个事务里；接管后旧 session 的写入被拒，产物仍被封存。</figcaption>
+    </figure>
+
+    <figure>
+      <div class="cases">
+        <div class="case"><h3><code>work</code> 工作包</h3><p>当前任务、范围、代码索引、必要文献、最新有效结果、已排除的解释</p>
+          <svg class="ve-mini rng" viewBox="0 0 240 56" role="img" aria-label="工作包目标约 2k 到 6k tokens"><path class="ax" d="M10 30H230"/><path class="tk" d="M10 26V34M120 26V34M230 26V34"/><rect class="hot" x="46.7" y="23" width="73.3" height="14" rx="2"/><text class="rv" x="83" y="11">2k–6k</text><text x="10" y="45">0</text><text class="rm" x="120" y="45">6k</text><text class="re" x="230" y="45">12k</text></svg></div>
+        <div class="case"><h3><code>resume</code> 恢复包</h3><p>角色与 epoch、首个未完成动作、未结束的 attempt、最后可信观测、工件位置</p>
+          <svg class="ve-mini rng" viewBox="0 0 240 56" role="img" aria-label="恢复包未设 token 目标"><path class="ax" d="M10 30H230"/><path class="tk" d="M10 26V34M120 26V34M230 26V34"/><text class="rm" x="120" y="11">未设目标</text><text x="10" y="45">0</text><text class="rm" x="120" y="45">6k</text><text class="re" x="230" y="45">12k</text></svg></div>
+        <div class="case"><h3><code>review</code> 审查包</h3><p>精确快照与 diff、方法定义、执行配置、重点不变量、必要测试；代码内联</p>
+          <svg class="ve-mini rng" viewBox="0 0 240 56" role="img" aria-label="审查包未设 token 目标"><path class="ax" d="M10 30H230"/><path class="tk" d="M10 26V34M120 26V34M230 26V34"/><text class="rm" x="120" y="11">未设目标</text><text x="10" y="45">0</text><text class="rm" x="120" y="45">6k</text><text class="re" x="230" y="45">12k</text></svg></div>
+        <div class="case"><h3><code>advice</code> 咨询包</h3><p>瓶颈、关键正反证据、失败机制、尚存解释、预算、待决问题</p>
+          <svg class="ve-mini rng" viewBox="0 0 240 56" role="img" aria-label="咨询包目标约 6k 到 12k tokens"><path class="ax" d="M10 30H230"/><path class="tk" d="M10 26V34M120 26V34M230 26V34"/><rect class="hot" x="120" y="23" width="110" height="14" rx="2"/><text class="rv" x="175" y="11">6k–12k</text><text x="10" y="45">0</text><text class="rm" x="120" y="45">6k</text><text class="re" x="230" y="45">12k</text></svg></div>
+      </div>
+      <figcaption><span class="fig-n">Fig. 11</span>四种上下文包都围绕当前要做的决定。token 目标是待验证的默认值，按“ASCII 字符 / 4 + 非 ASCII 字符”估算；超出部分列为按需读取的索引。</figcaption>
+    </figure>
+
+    <figure>
+      <div class="cases">
+        <div class="case" data-st="ok"><span class="chip ok">跨模型</span><h3>Claude 写，Codex 审</h3>
+          <svg class="ve-mini" viewBox="0 0 240 92" role="img" aria-label="作者 Claude，审查者 Codex。">
+            <text class="mn" x="120" y="14">快照 + 审查包</text>
+            <path class="ve-e is-st" d="M86 58H146"/>
+            <g class="ve-n"><rect class="sh" x="2" y="36" width="84" height="44" rx="4"/><text x="44" y="51">Claude</text><text class="sub" x="44" y="69">作者</text></g>
+            <g class="ve-n is-st"><rect class="sh" x="148" y="36" width="90" height="44" rx="4"/><text x="193" y="51">Codex</text><text class="sub" x="193" y="69">审查者</text></g>
+          </svg><p class="rel"><code>cross_model</code><span><span class="nb">gpt-6-astra</span></span></p></div>
+        <div class="case" data-st="ok"><span class="chip ok">跨模型</span><h3>Codex 写，Claude 审</h3>
+          <svg class="ve-mini" viewBox="0 0 240 92" role="img" aria-label="作者 Codex，审查者 Claude。">
+            <text class="mn" x="120" y="14">快照 + 审查包</text>
+            <path class="ve-e is-st" d="M86 58H146"/>
+            <g class="ve-n"><rect class="sh" x="2" y="36" width="84" height="44" rx="4"/><text x="44" y="51">Codex</text><text class="sub" x="44" y="69">作者</text></g>
+            <g class="ve-n is-st"><rect class="sh" x="148" y="36" width="90" height="44" rx="4"/><text x="193" y="51">Claude</text><text class="sub" x="193" y="69">审查者</text></g>
+          </svg><p class="rel"><code>cross_model</code><span><span class="nb">claude-opus-5-5</span></span></p></div>
+        <div class="case" data-st="warn"><span class="chip warn">同族复核</span><h3>同一模型族的另一 session</h3>
+          <svg class="ve-mini" viewBox="0 0 240 92" role="img" aria-label="作者 Claude，审查者是另一个 Claude session。">
+            <text class="mn" x="120" y="14">快照 + 审查包</text>
+            <path class="ve-e is-st" d="M86 58H146"/>
+            <g class="ve-n"><rect class="sh" x="2" y="36" width="84" height="44" rx="4"/><text x="44" y="51">Claude</text><text class="sub" x="44" y="69">作者</text></g>
+            <g class="ve-n is-st"><rect class="sh" x="148" y="36" width="90" height="44" rx="4"/><text x="193" y="51">Claude</text><text class="sub" x="193" y="69">另一会话</text></g>
+          </svg><p class="rel"><code>same_family_<wbr>independent_<wbr>session</code></p></div>
+        <div class="case" data-st="risk"><span class="chip risk">不可用</span><h3>没有合格的另一模型族</h3>
+          <svg class="ve-mini" viewBox="0 0 240 92" role="img" aria-label="作者 Claude，没有合格审查者，记为 unavailable。">
+            <text class="mn" x="120" y="14">审查包待发</text>
+            <path class="ve-e is-off is-st" d="M86 58H146"/>
+            <g class="ve-n"><rect class="sh" x="2" y="36" width="84" height="44" rx="4"/><text x="44" y="51">Claude</text><text class="sub" x="44" y="69">作者</text></g>
+            <g class="ve-n is-st"><rect class="sh is-off" x="148" y="36" width="90" height="44" rx="4"/><text x="193" y="51">—</text><text class="sub" x="193" y="69">无</text></g>
+          </svg><p class="rel"><code>unavailable</code><span>不是通过</span></p></div>
+      </div>
+      <figcaption><span class="fig-n">Fig. 12</span>审查者按代码作者选择，而不是按协调者。模型身份核实不了时记为 <code>*_unverified</code>；没有合格审查者时记为 unavailable，依赖它的扩大实验等待。第二轮本机 e2e 的 <span class="nb">RV-0004</span> 由 rollout 核实为 <span class="nb">gpt-6-astra</span>。</figcaption>
+    </figure>
+  </section>
+
+  <section id="miyabi">
+    <div class="sec-intro">
+      <div class="sec-head"><p class="ve-label caps">Miyabi 分工</p><h2>三个组件各管一层，接口只有提交参数和导出</h2></div>
+      <p><span class="nb">pi-env-mcp</span> 只管传输，<span class="nb">miyabi-mcp</span> 管 PBS 语义，<span class="nb">smooth-research</span> 只管记录。<b>记录不经模型转抄</b>：<span class="nb">miyabi-mcp</span> 的<span class="ve-ref" data-ref="export" tabindex="0">导出</span>直接交给 <code>rl run record</code>；一批作业共用一个<span class="ve-ref" data-ref="notify" tabindex="0">通知组</span>。</p>
+    </div>
+
+    <figure>
+      <div class="frame">
+        <svg class="ve-svg" viewBox="0 0 1000 480" role="img" aria-label="三个边界：pi-env-mcp 负责 exec、文件、终端、后台进程和上传下载，不负责项目映射与同步；miyabi-mcp 负责提交、查询、取消、台账、用量、通知和导出为 Observation，不负责研究记录；smooth-research 负责 RunSpec、attempt、绑定、观测排序与去重、结果与证据，不负责调度、SSH 与轮询。agent 经 pi-env-mcp 上传只读快照到远端项目目录，经 miyabi-mcp 用 job_submit 提交到 PBS，收到组通知；miyabi-mcp 的 JSON Lines 导出交给 smooth-research。">
+          <rect class="ve-bd" x="20" y="140" width="300" height="240" rx="4"/><text class="ve-bd-t" x="34" y="162">PI-ENV-MCP · 传输</text>
+          <rect class="ve-bd" x="350" y="140" width="300" height="240" rx="4"/><text class="ve-bd-t" x="364" y="162">MIYABI-MCP · PBS 语义</text>
+          <rect class="ve-bd" x="680" y="140" width="300" height="240" rx="4"/><text class="ve-bd-t" x="694" y="162">SMOOTH-RESEARCH · 记录</text>
+
+          <path class="ve-e" d="M420 80V100H170V176"/><text class="ve-el" x="295" y="91">上传快照</text>
+          <path class="ve-e" d="M500 80V176"/><text class="ve-el l" x="490" y="126">job_submit</text>
+          <path class="ve-e is-async" data-ref="notify" d="M600 176V82"/><text class="ve-el r" data-ref="notify" x="610" y="112">组通知</text>
+          <path class="ve-e is-hot" data-ref="export" d="M630 295H698"/><text class="ve-el" data-ref="export" x="664" y="286">JSONL</text>
+          <path class="ve-e" d="M170 328V408"/><text class="ve-el r" x="180" y="396">上传 · 下载</text>
+          <path class="ve-e" d="M500 380V408"/><text class="ve-el r" x="510" y="397">qsub · qstat · qdel</text>
+          <path class="ve-e" d="M400 440H322"/><text class="ve-el" x="361" y="431">写出</text>
+
+          <g class="ve-n" transform="translate(380 14)"><rect class="sh" width="240" height="66" rx="4"/><text x="120" y="26">研究 agent</text><text class="sub" x="120" y="50">Claude Code · Bash</text></g>
+          <g class="ve-n" transform="translate(40 178)"><rect class="sh" width="260" height="66" rx="4"/><text x="130" y="24">exec · 文件 · 终端</text><text class="sub" x="130" y="48">后台进程</text></g>
+          <g class="ve-n" transform="translate(40 262)"><rect class="sh" width="260" height="66" rx="4"/><text x="130" y="24">快照与清单</text><text class="sub" x="130" y="48">上传 · 解压 · 下载</text></g>
+          <g class="ve-n" transform="translate(370 178)"><rect class="sh" width="260" height="66" rx="4"/><text x="130" y="24">提交 · 查询 · 取消</text><text class="sub" x="130" y="48">台账 · 用量 · 通知</text></g>
+          <g class="ve-n" data-ref="export" transform="translate(370 262)"><rect class="sh" width="260" height="66" rx="4"/><text x="130" y="24">导出为 Observation</text><text class="sub" x="130" y="48">export_command · JSONL</text></g>
+          <g class="ve-n" transform="translate(700 178)"><rect class="sh" width="260" height="66" rx="4"/><text x="130" y="24">RunSpec · attempt</text><text class="sub" x="130" y="48">绑定 · 结果 · 证据</text></g>
+          <g class="ve-n is-key" data-ref="export" transform="translate(700 262)"><rect class="sh" width="260" height="66" rx="4"/><text x="130" y="24">观测排序与去重</text><text class="sub" x="130" y="48">rl run record</text></g>
+          <path class="ve-x" d="M40 350l8 8M48 350l-8 8"/><text class="mn l" x="58" y="359">项目映射 · 同步</text>
+          <path class="ve-x" d="M370 350l8 8M378 350l-8 8"/><text class="mn l" x="388" y="359">研究记录</text>
+          <path class="ve-x" d="M700 350l8 8M708 350l-8 8"/><text class="mn l" x="718" y="359">调度 · SSH · 轮询</text>
+          <g class="ve-n" transform="translate(20 410)"><rect class="sh" width="300" height="60" rx="4"/><text x="150" y="20">远端项目目录</text><text class="sub" x="150" y="42">snapshots/&lt;sha&gt; · runs/&lt;ATT&gt;</text></g>
+          <g class="ve-n" transform="translate(400 410)"><rect class="sh" width="220" height="60" rx="4"/><text x="110" y="20">PBS · debug-mig</text><text class="sub" x="110" y="42">Miyabi-G</text></g>
+
+          <g class="ve-co" transform="translate(664 318)"><circle r="11"/><text>1</text></g>
+          <g class="ve-co" transform="translate(150 122)"><circle r="11"/><text>2</text></g>
+          <g class="ve-co" transform="translate(630 128)"><circle r="11"/><text>3</text></g>
+        </svg>
+      </div>
+      <ol class="co-list">
+        <li><span class="n">1</span><span><span class="nb">miyabi-mcp</span> 返回一条本机可执行的 <code>export_command</code>；输出写入 <code>observations.jsonl</code>，再由 <code>rl run record --observation @file</code> 读入。</span></li>
+        <li><span class="n">2</span><span>每个 commit 先 <code>git archive</code>，上传后解压为只读的 <code>snapshots/&lt;sha&gt;/</code>；作业脚本和 workdir 都在快照里，输出写到 <code>runs/&lt;ATT&gt;/</code>。</span></li>
+        <li><span class="n">3</span><span>一批作业一个通知组；listener 在后台等待，收到后先 <code>notify_ack</code>，再导出并登记。</span></li>
+      </ol>
+      <figcaption><span class="fig-n">Fig. 13</span><span class="nb">pi-env-mcp</span> 保持通用，不做项目映射；PBS 的全部语义在 <span class="nb">miyabi-mcp</span>；<span class="nb">smooth-research</span> 不碰调度和 SSH。</figcaption>
+    </figure>
+
+    <figure>
+      <div class="specs">
+        <div class="spec">
+          <div class="spec-h"><h3>job_submit</h3><span class="meta">agent → <span class="nb">miyabi-mcp</span> · 用 attempt 绑定作业</span></div>
+          <dl>
+            <dt>request_key</dt><dd class="mono">sr:<span class="nb">ATT-0001-1</span></dd>
+            <dt>client_ref · name</dt><dd><span class="mono"><span class="nb">ATT-0001-1</span></span> <span class="dim">— 导出时 client_ref 成为 attempt_id</span></dd>
+            <dt>script · workdir</dt><dd><span class="mono">snapshots/1b1adbb…/</span> <span class="dim">— 只读快照，不触发 code.mutable</span></dd>
+            <dt>env</dt><dd class="mono">SR_ATTEMPT_ID · SR_SPEC_DIGEST</dd>
+            <dt>labels.code_commit</dt><dd class="mono">1b1adbb7607c7227b1133f83d07c07e7f2723b37</dd>
+            <dt>notify</dt><dd>一批作业一个通知组（expected 3）</dd>
+          </dl>
+        </div>
+        <div class="spec">
+          <div class="spec-h"><h3>export_command</h3><span class="meta"><span class="nb">miyabi-mcp</span> → rl run record · 已存事件的纯函数</span></div>
+          <dl>
+            <dt>executor_namespace</dt><dd class="mono"><span class="nb">miyabi-pbs</span></dd>
+            <dt>record_id</dt><dd class="mono"><span class="nb">miyabi-pbs</span>:3737671.opbs:3</dd>
+            <dt>observed_at · occurred_at</dt><dd><span class="mono">18:57:07 · 18:51:54</span> <span class="dim">— occurred_at 只作证据，不参与排序</span></dd>
+            <dt>usage · G 节点</dt><dd class="mono">node_hours · GH200</dd>
+            <dt>usage · MIG</dt><dd class="mono">mig_instance_hours · GH200 MIG 2g.24gb</dd>
+            <dt>usage · TOKEN</dt><dd>单独的 accounting_ref，不与其他单位相加</dd>
+            <dt>重发</dt><dd>按 record_id 去重，整批重发安全；输出逐字节稳定</dd>
+          </dl>
+        </div>
+      </div>
+      <figcaption><span class="fig-n">Fig. 14</span>两条接口的全部要点。提交时用 attempt 编号绑定作业；导出时作业变成带命名空间的观测和用量。值取自 bf16 测试 seed 0 的真实记录。</figcaption>
+    </figure>
+  </section>
+
+  <section id="e2e">
+    <div class="sec-intro">
+      <div class="sec-head"><p class="ve-label caps">端到端测试</p><h2>Miyabi 上 3 个作业跑通，记录与台账逐字节一致</h2></div>
+      <p>Claude Code 2.1.314（Sonnet 5.5）加载插件，在 <span class="nb">Miyabi-G</span> 的 <span class="nb">debug-mig</span> 上完成一次研究循环。<b>结论只到 screening</b>：速度得到支持，精度等价还没有显示。</p>
+    </div>
+
+    <figure>
+      <div class="frame">
+        <svg class="ve-svg" viewBox="0 0 1000 322" role="img" aria-label="时间线，按比例。18:48:36 提交 seed 0 的作业 3737671；18:50:39 与 18:50:44 提交 seed 1、2 的作业 3737679、3737680。三个作业分别在 18:51:54、18:53:51、18:53:56 结束，walltime 3:11、3:05、3:05。18:57:04 miyabi-mcp 轮询发出组通知；18:57:16 rl 已登记 9 条观测和 3 条用量。最后一个作业结束到通知之间 3 分 08 秒。">
+          <text class="lane-m" x="20" y="56" dominant-baseline="central">agent</text>
+          <text class="lane-m" x="20" y="106" dominant-baseline="central">miyabi-mcp</text>
+          <text class="lane-m" x="20" y="176" dominant-baseline="central">PBS</text>
+          <text class="lane-m" x="20" y="262" dominant-baseline="central">rl</text>
+          <path class="lane" d="M150 56H978M150 106H978M150 262H978"/>
+          <path class="tick" d="M150 286V294M232.8 286V294M315.6 286V294M398.4 286V294M481.2 286V294M564 286V294M646.8 286V294M729.6 286V294M812.4 286V294M895.2 286V294M978 286V294"/>
+          <path class="lane" d="M150 290H978"/>
+          <text class="tick-t" x="150" y="312">18:48</text><text class="tick-t" x="232.8" y="312">18:49</text><text class="tick-t" x="315.6" y="312">18:50</text><text class="tick-t" x="398.4" y="312">18:51</text><text class="tick-t" x="481.2" y="312">18:52</text><text class="tick-t" x="564" y="312">18:53</text><text class="tick-t" x="646.8" y="312">18:54</text><text class="tick-t" x="729.6" y="312">18:55</text><text class="tick-t" x="812.4" y="312">18:56</text><text class="tick-t" x="895.2" y="312">18:57</text><text class="tick-t" x="978" y="312">18:58</text>
+
+          <path class="ve-e" d="M199.7 60V100"/><text class="ve-el r" x="206" y="84">submit · seed 0</text>
+          <path class="ve-e" d="M369.4 60V100"/><path class="ve-e" d="M376.3 60V100"/><text class="ve-el r" x="384" y="84">submit · seed 1 · 2</text>
+          <path class="ve-e is-async no-ah" data-ref="notify" d="M380 46H896"/><text class="ve-el" x="640" y="37">listener 在后台等待</text>
+          <path class="ve-e" data-ref="notify" d="M900.7 102V62"/><text class="ve-el l" data-ref="notify" x="893" y="84">组通知 3/3</text>
+          <path class="ev-d" d="M900.7 100l6 6l-6 6l-6 -6z"/><text class="ve-el l" x="890" y="128">notifyd 轮询</text>
+          <path class="ve-e is-hot" d="M917.3 62V256"/><text class="ve-el l" x="893" y="160">ack → export → record</text>
+          <circle class="ev" cx="917.3" cy="262" r="5"/><text class="ve-el l" x="909" y="252">9 条观测 · 3 条用量</text>
+          <text class="ve-el r" x="156" y="252">register ×3（提交前）</text>
+
+          <rect class="job" x="202.4" y="140" width="270.5" height="16" rx="3"/><text class="job-t" x="210" y="148">3737671 · seed 0</text><text class="job-w" x="480" y="148">walltime 3:11</text>
+          <rect class="job" x="372.2" y="168" width="262.2" height="16" rx="3"/><text class="job-t" x="380" y="176">3737679 · seed 1</text><text class="job-w" x="642" y="176">3:05</text>
+          <rect class="job" x="379.1" y="196" width="262.2" height="16" rx="3"/><text class="job-t" x="387" y="204">3737680 · seed 2</text><text class="job-w" x="649" y="204">3:05</text>
+
+          <g class="ve-dim is-key"><path class="ext" d="M641.3 214V236M900.7 114V236"/><path class="ln" d="M641.3 230H900.7M637.3 234l8 -8M896.7 234l8 -8"/><text x="771" y="223">3 min 08 s</text></g>
+        </svg>
+      </div>
+      <figcaption><span class="fig-n">Fig. 15</span>Miyabi 端到端测试的实际时间线，按比例绘制。三个作业在 18:53:56 前全部结束；组通知等到 notifyd 的下一次轮询（每 300&nbsp;s 一次），12&nbsp;s 后 rl 已登记全部观测和用量。</figcaption>
+    </figure>
+
+    <figure>
+      <div class="kpis">
+        <div class="kpi"><span class="ve-label">作业 · 24&nbsp;h 上限 6 个</span><span class="val"><span data-count="3">3</span><span class="unit"> / 6</span></span>
+          <svg class="ve-waffle" viewBox="0 0 170 40" role="img" aria-label="6 个作业额度用了 3 个"><rect class="on" x="0" y="8" width="24" height="24" rx="2"/><rect class="on" x="28" y="8" width="24" height="24" rx="2"/><rect class="on" x="56" y="8" width="24" height="24" rx="2"/><rect class="off" x="84.5" y="8.5" width="23" height="23" rx="2"/><rect class="off" x="112.5" y="8.5" width="23" height="23" rx="2"/><rect class="off" x="140.5" y="8.5" width="23" height="23" rx="2"/></svg></div>
+        <div class="kpi"><span class="ve-label">MIG 实例 · 小时</span><span class="val"><span data-count="0.156">0.156</span></span>
+          <svg class="ve-bars" viewBox="0 0 240 84" role="img" aria-label="实际使用 0.156，申请 0.4，上限 1.0 MIG 实例·小时"><text y="12">实际</text><rect class="hot" x="52" y="4" width="23.4" height="16" rx="2"/><text x="82" y="12">0.156</text><text y="40">申请</text><rect x="52" y="32" width="60" height="16" rx="2"/><text x="118" y="40">0.4</text><text y="68">上限</text><rect x="52" y="60" width="150" height="16" rx="2"/><text x="208" y="68">1.0</text></svg></div>
+        <div class="kpi"><span class="ve-label">bf16 每步时间</span><span class="val"><span data-count="9.2">9.2</span><span class="unit"> ms</span></span>
+          <svg class="ve-bars" viewBox="0 0 240 76" role="img" aria-label="bf16 每步 9.2 ms，fp32 17.6 ms，快 1.91 倍"><text y="12">bf16</text><rect class="hot" x="52" y="4" width="73.2" height="16" rx="2"/><text x="132" y="12">9.2 ms</text><text y="40">fp32</text><rect x="52" y="32" width="140" height="16" rx="2"/><text x="199" y="40">17.6</text><text x="52" y="66">快 1.91×（TF32 关闭）</text></svg></div>
+        <div class="kpi"><span class="ve-label">观测 · 与重新导出逐字节一致</span><span class="val"><span data-count="9">9</span></span>
+          <svg class="ve-waffle" viewBox="0 0 170 76" role="img" aria-label="9 条观测：3 个作业，各有 queued、running、ended"><rect class="on" x="0" y="0" width="22" height="22" rx="2"/><rect class="on" x="26" y="0" width="22" height="22" rx="2"/><rect class="on" x="52" y="0" width="22" height="22" rx="2"/><rect class="on" x="0" y="26" width="22" height="22" rx="2"/><rect class="on" x="26" y="26" width="22" height="22" rx="2"/><rect class="on" x="52" y="26" width="22" height="22" rx="2"/><rect class="on" x="0" y="52" width="22" height="22" rx="2"/><rect class="on" x="26" y="52" width="22" height="22" rx="2"/><rect class="on" x="52" y="52" width="22" height="22" rx="2"/><text x="86" y="24">3 个作业</text><text x="86" y="50">× 3 状态</text></svg></div>
+      </div>
+      <figcaption><span class="fig-n">Fig. 16</span>三个作业都在 policy 之内：只用 <span class="nb">debug-mig</span>，每个作业 1 个 MIG 实例、walltime&nbsp;≤&nbsp;10&nbsp;min。实际用量只有申请量的约 39%，没有台账外的作业。</figcaption>
+    </figure>
+
+    <figure>
+      <div class="frame">
+        <svg class="ve-svg" viewBox="0 0 1000 245" role="img" aria-label="第 4000 步的 val 精度。fp32：seed 0 和 2 为 1.000，seed 1 为 0.932，均值 0.977。bf16 autocast：三个 seed 都是 1.000。fp32 加 bf16 梯度舍入：三个 seed 都是 1.000。fp32 均值比 bf16 低 2.3 pp，落在小于 1 pp 的区间之外。">
+          <path class="gridv" d="M220 44V218M368 44V218M516 44V218M664 44V218M812 44V218M960 44V218"/>
+          <text class="tick-t" x="220" y="236">0.90</text><text class="tick-t" x="368" y="236">0.92</text><text class="tick-t" x="516" y="236">0.94</text><text class="tick-t" x="664" y="236">0.96</text><text class="tick-t" x="812" y="236">0.98</text><text class="tick-t" x="960" y="236">1.00</text>
+          <text class="row-t" x="20" y="70">fp32</text>
+          <text class="row-t" x="20" y="135">bf16 autocast</text>
+          <text class="row-t" x="20" y="195">fp32 + bf16 梯度</text>
+          <rect class="band" x="886" y="52" width="74" height="36"/>
+          <text class="lbl" x="923" y="46" text-anchor="middle">&lt; 1 pp</text>
+          <path class="mean" d="M789.8 56V84"/>
+          <text class="lbl" x="789.8" y="46" text-anchor="middle">均值 0.977</text>
+          <g class="ve-dim is-key"><path class="ext" d="M789.8 86V108M960 92V108"/><path class="ln" d="M789.8 104H960M785.8 108l8 -8M956 108l8 -8"/><text x="875" y="98">2.3 pp</text></g>
+          <path class="ann" d="M456.8 62V36"/>
+          <text class="lbl" x="464" y="30">seed 1：第 4000 步时还没学完（train loss 0.90）</text>
+          <circle class="dot" cx="960" cy="62" r="7"/><circle class="dot hot" data-ref="s1" cx="456.8" cy="70" r="7"/><circle class="dot" cx="960" cy="78" r="7"/>
+          <circle class="dot" cx="960" cy="125" r="7"/><circle class="dot" cx="960" cy="135" r="7"/><circle class="dot" cx="960" cy="145" r="7"/>
+          <circle class="dot" cx="960" cy="185" r="7"/><circle class="dot" cx="960" cy="195" r="7"/><circle class="dot" cx="960" cy="205" r="7"/>
+          <text class="lbl" x="974" y="75">×2</text><text class="lbl" x="974" y="140">×3</text><text class="lbl" x="974" y="200">×3</text>
+        </svg>
+      </div>
+      <figcaption><span class="fig-n">Fig. 17</span>bf16 三个 seed 都是 1.000。均值差 2.3&nbsp;pp 全部来自 fp32 的 <span class="ve-ref" data-ref="s1" tabindex="0">seed 1</span>，所以严格的“差距 &lt; 1&nbsp;pp”判据没有达到，但这不是 bf16 有害的证据。轴从 0.90 开始。</figcaption>
+    </figure>
+
+    <figure>
+      <div class="table-scroll">
+        <table class="t-issues">
+          <thead><tr><th>问题</th><th>现象</th><th>修复</th><th>状态</th></tr></thead>
+          <tbody>
+            <tr class="grp"><td colspan="4"><span class="nb">smooth-research</span> · a35ac78</td></tr>
+            <tr><td>manifest 字段</td><td>作业写的 metric 文字与 RunSpec 不同，三个结果都被标为不能作预设比较</td><td>流程要求逐字复制 RunSpec 字段或省略；导入提示写明这一点</td><td><span class="chip ok">已修复</span></td></tr>
+            <tr><td>重复记录用量</td><td>导出已带用量，agent 又用 <code>rl run usage</code> 记录，被判为 CONFLICT</td><td>流程说明不要重复记录；冲突信息显示已记录的值</td><td><span class="chip ok">已修复</span></td></tr>
+            <tr><td>快照带入缓存</td><td>代码快照里带进了 <code>__pycache__</code></td><td><code>rl init</code> 在 <code>src/</code> 写入 <code>.gitignore</code></td><td><span class="chip ok">已修复</span></td></tr>
+            <tr><td>可变代码警告</td><td>默认 workdir 是可写的项目目录，触发 code.mutable 警告</td><td>脚本和 workdir 都指向只读快照；<span class="nb">dry-run</span> 确认不再警告</td><td><span class="chip ok">已修复</span></td></tr>
+            <tr class="grp"><td colspan="4"><span class="nb">miyabi-mcp</span> · 96f2247，已合并到 main；独立核对：<span class="nb">dry-run</span> 符合预期，导出字节不变</td></tr>
+            <tr><td>code.mutable 误报</td><td>默认 workdir 下误报</td><td>在 <span class="nb">miyabi-mcp</span> 修复</td><td><span class="chip ok">已修复</span></td></tr>
+            <tr><td>作业名</td><td>未给作业名时使用脚本文件名</td><td>在 <span class="nb">miyabi-mcp</span> 修复</td><td><span class="chip ok">已修复</span></td></tr>
+            <tr><td>notify_list</td><td>确认通知后 daemons 为空</td><td>在 <span class="nb">miyabi-mcp</span> 修复</td><td><span class="chip ok">已修复</span></td></tr>
+            <tr><td>申请量取整</td><td>申请量求和的取整</td><td>在 <span class="nb">miyabi-mcp</span> 修复</td><td><span class="chip ok">已修复</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <figcaption><span class="fig-n">Fig. 18</span>测试发现的 8 个问题按责任范围修复：4 个在 <span class="nb">smooth-research</span>，4 个在 <span class="nb">miyabi-mcp</span>，<span class="nb">pi-env-mcp</span> 无需改动。</figcaption>
+    </figure>
+
+    <figure>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th></th><th>本机 · <span class="nb">wd-noise</span></th><th>Miyabi · bf16</th></tr></thead>
+          <tbody>
+            <tr><td class="k">研究问题</td><td>对称标签噪声下，L2 权重衰减能否提升逻辑回归的泛化</td><td>2 层 transformer 学模加法（p=97）时，bf16 autocast 与 fp32 有何差别</td></tr>
+            <tr><td class="k">执行</td><td>本机进程，<span class="num">29</span> 次运行</td><td>3 个 PBS 作业（<span class="nb">debug-mig</span>），每个作业跑三个臂</td></tr>
+            <tr><td class="k">用时</td><td class="num">约 5.7&nbsp;min（第一轮）</td><td class="num">约 10&nbsp;min</td></tr>
+            <tr><td class="k">记录</td><td>3 假说 · E0/E1 契约 · 4 证据 · 5 决策</td><td>2 假说 · E2 契约 · 3 证据 · 3 决策</td></tr>
+            <tr><td class="k">用量</td><td class="num">约 53 cpu_s（实测）</td><td class="num">0.155834 mig_instance_hours（台账导出）</td></tr>
+            <tr><td class="k">阶段交付</td><td><span class="chip info">continue_probe</span></td><td><span class="chip info">continue_probe</span></td></tr>
+            <tr><td class="k">审查</td><td>第二轮 <span class="nb">RV-0004</span>：cross_model（<span class="nb">gpt-6-astra</span>），1 条非阻塞发现</td><td>未做跨模型审查，<span class="nb">D-0003</span> 已注明</td></tr>
+            <tr><td class="k">发现的问题</td><td>Codex 沙箱读不到审查包 → 审查包内联代码；无法解析的回答记为失败</td><td>8 个，见 Fig. 18</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <figcaption><span class="fig-n">Fig. 19</span>两次端到端测试都由 Claude Code 2.1.314（Sonnet 5.5）在 herdr 新 tab 中加载插件完成，都停在 continue_probe，并如实报告了证据边界。</figcaption>
+    </figure>
+  </section>
+
+  <section id="build">
+    <div class="sec-intro">
+      <div class="sec-head"><p class="ve-label caps">实现</p><h2>一个共享核心，两个宿主薄适配</h2></div>
+      <p>核心与 CLI 在 <code>src/smooth_research/</code>，插件公共部分在 <code>plugin/</code>；<code>hosts/</code> 只放 manifest、hook、宿主说明和占位符取值。<b>没有 MCP 包装</b>：CLI 已覆盖两个宿主。</p>
+    </div>
+
+    <figure>
+      <div class="frame">
+        <svg class="ve-svg" viewBox="0 0 1000 392" role="img" aria-label="构建：共享的 plugin/（bin/rl、3 个 skill、workflow.md）和 src/smooth_research（17 个模块，4,337 行），加上 hosts/claude 或 hosts/codex 的适配文件，经 build_plugins.py 填占位符、检查并写 blake2b 清单，产出 dist/claude（33 个文件）和 dist/codex（32 个文件）。">
+          <rect class="ve-bd" x="16" y="32" width="298" height="164" rx="4"/><text class="ve-bd-t" x="16" y="22">共享 · 两宿主相同</text>
+          <rect class="ve-bd" x="16" y="220" width="298" height="162" rx="4"/><text class="ve-bd-t" x="16" y="212">宿主适配</text>
+          <path class="ve-e is-hot" d="M300 76H350V180H398"/>
+          <path class="ve-e is-hot no-ah" d="M300 152H350"/>
+          <path class="ve-e" d="M300 264H362V204H398"/>
+          <path class="ve-e" d="M300 340H374V228H398"/>
+          <path class="ve-e" d="M620 180H660V128H698"/><text class="ve-el l" x="652" y="150">claude</text>
+          <path class="ve-e" d="M620 228H660V280H698"/><text class="ve-el l" x="652" y="264">codex</text>
+
+          <g class="ve-n" transform="translate(30 44)"><rect class="sh" width="270" height="64" rx="4"/><text class="m" x="135" y="22">plugin/</text><text class="sub" x="135" y="46">bin/rl · 3 个 skill · workflow.md</text></g>
+          <g class="ve-n" transform="translate(30 120)"><rect class="sh" width="270" height="64" rx="4"/><text class="m" x="135" y="22">src/smooth_research/</text><text class="sub" x="135" y="46">17 个模块 · 4,337 行</text></g>
+          <g class="ve-n" transform="translate(30 232)"><rect class="sh" width="270" height="64" rx="4"/><text class="m" x="135" y="22">hosts/claude/</text><text class="sub" x="135" y="46">manifest · hook · 子代理 · host.md</text></g>
+          <g class="ve-n" transform="translate(30 308)"><rect class="sh" width="270" height="64" rx="4"/><text class="m" x="135" y="22">hosts/codex/</text><text class="sub" x="135" y="46">manifest · hook · host.md</text></g>
+          <g class="ve-n is-key" transform="translate(400 160)"><rect class="sh" width="220" height="88" rx="4"/><text class="m" x="110" y="32">build_plugins.py</text><text class="sub" x="110" y="60">填占位符 · 检查 · 清单</text></g>
+          <g class="ve-n" transform="translate(700 80)"><rect class="sh" width="280" height="96" rx="4"/><text class="ve-kind" x="140" y="22">CLAUDE CODE</text><text class="m" x="140" y="48">dist/claude</text><text class="sub" x="140" y="74">33 个文件 · marketplace</text></g>
+          <g class="ve-n" transform="translate(700 232)"><rect class="sh" width="280" height="96" rx="4"/><text class="ve-kind" x="140" y="22">CODEX</text><text class="m" x="140" y="48">dist/codex</text><text class="sub" x="140" y="74">32 个文件 · marketplace</text></g>
+
+          <g class="ve-co" transform="translate(450 272)"><circle r="11"/><text>1</text></g>
+          <g class="ve-co" transform="translate(510 272)"><circle r="11"/><text>2</text></g>
+          <g class="ve-co" transform="translate(570 272)"><circle r="11"/><text>3</text></g>
+        </svg>
+      </div>
+      <ol class="co-list">
+        <li><span class="n">1</span><span>同一个目标文件有两个来源 → 拒绝构建；适配层不能覆盖共享文件。</span></li>
+        <li><span class="n">2</span><span>还有未填的占位符（如 <code>{{rl}}</code>、<code>{{session_id}}</code>）→ 拒绝构建。Claude 填 <code>${CLAUDE_PLUGIN_ROOT}/bin/rl</code> 与 <code>${CLAUDE_SESSION_ID}</code>；Codex 填 <code>rl</code>，绝对路径由 <span class="nb">session-start</span> 提示给出。</span></li>
+        <li><span class="n">3</span><span>输出与源码重叠，或旧目录不是构建产物 → 拒绝覆盖。BUILD.json 记录每个文件的 blake2b；构建号随内容变化，<code>rl setup</code> 据此安装新环境。</span></li>
+      </ol>
+      <figcaption><span class="fig-n">Fig. 20</span>两个宿主的插件从同一份源码组装，只差适配文件；Claude 包多一个 researcher 子代理。</figcaption>
+    </figure>
+
+    <figure>
+      <div class="frame">
+        <svg class="ve-svg bars" viewBox="0 0 1000 410" role="img" aria-label="模块行数：cli 724，runs 486，research 472，reviews 395，store 338，tasks 260，adapters 226，context 209，view 200，literature 188，schema 175，util 148，project 148，snapshot 114，documents 106，delegate 78，hooks 57。测试项数：records 18，runs 13，reviews 10，executor_contract 5，packaging 5。">
+          <text class="hd2" x="0" y="14">src/smooth_research · 行数</text>
+          <text class="hd2" x="657" y="14">tests · 项数（共 51）</text>
+          <text class="lab" x="140" y="44">cli.py</text><rect class="hot" x="150" y="37" width="398.2" height="14" rx="2"/><text x="556" y="44">724</text>
+          <text class="lab" x="140" y="65">runs.py</text><rect class="hot" x="150" y="58" width="267.3" height="14" rx="2"/><text x="425" y="65">486</text>
+          <text class="lab" x="140" y="86">research.py</text><rect x="150" y="79" width="259.6" height="14" rx="2"/><text x="418" y="86">472</text>
+          <text class="lab" x="140" y="107">reviews.py</text><rect x="150" y="100" width="217.3" height="14" rx="2"/><text x="375" y="107">395</text>
+          <text class="lab" x="140" y="128">store.py</text><rect x="150" y="121" width="185.9" height="14" rx="2"/><text x="344" y="128">338</text>
+          <text class="lab" x="140" y="149">tasks.py</text><rect x="150" y="142" width="143" height="14" rx="2"/><text x="301" y="149">260</text>
+          <text class="lab" x="140" y="170">adapters.py</text><rect x="150" y="163" width="124.3" height="14" rx="2"/><text x="282" y="170">226</text>
+          <text class="lab" x="140" y="191">context.py</text><rect x="150" y="184" width="115" height="14" rx="2"/><text x="273" y="191">209</text>
+          <text class="lab" x="140" y="212">view.py</text><rect x="150" y="205" width="110" height="14" rx="2"/><text x="268" y="212">200</text>
+          <text class="lab" x="140" y="233">literature.py</text><rect x="150" y="226" width="103.4" height="14" rx="2"/><text x="261" y="233">188</text>
+          <text class="lab" x="140" y="254">schema.py</text><rect x="150" y="247" width="96.3" height="14" rx="2"/><text x="254" y="254">175</text>
+          <text class="lab" x="140" y="275">util.py</text><rect x="150" y="268" width="81.4" height="14" rx="2"/><text x="239" y="275">148</text>
+          <text class="lab" x="140" y="296">project.py</text><rect x="150" y="289" width="81.4" height="14" rx="2"/><text x="239" y="296">148</text>
+          <text class="lab" x="140" y="317">snapshot.py</text><rect x="150" y="310" width="62.7" height="14" rx="2"/><text x="221" y="317">114</text>
+          <text class="lab" x="140" y="338">documents.py</text><rect x="150" y="331" width="58.3" height="14" rx="2"/><text x="216" y="338">106</text>
+          <text class="lab" x="140" y="359">delegate.py</text><rect x="150" y="352" width="42.9" height="14" rx="2"/><text x="201" y="359">78</text>
+          <text class="lab" x="140" y="380">hooks.py</text><rect x="150" y="373" width="31.4" height="14" rx="2"/><text x="189" y="380">57</text>
+
+          <text class="lab" x="800" y="44">records</text><rect class="hot" x="810" y="37" width="144" height="14" rx="2"/><text x="962" y="44">18</text>
+          <text class="lab" x="800" y="72">runs</text><rect class="hot" x="810" y="65" width="104" height="14" rx="2"/><text x="922" y="72">13</text>
+          <text class="lab" x="800" y="100">reviews</text><rect x="810" y="93" width="80" height="14" rx="2"/><text x="898" y="100">10</text>
+          <text class="lab" x="800" y="128">executor_contract</text><rect x="810" y="121" width="40" height="14" rx="2"/><text x="858" y="128">5</text>
+          <text class="lab" x="800" y="156">packaging</text><rect x="810" y="149" width="40" height="14" rx="2"/><text x="858" y="156">5</text>
+        </svg>
+      </div>
+      <figcaption><span class="fig-n">Fig. 21</span>4,337 行 Python：17 个模块，加上 <code>__init__</code> 与 <code>__main__</code> 的 13 行；CLI 与 runs.py 合占约 28%。51 项测试中，记录与运行的契约测试占 31 项。</figcaption>
+    </figure>
+
+    <div class="callout">
+      <span class="chip warn">首版未做</span>
+      <ul class="tags">
+        <li>向量检索</li><li>Zotero 同步</li><li>MCP 包装</li><li>自动 session 轮换阈值</li><li>跨主机协调者 failover</li><li>文献检索只接 arXiv（另可用 Crossref 核对 DOI）</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="sources" id="sources" aria-label="来源">
+    <p class="ve-label caps">来源</p>
+    <ul>
+      <li>设计文档 <code>design/ml-research-agent-design-2026-10-30 (1).md</code>：§2–§10 为设计，§21 为实施记录（与正文冲突时以 §21 为准）。</li>
+      <li>代码 <code>src/smooth_research/</code>（<code>runs.py</code> 的观测投影、<code>reviews.py</code> 的审查关系）· <code>plugin/</code> · <code>hosts/</code> · <code>scripts/build_plugins.py</code>。</li>
+      <li>测试 <code>tests/test_records.py</code> · <code>test_runs.py</code> · <code>test_reviews.py</code> · <code>test_executor_contract.py</code> · <code>test_packaging.py</code>（51 项）。</li>
+      <li>提交 446fd7b · 3ff9329 · a35ac78 · 2e13425 · 07db148；<span class="nb">miyabi-mcp</span> 96f2247。<span class="nb">miyabi-mcp</span> 一侧的权威说明：<span class="nb">miyabi-toolbox</span> <code><span class="nb">miyabi-mcp</span>/DESIGN.md</code> §11。</li>
+      <li>e2e 记录：<code>/home/yu/workspace/<span class="nb">sr-e2e</span>/<span class="nb">miyabi-bf16</span></code> 的 <code>rl show</code> / <code>rl run show</code> 输出（<span class="nb">D-0003</span>、<span class="nb">E-0001</span>、<span class="nb">EV-0001</span>…0003、RUN/ATT/<span class="nb">U-0001</span>…0003）；本机 e2e 见设计文档 §21.6。</li>
+    </ul>
+  </section>
+
+</main>
+</div>
+<script>
+  const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // Linked highlighting: hovering any [data-ref], or focusing a prose term, lights every element that shares a ref.
+  const linked = [...document.querySelectorAll('[data-ref]')], refs = (el) => el.dataset.ref.split(' ');
+  let hovered = null, focused = null;
+  const paint = () => {
+    const keys = (hovered || focused)?.dataset.ref.split(' ') ?? [];
+    for (const t of linked) t.classList.toggle('is-lit', refs(t).some((k) => keys.includes(k)));
+    for (const svg of document.querySelectorAll('svg')) svg.classList.toggle('has-lit', !!svg.querySelector('.is-lit'));
+  };
+  for (const el of linked) {
+    el.addEventListener('pointerenter', () => { hovered = el; paint(); });
+    el.addEventListener('pointerleave', () => { hovered = null; paint(); });
+    el.addEventListener('focus', () => { focused = el; paint(); });
+    el.addEventListener('blur', () => { focused = null; paint(); });
+  }
+
+  // Stepper / scene player.
+  for (const root of document.querySelectorAll('.ve-steps')) {
+    const parts = [...root.querySelectorAll('[data-s]')], caps = [...root.querySelectorAll('.ve-cap li')];
+    const range = root.querySelector('input[type=range]'), play = root.querySelector('[data-play]');
+    const n = caps.length; let i = 0, timer = null;
+    if (range) range.max = n - 1;
+    const show = (k) => {
+      i = Math.max(0, Math.min(n - 1, k));
+      root.classList.remove('is-still');
+      // data-s lists the steps a part takes part in: it appears at the first ("0" = from the start) and is .now on each.
+      for (const el of parts) { const s = el.dataset.s.trim().split(' ').map(Number); el.classList.toggle('on', s[0] <= i + 1); el.classList.toggle('now', s.includes(i + 1)); }
+      caps.forEach((c, j) => c.hidden = j !== i);
+      root.classList.toggle('is-full', i === n - 1);
+      root.dispatchEvent(new Event('ve:step'));
+      if (range) range.value = i;
+    };
+    const stop = () => { clearInterval(timer); timer = null; if (play) play.textContent = '播放'; };
+    root.addEventListener('click', (e) => { const b = e.target.closest('[data-go]'); if (b) { stop(); show(i + +b.dataset.go); } });
+    range?.addEventListener('input', () => { stop(); show(+range.value); });
+    play?.addEventListener('click', () => {
+      if (timer) return stop();
+      if (i === n - 1) show(0);
+      play.textContent = '暂停';
+      timer = setInterval(() => (i < n - 1 ? show(i + 1) : stop()), 3500);
+    });
+    show(n - 1); // open on the full picture; Play replays from step 1
+    root.classList.add('is-still');
+    addEventListener('beforeprint', () => { show(n - 1); root.classList.add('is-still'); });
+  }
+
+  // Section navigation: mark the section in view.
+  const navLinks = [...document.querySelectorAll('.toc a')];
+  const navList = document.querySelector('.toc ol');
+  const spy = new IntersectionObserver((entries) => {
+    for (const e of entries) {
+      if (!e.isIntersecting) continue;
+      for (const a of navLinks) {
+        const on = a.getAttribute('href') === '#' + e.target.id;
+        a.classList.toggle('is-on', on);
+        if (on) { a.setAttribute('aria-current', 'true'); if (navList.scrollWidth > navList.clientWidth) navList.scrollTo({ left: a.offsetLeft - 16, behavior: still ? 'auto' : 'smooth' }); }
+        else a.removeAttribute('aria-current');
+      }
+    }
+  }, { rootMargin: '-10% 0px -80% 0px' });
+  for (const a of navLinks) { const t = document.querySelector(a.getAttribute('href')); if (t) spy.observe(t); }
+
+  if (!still) {
+    // Entrance: each block rises in once; numbers count up and bars grow as it arrives.
+    document.documentElement.classList.add('js-motion');
+    const io = new IntersectionObserver((entries) => {
+      for (const e of entries) {
+        if (!e.isIntersecting) continue;
+        io.unobserve(e.target); e.target.classList.add('in');
+        for (const el of e.target.querySelectorAll('[data-count]')) {
+          const end = +el.dataset.count, dp = (el.dataset.count.split('.')[1] || '').length, t0 = performance.now();
+          const step = (t) => {
+            const k = Math.min(1, (t - t0) / 900);
+            el.textContent = (end * (1 - (1 - k) ** 3)).toLocaleString('en-US', { minimumFractionDigits: dp, maximumFractionDigits: dp });
+            if (k < 1) requestAnimationFrame(step);
+          };
+          requestAnimationFrame(step);
+        }
+      }
+    }, { rootMargin: '0px 0px -10% 0px' });
+    for (const el of document.querySelectorAll('main > *')) io.observe(el);
+  }
+</script>
+</body>
+</html>
