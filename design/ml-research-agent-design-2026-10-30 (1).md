@@ -478,6 +478,17 @@ Reviewer 获取方法定义、代码 diff、必要上下文、关键测试和中
 
 不强制拦截：没有引用通过（pass 或 issues）的结论审查的关键决定照常记录，但会一直列在 `rl status`、恢复包和 session 开始提示的待处理中，直到用 `rl link D-x based_on RV-x` 补上；unavailable 或 blocking 都不算通过。报告为每个关键决定标出审查状态。
 
+### 8.7 登记 run 时检查代码审查是否覆盖（2026-10-30 增加）
+
+哪个 run 需要代码审查（§8.2）仍由研究者判断，CLI 不判断一个 run 是不是“新核心路径上的高成本 run”。但每次 `rl run register` 都检查已有的代码审查是否仍覆盖这个 run 实际执行的代码，并把结果记在 attempt 上：
+
+- 候选审查：针对该实验、以及它的代码来源（code_from）实验的代码审查，加上 `--review RV-x` 指名的审查。
+- 覆盖的含义：通过（pass 或 issues）的跨模型审查审过的每个路径，在 run 实际执行的代码中都至少与其中一次审查看到的版本一致。RunSpec 给出 commit 时读该 commit 的文件，否则读工作区；配置去掉该审查允许变化的键后再比较。按 §8.5 修复后只复核受影响文件，也因此仍算覆盖。
+- 结果：covered；stale（列出变化的文件和看到旧版本的审查）；not_passed（只有 pending、unavailable、blocking 或同族审查）；none；unchecked（审查没有记录范围，或 commit 不在本仓库）；waived（`--no-review` 附理由，例如冒烟测试）。
+- 为此代码审查工单记录审查范围明细：每个文件、依赖和配置的摘要，忽略键，scope 文字。此前的工单没有这份明细，用相同范围重新请求即可复用原回答并补记。
+
+不拦截。结果出现在 register 的输出、`rl run show`、工作包、结论审查包（每条证据背后各 attempt 的状态）和报告的证据条目中，让缺口在下结论之前可见。它不单独进入待处理，以免冒烟测试反复提示。
+
 ---
 
 ## 9. 研究瓶颈与最强模型咨询
@@ -1143,6 +1154,7 @@ GitHub 链接固定到本次读取的提交；外部产品文档按 2026-10-30 �
 - 上下文包的 token 数为标注方法的估算（ASCII 字符/4 + 非 ASCII 字符），超出预算的部分列为按需读取的索引。
 - 执行下放（2026-10-30，见 §7.1）：协调者的 skill 改为“掌握与用户的对话、假说和路线决定，实现和运行交给研究者”；记录运行的规则单列一节，研究者和做小检查的协调者共用。研究者子代理不再限定工具，继承主 session 的工具（含 pi-env-mcp、miyabi-mcp），可以直接在 Miyabi 上执行。等待集群作业归协调者：研究者提交后以 `task wait` 结束并报告监听命令，协调者等到通知后以同一角色重启研究者；`rl delegate` 也能续接同一角色拥有的未完成任务。工作包列出协调者的 session，作业通知发往那里。代码审查由写代码的一方（通常是研究者）发起。
 - 结论审查（2026-10-30，见 §8.6）：新增 `rl review conclusion`。Ticket 新增 `subject`（code / conclusion），Decision 新增 `evidence_status_set`（记下该决定设定的证据状态）；两者都是可选字段，旧库照常读取。
+- 登记时的代码审查覆盖检查（2026-10-30，见 §8.7）：Ticket 新增 `code_scope`（审查范围明细），Attempt 新增 `code_review`（登记时的检查结果）；`rl run register` 新增 `--review`、`--no-review`。都是可选字段，旧库照常读取，旧 attempt 显示为 not checked。
 
 ### 21.4 首版未做
 
@@ -1154,6 +1166,7 @@ GitHub 链接固定到本次读取的提交；外部产品文档按 2026-10-30 �
 - 端到端：在 herdr 新 tab 中启动 Claude Code 2.1.314（Sonnet 5.5，effort medium），`--plugin-dir dist/claude/plugins/smooth-research` 加载插件，用本计划的小型研究（标签噪声下的权重衰减）跑完一次研究循环。结果见 21.6。
 - 其后增至 51 项：观测的批量导入与 `occurred_at`、miyabi-mcp 导出契约（`tests/test_executor_contract.py`，见 21.7）等。Miyabi 上的端到端测试见 21.8。
 - 再增至 54 项：结论审查的审查包内容与复用、未经结论审查的关键决定留在待处理中、`rl delegate` 续接同一角色拥有的任务。
+- 再增至 56 项：登记 run 时的代码审查覆盖检查（工作区与 commit 两种代码来源、忽略键、只复核变化的文件、code_from、没有记录范围的旧工单、`--no-review`、报告中的标注）。
 
 ### 21.6 端到端测试结果（2026-10-30）
 

@@ -55,10 +55,13 @@ def normalize_spec(spec: dict) -> dict:
     return spec
 
 
-def register(store: Store, experiment: str, spec: dict, request_id: str, run_id: str | None = None) -> dict:
+def register(store: Store, experiment: str, spec: dict, request_id: str, run_id: str | None = None,
+             reviews: list[str] = (), no_review: str | None = None) -> dict:
+    from .reviews import code_coverage  # reviews imports this module (through context and view)
     spec = normalize_spec(dict(spec))
     payload = digest_json({"experiment": experiment, "spec": spec, "run": run_id})
     prep = prepare_contract(store, experiment)  # a registered run is a formal reference: seal the contract
+    check = code_coverage(store, experiment, spec["code_ref"], list(reviews), no_review)
     with store.write() as tx:
         previous = tx.request("run.register", request_id, payload)
         if previous:
@@ -87,15 +90,73 @@ def register(store: Store, experiment: str, spec: dict, request_id: str, run_id:
         attempt = f"ATT-{run_id.split('-')[1]}-{index}"
         tx.create("Attempt", {"id": attempt, "run_id": run_id, "index": index, "request_id": request_id,
                               "execution_state": "prepared", "outcome": "unknown", "result_status": "absent",
-                              "issues": []})
+                              "issues": [], "code_review": check})
         tx.link("of_run", attempt, run_id)
-        result = {"run": run_id, "attempt": attempt, "spec_digest": spec_digest}
+        result = {"run": run_id, "attempt": attempt, "spec_digest": spec_digest, "code_review": check}
         tx.remember("run.register", request_id, payload, result)
         tx.event("run.register", attempt, f"{run_id} attempt {index} prepared")
     unknown = sorted(k for k, v in spec.items() if v == "unknown")
+    source = f" ({check['source']})" if check.get("source") else ""
     return {**result, "summary": f"{run_id} {attempt} prepared (spec {short(spec_digest)})"
                                  + (f"; unknown: {', '.join(unknown)}" if unknown else "")
-                                 + ". Nothing was started: run it with your own tool, then `rl run record`."}
+                                 + ". Nothing was started: run it with your own tool, then `rl run record`."
+                                 + f"\ncode review{source}: {code_review_note(check)}{_review_hint(check)}"}
+
+
+def _review_hint(check: dict) -> str:
+    if check["status"] == "stale":
+        last = max(i for ids in check["changed"].values() for i in ids)
+        return f". Before a costly run, re-check the changed files: rl review request ... --recheck-of {last}"
+    if check["status"] in ("none", "not_passed"):
+        return (". A costly run on a new core path needs a cross-model code review first; for other runs say why "
+                "with --no-review \"<reason>\"")
+    return ""
+
+
+def code_review_note(check: dict | None) -> str:
+    """The code review check recorded when an attempt was registered, in one line."""
+    if not check:
+        return "not checked"  # registered before the check existed
+    status = check["status"]
+    if status == "waived":
+        text = f"not needed: {check['reason']}"
+    elif status == "covered":
+        text = f"covered by {', '.join(check['reviews'])}"
+    elif status == "stale":
+        paths = [f"{p} changed since {', '.join(ids)}" for p, ids in check["changed"].items()]
+        text = "stale: " + "; ".join(paths[:3]) + (f"; {len(paths) - 3} more" if len(paths) > 3 else "")
+    elif status == "unchecked":
+        text = f"unchecked: {check['reason']}"
+    elif status == "not_passed":
+        text = f"no passing review ({', '.join(check['open'])})"
+    else:
+        text = "not reviewed"
+    if status in ("covered", "stale") and check.get("open"):
+        text += f" ({', '.join(check['open'])})"
+    return text
+
+
+def evidence_attempts(tx: Tx, ev_id: str) -> list[dict]:
+    """The attempts behind an evidence record: linked directly or through its results."""
+    ids: list[str] = []
+    for e in tx.out(ev_id):
+        if e["rel"] == "from_attempt":
+            aid = e["id"]
+        elif e["rel"] == "from_result":
+            aid = tx.require(e["id"])["attempt_id"]
+        else:
+            continue
+        if aid not in ids:
+            ids.append(aid)
+    return [tx.require(a) for a in ids]
+
+
+def code_review_summary(attempts: list[dict]) -> str:
+    """Attempts grouped by the code review check recorded at their registration."""
+    groups: dict[str, list[str]] = {}
+    for att in attempts:
+        groups.setdefault(code_review_note(att.get("code_review")), []).append(att["id"])
+    return "; ".join(f"{', '.join(ids)} {note}" for note, ids in groups.items())
 
 
 # -- record ---------------------------------------------------------------------------------------------------
@@ -428,7 +489,8 @@ def describe_attempt(tx: Tx, att: dict) -> str:
         " (stale? refresh with your execution tool)" if age > STALE_AFTER_H and att["execution_state"] != "ended" else "")
     trusted = (f"; last trusted {att['last_trusted_state']} at {att['last_trusted_at']}"
                if att.get("last_trusted_state") and att["execution_state"] == "unknown" else "")
-    return f"{brief(att)} {ref_text}; {fresh}{trusted}"
+    review = f"; code review: {code_review_note(att['code_review'])}" if att.get("code_review") else ""
+    return f"{brief(att)} {ref_text}; {fresh}{trusted}{review}"
 
 
 def show(store: Store, entity_id: str | None = None, active: bool = False) -> dict:

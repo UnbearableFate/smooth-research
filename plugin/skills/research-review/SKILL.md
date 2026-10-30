@@ -31,6 +31,12 @@ smooth-research skill: {{rl_short}}
 5. If no eligible reviewer can be called, the ticket says `unavailable`. That is not a pass: low-cost
    independent work may continue, but scaled-up runs that depend on the reviewed path wait (a researcher
    blocks its task with `--reason model_unavailable`).
+6. `{{rl}} run register` checks each run against the code reviews of its experiment (and of the experiment
+   its code comes from; name others with `--review RV-x`): every reviewed path must still match, in the code
+   the run executes, a version that a passing cross-model review saw (configs without the ignored keys).
+   The result (covered, stale with the changed paths, not reviewed, or `--no-review` with its reason) is
+   recorded on the attempt and shown in conclusion review packages and `{{rl}} report`. A review requested
+   before scopes were recorded cannot be checked: request it again with the same scope (the answer is reused).
 
 ## Conclusion
 

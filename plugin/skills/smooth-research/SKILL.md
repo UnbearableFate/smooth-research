@@ -62,8 +62,8 @@ controls) · E2 minimal real model · E3 limited confirmation (pre-fixed compari
 3. Wait without polling: a researcher with long runs ends with WAIT in `{{rl}} inbox --role coordinator` (the
    attempts, and what reports their end). You own the wake-up (host.md); when it fires, start the researcher
    again with the same role and it resumes the task.
-4. Check each delivery: the RESULT message, the records it names (`{{rl}} show`, `{{rl}} run show E-x`) and the
-   outputs; then `{{rl}} task accept T-x --reason ..`, or `{{rl}} task reopen T-x --reason "<what to change>"` and
+4. Check each delivery: the RESULT message, the records it names (`{{rl}} show`, `{{rl}} run show E-x`, which
+   includes each attempt's code review check) and the outputs; then `{{rl}} task accept T-x --reason ..`, or `{{rl}} task reopen T-x --reason "<what to change>"` and
    start the researcher again.
 5. Before a key conclusion (a hypothesis set supported or challenged, a route stopped, a formal experiment
    recommended), get a conclusion review (skill `research-review`) and cite it with `--based-on RV-x`.
@@ -79,7 +79,10 @@ controls) · E2 minimal real model · E3 limited confirmation (pre-fixed compari
 2. Register before running: `{{rl}} run register --experiment E-x --request-id <unique> --arm .. --seed ..
    --code-digest "$({{rl}} digest src/ | cut -d' ' -f1)" (or --code-commit <full sha>) --config-digest ..
    --data-revision .. --metric .. --output-spec research/artifacts/<ATT>/..` -> RUN and ATT ids.
-   Write `unknown` for facts you do not have; never guess.
+   Write `unknown` for facts you do not have; never guess. Its `code review` line, recorded on the attempt,
+   says whether answered cross-model reviews still cover the code this run executes (the commit, else the
+   working tree): covered, stale (a reviewed file changed: re-check before a costly run) or not reviewed.
+   Nothing is blocked; a run that needs no review says why: `--no-review "smoke test"`.
 3. Run it with your own tools (shell, background jobs, remote or HPC tools). Record facts as you observe
    them: `{{rl}} run record --attempt ATT --source <tool> --state running|ended [--outcome success|failed|cancelled]
    --exec-namespace host:<hostname> --exec-id <pid or job id> --source-ref <log>`. On a cluster (Miyabi:

@@ -41,7 +41,9 @@ decisions; you own the execution of this task.
 3. Before a costly run on a new core path (operator, training or evaluation path, loss mask, data split, adapter
    injection, checkpoint I/O), get a cross-model code review: `{rl} review request --target <E-x> --files ..
    --author-model <your model id> --question ..`, then `{rl} review run <RV-x>`; fix real problems. If no reviewer
-   is available, do not scale up: block with --reason model_unavailable.
+   is available, do not scale up: block with --reason model_unavailable. `{rl} run register` prints whether the
+   reviews still cover the code the run executes; on stale, re-check before scaling up. A run that needs no
+   review: --no-review "<reason>".
 4. Long external runs (cluster jobs): once they are submitted and recorded, `{rl} task wait {task_id} --role {role}
    --attempts <ATT ids> --next-action "<what to do when they end>"`, say what reports their end, and finish. The
    coordinator waits and starts you again with the same role.

@@ -261,3 +261,78 @@ def test_delegation_continues_a_task_its_role_already_owns(project, fakes, monke
     with pytest.raises(RLError) as err:
         delegate.delegate(project, "T-0001", "codex:gpt-6-astra@medium", role="researcher-2")
     assert err.value.code == "CONFLICT"
+
+
+def test_a_run_records_whether_code_reviews_still_cover_its_code(project, fakes, tmp_path, rl):
+    from conftest import SPEC
+    from smooth_research import view
+    code(tmp_path)
+
+    def check(n, experiment="E-0001", **kw):
+        out = runs.register(project, experiment, {**SPEC, "seed": n}, f"cov{n}", **kw)
+        return out["code_review"], out["summary"]
+
+    first, text = check(0)
+    assert first == {"status": "none"} and "code review: not reviewed" in text and "--no-review" in text
+    rv = request(project)["id"]
+    assert check(1)[0] == {"status": "not_passed", "open": [f"{rv} pending"]}
+    reviews.run_ticket(project, rv)
+    covered, text = check(2)
+    assert covered == {"status": "covered", "source": "working tree", "reviews": [f"{rv} pass"]}
+    assert f"code review (working tree): covered by {rv} pass" in text
+    code(tmp_path, config={"lr": 0.1, "seed": 9})  # only a key the review allowed to vary
+    assert check(3)[0]["status"] == "covered"
+    code(tmp_path, body="def f(x):\n    return 2 * x\n")  # the reviewed code changed
+    stale, text = check(4)
+    assert stale["status"] == "stale" and stale["changed"] == {"src/model.py": [rv]} and "--recheck-of" in text
+    fixed = request(project, recheck_of=rv)["id"]
+    reviews.run_ticket(project, fixed)
+    covered = check(5)[0]
+    assert covered["status"] == "covered" and f"{fixed} pass" in covered["reviews"]
+    with project.read() as tx:
+        att = tx.require("ATT-0006-1")
+        assert att["code_review"] == covered and "code review: covered by" in runs.describe_attempt(tx, att)
+    # the experiment whose code comes from E-0001 is covered by E-0001's reviews
+    research.add_experiment(project, "WD, more noise", "does wd still help at 40%?", ["H-0001"], "E1",
+                            code_from="E-0001", intervention="wd", comparator="no wd", metric="acc", scope="toy",
+                            outcome_actions="a", budget="b", stop="c")
+    assert check(6, "E-0002")[0]["status"] == "covered"
+    with project.write() as tx:  # reviews requested before scopes were recorded
+        for rid in (rv, fixed):
+            tx.update(rid, {"code_scope": None})
+    old = check(7)[0]
+    assert old["status"] == "unchecked" and "recorded no scope" in old["reason"]
+    assert request(project)["reused_from"] == fixed  # same scope: the answer is reused and the scope recorded
+    assert check(8)[0]["status"] == "covered"
+    code_, out, _ = rl("run", "register", "--experiment", "E-0001", "--request-id", "cov9", "--spec",
+                       json.dumps({**SPEC, "seed": 9}), "--no-review", "smoke test")
+    assert code_ == 0 and "code review: not needed: smoke test" in out
+    with pytest.raises(RLError, match="not a code review"):
+        runs.register(project, "E-0001", SPEC, "cov10",
+                      reviews=[reviews.request_conclusion_review(project, ["H-0001"], "x", ["claude-opus-5-5"])["id"]])
+    ev = evidence(project)
+    report = open(view.report(project)["path"], encoding="utf-8").read()
+    line = next(l for l in report.splitlines() if l.startswith(f"- {ev} "))
+    assert "[code review: " in line and "covered by" in line, line
+
+
+def test_a_run_from_a_commit_is_checked_against_that_commit(project, fakes, tmp_path):
+    import subprocess
+    from conftest import SPEC
+
+    def git(*args):
+        return subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True, text=True).stdout.strip()
+
+    code(tmp_path)
+    git("init", "-q")
+    git("add", "src", "configs")
+    git("-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-qm", "reviewed code")
+    commit = git("rev-parse", "HEAD")
+    rv = request(project)["id"]
+    reviews.run_ticket(project, rv)
+    code(tmp_path, body="def f(x):\n    return 3 * x\n")  # edited after the commit
+    at_commit = runs.register(project, "E-0001", {**SPEC, "code_ref": {"commit": commit}}, "c1")["code_review"]
+    assert at_commit == {"status": "covered", "source": f"commit {commit[:12]}", "reviews": [f"{rv} pass"]}
+    assert runs.register(project, "E-0001", SPEC, "c2")["code_review"]["status"] == "stale"  # the working tree
+    elsewhere = runs.register(project, "E-0001", {**SPEC, "code_ref": {"commit": "f" * 40}}, "c3")["code_review"]
+    assert elsewhere["status"] == "unchecked" and "not in this repository" in elsewhere["reason"]

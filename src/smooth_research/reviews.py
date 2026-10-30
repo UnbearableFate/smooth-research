@@ -2,8 +2,9 @@
 
 Code reviews are keyed by a scope fingerprint (code, configuration with whitelisted keys removed, dependencies
 and the scope text); conclusion reviews by the package built from the records behind a proposed key conclusion.
-Either is reused only while its key is unchanged. The reviewer comes from a different model family than the
-authors; when none is available the ticket stays pending or unavailable — never a fake pass.
+Either is reused only while its key is unchanged. A code review also keeps its scope, so registering a run can
+tell whether the reviews still cover the code it executes. The reviewer comes from a different model family than
+the authors; when none is available the ticket stays pending or unavailable — never a fake pass.
 Advice requests are deduplicated by question, evidence version, constraints and advisor configuration.
 """
 
@@ -20,8 +21,9 @@ import yaml
 from . import adapters, documents
 from .context import advice_pack, _contract
 from .research import brief
+from .runs import code_review_summary, evidence_attempts
 from .store import Store, Tx
-from .util import RLError, digest_file, digest_json, now_utc, short
+from .util import RLError, digest_bytes, digest_file, digest_json, now_utc, short
 from .view import _arm_table
 
 INLINE_FILE_CHARS = 60_000
@@ -250,6 +252,14 @@ def _strip(value, keys: set):
     return value
 
 
+def _config_digest(path: str, data: bytes, ignore_keys: list[str]) -> str:
+    try:
+        loaded = (json.loads if Path(path).suffix == ".json" else yaml.safe_load)(data.decode("utf-8"))
+        return digest_json(_strip(loaded, set(ignore_keys)))
+    except (ValueError, yaml.YAMLError):
+        return digest_bytes(data)  # not structured: the whole file counts
+
+
 def fingerprint(store: Store, files: list[str], configs: list[str], deps: list[str], ignore_keys: list[str],
                 scope: str) -> tuple[str, dict]:
     def digest(p: str) -> str:
@@ -264,11 +274,7 @@ def fingerprint(store: Store, files: list[str], configs: list[str], deps: list[s
     for c in sorted(configs):
         path = store.project.abs(c)
         digest(c)
-        try:
-            loaded = (json.loads if path.suffix == ".json" else yaml.safe_load)(path.read_text(encoding="utf-8"))
-            detail["configs"][store.project.rel(path)] = digest_json(_strip(loaded, set(ignore_keys)))
-        except (ValueError, yaml.YAMLError):
-            detail["configs"][store.project.rel(path)] = digest_file(path)  # not structured: whole file counts
+        detail["configs"][store.project.rel(path)] = _config_digest(c, path.read_bytes(), ignore_keys)
     return digest_json(detail), detail
 
 
@@ -280,7 +286,7 @@ def _eligible(store: Store, author_models: list[str]) -> list[adapters.Entry]:
 
 
 def _reuse(tx: Tx, key: str, target_text: str | None, targets: list[str], author_models: list[str],
-           subject: str) -> dict | None:
+           subject: str, extra: dict | None = None) -> dict | None:
     """An answered cross-model review (pass or issues) with the same key answers this request too."""
     for old in tx.all("Ticket", dedupe_key=key):
         if old["kind"] == "review" and old["status"] == "answered" and old.get("verdict") in ("pass", "issues") \
@@ -292,7 +298,7 @@ def _reuse(tx: Tx, key: str, target_text: str | None, targets: list[str], author
                                                             "answered_at")},
                                  "id": rid, "kind": "review", "subject": subject, "status": "answered",
                                  "target_id": target_text, "dedupe_key": key, "author_models": list(author_models),
-                                 "reused_from": old.get("reused_from") or old["id"]})
+                                 "reused_from": old.get("reused_from") or old["id"], **(extra or {})})
             for t in targets:
                 tx.link("targets", rid, t)
             tx.event("review.reused", rid, f"{subject} key {short(key)} unchanged since {old['id']}")
@@ -315,7 +321,8 @@ def request_review(store: Store, target: str | None, files: list[str], question:
     with store.write() as tx:
         if target:
             tx.require(target)
-        reused = None if recheck_of else _reuse(tx, fp, target, [target] if target else [], author_models, "code")
+        reused = None if recheck_of else _reuse(tx, fp, target, [target] if target else [], author_models, "code",
+                                                {"code_scope": detail})
         if reused:
             return reused
         rid = tx.next_id("Ticket", "RV")
@@ -323,7 +330,7 @@ def request_review(store: Store, target: str | None, files: list[str], question:
                              "status": "pending" if eligible else "unavailable",
                              "target_id": target, "question": question, "dedupe_key": fp,
                              "candidates": [str(e) for e in eligible], "author_models": list(author_models),
-                             "recheck_of": recheck_of,
+                             "recheck_of": recheck_of, "code_scope": detail,
                              "error": None if eligible else f"no configured reviewer outside families {sorted(authors)}"})
         if target:
             tx.link("targets", rid, target)
@@ -385,6 +392,114 @@ def _review_package(store: Store, rid: str, target: str | None, question: str, s
             parts.append(f"\n## Diff against {diff_base}\n\n```diff\n{diff[:40000]}\n```")
     parts.append("\n" + REVIEW_PROTOCOL)
     return "\n".join(parts)
+
+
+# -- code review coverage of a run ----------------------------------------------------------------------------
+
+
+def _code_reviews(tx: Tx, experiment: str, named: list[str]) -> list[dict]:
+    """Code reviews of the experiment and of the experiments its code comes from, plus the ones named."""
+    exps, todo = set(), [experiment]
+    while todo:
+        eid = todo.pop()
+        if eid not in exps:
+            exps.add(eid)
+            todo += [e["id"] for e in tx.out(eid, "code_from")]
+    ids = {e["id"] for eid in exps for e in tx.inc(eid, "targets") if e["label"] == "Ticket"}
+    for rid in named:
+        t = tx.require(rid, "Ticket")
+        if t["kind"] != "review" or t.get("subject") == "conclusion":
+            raise RLError("INVALID", f"{rid} is not a code review")
+        ids.add(rid)
+    tickets = [tx.require(i) for i in sorted(ids)]
+    return [t for t in tickets if t["kind"] == "review" and t.get("subject") != "conclusion"]
+
+
+def _code_reader(store: Store, code_ref) -> tuple:
+    """Files as the run executes them: from the commit its RunSpec names, otherwise from the working tree."""
+    commit = code_ref.get("commit") if isinstance(code_ref, dict) else None
+    if not commit:
+        def read_tree(p: str) -> bytes | None:
+            path = store.project.abs(p)
+            return path.read_bytes() if path.is_file() else None
+        return read_tree, "working tree"
+
+    def git(*args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(["git", *args], cwd=store.project.root, capture_output=True, timeout=30)
+
+    try:
+        found = git("cat-file", "-e", f"{commit}^{{commit}}").returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        found = False
+    if not found:
+        return None, f"commit {commit[:12]} is not in this repository"
+
+    def read_commit(p: str) -> bytes | None:
+        out = git("cat-file", "blob", f"{commit}:./{p}")
+        return out.stdout if out.returncode == 0 else None
+    return read_commit, f"commit {commit[:12]}"
+
+
+def code_coverage(store: Store, experiment: str, code_ref, named: list[str] = (), waived: str | None = None) -> dict:
+    """Do answered cross-model code reviews still cover the code a run of this experiment executes?
+
+    Every path a passing review covered must still match, in that code, the version at least one passing
+    review saw (configs compared without the keys that review allowed to vary). The result is recorded on the
+    attempt; nothing is blocked, because only the researcher knows whether the run needs a review.
+    """
+    if waived is not None:
+        if not waived.strip():
+            raise RLError("INVALID", "--no-review needs the reason this run needs no code review")
+        return {"status": "waived", "reason": waived.strip()}
+    with store.read() as tx:
+        tickets = _code_reviews(tx, experiment, list(named))
+    if not tickets:
+        return {"status": "none"}
+    passing = [t for t in tickets if t["status"] == "answered" and t.get("verdict") in ("pass", "issues")
+               and str(t.get("relation", "")).startswith("cross_model")]
+    others = [t for t in tickets if t not in passing]
+    if not passing:
+        return {"status": "not_passed", "open": [
+            f"{t['id']} {t.get('verdict') or t['status']}"
+            + (f" ({t['relation']})" if t.get("relation") and not t["relation"].startswith("cross_model") else "")
+            for t in others]}
+    scoped = [t for t in passing if t.get("code_scope")]
+    if not scoped:
+        return {"status": "unchecked", "reviews": [f"{t['id']} {t['verdict']}" for t in passing],
+                "reason": f"{', '.join(t['id'] for t in passing)} recorded no scope; request it again with the "
+                          "same scope to record one (an unchanged scope reuses the answer)"}
+    read, source = _code_reader(store, code_ref)
+    if read is None:
+        return {"status": "unchecked", "reviews": [f"{t['id']} {t['verdict']}" for t in scoped], "reason": source}
+
+    def current(path: str, kind: str, ignored: list[str]) -> str | None:
+        data = read(path)
+        if data is None:
+            return None
+        return _config_digest(path, data, ignored) if kind == "configs" else digest_bytes(data)
+
+    seen: dict[str, list[str]] = {}  # path -> passing reviews that saw the version this run executes
+    older: dict[str, list[str]] = {}  # path -> passing reviews that saw another version
+    try:
+        for t in scoped:
+            scope = t["code_scope"]
+            for kind in ("files", "deps", "configs"):
+                for path, digest in (scope.get(kind) or {}).items():
+                    now = current(path, kind, scope.get("ignored_keys") or [])
+                    (seen if now == digest else older).setdefault(path, []).append(t["id"])
+    except (OSError, subprocess.SubprocessError) as exc:
+        return {"status": "unchecked", "reviews": [f"{t['id']} {t['verdict']}" for t in scoped],
+                "reason": f"could not read the {source}: {exc}"}
+    changed = {p: ids for p, ids in sorted(older.items()) if p not in seen}
+    used = {i for ids in seen.values() for i in ids}
+    out = {"status": "stale" if changed else "covered", "source": source,
+           "reviews": [f"{t['id']} {t['verdict']}" for t in scoped if t["id"] in used]}
+    if changed:
+        out["changed"] = changed
+    pending = [f"{t['id']} {t['status']}" for t in others if t["status"] in ("pending", "running")]
+    if pending:
+        out["open"] = pending
+    return out
 
 
 CONCLUSION_QUESTION = "Do the records support this conclusion, at this evidence level and within this scope?"
@@ -477,6 +592,8 @@ def _conclusion_body(tx: Tx, store: Store, targets: list[str], proposal: str, qu
                     lines.append(f"- attempt {brief(att)} arm {spec.get('arm')} seed {spec.get('seed')}")
                 elif e["rel"] == "from_result":
                     lines.append(_result_line(tx.require(e["id"])))
+            if code := code_review_summary(evidence_attempts(tx, ev["id"])):
+                lines.append(f"- code review at registration: {code}")
         for e in tx.inc(hid, "tests"):
             experiments.setdefault(e["id"], tx.require(e["id"]))
         decisions = [brief(tx.require(e["id"])) for e in tx.inc(hid, "decides")]

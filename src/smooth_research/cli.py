@@ -227,7 +227,8 @@ def cmd_run(args):
     if a == "register":
         spec = load_json_arg(args.spec) or {}
         spec.update(_spec_from_flags(args))
-        return runs.register(store, args.experiment, spec, args.request_id, args.run)
+        return runs.register(store, args.experiment, spec, args.request_id, args.run, _list(args.review),
+                             args.no_review)
     if a == "record":
         items = load_json_records(args.observation) if args.observation else [{}]
         flags = {"record_id": args.record_id, "attempt_id": args.attempt, "source": args.source,
@@ -547,7 +548,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = add("run", cmd_run, "run records: register, record, import-result, reject-result, usage, show")
     ss = sp.add_subparsers(dest="action", required=True)
-    s = ss.add_parser("register", help="register an immutable RunSpec and a prepared attempt (starts nothing)")
+    s = ss.add_parser("register", help="register an immutable RunSpec and a prepared attempt (starts nothing); "
+                                       "records whether code reviews cover its code")
     s.add_argument("--experiment", required=True)
     s.add_argument("--request-id", required=True, help="caller id that makes retries idempotent")
     s.add_argument("--spec", help="RunSpec JSON (inline, @file or path); flags below add to it")
@@ -567,6 +569,9 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--output-spec")
     s.add_argument("--resume-from")
     s.add_argument("--param", action="append", help="k=v (JSON values allowed)")
+    g = s.add_mutually_exclusive_group()
+    g.add_argument("--review", action="append", help="code review (RV-x) to check besides the experiment's own")
+    g.add_argument("--no-review", metavar="REASON", help="why this run needs no code review (e.g. smoke test)")
     s = ss.add_parser("record", help="record an observation of an attempt (queries nothing)")
     s.add_argument("--observation", help="one observation, a JSON array or JSON Lines (inline, @file, path or -); "
                    "flags fill in or override every record")

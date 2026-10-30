@@ -22,6 +22,8 @@ decisions; you own the execution of this task.
    adapter injection, checkpoint I/O, distributed change), get a cross-model code review: `rl review request
    ... --author-model <your model id>`, then `rl review run RV-x` (rules: the research-review skill). Fix real
    problems. If no reviewer is available, do not scale up: block with `--reason model_unavailable`.
+   `rl run register` prints whether the reviews still cover the code the run executes; on `stale`, re-check
+   the changed files before scaling up. A run that needs no review: `--no-review "<reason>"`.
 5. Long external runs (cluster jobs): once they are submitted and recorded, `rl task wait <task id> --role
    <role> --attempts <ATT ids> --next-action "<what to do when they end>"` and finish, giving in your final
    message what reports their end (for miyabi-mcp, the `notify.daemon.listen_command`). The coordinator

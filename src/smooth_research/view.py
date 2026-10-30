@@ -9,7 +9,7 @@ import html
 from datetime import datetime, timezone
 
 from .research import brief, conclusion_reviews, key_hypotheses, review_gap
-from .runs import describe_attempt, usage_summary
+from .runs import code_review_summary, describe_attempt, evidence_attempts, usage_summary
 from .store import Store, Tx
 
 SIDE = ("tests", "supports", "challenges", "decides", "nearest_work", "motivated_by", "cites", "combines")
@@ -174,8 +174,10 @@ def report(store: Store, out: str | None = None, title: str | None = None) -> di
         for ev in evidence:
             rel = ", ".join(f"{e['rel']} {e['id']}@{e.get('revision')}" for e in tx.out(ev["id"])
                             if e["rel"] in ("supports", "challenges"))
+            code = code_review_summary(evidence_attempts(tx, ev["id"]))
             ev_lines.append(f"- {ev['id']} [{ev['evidence_level']}, {ev['validity']}] {ev['summary']}"
-                            + (f" ({rel})" if rel else "") + (f"; scope: {ev['scope']}" if ev.get("scope") else ""))
+                            + (f" ({rel})" if rel else "") + (f"; scope: {ev['scope']}" if ev.get("scope") else "")
+                            + (f" [code review: {code}]" if code else ""))
         stage = [d for d in decisions if d["kind"] == "stage"]
         checks = {}  # key conclusions: which conclusion review backs each one, or why none does
         for d in decisions:

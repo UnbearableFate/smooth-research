@@ -5,7 +5,8 @@ Read the section you need; the main skill has the loop. `{{rl}}` is the CLI (see
 ## A local run, end to end
 
 ```bash
-# 1. register (nothing starts); keep the printed RUN / ATT ids
+# 1. register (nothing starts); keep the printed RUN / ATT ids. Its "code review" line says whether a
+#    cross-model review still covers this code; add --no-review "<reason>" when the run needs none
 {{rl}} run register --experiment E-0001 --request-id E-0001-wd-s0 --arm wd1e-2 --seed 0 \
   --code-digest "$({{rl}} digest src/ | cut -d' ' -f1)" --config-digest unknown \
   --data-revision "synthetic-v1 (generator in src/data.py, n=2000)" --metric "test accuracy" \
@@ -28,7 +29,8 @@ nohup python src/train.py --wd 0.01 --seed 0 --out research/artifacts/ATT-0001-1
 Short runs can be recorded after the fact with one `--state ended` record (give `--observed-at` when the
 fact was observed earlier). A crash is `--state ended --outcome failed`; a lost process you cannot check is
 `--state unknown`. A re-execution of the same RunSpec is a new attempt: `{{rl}} run register --experiment E-0001
---run RUN-0001 --request-id <new>`. A changed config or code is a new run.
+--run RUN-0001 --request-id <new>`. A changed config or code is a new run. `--review RV-x` adds a code review
+that targets something other than E-0001 (or the experiment its code comes from) to the coverage check.
 
 ## A remote or HPC run (Miyabi: pi-env-mcp and miyabi-mcp)
 
@@ -42,7 +44,8 @@ ledger and PBS logs; do not edit), `snapshots/<commit>/` read-only code, the Pyt
 login node of the target system, `runs/<ATT>/` one directory per attempt.
 
 1. Commit the code (sources only: no `__pycache__`, outputs or data) and register with
-   `--code-commit <full sha>`; add `--json` to get the full `spec_digest`.
+   `--code-commit <full sha>`; add `--json` to get the full `spec_digest`. The code review check then
+   reads the files of that commit, not the working tree.
 2. Stage the commit once, never edit it afterwards (PBS reads the code when the job starts, not when it is
    submitted): `git archive --format=tar -o research/artifacts/snapshots/<sha>.tar <sha> src configs`, upload
    that one file with pi-env-mcp to `<root>/snapshots/<sha>.tar`, then in pi-env-mcp bash:
