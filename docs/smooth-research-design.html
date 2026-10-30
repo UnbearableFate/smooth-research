@@ -168,7 +168,22 @@
   .ev { fill: var(--accent); }
   .ev-d { fill: var(--surface); stroke: var(--text-dim); stroke-width: 1.5; }
 
-  /* strip plot (Fig. 16) */
+  /* roles and the task protocol (Fig. 10, Fig. 11) */
+  .ve-n.ro .sh { stroke-dasharray: 6 4; }
+  .lane-s { fill: var(--text-dim); font: 500 13px var(--font-mono); }
+  .st rect { fill: url(#ve-node); stroke: var(--border-bright); stroke-width: 1.5; }
+  .st text { fill: var(--text); font: 600 14px var(--font-mono); text-anchor: middle; dominant-baseline: central; }
+  .ve-e.is-msg { stroke: var(--accent); }
+  .msg rect { fill: var(--surface); stroke: var(--accent); stroke-width: 1.5; }
+  .msg text { fill: var(--accent); font: 600 13px var(--font-mono); text-anchor: middle; dominant-baseline: central; }
+  .ve-mini .msg text { font-size: 14px; }
+  .ve-mini .none { fill: var(--text-dim); font: 500 14px var(--font-mono); text-anchor: middle; dominant-baseline: central; }
+  .ve-key text { fill: var(--text-dim); font: 500 14px var(--font-mono); dominant-baseline: central; }
+  .ve-key .ln { fill: none; stroke: var(--text-dim); stroke-width: 1.75; }
+  .ve-key .dash { stroke-dasharray: 6 5; }
+  .ve-key .bx { fill: var(--surface); stroke: var(--border-bright); stroke-width: 1.5; }
+
+  /* strip plot (Fig. 18) */
   .gridv { stroke: var(--border); stroke-width: 1; }
   .dot { fill: var(--text-dim); stroke: var(--bg); stroke-width: 1.5; }
   .dot.hot { fill: var(--accent); }
@@ -177,7 +192,7 @@
   .row-t { fill: var(--text); font: 500 14px var(--font-mono); dominant-baseline: central; }
   .lbl { fill: var(--text-dim); font: 500 14px var(--font-mono); }
 
-  /* bar charts (Fig. 20) */
+  /* bar charts (Fig. 22) */
   .bars text { fill: var(--text-dim); font: 500 14px var(--font-mono); dominant-baseline: central; }
   .bars .lab { text-anchor: end; fill: var(--text); }
   .bars .hd2 { font: 600 13px var(--font-mono); }
@@ -786,48 +801,174 @@
 
   <section id="team">
     <div class="sec-intro">
-      <div class="sec-head"><p class="ve-label caps">团队与审查</p><h2>角色持续，session 可换，审查跨模型</h2></div>
-      <p>稳定的是角色、任务和封存文档，不是某个聊天上下文。<b>新 session 用 rl resume 接续</b>。</p>
+      <div class="sec-head"><p class="ve-label caps">团队与审查</p><h2>四个角色经记录交接，审查跨模型</h2></div>
+      <p>现在有四个 agent 角色：<span class="ve-ref" data-ref="r-coord" tabindex="0">协调者</span>、<span class="ve-ref" data-ref="r-res" tabindex="0">研究者</span>、<span class="ve-ref" data-ref="r-rev" tabindex="0">审查者</span>和<span class="ve-ref" data-ref="r-adv" tabindex="0">顾问</span>。<b>它们不在聊天里互相转述，而是经 rl 记录交接</b>；稳定的是角色、任务和封存文档，新 session 用 rl resume 接续。</p>
     </div>
 
     <figure>
-      <div class="cases">
-        <div class="case"><h3><code>work</code> 工作包</h3><p>当前任务、范围、代码索引、必要文献、最新有效结果、已排除的解释</p>
-          <svg class="ve-mini rng" viewBox="0 0 240 56" role="img" aria-label="工作包目标约 2k 到 6k tokens"><path class="ax" d="M10 30H230"/><path class="tk" d="M10 26V34M120 26V34M230 26V34"/><rect class="hot" x="46.7" y="23" width="73.3" height="14" rx="2"/><text class="rv" x="83" y="11">2k–6k</text><text x="10" y="45">0</text><text class="rm" x="120" y="45">6k</text><text class="re" x="230" y="45">12k</text></svg></div>
-        <div class="case"><h3><code>resume</code> 恢复包</h3><p>角色、首个未完成动作、未结束的 attempt、最后可信观测、工件位置</p>
-          <svg class="ve-mini rng" viewBox="0 0 240 56" role="img" aria-label="恢复包未设 token 目标"><path class="ax" d="M10 30H230"/><path class="tk" d="M10 26V34M120 26V34M230 26V34"/><text class="rm" x="120" y="11">未设目标</text><text x="10" y="45">0</text><text class="rm" x="120" y="45">6k</text><text class="re" x="230" y="45">12k</text></svg></div>
-        <div class="case"><h3><code>review</code> 审查包</h3><p>精确快照与 diff、方法定义、执行配置、重点不变量、必要测试；代码内联</p>
-          <svg class="ve-mini rng" viewBox="0 0 240 56" role="img" aria-label="审查包未设 token 目标"><path class="ax" d="M10 30H230"/><path class="tk" d="M10 26V34M120 26V34M230 26V34"/><text class="rm" x="120" y="11">未设目标</text><text x="10" y="45">0</text><text class="rm" x="120" y="45">6k</text><text class="re" x="230" y="45">12k</text></svg></div>
-        <div class="case"><h3><code>advice</code> 咨询包</h3><p>瓶颈、关键正反证据、失败机制、尚存解释、预算、待决问题</p>
-          <svg class="ve-mini rng" viewBox="0 0 240 56" role="img" aria-label="咨询包目标约 6k 到 12k tokens"><path class="ax" d="M10 30H230"/><path class="tk" d="M10 26V34M120 26V34M230 26V34"/><rect class="hot" x="120" y="23" width="110" height="14" rx="2"/><text class="rv" x="175" y="11">6k–12k</text><text x="10" y="45">0</text><text class="rm" x="120" y="45">6k</text><text class="re" x="230" y="45">12k</text></svg></div>
+      <div class="frame">
+        <svg class="ve-svg" viewBox="0 0 1000 520" role="img" aria-label="角色地图。用户给协调者计划和约束，协调者向用户提出缺口问题并报告。协调者经 rl 记录建任务、开审查和咨询工单、做决定，并读取恢复包和收件箱。协调者启动研究者（子代理或 rl delegate），研究者完成时回一段不超过六行的摘要。研究者读工作包和 TASK 消息，写领取、运行、证据和交付。rl 以只读方式启动审查者和顾问，交给它们审查包和咨询包；回答由 rl 存为 RV-x.md 和 AD-x.md。">
+          <path class="ve-e" data-ref="r-coord" d="M470 72V110"/>
+          <text class="ve-el l" data-ref="r-coord" x="460" y="97">计划 · 约束</text>
+          <path class="ve-e is-async" data-ref="r-coord" d="M530 110V74"/>
+          <text class="ve-el r" data-ref="r-coord" x="540" y="97">缺口问题 · 报告</text>
+
+          <path class="ve-e" data-ref="r-coord" d="M470 204V282"/>
+          <text class="ve-el l" data-ref="r-coord" x="460" y="236">建任务 · 开工单</text>
+          <text class="ve-el l" data-ref="r-coord" x="460" y="256">决定 · 验收或停止</text>
+          <path class="ve-e" data-ref="r-coord" d="M530 284V206"/>
+          <text class="ve-el r" data-ref="r-coord" x="540" y="248">resume · inbox</text>
+
+          <path class="ve-e is-async" data-ref="r-coord r-res" d="M348 150H124V308"/>
+          <text class="ve-el" data-ref="r-coord r-res" x="236" y="141">启动：子代理 · rl delegate</text>
+          <path class="ve-e is-async" data-ref="r-coord r-res" d="M184 308V178H346"/>
+          <text class="ve-el" data-ref="r-coord r-res" x="266" y="196">完成摘要 · ≤6 行</text>
+
+          <path class="ve-e" data-ref="r-res" d="M248 344H398"/>
+          <text class="ve-el" data-ref="r-res" x="322" y="335">领取 · 登记 · 交付</text>
+          <path class="ve-e" data-ref="r-res" d="M400 400H250"/>
+          <text class="ve-el" data-ref="r-res" x="322" y="418">工作包 · TASK</text>
+
+          <path class="ve-e is-async" data-ref="r-rev" d="M600 304H758"/>
+          <text class="ve-el" data-ref="r-rev" x="680" y="295">审查包 · 只读启动</text>
+          <path class="ve-e" data-ref="r-rev" d="M760 348H602"/>
+          <text class="ve-el" data-ref="r-rev" x="680" y="366">回答 · RV-x.md</text>
+          <path class="ve-e is-async" data-ref="r-adv" d="M600 408H758"/>
+          <text class="ve-el" data-ref="r-adv" x="680" y="399">咨询包 · 只读启动</text>
+          <path class="ve-e" data-ref="r-adv" d="M760 446H602"/>
+          <text class="ve-el" data-ref="r-adv" x="680" y="464">建议 · AD-x.md</text>
+
+          <g class="ve-n" transform="translate(420 12)"><rect class="sh" width="160" height="60" rx="30"/><text x="80" y="21">用户</text><text class="sub" x="80" y="43">定目标与预算</text></g>
+          <g class="ve-n" data-ref="r-coord" transform="translate(350 112)"><rect class="sh" width="300" height="92" rx="4"/><text x="150" y="26">协调者</text><text class="sub" x="150" y="52">主 session · Claude Code / Codex</text><text class="sub" x="150" y="73">也常自己执行</text></g>
+          <g class="ve-n is-key" transform="translate(400 284)"><rect class="sh" width="200" height="176" rx="4"/><text x="100" y="28">rl 记录</text><path class="ann" d="M18 50H182"/><text class="sub l" x="20" y="74">任务 · 消息</text><text class="sub l" x="20" y="100">工单 · 包 · 回答</text><text class="sub l" x="20" y="126">运行 · 证据 · 决定</text><text class="sub l" x="20" y="152">会话：谁、哪个模型</text></g>
+          <g class="ve-n" data-ref="r-res" transform="translate(20 318)"><rect class="sh" x="8" y="-8" width="220" height="110" rx="4"/><rect class="sh" width="220" height="110" rx="4"/><text x="110" y="30">研究者 × N</text><text class="sub" x="110" y="58">子代理 · 独立 session</text><text class="sub" x="110" y="80">领取任务后执行</text></g>
+          <g class="ve-n ro" data-ref="r-rev" transform="translate(760 284)"><rect class="sh" width="220" height="84" rx="4"/><text x="110" y="30">审查者</text><text class="sub" x="110" y="58">另一模型族 · 只读</text></g>
+          <g class="ve-n ro" data-ref="r-adv" transform="translate(760 384)"><rect class="sh" width="220" height="84" rx="4"/><text x="110" y="30">顾问</text><text class="sub" x="110" y="58">最强模型 · 只读</text></g>
+
+          <g class="ve-co" transform="translate(500 92)"><circle r="11"/><text>1</text></g>
+          <g class="ve-co" transform="translate(500 244)"><circle r="11"/><text>2</text></g>
+          <g class="ve-co" transform="translate(124 236)"><circle r="11"/><text>3</text></g>
+          <g class="ve-co" transform="translate(322 372)"><circle r="11"/><text>4</text></g>
+          <g class="ve-co" transform="translate(680 326)"><circle r="11"/><text>5</text></g>
+          <g class="ve-co" transform="translate(680 427)"><circle r="11"/><text>6</text></g>
+
+          <g class="ve-key">
+            <path class="ln" d="M20 500H56"/><text x="66" y="500">经 rl 读写记录</text>
+            <path class="ln dash" d="M210 500H246"/><text x="256" y="500">聊天或启动 session，不进记录</text>
+            <rect class="bx dash" x="520" y="490" width="34" height="20" rx="3"/><text x="564" y="500">虚线框：只读，不写记录</text>
+          </g>
+        </svg>
       </div>
-      <figcaption><span class="fig-n">Fig. 10</span>四种上下文包都围绕当前要做的决定。token 目标是待验证的默认值，按“ASCII 字符 / 4 + 非 ASCII 字符”估算；超出部分列为按需读取的索引。</figcaption>
+      <ol class="co-list">
+        <li><span class="n">1</span><span>用户给研究计划和约束；协调者用 <code>rl init <span class="nb">--plan</span></code> 导入并封存计划，只就会改变目标或预算的缺口提问。</span></li>
+        <li><span class="n">2</span><span>协调者就是用户正在对话的 Claude Code 或 Codex session（<code>rl session start <span class="nb">--role</span> coordinator</code>）。它建任务、开工单、做决定，也常自己执行；用 <code>rl resume</code> 和 <code>rl inbox</code> 读记录。新的协调 session 会把旧的标为 superseded，只作记录。</span></li>
+        <li><span class="n">3</span><span>研究者由协调者启动：同一 session 内用宿主子代理（Claude 的 <code><span class="nb">smooth-research:researcher</span></code>，或 Codex 子代理）；跨 session 用 <code>rl delegate <span class="nb">T-x</span> <span class="nb">--entry</span> <span class="nb">codex:&lt;model&gt;</span></code>，rl 记下它的 session ID 与模型。回到聊天的只有不超过六行的摘要（后台 delegate 则看收件箱），内容以记录为准。</span></li>
+        <li><span class="n">4</span><span>研究者读工作包，<code>task claim</code>（同时领取只有一个成功），用 <code>rl run …</code> 和 <code>rl evidence add</code> 登记，最后 <code>task deliver</code>。路线决定留给协调者。</span></li>
+        <li><span class="n">5</span><span><code>rl review request <span class="nb">--author-model</span> &lt;写代码的模型&gt;</code> 开 RV 工单；<code>rl review run</code>（可加 <code><span class="nb">--background</span></code>）启动另一模型族的只读 CLI（<code>codex exec <span class="nb">--sandbox</span> <span class="nb">read-only</span></code>，或只开 Read、Grep、Glob 的 <code>claude <span class="nb">-p</span></code>）。回答存为 <code><span class="nb">reports/reviews/RV-x.md</span></code>，并记 verdict 与 relation。</span></li>
+        <li><span class="n">6</span><span><code>rl advise prepare</code> 开 AD 工单；<code>rl advise run</code> 依次试 <code><span class="nb">claude-fable-5-1</span></code> 和 <code><span class="nb">gpt-6-astra</span></code>，都不行时请用户在产品界面问 <code><span class="nb">gpt-pro</span></code>，再用 <code>rl advise import</code> 导入。建议是新假说的来源，不是证据。</span></li>
+      </ol>
+      <figcaption><span class="fig-n">Fig. 10</span>四个 agent 角色围绕同一份记录：协调者和研究者经 rl 读写记录；审查者和顾问由 rl 启动、只读各自的包，回答由 rl 存档。聊天里只传启动指令和完成摘要。</figcaption>
+    </figure>
+
+    <figure>
+      <div class="frame">
+        <svg class="ve-svg" viewBox="0 0 1000 340" role="img" aria-label="任务协议时间线。协调者 task create，任务变为 ready，TASK 消息给研究者。研究者 task claim，任务变为 active；登记运行与证据；task wait，任务变为 waiting，WAIT 消息给协调者；task resume 回到 active；task deliver，任务变为 delivered，RESULT 消息给协调者。协调者读 inbox、核对产物后 task accept，任务变为 accepted。">
+          <text class="lane-m" data-ref="r-coord" x="20" y="56" dominant-baseline="central">协调者</text>
+          <text class="lane-m" x="20" y="168" dominant-baseline="central">T-0001</text>
+          <text class="lane-s" x="20" y="189" dominant-baseline="central">任务记录</text>
+          <text class="lane-m" data-ref="r-res" x="20" y="296" dominant-baseline="central">研究者</text>
+          <path class="lane" d="M120 56H980M120 176H980M120 296H980"/>
+
+          <path class="ve-e" data-ref="r-coord" d="M182 58V157"/>
+          <text class="ve-el r" data-ref="r-coord" x="192" y="104">task create</text>
+          <text class="ve-el" data-ref="r-coord" x="846" y="42">inbox · 核对产物</text>
+          <path class="ve-e" data-ref="r-coord" d="M922 58V157"/>
+          <text class="ve-el l" data-ref="r-coord" x="912" y="104">task accept</text>
+
+          <path class="ve-e" data-ref="r-res" d="M322 294V195"/>
+          <text class="ve-el r" data-ref="r-res" x="332" y="236">task claim</text>
+          <text class="ve-el r" data-ref="r-res" x="332" y="256">只有一个成功</text>
+          <text class="ve-el" data-ref="r-res" x="397" y="322">登记运行与证据</text>
+          <path class="ve-e" data-ref="r-res" d="M472 294V195"/>
+          <text class="ve-el r" data-ref="r-res" x="482" y="236">task wait</text>
+          <text class="ve-el r" data-ref="r-res" x="482" y="256">等作业结束</text>
+          <path class="ve-e" data-ref="r-res" d="M618 294V195"/>
+          <text class="ve-el r" data-ref="r-res" x="628" y="236">task resume</text>
+          <path class="ve-e" data-ref="r-res" d="M770 294V195"/>
+          <text class="ve-el r" data-ref="r-res" x="780" y="236">task deliver</text>
+          <text class="ve-el r" data-ref="r-res" x="780" y="256">--output 文件</text>
+          <text class="lane-s" x="980" y="322" text-anchor="end">时间 →</text>
+
+          <path class="ve-e is-msg" data-ref="r-coord r-res" d="M182 195V294"/>
+          <g class="msg" data-ref="r-coord r-res" transform="translate(182 244)"><rect x="-26" y="-11" width="52" height="22" rx="3"/><text>TASK</text></g>
+          <path class="ve-e is-msg" data-ref="r-coord r-res" d="M472 157V58"/>
+          <g class="msg" data-ref="r-coord r-res" transform="translate(472 108)"><rect x="-26" y="-11" width="52" height="22" rx="3"/><text>WAIT</text></g>
+          <path class="ve-e is-msg" data-ref="r-coord r-res" d="M770 157V58"/>
+          <g class="msg" data-ref="r-coord r-res" transform="translate(770 108)"><rect x="-33" y="-11" width="66" height="22" rx="3"/><text>RESULT</text></g>
+
+          <g class="st" transform="translate(140 159)"><rect width="84" height="34" rx="17"/><text x="42" y="17">ready</text></g>
+          <g class="st" transform="translate(280 159)"><rect width="84" height="34" rx="17"/><text x="42" y="17">active</text></g>
+          <g class="st" transform="translate(424 159)"><rect width="96" height="34" rx="17"/><text x="48" y="17">waiting</text></g>
+          <g class="st" transform="translate(576 159)"><rect width="84" height="34" rx="17"/><text x="42" y="17">active</text></g>
+          <g class="st" transform="translate(716 159)"><rect width="108" height="34" rx="17"/><text x="54" y="17">delivered</text></g>
+          <g class="st" transform="translate(870 159)"><rect width="104" height="34" rx="17"/><text x="52" y="17">accepted</text></g>
+        </svg>
+      </div>
+      <div class="cases">
+        <div class="case" data-ref="r-res"><h3><code>task block</code> · 研究者</h3>
+          <svg class="ve-mini" viewBox="0 0 240 70" role="img" aria-label="active 变为 blocked，给协调者发 BLOCKED 消息"><path class="ve-e" d="M94 51H148"/><g class="msg" transform="translate(120 14)"><rect x="-69" y="-12" width="138" height="24" rx="3"/><text>BLOCKED → 协调者</text></g><g class="st" transform="translate(2 36)"><rect width="92" height="30" rx="15"/><text x="46" y="15">active</text></g><g class="st" transform="translate(150 36)"><rect width="88" height="30" rx="15"/><text x="44" y="15">blocked</text></g></svg>
+          <p>卡住时用，必须给原因：engineering、model_unavailable、budget 或 science。解决后 <code>task resume</code>。</p></div>
+        <div class="case" data-ref="r-res"><h3><code>task handoff</code> · 研究者</h3>
+          <svg class="ve-mini" viewBox="0 0 240 70" role="img" aria-label="active 变回 ready，给下一位发 HANDOFF 消息"><path class="ve-e" d="M94 51H148"/><g class="msg" transform="translate(120 14)"><rect x="-69" y="-12" width="138" height="24" rx="3"/><text>HANDOFF → 下一位</text></g><g class="st" transform="translate(2 36)"><rect width="92" height="30" rx="15"/><text x="46" y="15">active</text></g><g class="st" transform="translate(150 36)"><rect width="88" height="30" rx="15"/><text x="44" y="15">ready</text></g></svg>
+          <p>交接文档封存，owner 清空，任务回到 ready；下一位研究者重新 claim，从交接文档和记录接续。</p></div>
+        <div class="case" data-ref="r-coord"><h3><code>task stop</code> · 协调者</h3>
+          <svg class="ve-mini" viewBox="0 0 240 70" role="img" aria-label="未结束的任务变为 stopped，给 owner 发 CANCEL 消息"><path class="ve-e" d="M94 51H148"/><g class="msg" transform="translate(120 14)"><rect x="-65" y="-12" width="130" height="24" rx="3"/><text>CANCEL → owner</text></g><g class="st" transform="translate(2 36)"><rect width="92" height="30" rx="15"/><text x="46" y="15">未结束</text></g><g class="st" transform="translate(150 36)"><rect width="88" height="30" rx="15"/><text x="44" y="15">stopped</text></g></svg>
+          <p>有 owner 时才发 CANCEL。外部运行不会因此停止，要用执行工具另停，再登记结果。</p></div>
+        <div class="case" data-ref="r-coord"><h3><code>task reopen</code> · 协调者</h3>
+          <svg class="ve-mini" viewBox="0 0 240 70" role="img" aria-label="delivered 变回 active，不发消息"><path class="ve-e" d="M94 51H148"/><text class="none" x="120" y="14">不发消息</text><g class="st" transform="translate(2 36)"><rect width="92" height="30" rx="15"/><text x="46" y="15">delivered</text></g><g class="st" transform="translate(150 36)"><rect width="88" height="30" rx="15"/><text x="44" y="15">active</text></g></svg>
+          <p>要求修改：有 owner 时回到 active，没有时回到 ready。stopped 的任务也可以重开。</p></div>
+      </div>
+      <figcaption><span class="fig-n">Fig. 11</span>协调者和研究者之间的任务协议，时间从左到右。每个命令改写任务状态；需要对方知道的变化写成一条消息，对方从收件箱读到。下方是另外四个出口。</figcaption>
     </figure>
 
     <figure>
       <div class="cases">
-        <div class="case" data-st="ok"><span class="chip ok">跨模型</span><h3>Claude 写，Codex 审</h3>
+        <div class="case" data-ref="r-res"><h3><code>work</code> 工作包</h3><p>当前任务、范围、代码索引、必要文献、最新有效结果、已排除的解释</p>
+          <svg class="ve-mini rng" viewBox="0 0 240 56" role="img" aria-label="工作包目标约 2k 到 6k tokens"><path class="ax" d="M10 30H230"/><path class="tk" d="M10 26V34M120 26V34M230 26V34"/><rect class="hot" x="46.7" y="23" width="73.3" height="14" rx="2"/><text class="rv" x="83" y="11">2k–6k</text><text x="10" y="45">0</text><text class="rm" x="120" y="45">6k</text><text class="re" x="230" y="45">12k</text></svg></div>
+        <div class="case" data-ref="r-coord r-res"><h3><code>resume</code> 恢复包</h3><p>角色、首个未完成动作、未结束的 attempt、最后可信观测、工件位置</p>
+          <svg class="ve-mini rng" viewBox="0 0 240 56" role="img" aria-label="恢复包未设 token 目标"><path class="ax" d="M10 30H230"/><path class="tk" d="M10 26V34M120 26V34M230 26V34"/><text class="rm" x="120" y="11">未设目标</text><text x="10" y="45">0</text><text class="rm" x="120" y="45">6k</text><text class="re" x="230" y="45">12k</text></svg></div>
+        <div class="case" data-ref="r-rev"><h3><code>review</code> 审查包</h3><p>精确快照与 diff、方法定义、执行配置、重点不变量、必要测试；代码内联</p>
+          <svg class="ve-mini rng" viewBox="0 0 240 56" role="img" aria-label="审查包未设 token 目标"><path class="ax" d="M10 30H230"/><path class="tk" d="M10 26V34M120 26V34M230 26V34"/><text class="rm" x="120" y="11">未设目标</text><text x="10" y="45">0</text><text class="rm" x="120" y="45">6k</text><text class="re" x="230" y="45">12k</text></svg></div>
+        <div class="case" data-ref="r-adv"><h3><code>advice</code> 咨询包</h3><p>瓶颈、关键正反证据、失败机制、尚存解释、预算、待决问题</p>
+          <svg class="ve-mini rng" viewBox="0 0 240 56" role="img" aria-label="咨询包目标约 6k 到 12k tokens"><path class="ax" d="M10 30H230"/><path class="tk" d="M10 26V34M120 26V34M230 26V34"/><rect class="hot" x="120" y="23" width="110" height="14" rx="2"/><text class="rv" x="175" y="11">6k–12k</text><text x="10" y="45">0</text><text class="rm" x="120" y="45">6k</text><text class="re" x="230" y="45">12k</text></svg></div>
+      </div>
+      <figcaption><span class="fig-n">Fig. 12</span>四种上下文包都围绕当前要做的决定。token 目标是待验证的默认值，按“ASCII 字符 / 4 + 非 ASCII 字符”估算；超出部分列为按需读取的索引。</figcaption>
+    </figure>
+
+    <figure>
+      <div class="cases">
+        <div class="case" data-ref="r-rev" data-st="ok"><span class="chip ok">跨模型</span><h3>Claude 写，Codex 审</h3>
           <svg class="ve-mini" viewBox="0 0 240 92" role="img" aria-label="作者 Claude，审查者 Codex。">
             <text class="mn" x="120" y="14">快照 + 审查包</text>
             <path class="ve-e is-st" d="M86 58H146"/>
             <g class="ve-n"><rect class="sh" x="2" y="36" width="84" height="44" rx="4"/><text x="44" y="51">Claude</text><text class="sub" x="44" y="69">作者</text></g>
             <g class="ve-n is-st"><rect class="sh" x="148" y="36" width="90" height="44" rx="4"/><text x="193" y="51">Codex</text><text class="sub" x="193" y="69">审查者</text></g>
           </svg><p class="rel"><code>cross_model</code><span><span class="nb">gpt-6-astra</span></span></p></div>
-        <div class="case" data-st="ok"><span class="chip ok">跨模型</span><h3>Codex 写，Claude 审</h3>
+        <div class="case" data-ref="r-rev" data-st="ok"><span class="chip ok">跨模型</span><h3>Codex 写，Claude 审</h3>
           <svg class="ve-mini" viewBox="0 0 240 92" role="img" aria-label="作者 Codex，审查者 Claude。">
             <text class="mn" x="120" y="14">快照 + 审查包</text>
             <path class="ve-e is-st" d="M86 58H146"/>
             <g class="ve-n"><rect class="sh" x="2" y="36" width="84" height="44" rx="4"/><text x="44" y="51">Codex</text><text class="sub" x="44" y="69">作者</text></g>
             <g class="ve-n is-st"><rect class="sh" x="148" y="36" width="90" height="44" rx="4"/><text x="193" y="51">Claude</text><text class="sub" x="193" y="69">审查者</text></g>
           </svg><p class="rel"><code>cross_model</code><span><span class="nb">claude-opus-5-5</span></span></p></div>
-        <div class="case" data-st="warn"><span class="chip warn">同族复核</span><h3>同一模型族的另一 session</h3>
+        <div class="case" data-ref="r-rev" data-st="warn"><span class="chip warn">同族复核</span><h3>同一模型族的另一 session</h3>
           <svg class="ve-mini" viewBox="0 0 240 92" role="img" aria-label="作者 Claude，审查者是另一个 Claude session。">
             <text class="mn" x="120" y="14">快照 + 审查包</text>
             <path class="ve-e is-st" d="M86 58H146"/>
             <g class="ve-n"><rect class="sh" x="2" y="36" width="84" height="44" rx="4"/><text x="44" y="51">Claude</text><text class="sub" x="44" y="69">作者</text></g>
             <g class="ve-n is-st"><rect class="sh" x="148" y="36" width="90" height="44" rx="4"/><text x="193" y="51">Claude</text><text class="sub" x="193" y="69">另一会话</text></g>
           </svg><p class="rel"><code>same_family_<wbr>independent_<wbr>session</code></p></div>
-        <div class="case" data-st="risk"><span class="chip risk">不可用</span><h3>没有合格的另一模型族</h3>
+        <div class="case" data-ref="r-rev" data-st="risk"><span class="chip risk">不可用</span><h3>没有合格的另一模型族</h3>
           <svg class="ve-mini" viewBox="0 0 240 92" role="img" aria-label="作者 Claude，没有合格审查者，记为 unavailable。">
             <text class="mn" x="120" y="14">审查包待发</text>
             <path class="ve-e is-off is-st" d="M86 58H146"/>
@@ -835,7 +976,7 @@
             <g class="ve-n is-st"><rect class="sh is-off" x="148" y="36" width="90" height="44" rx="4"/><text x="193" y="51">—</text><text class="sub" x="193" y="69">无</text></g>
           </svg><p class="rel"><code>unavailable</code><span>不是通过</span></p></div>
       </div>
-      <figcaption><span class="fig-n">Fig. 11</span>审查者按代码作者选择，而不是按协调者。模型身份核实不了时记为 <code>*_unverified</code>；没有合格审查者时记为 unavailable，依赖它的扩大实验等待。第二轮本机 e2e 的 <span class="nb">RV-0004</span> 由 rollout 核实为 <span class="nb">gpt-6-astra</span>。</figcaption>
+      <figcaption><span class="fig-n">Fig. 13</span>审查者按代码作者选择，而不是按协调者。模型身份核实不了时记为 <code>*_unverified</code>；没有合格审查者时记为 unavailable，依赖它的扩大实验等待。第二轮本机 e2e 的 <span class="nb">RV-0004</span> 由 rollout 核实为 <span class="nb">gpt-6-astra</span>。</figcaption>
     </figure>
   </section>
 
@@ -883,7 +1024,7 @@
         <li><span class="n">2</span><span>每个 commit 先 <code>git archive</code>，上传后解压为只读的 <code>snapshots/&lt;sha&gt;/</code>；作业脚本和 workdir 都在快照里，输出写到 <code>runs/&lt;ATT&gt;/</code>。</span></li>
         <li><span class="n">3</span><span>一批作业一个通知组；listener 在后台等待，收到后先 <code>notify_ack</code>，再导出并登记。</span></li>
       </ol>
-      <figcaption><span class="fig-n">Fig. 12</span><span class="nb">pi-env-mcp</span> 保持通用，不做项目映射；PBS 的全部语义在 <span class="nb">miyabi-mcp</span>；<span class="nb">smooth-research</span> 不碰调度和 SSH。</figcaption>
+      <figcaption><span class="fig-n">Fig. 14</span><span class="nb">pi-env-mcp</span> 保持通用，不做项目映射；PBS 的全部语义在 <span class="nb">miyabi-mcp</span>；<span class="nb">smooth-research</span> 不碰调度和 SSH。</figcaption>
     </figure>
 
     <figure>
@@ -912,7 +1053,7 @@
           </dl>
         </div>
       </div>
-      <figcaption><span class="fig-n">Fig. 13</span>两条接口的全部要点。提交时用 attempt 编号绑定作业；导出时作业变成带命名空间的观测和用量。值取自 bf16 测试 seed 0 的真实记录。</figcaption>
+      <figcaption><span class="fig-n">Fig. 15</span>两条接口的全部要点。提交时用 attempt 编号绑定作业；导出时作业变成带命名空间的观测和用量。值取自 bf16 测试 seed 0 的真实记录。</figcaption>
     </figure>
   </section>
 
@@ -950,7 +1091,7 @@
           <g class="ve-dim is-key"><path class="ext" d="M641.3 214V236M900.7 114V236"/><path class="ln" d="M641.3 230H900.7M637.3 234l8 -8M896.7 234l8 -8"/><text x="771" y="223">3 min 08 s</text></g>
         </svg>
       </div>
-      <figcaption><span class="fig-n">Fig. 14</span>Miyabi 端到端测试的实际时间线，按比例绘制。三个作业在 18:53:56 前全部结束；组通知等到 notifyd 的下一次轮询（每 300&nbsp;s 一次），12&nbsp;s 后 rl 已登记全部观测和用量。</figcaption>
+      <figcaption><span class="fig-n">Fig. 16</span>Miyabi 端到端测试的实际时间线，按比例绘制。三个作业在 18:53:56 前全部结束；组通知等到 notifyd 的下一次轮询（每 300&nbsp;s 一次），12&nbsp;s 后 rl 已登记全部观测和用量。</figcaption>
     </figure>
 
     <figure>
@@ -964,7 +1105,7 @@
         <div class="kpi"><span class="ve-label">观测 · 与重新导出逐字节一致</span><span class="val"><span data-count="9">9</span></span>
           <svg class="ve-waffle" viewBox="0 0 170 76" role="img" aria-label="9 条观测：3 个作业，各有 queued、running、ended"><rect class="on" x="0" y="0" width="22" height="22" rx="2"/><rect class="on" x="26" y="0" width="22" height="22" rx="2"/><rect class="on" x="52" y="0" width="22" height="22" rx="2"/><rect class="on" x="0" y="26" width="22" height="22" rx="2"/><rect class="on" x="26" y="26" width="22" height="22" rx="2"/><rect class="on" x="52" y="26" width="22" height="22" rx="2"/><rect class="on" x="0" y="52" width="22" height="22" rx="2"/><rect class="on" x="26" y="52" width="22" height="22" rx="2"/><rect class="on" x="52" y="52" width="22" height="22" rx="2"/><text x="86" y="24">3 个作业</text><text x="86" y="50">× 3 状态</text></svg></div>
       </div>
-      <figcaption><span class="fig-n">Fig. 15</span>三个作业都在 policy 之内：只用 <span class="nb">debug-mig</span>，每个作业 1 个 MIG 实例、walltime&nbsp;≤&nbsp;10&nbsp;min。实际用量只有申请量的约 39%，没有台账外的作业。</figcaption>
+      <figcaption><span class="fig-n">Fig. 17</span>三个作业都在 policy 之内：只用 <span class="nb">debug-mig</span>，每个作业 1 个 MIG 实例、walltime&nbsp;≤&nbsp;10&nbsp;min。实际用量只有申请量的约 39%，没有台账外的作业。</figcaption>
     </figure>
 
     <figure>
@@ -988,7 +1129,7 @@
           <text class="lbl" x="974" y="75">×2</text><text class="lbl" x="974" y="140">×3</text><text class="lbl" x="974" y="200">×3</text>
         </svg>
       </div>
-      <figcaption><span class="fig-n">Fig. 16</span>bf16 三个 seed 都是 1.000。均值差 2.3&nbsp;pp 全部来自 fp32 的 <span class="ve-ref" data-ref="s1" tabindex="0">seed 1</span>，所以严格的“差距 &lt; 1&nbsp;pp”判据没有达到，但这不是 bf16 有害的证据。轴从 0.90 开始。</figcaption>
+      <figcaption><span class="fig-n">Fig. 18</span>bf16 三个 seed 都是 1.000。均值差 2.3&nbsp;pp 全部来自 fp32 的 <span class="ve-ref" data-ref="s1" tabindex="0">seed 1</span>，所以严格的“差距 &lt; 1&nbsp;pp”判据没有达到，但这不是 bf16 有害的证据。轴从 0.90 开始。</figcaption>
     </figure>
 
     <figure>
@@ -1009,7 +1150,7 @@
           </tbody>
         </table>
       </div>
-      <figcaption><span class="fig-n">Fig. 17</span>测试发现的 8 个问题按责任范围修复：4 个在 <span class="nb">smooth-research</span>，4 个在 <span class="nb">miyabi-mcp</span>，<span class="nb">pi-env-mcp</span> 无需改动。</figcaption>
+      <figcaption><span class="fig-n">Fig. 19</span>测试发现的 8 个问题按责任范围修复：4 个在 <span class="nb">smooth-research</span>，4 个在 <span class="nb">miyabi-mcp</span>，<span class="nb">pi-env-mcp</span> 无需改动。</figcaption>
     </figure>
 
     <figure>
@@ -1024,11 +1165,11 @@
             <tr><td class="k">用量</td><td class="num">约 53 cpu_s（实测）</td><td class="num">0.155834 mig_instance_hours（台账导出）</td></tr>
             <tr><td class="k">阶段交付</td><td><span class="chip info">continue_probe</span></td><td><span class="chip info">continue_probe</span></td></tr>
             <tr><td class="k">审查</td><td>第二轮 <span class="nb">RV-0004</span>：cross_model（<span class="nb">gpt-6-astra</span>），1 条非阻塞发现</td><td>未做跨模型审查，<span class="nb">D-0003</span> 已注明</td></tr>
-            <tr><td class="k">发现的问题</td><td>Codex 沙箱读不到审查包 → 审查包内联代码；无法解析的回答记为失败</td><td>8 个，见 Fig. 17</td></tr>
+            <tr><td class="k">发现的问题</td><td>Codex 沙箱读不到审查包 → 审查包内联代码；无法解析的回答记为失败</td><td>8 个，见 Fig. 19</td></tr>
           </tbody>
         </table>
       </div>
-      <figcaption><span class="fig-n">Fig. 18</span>两次端到端测试都由 Claude Code 2.1.314（Sonnet 5.5）在 herdr 新 tab 中加载插件完成，都停在 continue_probe，并如实报告了证据边界。</figcaption>
+      <figcaption><span class="fig-n">Fig. 20</span>两次端到端测试都由 Claude Code 2.1.314（Sonnet 5.5）在 herdr 新 tab 中加载插件完成，都停在 continue_probe，并如实报告了证据边界。</figcaption>
     </figure>
   </section>
 
@@ -1068,7 +1209,7 @@
         <li><span class="n">2</span><span>还有未填的占位符（如 <code>{{rl}}</code>、<code>{{session_id}}</code>）→ 拒绝构建。Claude 填 <code>${CLAUDE_PLUGIN_ROOT}/bin/rl</code> 与 <code>${CLAUDE_SESSION_ID}</code>；Codex 填 <code>rl</code>，绝对路径由 <span class="nb">session-start</span> 提示给出。</span></li>
         <li><span class="n">3</span><span>输出与源码重叠，或旧目录不是构建产物 → 拒绝覆盖。BUILD.json 记录每个文件的 blake2b；构建号随内容变化，<code>rl setup</code> 据此安装新环境。</span></li>
       </ol>
-      <figcaption><span class="fig-n">Fig. 19</span>两个宿主的插件从同一份源码组装，只差适配文件；Claude 包多一个 researcher 子代理。</figcaption>
+      <figcaption><span class="fig-n">Fig. 21</span>两个宿主的插件从同一份源码组装，只差适配文件；Claude 包多一个 researcher 子代理。</figcaption>
     </figure>
 
     <figure>
@@ -1101,7 +1242,7 @@
           <text class="lab" x="800" y="156">packaging</text><rect x="810" y="149" width="40" height="14" rx="2"/><text x="858" y="156">5</text>
         </svg>
       </div>
-      <figcaption><span class="fig-n">Fig. 20</span>4,286 行 Python：17 个模块，加上 <code>__init__</code> 与 <code>__main__</code> 的 13 行；CLI 与 runs.py 合占约 28%。51 项测试中，记录与运行的契约测试占 31 项。</figcaption>
+      <figcaption><span class="fig-n">Fig. 22</span>4,286 行 Python：17 个模块，加上 <code>__init__</code> 与 <code>__main__</code> 的 13 行；CLI 与 runs.py 合占约 28%。51 项测试中，记录与运行的契约测试占 31 项。</figcaption>
     </figure>
 
     <div class="callout">
