@@ -88,3 +88,35 @@ def test_a_lookup_after_the_end_and_a_reconciled_correction(project, rl, tmp_pat
     with project.read() as tx:
         att = tx.require("ATT-0001-1", "Attempt")
     assert (att["execution_state"], att["outcome"]) == ("ended", "failed")
+
+
+DRILLS = Path(__file__).parent / "fixtures" / "miyabi_mcp_mig_drills.jsonl"
+
+
+def test_the_real_mig_drills_in_one_project_export(project, rl, tmp_path):
+    """miyabi-mcp's five debug-mig acceptance drills (2026-10-30), exported by its own export function from the
+    stored events; only the project path is replaced by <project_dir>. Their usage has no hardware (mig_hardware
+    was configured afterwards). Only one drill had a client_ref; here every job gets its attempt as client_ref."""
+    jobs = ["3737441.opbs", "3737442.opbs", "3737546.opbs", "3737547.opbs", "3737549.opbs"]
+    attempt = {job: runs.register(project, "E-0001", {**SPEC, "seed": n}, f"r{n}")["attempt"]
+               for n, job in enumerate(jobs)}
+    records = [{**r, "attempt_id": attempt[r["execution_ref"]["opaque_id"]]}
+               for r in map(json.loads, DRILLS.read_text().splitlines())]
+    export = write(tmp_path / "project.jsonl", records)
+    code, out, _ = rl("run", "record", "--observation", export)
+    assert code == 0
+    code, out, _ = rl("run", "record", "--observation", export)
+    assert code == 0 and out.count("duplicate") == len(records)
+    with project.read() as tx:
+        ends = {job: (tx.require(a, "Attempt")["execution_state"], tx.require(a, "Attempt")["outcome"])
+                for job, a in attempt.items()}
+        usage = runs.usage_summary(tx)
+    assert ends == {"3737441.opbs": ("ended", "success"), "3737442.opbs": ("ended", "success"),
+                    "3737546.opbs": ("ended", "cancelled"),  # qdel while running: Exit_status=271
+                    "3737547.opbs": ("ended", "cancelled"),  # deleted while held: FINISH no-start
+                    "3737549.opbs": ("ended", "failed")}     # walltime exceeded: Exit_status=-29
+    [total] = usage["totals"]
+    assert (total["resource_type"], total["unit"], total["hardware"], total["basis"]) == \
+        ("gpu_mig_instance", "mig_instance_hours", "-", "measured")
+    assert round(total["quantity"], 6) == 0.046944
+    assert usage["unreported_attempts"] == [attempt["3737547.opbs"]]  # it never ran, so it has no usage
