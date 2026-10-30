@@ -142,6 +142,8 @@ def test_result_mismatch_remote_uris_partial_and_late_results(project, tmp_path)
         "artifacts": [{"path": "research/artifacts/m.json"}, {"uri": "remote:/ckpt.pt", "digest": "md5:ab"}]},
         "c1")
     assert complete["mismatches"][0]["field"] == "data_revision"
+    assert "copies RunSpec fields exactly or leaves them out" in complete["summary"]
+    assert "__pycache__/" in (tmp_path / "src" / ".gitignore").read_text()  # init keeps caches out of snapshots
     assert "remote_reference_not_read" in complete["verification_scope"]
     runs.import_result(project, "ATT-0001-1", {"status": "partial", "metrics": {"acc": 0.1}}, "p2")
     assert attempt(project)["result_status"] == "complete"  # partial never replaces complete
@@ -166,7 +168,7 @@ def test_shared_usage_counts_once_and_unreported_is_not_zero(project):
     usage = {"accounting_ref": "pbs:42", "quantity": 2.0, "unit": "node_h", "resource_type": "compute"}
     runs.add_usage(project, usage, ["ATT-0001-1", "ATT-0002-1"])
     assert runs.add_usage(project, usage, ["ATT-0001-1", "ATT-0002-1"])["duplicate"]
-    with pytest.raises(RLError):
+    with pytest.raises(RLError, match=r"already recorded as U-0001 \(2 node_h"):
         runs.add_usage(project, {**usage, "quantity": 3.0}, ["ATT-0001-1", "ATT-0002-1"])
     runs.add_usage(project, {**usage, "quantity": 3.0}, ["ATT-0001-1", "ATT-0002-1"], revise=True)
     register(project, request_id="r3", spec={**SPEC, "seed": 2})

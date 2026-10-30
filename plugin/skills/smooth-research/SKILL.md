@@ -68,7 +68,8 @@ controls) · E2 minimal real model · E3 limited confirmation (pre-fixed compari
    `{{rl}} run record --observation @file`, and wait for its notification instead of polling; recipe in
    workflow.md.
 5. `{{rl}} run import-result --attempt ATT --request-id <unique> --manifest @<manifest.json>`; optionally
-   `{{rl}} run usage ...` with measured time. Unreported usage is not zero.
+   `{{rl}} run usage ...` with measured time, unless the executor's export already carried it. Unreported
+   usage is not zero.
 6. Evidence: `{{rl}} evidence add --summary .. --level diagnostic|screening|exploratory|confirmatory
    --validity valid|invalid|pending --supports|--challenges H-x --attempts ATT --results RES --experiment E-x`.
 7. Decide what changes: `{{rl}} decide --targets H-x --action continue|expand|modify|diagnose|consult|pause|stop|reopen

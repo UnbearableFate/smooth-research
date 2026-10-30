@@ -331,7 +331,8 @@ def import_result(store: Store, attempt: str, manifest: dict, request_id: str, e
     notes = []
     if mismatches:
         notes.append("differs from RunSpec in " + ", ".join(m["field"] for m in mismatches)
-                     + ": kept, but not usable as the pre-specified comparison")
+                     + ": kept, but not usable as the pre-specified comparison (a manifest copies RunSpec fields "
+                       "exactly or leaves them out)")
     if bad:
         notes.append(f"digest mismatch: {', '.join(bad)}")
     if att["execution_state"] != "ended":
@@ -369,8 +370,10 @@ def _usage(tx: Tx, usage: dict, attempts: list[str], revise: bool = False) -> di
         if old["content_digest"] == digest:
             return {"usage": old["id"], "duplicate": True}
         if not revise:
-            raise RLError("CONFLICT", f"{usage['accounting_ref']} is already recorded as {old['id']} with other "
-                                      "values; pass --revise to record a corrected revision")
+            raise RLError("CONFLICT", f"{usage['accounting_ref']} is already recorded as {old['id']} "
+                                      f"({old['quantity']:g} {old['unit']}, {old.get('source_ref') or 'no source_ref'}); "
+                                      "if that record is right there is nothing to add, otherwise pass --revise "
+                                      "to record a corrected revision")
     uid = tx.next_id("Usage")
     tx.create("Usage", {"id": uid, "accounting_ref": usage["accounting_ref"], "quantity": float(body["quantity"]),
                         "unit": body["unit"], "resource_type": body["resource_type"], "hardware": body["hardware"],

@@ -46,6 +46,9 @@ def init_project(root: Path, plan: str | None = None, title: str | None = None) 
         gitignore.write_text("# the active database, call logs and raw run artifacts stay out of git;\n"
                              "# sealed documents are kept, and `rl export` writes consistent snapshots\n"
                              "state/\ncalls/\nartifacts/\n", encoding="utf-8")
+    code_ignore = project.code_root / ".gitignore"
+    if not code_ignore.exists():  # a commit is staged as the code snapshot of remote runs: sources only
+        code_ignore.write_text("__pycache__/\n*.py[cod]\n", encoding="utf-8")
     constraints = project.abs(project.config["constraints_ref"])
     if not constraints.exists():
         constraints.parent.mkdir(parents=True, exist_ok=True)

@@ -41,17 +41,20 @@ remote paths: relative ones follow the remote shell's `cd`. Remote layout: `.miy
 ledger and PBS logs; do not edit), `snapshots/<commit>/` read-only code, the Python environment built on the
 login node of the target system, `runs/<ATT>/` one directory per attempt.
 
-1. Commit the code and register with `--code-commit <full sha>`; add `--json` to get the full `spec_digest`.
+1. Commit the code (sources only: no `__pycache__`, outputs or data) and register with
+   `--code-commit <full sha>`; add `--json` to get the full `spec_digest`.
 2. Stage the commit once, never edit it afterwards (PBS reads the code when the job starts, not when it is
    submitted): `git archive --format=tar -o research/artifacts/snapshots/<sha>.tar <sha> src configs`, upload
    that one file with pi-env-mcp to `<root>/snapshots/<sha>.tar`, then in pi-env-mcp bash:
    `mkdir <root>/snapshots/<sha> && tar -xf <root>/snapshots/<sha>.tar -C <root>/snapshots/<sha> && chmod -R a-w <root>/snapshots/<sha>`.
-3. The job script runs code from the snapshot and writes only to `<root>/runs/$SR_ATTEMPT_ID/`, ending with
-   a `manifest.json` (format below) that carries `spec_digest`, `code_ref` and artifact digests written as
+3. The job script is part of the snapshot, runs code from it and writes only to `<root>/runs/$SR_ATTEMPT_ID/`,
+   ending with a `manifest.json` (format below) that carries `spec_digest` and artifact digests written as
    `blake2b:<hex>` (Python: `hashlib.blake2b(data, digest_size=32)`).
 4. Submit with miyabi-mcp `job_submit`: dry run first (show the plan when the user wants to confirm
-   submissions), then submit with `request_key: "sr:<ATT>"`, `client_ref: "<ATT>"`,
-   `env: {SR_ATTEMPT_ID, SR_SPEC_DIGEST}`, `labels: {code_commit: <sha>}` and, for jobs you will analyse together
+   submissions), then submit with `script: <root>/snapshots/<sha>/<job script>`, `workdir:
+   <root>/snapshots/<sha>` (both read-only, so miyabi-mcp's check that the code cannot change passes), `name:
+   "<ATT>"`, `request_key: "sr:<ATT>"`, `client_ref: "<ATT>"`, `env: {SR_ATTEMPT_ID, SR_SPEC_DIGEST}`,
+   `labels: {code_commit: <sha>}` and, for jobs you will analyse together
    (the seeds of a comparison), one notification: `notify: {name: "<E>-<batch>", expected: <number of jobs>,
    message: "<what to do next>"}`. PBS logs go to `.miyabi-mcp/logs/` (`job_get` shows their tail). The same
    request key returns the same job, so a retried submit is safe; a new attempt needs a new key.
@@ -60,7 +63,7 @@ login node of the target system, `runs/<ATT>/` one directory per attempt.
    `{{rl}} run record --observation @research/artifacts/miyabi/observations.jsonl`. It exports every job of the
    remote project and records already received are skipped, so repeat it after submitting and after every
    notification. The ended line carries the measured usage (`node_hours` on G nodes, `mig_instance_hours` on
-   MIG queues).
+   MIG queues): do not record it again with `{{rl}} run usage`.
 6. Wait without polling: after the first submit of a batch, start the listener as host.md says, then keep
    working or end the turn. Its first message is either an early failure of one job (start the listener again
    to wait for the rest) or the batch summary. Acknowledge with `notify_ack(id, ack_token)` from the message,
@@ -114,7 +117,9 @@ as `--attempt` fill in or override every record.
  "validator": {"name": "check_metrics.py", "passed": true, "source_ref": "stdout"}}
 ```
 
-`partial` results never replace a `complete` one; a later import is a new revision. Local paths are read and
+`spec_digest` names the RunSpec the job ran. Copy `code_ref`, `data_revision` and `metric` from the RunSpec
+exactly (`{{rl}} show RUN-x`), or leave them out: a differently worded field marks the result as not usable for
+the planned comparison. `partial` results never replace a `complete` one; a later import is a new revision. Local paths are read and
 digested; remote URIs are only registered ("not read"). Fields that differ from the RunSpec are kept, and the
 result is marked unusable for the pre-specified comparison. `{{rl}} run reject-result RES-x --reason ..` if
 the result itself is wrong.
