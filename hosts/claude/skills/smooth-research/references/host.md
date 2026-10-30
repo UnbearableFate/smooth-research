@@ -21,5 +21,8 @@ the absolute path from SKILL.md.
   `claude -p` session that sees only the package.
 - Long runs: start them with Bash `run_in_background` (or `nohup ... &`), record `running` with the PID,
   keep working, and record the end when you have checked the exit status. Do not sleep-poll.
+- Miyabi jobs (miyabi-mcp): run the `notify.daemon.listen_command` returned by the first `job_submit` of a
+  batch with Bash `run_in_background`. It exits when the notification arrives, which wakes you whether you are
+  working or idle.
 - Context: at a natural task boundary with a heavy context, write a handoff note in `docs/tasks/`, end the
   session record (`rl session end S-x`) and continue in a new session that starts from `rl resume`.

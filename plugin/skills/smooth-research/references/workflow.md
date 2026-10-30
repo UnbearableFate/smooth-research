@@ -33,7 +33,8 @@ fact was observed earlier). A crash is `--state ended --outcome failed`; a lost 
 ## A remote or HPC run (Miyabi: pi-env-mcp and miyabi-mcp)
 
 pi-env-mcp moves files and runs remote commands; miyabi-mcp submits, queries, cancels and waits for PBS
-jobs and exports observations; `{{rl}}` only records. The remote root is the miyabi-mcp project directory
+jobs and exports observations; `{{rl}}` only records. Submit and cancel only through miyabi-mcp: a `qsub` run
+through pi-env-mcp bypasses its ledger and its limits. The remote root is the miyabi-mcp project directory
 (its `--project-dir`, by default `/work/<group>/<user>/<project>`), one per research project and never
 shared: request keys are unique only inside it. Write it in `docs/plan/constraints.md`, and pass absolute
 remote paths: relative ones follow the remote shell's `cd`. Remote layout: `.miyabi-mcp/` (miyabi-mcp's
@@ -50,15 +51,21 @@ login node of the target system, `runs/<ATT>/` one directory per attempt.
    `blake2b:<hex>` (Python: `hashlib.blake2b(data, digest_size=32)`).
 4. Submit with miyabi-mcp `job_submit`: dry run first (show the plan when the user wants to confirm
    submissions), then submit with `request_key: "sr:<ATT>"`, `client_ref: "<ATT>"`,
-   `env: {SR_ATTEMPT_ID, SR_SPEC_DIGEST}` and `labels: {code_commit: <sha>}` (PBS logs go to `.miyabi-mcp/logs/`;
-   `job_get` shows their tail). The same request key returns the same job, so a retried submit is safe; a new
-   attempt needs a new key.
-5. Right after submitting and after every wake-up: `ledger_query(format="smooth-research", client_ref="<ATT>")`,
-   save the lines as `research/artifacts/<ATT>/observations.jsonl`, then
-   `{{rl}} run record --observation @research/artifacts/<ATT>/observations.jsonl`. The ended line carries the
-   measured node-hours as usage. Short jobs: `job_wait`; long ones: `watch_create`, run the returned waiter
-   in the background, end the turn, and `watch_ack` after waking up.
-6. After the end (PBS exit 0 is not application success): download `<root>/runs/<ATT>/manifest.json` and the
+   `env: {SR_ATTEMPT_ID, SR_SPEC_DIGEST}`, `labels: {code_commit: <sha>}` and, for jobs you will analyse together
+   (the seeds of a comparison), one notification: `notify: {name: "<E>-<batch>", expected: <number of jobs>,
+   message: "<what to do next>"}`. PBS logs go to `.miyabi-mcp/logs/` (`job_get` shows their tail). The same
+   request key returns the same job, so a retried submit is safe; a new attempt needs a new key.
+5. Record without copying JSON by hand: run the `export_command` from the submit result in a local shell,
+   `<export_command> > research/artifacts/miyabi/observations.jsonl`, then
+   `{{rl}} run record --observation @research/artifacts/miyabi/observations.jsonl`. It exports every job of the
+   remote project and records already received are skipped, so repeat it after submitting and after every
+   notification. The ended line carries the measured usage (`node_hours` on G nodes, `mig_instance_hours` on
+   MIG queues).
+6. Wait without polling: after the first submit of a batch, start the listener as host.md says, then keep
+   working or end the turn. Its first message is either an early failure of one job (start the listener again
+   to wait for the rest) or the batch summary. Acknowledge with `notify_ack(id, ack_token)` from the message,
+   then export and record (step 5). Jobs of a few minutes can use `job_wait` instead.
+7. After the end (PBS exit 0 is not application success): download `<root>/runs/<ATT>/manifest.json` and the
    small files it lists into `research/artifacts/<ATT>/`; list checkpoints and other large files as
    `{"uri": "miyabi:<absolute path>"}` (recorded as not read). Then `{{rl}} run import-result`.
 

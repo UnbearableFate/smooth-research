@@ -17,5 +17,8 @@ directories above the smooth-research SKILL.md). Write the absolute path in each
   `claude -p` session that sees only the package; fallbacks follow the configuration.
 - Long runs: start them in the background (`nohup ... &` and record the PID), keep working, record the end
   after checking the exit status. Do not sleep-poll.
+- Miyabi jobs (miyabi-mcp): give `notify` a `deliver` your session can receive (`codex_queue` with your
+  thread id, or `herdr` when you run in herdr; see miyabi-mcp's instructions) and run the returned
+  `start_command`.
 - Context: at a natural task boundary with a heavy context, write a handoff note in `docs/tasks/`, end the
   session record (`rl session end S-x`) and continue in a new session that starts from `rl resume`.

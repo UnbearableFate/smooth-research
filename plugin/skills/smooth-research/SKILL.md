@@ -64,8 +64,9 @@ controls) · E2 minimal real model · E3 limited confirmation (pre-fixed compari
    them: `{{rl}} run record --attempt ATT --source <tool> --state running|ended [--outcome success|failed|cancelled]
    --exec-namespace host:<hostname> --exec-id <pid or job id> --source-ref <log>`. On a cluster (Miyabi:
    pi-env-mcp and miyabi-mcp) run only from a staged snapshot of the registered commit, submit with the
-   attempt id as the request key, and record the scheduler's export with `{{rl}} run record --observation @file`;
-   recipe in workflow.md.
+   attempt id as the request key, record the ledger export (its `export_command` output) with
+   `{{rl}} run record --observation @file`, and wait for its notification instead of polling; recipe in
+   workflow.md.
 5. `{{rl}} run import-result --attempt ATT --request-id <unique> --manifest @<manifest.json>`; optionally
    `{{rl}} run usage ...` with measured time. Unreported usage is not zero.
 6. Evidence: `{{rl}} evidence add --summary .. --level diagnostic|screening|exploratory|confirmatory
