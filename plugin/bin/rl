@@ -1,0 +1,35 @@
+#!/bin/sh
+# Smooth Research CLI for the host plugins. It runs `rl` from a dedicated environment built once from this
+# plugin's pinned Python package: `rl setup` builds it with uv; no other command installs anything.
+set -eu
+here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+root=$(dirname -- "$here")
+project=$root
+[ -f "$project/pyproject.toml" ] || project=$(dirname -- "$root")  # source checkout: plugin/ inside the repo
+build=$(cat "$root/.build-id" 2>/dev/null || echo dev)
+home=${SMOOTH_RESEARCH_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/smooth-research}
+env_dir="$home/env-$build"
+SMOOTH_RESEARCH_RL="$here/rl"
+export SMOOTH_RESEARCH_RL
+
+if [ "${1-}" = "setup" ]; then
+  if ! command -v uv >/dev/null 2>&1; then
+    echo "smooth-research setup needs uv: https://docs.astral.sh/uv/getting-started/installation/" >&2
+    exit 2
+  fi
+  mkdir -p "$home"
+  UV_PROJECT_ENVIRONMENT="$env_dir" uv sync --project "$project" --frozen --no-dev --no-editable --quiet
+  "$env_dir/bin/rl" --help >/dev/null
+  echo "smooth-research CLI ready: $here/rl (environment $env_dir)"
+  exit 0
+fi
+
+if [ ! -x "$env_dir/bin/rl" ]; then
+  if [ "${1-}" = "hook" ]; then  # never break the host session; tell the agent what to do instead
+    printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"Smooth Research plugin: its CLI environment is not installed yet. Before using the smooth-research skill, run once: %s setup"}}\n' "$here/rl"
+    exit 0
+  fi
+  echo "smooth-research: the CLI environment is not installed; run once: $here/rl setup" >&2
+  exit 3
+fi
+exec "$env_dir/bin/rl" "$@"

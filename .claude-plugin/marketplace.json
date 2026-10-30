@@ -1,0 +1,12 @@
+{
+  "name": "smooth-research",
+  "owner": {"name": "unbearablefate"},
+  "metadata": {"description": "Smooth Research for Claude Code: lean, evidence-recording ML research workflow."},
+  "plugins": [
+    {
+      "name": "smooth-research",
+      "source": "./dist/claude/plugins/smooth-research",
+      "description": "Plan-driven ML research: hypotheses, experiment contracts, run records, cross-model review, advice and literature in one recoverable record. Build first: python3 scripts/build_plugins.py"
+    }
+  ]
+}

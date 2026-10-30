@@ -1,0 +1,15 @@
+{
+  "skill": {
+    "{{rl}}": "${CLAUDE_PLUGIN_ROOT}/bin/rl",
+    "{{host}}": "claude",
+    "{{session_id}}": "${CLAUDE_SESSION_ID}",
+    "{{cli_note}}": "- The CLI is `${CLAUDE_PLUGIN_ROOT}/bin/rl`; the commands below already use its absolute path. Run them from the research project root.",
+    "{{rl_short}}": "`${CLAUDE_PLUGIN_ROOT}/bin/rl`."
+  },
+  "reference": {
+    "{{rl}}": "rl",
+    "{{host}}": "claude",
+    "{{session_id}}": "<session id>",
+    "{{rl_short}}": "`rl`."
+  }
+}

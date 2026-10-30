@@ -1,0 +1,363 @@
+"""Review and advice tickets on one shared call mechanism, with separate packages and answer protocols.
+
+Reviews are keyed by a scope fingerprint (code, configuration with whitelisted keys removed, dependencies and
+the scope text) and reused only while it is unchanged. The reviewer comes from a different model family than
+the code's authors; when none is available the ticket stays pending or unavailable — never a fake pass.
+Advice requests are deduplicated by question, evidence version, constraints and advisor configuration.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+import yaml
+
+from . import adapters, documents
+from .context import advice_pack, _contract
+from .research import brief
+from .store import Store, Tx
+from .util import RLError, digest_file, digest_json, now_utc, short
+
+REVIEW_PROTOCOL = """## What to return
+
+Review the code against the method definition. For each problem give: location (file:line), the evidence
+that reproduces or demonstrates it, its impact (result_error | invalid_experiment | resource_waste |
+nonblocking), the minimal fix, and how to verify the fix. State what you checked and what you did not.
+Do not restate the package. End with exactly one ```json block:
+
+```json
+{"verdict": "pass | issues | blocking",
+ "findings": [{"location": "", "evidence": "", "impact": "", "fix": "", "verify": ""}],
+ "checked": [""], "unchecked": [""]}
+```
+"""
+
+ADVICE_PROTOCOL = """## What to return
+
+You are the advisor for a research bottleneck. Read the evidence critically; the coordinator's
+interpretation may be wrong. Return at most three proposals that differ in mechanism. For each one give:
+(1) which unexplained observation it explains, (2) the key difference from routes already tried,
+(3) a distinguishing prediction and the controls it needs, (4) the cheapest test and its expected cost,
+(5) the result that would make us drop it. Pausing is an acceptable recommendation when no route is worth
+its cost. End with exactly one ```json block:
+
+```json
+{"proposals": [{"title": "", "explains": "", "difference": "", "prediction": "", "controls": "",
+                "cheapest_test": "", "expected_cost": "", "stop_if": ""}],
+ "pause_recommended": false}
+```
+"""
+
+
+# -- shared ---------------------------------------------------------------------------------------------------
+
+
+def _entries(store: Store, kind: str) -> list[adapters.Entry]:
+    models = store.project.config["models"]
+    if kind == "review":
+        raw = models["reviewer"]["candidates"]
+    else:
+        raw = [models["advisor"]["primary"], *models["advisor"].get("fallback", [])]
+    return [adapters.Entry.parse(r) for r in raw]
+
+
+def _relation(author_families: set, observed: str | None, requested: str) -> str:
+    fam = adapters.family(observed) if observed else None
+    if fam is None:
+        return "cross_model_unverified" if adapters.family(requested) not in author_families else "same_family_unverified"
+    return "cross_model" if fam not in author_families else "same_family_independent_session"
+
+
+def _worker_alive(ticket: dict) -> bool:
+    pid = (ticket.get("calls") or [{}])[-1].get("pid") if ticket.get("calls") else None
+    if not pid:
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def start_background(store: Store, ticket_id: str, timeout: int) -> dict:
+    """Run the call in a detached worker process; `rl review show` / `rl advise show` report the outcome."""
+    log = store.project.dir("calls") / f"{ticket_id}.worker.log"
+    cmd = [sys.executable, "-m", "smooth_research", "--project", str(store.project.root),
+           "review" if ticket_id.startswith("RV") else "advise", "run", ticket_id, "--timeout", str(timeout)]
+    with open(log, "ab") as out:
+        proc = subprocess.Popen(cmd, stdout=out, stderr=out, stdin=subprocess.DEVNULL, start_new_session=True,
+                                cwd=store.project.root)
+    with store.write() as tx:
+        t = tx.require(ticket_id, "Ticket")
+        tx.update(ticket_id, {"status": "running", "calls": (t.get("calls") or []) + [
+            {"pid": proc.pid, "started_at": now_utc(), "background": True}]})
+    return {"id": ticket_id, "pid": proc.pid, "log": store.project.rel(log),
+            "summary": f"{ticket_id} running in background (pid {proc.pid}); check with "
+                       f"`rl {'review' if ticket_id.startswith('RV') else 'advise'} show {ticket_id}`"}
+
+
+def run_ticket(store: Store, ticket_id: str, timeout: int = 1800, only: str | None = None) -> dict:
+    """Try the configured entries in order (keeping the family rule for reviews); record every attempt."""
+    with store.read() as tx:
+        t = tx.require(ticket_id, "Ticket")
+        if not t.get("request_ref"):
+            raise RLError("INVALID", f"{ticket_id} has no request package; prepare it again")
+        request_path = store.project.abs(tx.require(t["request_ref"], "DocRevision")["object_path"])
+    if t["status"] == "answered":
+        return {"id": ticket_id, "summary": f"{ticket_id} already answered ({t.get('verdict') or 'see answer'})"}
+    candidates = [adapters.Entry.parse(c) for c in (t.get("candidates") or [])]
+    if only:
+        candidates = [adapters.Entry.parse(only)]
+    authors = set(filter(None, (adapters.family(m) for m in (t.get("author_models") or []))))
+    calls = [c for c in (t.get("calls") or []) if not c.get("background")]
+    manual = None
+    for entry in candidates:
+        if entry.entry == "manual":
+            manual = entry
+            break
+        log = store.project.dir("calls") / f"{ticket_id}.{entry.entry}.{len(calls) + 1}.log"
+        prompt = (f"Read the package at {request_path} and follow it exactly. It names project files to read; "
+                  f"paths are relative to {store.project.root}. Answer in the requested format.")
+        res = adapters.call(entry, prompt, store.project.root, read_only=True, timeout=timeout,
+                            log=log)
+        calls.append({"entry": str(entry), **res.as_dict(), "finished_at": now_utc()})
+        if res.ok:
+            return _store_answer(store, ticket_id, res.text, str(entry), res.observed_model, res.provider,
+                                 res.session_id, res.usage, res.cost_usd, calls, authors)
+    status = "pending" if manual else "unavailable"
+    with store.write() as tx:
+        tx.update(ticket_id, {"status": status, "calls": calls,
+                              "error": "; ".join(f"{c['entry']}: {c.get('error')}" for c in calls if c.get("error"))
+                                       or ("waiting for a manual answer" if manual else "no candidate could be called")})
+        tx.event(f"{t['kind']}.{status}", ticket_id, "no automatic answer")
+    if manual:
+        return {"id": ticket_id, "status": status,
+                "summary": f"{ticket_id}: submit {store.project.rel(request_path)} to {manual.model} yourself (or ask the "
+                           f"user to), then `rl {t['kind'] if t['kind'] == 'review' else 'advise'} import {ticket_id} "
+                           "--answer <file> --model-observed <model> --source <where>`"}
+    return {"id": ticket_id, "status": status,
+            "summary": f"{ticket_id} unavailable: " + "; ".join(f"{c['entry']}: {c.get('error')}" for c in calls)
+                       + ". Recorded as unavailable — not a pass; independent low-cost work can continue."}
+
+
+def _store_answer(store: Store, ticket_id: str, text: str, entry: str, observed: str | None, provider: str | None,
+                  session_id: str | None, usage: dict | None, cost: float | None, calls: list, authors: set) -> dict:
+    with store.read() as tx:
+        t = tx.require(ticket_id, "Ticket")
+    folder = "reviews" if t["kind"] == "review" else "advice"
+    path = store.project.dir(folder, "reports") / f"{ticket_id}.md"
+    header = (f"<!-- {ticket_id} answer · entry {entry} · observed model {observed or 'unverified'} · "
+              f"session {session_id or 'unknown'} · received {now_utc()} -->\n\n")
+    path.write_text(header + text, encoding="utf-8")
+    prep = documents.prepare(store.project, path, f"{t['kind']}_answer")
+    data = adapters.last_json_block(text) or {}
+    verdict = data.get("verdict") if t["kind"] == "review" else None
+    if t["kind"] == "review" and verdict not in ("pass", "issues", "blocking"):
+        verdict = "unparsed"
+    relation = _relation(authors, observed, entry.split(":", 1)[-1].split("@")[0]) if t["kind"] == "review" else None
+    summary = (f"{len(data.get('findings') or [])} finding(s)" if t["kind"] == "review"
+               else f"{len(data.get('proposals') or [])} proposal(s)" + (", pause recommended" if data.get("pause_recommended") else ""))
+    with store.write() as tx:
+        ref = documents.register(tx, prep)
+        tx.update(ticket_id, {"status": "answered", "answer_ref": ref, "verdict": verdict, "relation": relation,
+                              "requested_entry": entry, "observed_model": observed, "provider": provider,
+                              "host_session_id": session_id, "usage": usage,
+                              "cost_usd": float(cost) if cost is not None else None, "calls": calls,
+                              "summary": summary, "answered_at": now_utc(), "error": None})
+        tx.event(f"{t['kind']}.answered", ticket_id, f"{verdict or ''} {summary} via {entry}")
+    rel_note = f", {relation}" if relation else ""
+    return {"id": ticket_id, "answer_ref": ref, "verdict": verdict, "relation": relation,
+            "summary": f"{ticket_id} answered by {observed or entry + ' (model unverified)'}{rel_note}: "
+                       f"{verdict + ', ' if verdict else ''}{summary}; read {store.project.rel(path)}"}
+
+
+def import_answer(store: Store, ticket_id: str, answer: str, model_observed: str | None, source: str,
+                  provider: str | None = None, session_id: str | None = None) -> dict:
+    """Import an answer obtained outside the adapters (a person in a product UI, another tool)."""
+    with store.read() as tx:
+        t = tx.require(ticket_id, "Ticket")
+    text = Path(answer).read_text(encoding="utf-8")
+    authors = set(filter(None, (adapters.family(m) for m in (t.get("author_models") or []))))
+    calls = (t.get("calls") or []) + [{"entry": f"manual:{source}", "imported_at": now_utc()}]
+    return _store_answer(store, ticket_id, text, f"manual:{source}", model_observed, provider, session_id,
+                         None, None, calls, authors)
+
+
+def show(store: Store, ticket_id: str | None, kind: str) -> dict:
+    with store.read() as tx:
+        tickets = [tx.require(ticket_id, "Ticket")] if ticket_id else tx.all("Ticket", kind=kind)
+    lines = []
+    for t in tickets:
+        alive = " (worker not running: run again)" if t["status"] == "running" and not _worker_alive(t) else ""
+        lines.append(f"{brief(t)}{alive}")
+        for key in ("target_id", "relation", "requested_entry", "observed_model", "host_session_id", "summary",
+                    "request_ref", "answer_ref", "reused_from", "error", "cost_usd"):
+            if t.get(key) not in (None, ""):
+                lines.append(f"  {key}: {t[key]}")
+    return {"tickets": tickets, "summary": "\n".join(lines) or f"no {kind} tickets"}
+
+
+# -- reviews --------------------------------------------------------------------------------------------------
+
+
+def _strip(value, keys: set):
+    if isinstance(value, dict):
+        return {k: _strip(v, keys) for k, v in value.items() if k not in keys}
+    if isinstance(value, list):
+        return [_strip(v, keys) for v in value]
+    return value
+
+
+def fingerprint(store: Store, files: list[str], configs: list[str], deps: list[str], ignore_keys: list[str],
+                scope: str) -> tuple[str, dict]:
+    def digest(p: str) -> str:
+        path = store.project.abs(p)
+        if not path.is_file():
+            raise RLError("NOT_FOUND", f"review scope file not found: {p}")
+        return digest_file(path)
+
+    detail = {"files": {store.project.rel(store.project.abs(f)): digest(f) for f in sorted(files)},
+              "deps": {store.project.rel(store.project.abs(d)): digest(d) for d in sorted(deps)},
+              "configs": {}, "ignored_keys": sorted(ignore_keys), "scope": scope.strip()}
+    for c in sorted(configs):
+        path = store.project.abs(c)
+        digest(c)
+        try:
+            loaded = (json.loads if path.suffix == ".json" else yaml.safe_load)(path.read_text(encoding="utf-8"))
+            detail["configs"][store.project.rel(path)] = digest_json(_strip(loaded, set(ignore_keys)))
+        except (ValueError, yaml.YAMLError):
+            detail["configs"][store.project.rel(path)] = digest_file(path)  # not structured: whole file counts
+    return digest_json(detail), detail
+
+
+def request_review(store: Store, target: str | None, files: list[str], question: str, author_models: list[str],
+                   configs: list[str] = (), deps: list[str] = (), ignore_keys: list[str] = (), scope: str = "",
+                   diff_base: str | None = None, recheck_of: str | None = None, epoch: int | None = None) -> dict:
+    if not files:
+        raise RLError("INVALID", "name the code under review with --files")
+    if not author_models:
+        raise RLError("INVALID", "name the model(s) that wrote this code with --author-model; the reviewer must "
+                                 "come from a different family")
+    fp, detail = fingerprint(store, files, list(configs), list(deps), list(ignore_keys), scope or question)
+    authors = set(filter(None, (adapters.family(m) for m in author_models)))
+    rule = store.project.config["models"]["reviewer"].get("relation_to_author", "different_family")
+    entries = _entries(store, "review")
+    eligible = [e for e in entries if rule != "different_family" or e.entry == "manual" or e.family not in authors]
+    with store.write(epoch) as tx:
+        if target:
+            tx.require(target)
+        if not recheck_of:
+            for old in tx.all("Ticket", dedupe_key=fp):
+                if old["kind"] == "review" and old["status"] == "answered" and old.get("verdict") in ("pass", "issues") \
+                        and str(old.get("relation", "")).startswith("cross_model"):
+                    rid = tx.next_id("Ticket", "RV")
+                    tx.create("Ticket", {**{k: old.get(k) for k in ("question", "request_ref", "answer_ref",
+                                                                    "requested_entry", "requested_model", "observed_model",
+                                                                    "provider", "host_session_id", "relation",
+                                                                    "verdict", "summary", "answered_at")},
+                                         "id": rid, "kind": "review", "status": "answered", "target_id": target,
+                                         "dedupe_key": fp, "author_models": list(author_models),
+                                         "reused_from": old.get("reused_from") or old["id"]})
+                    if target:
+                        tx.link("targets", rid, target)
+                    tx.event("review.reused", rid, f"scope fingerprint {short(fp)} unchanged since {old['id']}")
+                    return {"id": rid, "reused_from": old["id"], "verdict": old.get("verdict"),
+                            "summary": f"{rid} reuses {old['id']} ({old.get('verdict')}): scope fingerprint unchanged"}
+        rid = tx.next_id("Ticket", "RV")
+        tx.create("Ticket", {"id": rid, "kind": "review", "status": "pending" if eligible else "unavailable",
+                             "target_id": target, "question": question, "dedupe_key": fp,
+                             "candidates": [str(e) for e in eligible], "author_models": list(author_models),
+                             "recheck_of": recheck_of,
+                             "error": None if eligible else f"no configured reviewer outside families {sorted(authors)}"})
+        if target:
+            tx.link("targets", rid, target)
+        contract = ""
+        if target and tx.require(target)["_label"] == "Experiment":
+            contract = _contract(tx, store, tx.require(target))
+        prior = brief(tx.require(recheck_of)) if recheck_of else ""
+    path = store.project.dir("packages") / f"{rid}.request.md"
+    path.write_text(_review_package(store, rid, target, question, scope, contract, detail, diff_base, prior),
+                    encoding="utf-8")
+    prep = documents.prepare(store.project, path, "review_request")
+    with store.write() as tx:
+        ref = documents.register(tx, prep)
+        tx.update(rid, {"request_ref": ref})
+        tx.event("review.requested", rid, f"{target or '-'} fingerprint {short(fp)}")
+    note = (f"candidates {', '.join(str(e) for e in eligible)}; run it: rl review run {rid} [--background]"
+            if eligible else "no eligible reviewer configured: recorded unavailable (not a pass)")
+    return {"id": rid, "request_ref": ref, "fingerprint": fp, "summary": f"{rid} {note}"}
+
+
+def _review_package(store: Store, rid: str, target: str | None, question: str, scope: str, contract: str,
+                    detail: dict, diff_base: str | None, prior: str) -> str:
+    parts = [f"# Review package {rid}\n",
+             f"Independent code review for a research experiment. Question: {question}\n",
+             f"Scope: {scope or question}\n"]
+    if prior:
+        parts.append(f"This re-checks only what the earlier review raised, after fixes: {prior}\n")
+    if contract:
+        parts.append(f"## Method definition\n\n{contract}\n")
+    parts.append("## Files under review (read them yourself)\n\n" + "\n".join(f"- {p}" for p in detail["files"]))
+    if detail["configs"]:
+        parts.append("\n## Execution configuration\n\n" + "\n".join(f"- {p}" for p in detail["configs"])
+                     + (f"\n(keys allowed to vary without a new review: {', '.join(detail['ignored_keys'])})"
+                        if detail["ignored_keys"] else ""))
+    if detail["deps"]:
+        parts.append("\n## Key dependencies\n\n" + "\n".join(f"- {p}" for p in detail["deps"]))
+    if diff_base:
+        try:
+            diff = subprocess.run(["git", "diff", diff_base, "--", *detail["files"]], cwd=store.project.root,
+                                  capture_output=True, text=True, timeout=30).stdout
+        except (OSError, subprocess.SubprocessError):
+            diff = ""
+        if diff:
+            parts.append(f"\n## Diff against {diff_base}\n\n```diff\n{diff[:40000]}\n```")
+    parts.append("\n" + REVIEW_PROTOCOL)
+    return "\n".join(parts)
+
+
+# -- advice ---------------------------------------------------------------------------------------------------
+
+
+def _evidence_version(tx: Tx) -> str:
+    state = [(ev["id"], ev["validity"], [(e["rel"], e["id"], e.get("revision")) for e in tx.out(ev["id"])])
+             for ev in tx.all("Evidence")]
+    hyps = [(h["id"], h["revision"], h["disposition"], h["evidence_status"]) for h in tx.all("Hypothesis")]
+    return digest_json({"evidence": state, "hypotheses": hyps})
+
+
+def prepare_advice(store: Store, question: str, target: str | None = None, epoch: int | None = None) -> dict:
+    constraints = store.project.abs(store.project.config["constraints_ref"])
+    with store.read() as tx:
+        if target:
+            tx.require(target)
+        key = digest_json({"question": question.strip(), "target": target, "evidence": _evidence_version(tx),
+                           "constraints": digest_file(constraints) if constraints.exists() else None,
+                           "advisor": store.project.config["models"]["advisor"]})
+        for old in tx.all("Ticket", dedupe_key=key):
+            if old["kind"] == "advice":
+                return {"id": old["id"], "duplicate": True,
+                        "summary": f"{old['id']} already asks this with the same evidence ({old['status']}); "
+                                   "send only new data, or wait for new evidence"}
+    pack = advice_pack(store, target, question)
+    with store.write(epoch) as tx:
+        aid = tx.next_id("Ticket", "AD")
+        tx.create("Ticket", {"id": aid, "kind": "advice", "status": "pending", "target_id": target,
+                             "question": question, "dedupe_key": key,
+                             "candidates": [str(e) for e in _entries(store, "advice")]})
+        if target:
+            tx.link("targets", aid, target)
+    path = store.project.dir("packages") / f"{aid}.request.md"
+    path.write_text(pack["summary"] + "\n\n" + ADVICE_PROTOCOL, encoding="utf-8")
+    prep = documents.prepare(store.project, path, "advice_request")
+    with store.write() as tx:
+        ref = documents.register(tx, prep)
+        tx.update(aid, {"request_ref": ref})
+        tx.event("advice.prepared", aid, question)
+    return {"id": aid, "request_ref": ref, "tokens": pack["tokens"],
+            "summary": f"{aid} package {store.project.rel(path)} (≈{pack['tokens']} tokens); "
+                       f"run: rl advise run {aid} [--background], or submit it manually"}

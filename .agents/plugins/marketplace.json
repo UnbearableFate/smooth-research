@@ -1,0 +1,12 @@
+{
+  "name": "smooth-research",
+  "interface": {"displayName": "Smooth Research"},
+  "plugins": [
+    {
+      "name": "smooth-research",
+      "source": {"source": "local", "path": "./dist/codex/plugins/smooth-research"},
+      "policy": {"installation": "AVAILABLE", "authentication": "ON_INSTALL"},
+      "category": "Productivity"
+    }
+  ]
+}

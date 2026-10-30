@@ -1,0 +1,15 @@
+{
+  "skill": {
+    "{{rl}}": "rl",
+    "{{host}}": "codex",
+    "{{session_id}}": "<thread id from the session-start note>",
+    "{{cli_note}}": "- `rl` in the commands below is this plugin's `bin/rl`: two directories above this SKILL.md; the session-start note prints its absolute path. It is not on PATH: write the absolute path in each command.",
+    "{{rl_short}}": "`rl` = this plugin's `bin/rl` (two directories above the smooth-research SKILL.md; absolute path in the session-start note)."
+  },
+  "reference": {
+    "{{rl}}": "rl",
+    "{{host}}": "codex",
+    "{{session_id}}": "<thread id>",
+    "{{rl_short}}": "`rl`."
+  }
+}

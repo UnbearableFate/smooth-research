@@ -1,0 +1,26 @@
+[project]
+name = "smooth-research"
+version = "0.1.0"
+description = "Lean ML research records and workflow plugin core for Claude Code and Codex"
+readme = "README.md"
+authors = [
+    { name = "unbearablefate", email = "tylov.ohno@gmail.com" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "latticedb==0.15.0",
+    "pyyaml>=6.0",
+]
+
+[project.scripts]
+rl = "smooth_research.cli:main"
+smooth-research = "smooth_research.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.13.4,<0.14.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+]

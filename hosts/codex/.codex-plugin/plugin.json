@@ -1,0 +1,18 @@
+{
+  "name": "smooth-research",
+  "version": "0.1.0",
+  "description": "Plan-driven ML research with an evidence record: testable hypotheses, compact experiment contracts, platform-independent run records, cross-model review, bottleneck advice and literature, kept in an embedded LatticeDB graph through one CLI.",
+  "author": {"name": "unbearablefate"},
+  "keywords": ["ml-research", "experiments", "evidence", "research-records"],
+  "skills": "./skills/",
+  "hooks": "./hooks/hooks.json",
+  "interface": {
+    "displayName": "Smooth Research",
+    "shortDescription": "Evidence-driven ML research records",
+    "longDescription": "Turn a research plan into testable hypotheses, run cheap discriminating experiments with your own tools, and keep runs, results, evidence, decisions, cross-model reviews and advice in one recoverable record.",
+    "developerName": "unbearablefate",
+    "category": "Productivity",
+    "capabilities": ["Read", "Write"],
+    "defaultPrompt": ["Start a research project from plan.md with smooth-research", "Resume the research project in this directory"]
+  }
+}
