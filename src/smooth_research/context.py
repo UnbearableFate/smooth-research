@@ -82,10 +82,15 @@ def work_pack(store: Store, task_id: str, budget: int | None = None) -> dict:
     budget = budget or store.project.config["context"]["work_target_tokens"]
     with store.read() as tx:
         task = tx.require(task_id, "Task")
+        coord = [s for s in tx.all("Session", status="active") if s["role_id"] == "coordinator"]
+        c = coord[-1] if coord else None
         sections = [("Task", "\n".join(filter(None, [
             brief(task), f"next action: {task.get('next_action') or '-'}",
             None if task.get("owner_role") else f"unclaimed: rl task claim {task_id} --role <role>",
-            f"handoff: {task['handoff_ref']}" if task.get("handoff_ref") else None])))]
+            f"waiting on: {', '.join(task['wait_attempts'])}" if task.get("wait_attempts") else None,
+            f"handoff: {task['handoff_ref']}" if task.get("handoff_ref") else None,
+            f"coordinator: {c['id']} ({c['host']} session {c.get('host_session_id') or 'unknown'}); notices that "
+            "jobs ended go to this session" if c else "coordinator: no active session"])))]
         if task.get("request_ref"):
             sections.append((f"Request {task['request_ref']}", _doc_text(tx, store, task["request_ref"])))
         if task.get("handoff_ref"):

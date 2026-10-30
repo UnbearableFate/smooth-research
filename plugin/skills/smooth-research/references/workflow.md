@@ -64,10 +64,13 @@ login node of the target system, `runs/<ATT>/` one directory per attempt.
    remote project and records already received are skipped, so repeat it after submitting and after every
    notification. The ended line carries the measured usage (`node_hours` on G nodes, `mig_instance_hours` on
    MIG queues): do not record it again with `{{rl}} run usage`.
-6. Wait without polling: after the first submit of a batch, start the listener as host.md says, then keep
-   working or end the turn. Its first message is either an early failure of one job (start the listener again
-   to wait for the rest) or the batch summary. Acknowledge with `notify_ack(id, ack_token)` from the message,
-   then export and record (step 5). Jobs of a few minutes can use `job_wait` instead.
+6. Wait without polling; waiting belongs to the coordinator (host.md). After the first submit of a batch a
+   researcher ends with `{{rl}} task wait T-x --role .. --attempts ATT-.. --next-action ..` and reports what
+   announces the end (the listener command, or the deliver target it set). The coordinator starts the
+   listener, then keeps working or ends the turn. The first message is either an early failure of one job
+   (start the listener again to wait for the rest) or the batch summary. The coordinator acknowledges it with
+   `notify_ack(id, ack_token)` from the message and starts the researcher again with the same role and the
+   message; the researcher exports and records (step 5). Jobs of a few minutes can use `job_wait` instead.
 7. After the end (PBS exit 0 is not application success): download `<root>/runs/<ATT>/manifest.json` and the
    small files it lists into `research/artifacts/<ATT>/`; list checkpoints and other large files as
    `{"uri": "miyabi:<absolute path>"}` (recorded as not read). Then `{{rl}} run import-result`.
@@ -141,6 +144,9 @@ several `--attempts`; never split it into invented per-run numbers. Different un
   (comparator), depends_on, combines, tests, supports, challenges, motivated_by, nearest_work, cites,
   based_on, supersedes. Science source, code origin and comparator are separate on purpose.
 - Pause needs `--reopen-condition`. A paused or retired hypothesis is reopened only by `--action reopen`.
+- Key conclusions (`--set-evidence-status supported|challenged`, `--action stop`, a stage `recommend_formal`):
+  `{{rl}} review conclusion --target H-x --proposal .. --author-model ..` first, then `{{rl}} decide ...
+  --based-on EV-x,RV-x` (skill research-review).
 
 ## Tasks, messages, sessions
 
@@ -148,7 +154,8 @@ several `--attempts`; never split it into invented per-run numbers. Different un
   --targets E-x --request docs/tasks/T-brief.md --to-role researcher --next-action ..`
 - Owner: `{{rl}} task claim T-x --role researcher` (one claimant wins); then `{{rl}} task deliver T-x
   --role researcher --summary .. --output <files>`, `task wait .. --attempts ATT-x --next-action ..`,
-  `task block .. --reason engineering|model_unavailable|budget|science`, `task resume`,
+  `task block .. --reason engineering|model_unavailable|budget|science`, `task resume` (also to continue a
+  task your role already owns, for example after a WAIT),
   `task handoff .. --doc docs/tasks/T-x-handoff.md` (the task is then ready to claim again).
 - Coordinator: `{{rl}} inbox --role coordinator` (add `--ack` after reading), `{{rl}} task accept|stop|reopen T-x
   --reason ..`. Stopping a task does not stop external runs: stop them with your tool and record that.

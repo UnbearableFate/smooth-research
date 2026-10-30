@@ -368,7 +368,7 @@ research-tree 已有 export_snapshot，但本次未发现完整的 import/restor
 | Reviewer | 按代码/协议变化临时启动 | 对指定快照进行独立跨模型审查 |
 | Advisor | 瓶颈或关键路线决策时调用 | 解释失败、提出替代机制与最小区分实验 |
 
-文献检索、框架构建和证据分析是 task kind，不各自建立永久角色。单个 agent 可以完成完整的小研究环；只有工作可以独立推进且通信成本合理时才并行。
+文献检索、框架构建和证据分析是 task kind，不各自建立永久角色。协调者默认不亲自执行：实现与运行交给研究者，自己只做小改动、冒烟检查和读结果，把上下文留给假说、证据和路线决定；只有任务可以独立推进时才同时启动多个研究者。（2026-10-30 调整：原文允许单个 agent 包办整个小研究环，实施时 skill 写成了协调者“通常也执行”；与用户讨论后回到本表的分工，不另设流程与科学分离的常驻角色，见 §8.6 与 §21.3。）
 
 稳定的是 role_id、task_id、worktree 和文档，而非必须永久保留某一个聊天上下文。
 
@@ -465,6 +465,18 @@ Reviewer 获取方法定义、代码 diff、必要上下文、关键测试和中
 使用预先选择的 fallback 顺序，同时保持跨模型要求。没有合格 reviewer 时，记录 pending；无关的低成本工作仍可继续。依赖该关键审查的扩大实验等待修复或合格审查，不伪称通过。
 
 合法的反对意见保留原文。修复后仅复核受影响范围；若意见有争议，绑定一次独立复核，保留分歧与 coordinator 的处理理由，不反复重开直到得到 pass。
+
+### 8.6 结论审查（2026-10-30 增加）
+
+代码审查只回答“实现是否忠实于方法”。实验由协调者设计、结果也由它解读时，结论本身同样需要独立核对。以下关键结论在记录前做一次只读、跨模型的结论审查：
+
+1. 把假说的证据状态定为 supported 或 challenged。
+2. 停止一条路线（假说转为 retired）。
+3. 阶段交付中的 recommend_formal 或 stop。
+
+由协调者发起（`rl review conclusion --target H-x --proposal … --author-model …`），与代码审查共用 RV 工单、候选、跨模型族规则和回答格式。审查包从记录生成：拟记录的结论、假说陈述与范围、每条相关证据及其 attempt、结果与各臂数字、实验契约（含是否在结果后修订）、代码审查、已有决定和其他开放假说。审查者检查证据等级、结论范围、事前设定的比较、工程失败或对照失败是否被当作否证、未排除的竞争解释，以及摘要与记录数字是否一致。审查包内容不变时复用已有的跨模型回答。
+
+不强制拦截：没有引用通过（pass 或 issues）的结论审查的关键决定照常记录，但会一直列在 `rl status`、恢复包和 session 开始提示的待处理中，直到用 `rl link D-x based_on RV-x` 补上；unavailable 或 blocking 都不算通过。报告为每个关键决定标出审查状态。
 
 ---
 
@@ -1129,6 +1141,8 @@ GitHub 链接固定到本次读取的提交；外部产品文档按 2026-10-30 �
 - 模型入口写作 `<claude|codex|manual>:<model>[@effort]`。默认 reviewer 候选 `codex:gpt-6-astra@medium`、`claude:claude-opus-5-5@medium`，按作者模型族自动排除同族；advisor 默认 `claude:claude-fable-5-1@high`，后备 `codex:gpt-6-astra@high`、`manual:gpt-pro`。实际模型：Claude 取 `modelUsage`，Codex 取 rollout 文件中的 `turn_context.model`，取不到则记为未核实。审查/咨询可后台运行（独立 worker 进程），这是宿主适配层的模型调用，不涉及实验执行。
 - 跨 session：`rl delegate T-x --entry <entry>` 用 `codex exec` 或 `claude -p` 启动独立 session，按工作包领取并交付任务，记录线程/会话 ID 与请求/实际模型。同 session：Claude 插件提供 `smooth-research:researcher` 子代理。
 - 上下文包的 token 数为标注方法的估算（ASCII 字符/4 + 非 ASCII 字符），超出预算的部分列为按需读取的索引。
+- 执行下放（2026-10-30，见 §7.1）：协调者的 skill 改为“掌握与用户的对话、假说和路线决定，实现和运行交给研究者”；记录运行的规则单列一节，研究者和做小检查的协调者共用。研究者子代理不再限定工具，继承主 session 的工具（含 pi-env-mcp、miyabi-mcp），可以直接在 Miyabi 上执行。等待集群作业归协调者：研究者提交后以 `task wait` 结束并报告监听命令，协调者等到通知后以同一角色重启研究者；`rl delegate` 也能续接同一角色拥有的未完成任务。工作包列出协调者的 session，作业通知发往那里。代码审查由写代码的一方（通常是研究者）发起。
+- 结论审查（2026-10-30，见 §8.6）：新增 `rl review conclusion`。Ticket 新增 `subject`（code / conclusion），Decision 新增 `evidence_status_set`（记下该决定设定的证据状态）；两者都是可选字段，旧库照常读取。
 
 ### 21.4 首版未做
 
@@ -1139,6 +1153,7 @@ GitHub 链接固定到本次读取的提交；外部产品文档按 2026-10-30 �
 - 43 项契约测试，对应 16.2 节场景：并发领取只有一个 owner、交接释放任务后由下一个 owner 接续、封存契约不随草稿变化、事务内异常与写进程被 SIGKILL 后无半写记录、封存中断只留下未登记对象、request_id 幂等与冲突、观测去重/乱序/unknown/矛盾与显式更正、命名空间隔离与共享外部执行、重新执行为新 attempt、结果版本不符/远程 URI/partial/迟到结果、共享用量只计一次且未报告不记零、记录操作不启动进程或模型调用、审查范围指纹复用与关键变化重审、无合格 reviewer 时如实记为不可用、阳性对照失败只作诊断、导出后恢复并生成恢复包；另有宿主适配（伪造的 claude/codex CLI）与构建检查。
 - 端到端：在 herdr 新 tab 中启动 Claude Code 2.1.314（Sonnet 5.5，effort medium），`--plugin-dir dist/claude/plugins/smooth-research` 加载插件，用本计划的小型研究（标签噪声下的权重衰减）跑完一次研究循环。结果见 21.6。
 - 其后增至 51 项：观测的批量导入与 `occurred_at`、miyabi-mcp 导出契约（`tests/test_executor_contract.py`，见 21.7）等。Miyabi 上的端到端测试见 21.8。
+- 再增至 54 项：结论审查的审查包内容与复用、未经结论审查的关键决定留在待处理中、`rl delegate` 续接同一角色拥有的任务。
 
 ### 21.6 端到端测试结果（2026-10-30）
 

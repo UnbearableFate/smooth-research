@@ -276,6 +276,9 @@ def cmd_review(args):
         return reviews.request_review(store, args.target, _list(args.files), args.question,
                                       _list(args.author_model), _list(args.configs), _list(args.deps),
                                       _list(args.ignore_keys), args.scope or "", args.diff_base, args.recheck_of)
+    if a == "conclusion":
+        return reviews.request_conclusion_review(store, _list(args.target), args.proposal, _list(args.author_model),
+                                                 args.question, args.recheck_of)
     if a == "run":
         if args.background:
             return reviews.start_background(store, args.id, args.timeout)
@@ -604,7 +607,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("id", nargs="?")
     s.add_argument("--active", action="store_true")
 
-    for name, fn, help_ in (("review", cmd_review, "cross-model code review tickets"),
+    for name, fn, help_ in (("review", cmd_review, "cross-model reviews: code before costly runs, key conclusions "
+                                                   "before they are recorded"),
                             ("advise", cmd_advise, "bottleneck consultation with the strongest configured model")):
         sp = add(name, fn, help_)
         ss = sp.add_subparsers(dest="action", required=True)
@@ -619,6 +623,14 @@ def build_parser() -> argparse.ArgumentParser:
             s.add_argument("--ignore-keys", action="append", help="config keys allowed to vary, e.g. seed,output_dir")
             s.add_argument("--scope")
             s.add_argument("--diff-base")
+            s.add_argument("--recheck-of")
+            s = ss.add_parser("conclusion", help="check a key conclusion (supported/challenged, a retired route, "
+                                                 "a formal recommendation) before recording it")
+            s.add_argument("--target", action="append", required=True, help="hypothesis id(s) the conclusion is about")
+            s.add_argument("--proposal", required=True, help="the conclusion or decision you plan to record")
+            s.add_argument("--author-model", action="append", required=True,
+                           help="model(s) that drew the conclusion (you, and a researcher that interpreted results)")
+            s.add_argument("--question")
             s.add_argument("--recheck-of")
         else:
             s = ss.add_parser("prepare")

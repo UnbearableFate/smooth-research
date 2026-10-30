@@ -8,7 +8,7 @@ from __future__ import annotations
 import html
 from datetime import datetime, timezone
 
-from .research import brief
+from .research import brief, conclusion_reviews, key_hypotheses, review_gap
 from .runs import describe_attempt, usage_summary
 from .store import Store, Tx
 
@@ -148,6 +148,13 @@ def _arm_table(tx: Tx, exp_id: str) -> list[str]:
     return lines
 
 
+def _decision_line(d: dict, check: str | None) -> str:
+    status = f"->{d['evidence_status_set']}" if d.get("evidence_status_set") else ""
+    reopen = f" (reopen if: {d['reopen_condition']})" if d.get("reopen_condition") else ""
+    review = f" [{check}]" if check else ""
+    return f"- {d['id']} {d['kind']}:{d['action']}{status} — {d['rationale']}{reopen}{review}"
+
+
 def report(store: Store, out: str | None = None, title: str | None = None) -> dict:
     """A human-facing progress/stage report generated from the records into reports/."""
     with store.read() as tx:
@@ -170,6 +177,14 @@ def report(store: Store, out: str | None = None, title: str | None = None) -> di
             ev_lines.append(f"- {ev['id']} [{ev['evidence_level']}, {ev['validity']}] {ev['summary']}"
                             + (f" ({rel})" if rel else "") + (f"; scope: {ev['scope']}" if ev.get("scope") else ""))
         stage = [d for d in decisions if d["kind"] == "stage"]
+        checks = {}  # key conclusions: which conclusion review backs each one, or why none does
+        for d in decisions:
+            if key_hypotheses(tx, d):
+                revs = conclusion_reviews(tx, [e["id"] for e in tx.out(d["id"], "based_on")])
+                gap = review_gap(revs)
+                checks[d["id"]] = gap or "conclusion review " + ", ".join(
+                    f"{t['id']} {t['verdict']}" + (f" ({t['relation']})" if t.get("relation") else "")
+                    for t in revs if t["status"] == "answered")
     lines = [f"# {title or 'Research report'}: {meta.get('title', '')}",
              f"\nGenerated {datetime.now(timezone.utc).isoformat(timespec='seconds')} from the research records "
              f"(data_version {meta['data_version']}, plan {meta.get('plan_ref') or '-'}). Regenerate with `rl report`.",
@@ -178,8 +193,7 @@ def report(store: Store, out: str | None = None, title: str | None = None) -> di
     lines += ["\n## Experiments and runs\n", *(exp_lines or ["none"])]
     lines += ["\n## Evidence\n", *(ev_lines or ["none"])]
     lines += ["\n## Decisions\n"]
-    lines += [f"- {d['id']} {d['kind']}:{d['action']} — {d['rationale']}"
-              + (f" (reopen if: {d['reopen_condition']})" if d.get("reopen_condition") else "") for d in decisions] or ["none"]
+    lines += [_decision_line(d, checks.get(d["id"])) for d in decisions] or ["none"]
     if stage:
         d = stage[-1]
         lines += ["\n## Stage delivery\n", f"- implementation_ready: {d.get('implementation_ready')}",

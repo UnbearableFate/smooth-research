@@ -22,16 +22,30 @@ def rl_command() -> str:
 
 def prompt_for(store: Store, task_id: str, role: str) -> str:
     rl = rl_command()
+    with store.read() as tx:
+        task = tx.require(task_id, "Task")
+    start = (f"Continue the task; it is already yours ({task['state']}): `{rl} task resume {task_id} --role {role}`, "
+             "then carry out its next action below." if task.get("owner_role") == role
+             else f"Claim the task: `{rl} task claim {task_id} --role {role}`.")
     pack = work_pack(store, task_id)["summary"]
     return f"""You are a Smooth Research {role} session working on task {task_id} in {store.project.root}.
-The research records CLI is `{rl}` (run it from the project directory).
+The research records CLI is `{rl}` (run it from the project directory). The coordinator owns the route
+decisions; you own the execution of this task.
 
-1. Claim the task: `{rl} task claim {task_id} --role {role}`.
+1. {start}
 2. Do the work described below. Experiment code belongs in {store.project.config['code_root']}/, human-facing notes
    in {store.project.config['docs_root']}/notes/. Register every experiment run before executing it
-   (`{rl} run register ...`), record what you observed (`{rl} run record ...`) and import results
-   (`{rl} run import-result ...`). Never invent results, versions or model identities; unknown stays unknown.
-3. Finish with `{rl} task deliver {task_id} --role {role} --summary "<what changed, what was found, what is
+   (`{rl} run register ...`), record what you observed (`{rl} run record ...`), import results
+   (`{rl} run import-result ...`) and add evidence with an honest level (`{rl} evidence add ...`). Never invent
+   results, versions or model identities; unknown stays unknown.
+3. Before a costly run on a new core path (operator, training or evaluation path, loss mask, data split, adapter
+   injection, checkpoint I/O), get a cross-model code review: `{rl} review request --target <E-x> --files ..
+   --author-model <your model id> --question ..`, then `{rl} review run <RV-x>`; fix real problems. If no reviewer
+   is available, do not scale up: block with --reason model_unavailable.
+4. Long external runs (cluster jobs): once they are submitted and recorded, `{rl} task wait {task_id} --role {role}
+   --attempts <ATT ids> --next-action "<what to do when they end>"`, say what reports their end, and finish. The
+   coordinator waits and starts you again with the same role.
+5. Finish with `{rl} task deliver {task_id} --role {role} --summary "<what changed, what was found, what is
    still open>" --output <files>`; if blocked, `{rl} task block ... --reason <engineering|
    model_unavailable|budget|science>`. Stay inside the constraints document.
 
@@ -45,8 +59,10 @@ def delegate(store: Store, task_id: str, entry_text: str, role: str = "researche
         raise RLError("INVALID", "a manual entry cannot run a task session")
     with store.read() as tx:
         task = tx.require(task_id, "Task")
-    if task["state"] != "ready":
-        raise RLError("CONFLICT", f"{task_id} is {task['state']}; only a ready task can be delegated")
+    own = task.get("owner_role") == role and task["state"] in ("active", "waiting", "blocked")
+    if task["state"] != "ready" and not own:
+        raise RLError("CONFLICT", f"{task_id} is {task['state']} (owner {task.get('owner_role') or 'none'}); only a "
+                                  f"ready task, or an unfinished one owned by --role {role}, can be delegated")
     log = store.project.dir("calls") / f"{task_id}.delegate.{entry.entry}.{now_utc().replace(':', '')}.log"
     res = adapters.call(entry, prompt_for(store, task_id, role), store.project.root, read_only=False,
                         timeout=timeout, log=log)

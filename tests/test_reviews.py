@@ -7,7 +7,7 @@ import stat
 import pytest
 import yaml
 
-from smooth_research import adapters, delegate, research, reviews, tasks
+from smooth_research import adapters, delegate, research, reviews, runs, tasks
 from smooth_research.util import RLError
 
 FAKE_CODEX = r"""#!{python}
@@ -186,3 +186,78 @@ def test_delegation_records_the_exact_session_and_model(project, fakes, monkeypa
     assert (s["host"], s["model_requested"], s["model_observed"]) == ("codex", "gpt-6-astra", "gpt-6-astra")
     prompt = delegate.prompt_for(project, "T-0001", "researcher")
     assert "task claim T-0001" in prompt and "Work pack for T-0001" in prompt
+
+
+def evidence(project, accs=(0.8, 0.9)):
+    """Two seeds of E-0001 and screening evidence that they support H-0001."""
+    from conftest import SPEC, obs
+    atts, results = [], []
+    for seed, acc in enumerate(accs):
+        out = runs.register(project, "E-0001", {**SPEC, "seed": seed}, f"r{seed}")
+        runs.record(project, obs(attempt=out["attempt"], state="ended", outcome="success"))
+        res = runs.import_result(project, out["attempt"], {"status": "complete", "metrics": {"acc": acc}}, f"res{seed}")
+        atts.append(out["attempt"])
+        results.append(res["result"])
+    return research.add_evidence(project, "wd beats no wd on 2 seeds", "screening", "valid", "toy, 20% noise",
+                                 supports=["H-0001"], attempts=atts, results=results, experiment="E-0001")["id"]
+
+
+def test_a_key_conclusion_is_checked_against_the_records_behind_it(project, fakes, tmp_path, monkeypatch):
+    ev = evidence(project)
+    monkeypatch.setenv("FAKE_PROMPT_OUT", str(tmp_path / "prompt.txt"))
+    claim = "H-0001 is supported at screening level only (unique-proposal)"
+    rv = reviews.request_conclusion_review(project, ["H-0001"], claim, ["claude-opus-5-5"])
+    with project.read() as tx:
+        t = tx.require(rv["id"])
+    assert t["subject"] == "conclusion" and t["candidates"] == ["codex:gpt-6-astra@medium"]
+    out = reviews.run_ticket(project, rv["id"])
+    assert out["verdict"] == "pass" and out["relation"] == "cross_model"
+    prompt = (tmp_path / "prompt.txt").read_text()
+    for part in ("unique-proposal", "weight decay raises test accuracy", f"{ev} supports H-0001", "arm wd seed 1",
+                 '"acc": 0.9', "| wd | 0,1 |", "Code reviews: none recorded", "overclaim"):
+        assert part in prompt, part
+    assert reviews.request_conclusion_review(project, ["H-0001"], claim, ["claude-opus-5-5"])["reused_from"] == rv["id"]
+    research.set_evidence(project, ev, "invalid", "metric bug")  # the records behind it changed: check again
+    assert "reused_from" not in reviews.request_conclusion_review(project, ["H-0001"], claim, ["claude-opus-5-5"])
+
+
+def test_key_conclusions_without_a_passing_review_stay_in_attention(project, fakes, monkeypatch):
+    from smooth_research import view
+    ev = evidence(project)
+    d1 = research.decide(project, ["H-0001"], "continue", "worth more seeds", [ev], set_evidence_status="supported")
+    assert d1["conclusion_review_gap"] == "no conclusion review" and "rl review conclusion" in d1["summary"]
+    with project.read() as tx:
+        assert tx.require(d1["id"])["evidence_status_set"] == "supported"
+        items = research.attention(tx)
+    assert any(i.startswith(f"{d1['id']} key conclusion on H-0001: no conclusion review") for i in items)
+    rv = reviews.request_conclusion_review(project, ["H-0001"], "supported at screening level", ["claude-opus-5-5"])
+    reviews.run_ticket(project, rv["id"])
+    research.link(project, d1["id"], "based_on", rv["id"])
+    with project.read() as tx:
+        assert not [i for i in research.attention(tx) if "key conclusion" in i]
+    assert research.decide(project, ["H-0001"], "diagnose", "check the metric", [ev])["conclusion_review_gap"] is None
+    monkeypatch.setenv("PATH", "/nonexistent")
+    rv2 = reviews.request_conclusion_review(project, ["H-0001"], "retire H-0001", ["claude-opus-5-5"])
+    reviews.run_ticket(project, rv2["id"])
+    d3 = research.decide(project, ["H-0001"], "stop", "not worth more", [ev, rv2["id"]])
+    assert d3["conclusion_review_gap"] == f"conclusion review {rv2['id']} is unavailable, not a pass"
+    with project.read() as tx:
+        items = [i for i in research.attention(tx) if "key conclusion" in i]
+    assert len(items) == 1 and items[0].startswith(d3["id"])  # the standing conclusion on H-0001 is now d3
+    text = open(view.report(project)["path"], encoding="utf-8").read()
+    assert f"[conclusion review {rv['id']} pass (cross_model)]" in text and "is unavailable, not a pass]" in text
+
+
+def test_delegation_continues_a_task_its_role_already_owns(project, fakes, monkeypatch):
+    monkeypatch.setenv("FAKE_ANSWER", "continued")
+    tasks.start_session(project, "coordinator", "claude", "sess-main")
+    tasks.create_task(project, "run E-0001", "experiment", ["E-0001"], to_role="researcher")
+    tasks.claim(project, "T-0001", "researcher-1")
+    tasks.progress(project, "T-0001", "waiting", "researcher-1", next_action="import the results when the jobs end")
+    prompt = delegate.prompt_for(project, "T-0001", "researcher-1")
+    assert "task resume T-0001 --role researcher-1" in prompt and "task claim" not in prompt
+    assert "coordinator: S-0001 (claude session sess-main)" in prompt
+    assert delegate.delegate(project, "T-0001", "codex:gpt-6-astra@medium", role="researcher-1")["ok"]
+    with pytest.raises(RLError) as err:
+        delegate.delegate(project, "T-0001", "codex:gpt-6-astra@medium", role="researcher-2")
+    assert err.value.code == "CONFLICT"

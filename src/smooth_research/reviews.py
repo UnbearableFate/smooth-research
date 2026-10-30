@@ -1,8 +1,9 @@
 """Review and advice tickets on one shared call mechanism, with separate packages and answer protocols.
 
-Reviews are keyed by a scope fingerprint (code, configuration with whitelisted keys removed, dependencies and
-the scope text) and reused only while it is unchanged. The reviewer comes from a different model family than
-the code's authors; when none is available the ticket stays pending or unavailable — never a fake pass.
+Code reviews are keyed by a scope fingerprint (code, configuration with whitelisted keys removed, dependencies
+and the scope text); conclusion reviews by the package built from the records behind a proposed key conclusion.
+Either is reused only while its key is unchanged. The reviewer comes from a different model family than the
+authors; when none is available the ticket stays pending or unavailable — never a fake pass.
 Advice requests are deduplicated by question, evidence version, constraints and advisor configuration.
 """
 
@@ -21,6 +22,7 @@ from .context import advice_pack, _contract
 from .research import brief
 from .store import Store, Tx
 from .util import RLError, digest_file, digest_json, now_utc, short
+from .view import _arm_table
 
 INLINE_FILE_CHARS = 60_000
 INLINE_TOTAL_CHARS = 240_000
@@ -31,6 +33,25 @@ Review the code against the method definition. For each problem give: location (
 that reproduces or demonstrates it, its impact (result_error | invalid_experiment | resource_waste |
 nonblocking), the minimal fix, and how to verify the fix. State what you checked and what you did not.
 Do not restate the package. End with exactly one ```json block:
+
+```json
+{"verdict": "pass | issues | blocking",
+ "findings": [{"location": "", "evidence": "", "impact": "", "fix": "", "verify": ""}],
+ "checked": [""], "unchecked": [""]}
+```
+"""
+
+CONCLUSION_PROTOCOL = """## What to return
+
+Check whether the records support the proposed conclusion. In particular: is each piece of evidence at the
+level it claims (diagnostic, screening, exploratory, confirmatory) given what was actually run (arms, seeds,
+results); does the conclusion stay inside the scope of that evidence (data, model, size, conditions); does a
+confirmation rest on a comparison fixed before the results (contract revisions); are engineering failures or
+failed controls counted as refutations, or one cheap failure generalized; which competing explanations are
+not ruled out; do the summaries match the recorded numbers. For each problem give: location (record id), the
+evidence, its impact (overclaim | wrong_level | out_of_scope | unruled_alternative | data_mismatch |
+nonblocking), the minimal fix (a weaker wording, a missing control, a re-run) and how to verify it. State what
+you checked and what you did not. Do not restate the package. End with exactly one ```json block:
 
 ```json
 {"verdict": "pass | issues | blocking",
@@ -251,6 +272,35 @@ def fingerprint(store: Store, files: list[str], configs: list[str], deps: list[s
     return digest_json(detail), detail
 
 
+def _eligible(store: Store, author_models: list[str]) -> list[adapters.Entry]:
+    authors = set(filter(None, (adapters.family(m) for m in author_models)))
+    rule = store.project.config["models"]["reviewer"].get("relation_to_author", "different_family")
+    return [e for e in _entries(store, "review") if rule != "different_family" or e.entry == "manual"
+            or e.family not in authors]
+
+
+def _reuse(tx: Tx, key: str, target_text: str | None, targets: list[str], author_models: list[str],
+           subject: str) -> dict | None:
+    """An answered cross-model review (pass or issues) with the same key answers this request too."""
+    for old in tx.all("Ticket", dedupe_key=key):
+        if old["kind"] == "review" and old["status"] == "answered" and old.get("verdict") in ("pass", "issues") \
+                and str(old.get("relation", "")).startswith("cross_model"):
+            rid = tx.next_id("Ticket", "RV")
+            tx.create("Ticket", {**{k: old.get(k) for k in ("question", "request_ref", "answer_ref", "requested_entry",
+                                                            "requested_model", "observed_model", "provider",
+                                                            "host_session_id", "relation", "verdict", "summary",
+                                                            "answered_at")},
+                                 "id": rid, "kind": "review", "subject": subject, "status": "answered",
+                                 "target_id": target_text, "dedupe_key": key, "author_models": list(author_models),
+                                 "reused_from": old.get("reused_from") or old["id"]})
+            for t in targets:
+                tx.link("targets", rid, t)
+            tx.event("review.reused", rid, f"{subject} key {short(key)} unchanged since {old['id']}")
+            return {"id": rid, "reused_from": old["id"], "verdict": old.get("verdict"),
+                    "summary": f"{rid} reuses {old['id']} ({old.get('verdict')}): {subject} unchanged"}
+    return None
+
+
 def request_review(store: Store, target: str | None, files: list[str], question: str, author_models: list[str],
                    configs: list[str] = (), deps: list[str] = (), ignore_keys: list[str] = (), scope: str = "",
                    diff_base: str | None = None, recheck_of: str | None = None) -> dict:
@@ -261,31 +311,16 @@ def request_review(store: Store, target: str | None, files: list[str], question:
                                  "come from a different family")
     fp, detail = fingerprint(store, files, list(configs), list(deps), list(ignore_keys), scope or question)
     authors = set(filter(None, (adapters.family(m) for m in author_models)))
-    rule = store.project.config["models"]["reviewer"].get("relation_to_author", "different_family")
-    entries = _entries(store, "review")
-    eligible = [e for e in entries if rule != "different_family" or e.entry == "manual" or e.family not in authors]
+    eligible = _eligible(store, author_models)
     with store.write() as tx:
         if target:
             tx.require(target)
-        if not recheck_of:
-            for old in tx.all("Ticket", dedupe_key=fp):
-                if old["kind"] == "review" and old["status"] == "answered" and old.get("verdict") in ("pass", "issues") \
-                        and str(old.get("relation", "")).startswith("cross_model"):
-                    rid = tx.next_id("Ticket", "RV")
-                    tx.create("Ticket", {**{k: old.get(k) for k in ("question", "request_ref", "answer_ref",
-                                                                    "requested_entry", "requested_model", "observed_model",
-                                                                    "provider", "host_session_id", "relation",
-                                                                    "verdict", "summary", "answered_at")},
-                                         "id": rid, "kind": "review", "status": "answered", "target_id": target,
-                                         "dedupe_key": fp, "author_models": list(author_models),
-                                         "reused_from": old.get("reused_from") or old["id"]})
-                    if target:
-                        tx.link("targets", rid, target)
-                    tx.event("review.reused", rid, f"scope fingerprint {short(fp)} unchanged since {old['id']}")
-                    return {"id": rid, "reused_from": old["id"], "verdict": old.get("verdict"),
-                            "summary": f"{rid} reuses {old['id']} ({old.get('verdict')}): scope fingerprint unchanged"}
+        reused = None if recheck_of else _reuse(tx, fp, target, [target] if target else [], author_models, "code")
+        if reused:
+            return reused
         rid = tx.next_id("Ticket", "RV")
-        tx.create("Ticket", {"id": rid, "kind": "review", "status": "pending" if eligible else "unavailable",
+        tx.create("Ticket", {"id": rid, "kind": "review", "subject": "code",
+                             "status": "pending" if eligible else "unavailable",
                              "target_id": target, "question": question, "dedupe_key": fp,
                              "candidates": [str(e) for e in eligible], "author_models": list(author_models),
                              "recheck_of": recheck_of,
@@ -349,6 +384,117 @@ def _review_package(store: Store, rid: str, target: str | None, question: str, s
         if diff:
             parts.append(f"\n## Diff against {diff_base}\n\n```diff\n{diff[:40000]}\n```")
     parts.append("\n" + REVIEW_PROTOCOL)
+    return "\n".join(parts)
+
+
+CONCLUSION_QUESTION = "Do the records support this conclusion, at this evidence level and within this scope?"
+
+
+def request_conclusion_review(store: Store, targets: list[str], proposal: str, author_models: list[str],
+                              question: str | None = None, recheck_of: str | None = None) -> dict:
+    """A read-only check of a key conclusion before it is recorded, built from the records behind it."""
+    if not targets:
+        raise RLError("INVALID", "name the hypotheses the conclusion is about with --target")
+    if not (proposal or "").strip():
+        raise RLError("INVALID", "state the conclusion you plan to record with --proposal")
+    if not author_models:
+        raise RLError("INVALID", "name the model(s) that drew this conclusion with --author-model; the reviewer "
+                                 "must come from a different family")
+    question = question or CONCLUSION_QUESTION
+    eligible = _eligible(store, author_models)
+    authors = set(filter(None, (adapters.family(m) for m in author_models)))
+    with store.read() as tx:
+        prior = brief(tx.require(recheck_of, "Ticket")) if recheck_of else ""
+        body = _conclusion_body(tx, store, targets, proposal, question, prior)
+    key = digest_json({"subject": "conclusion", "body": body})
+    target_text = ", ".join(targets)
+    error = None if eligible else f"no configured reviewer outside families {sorted(authors)}"
+    with store.write() as tx:
+        reused = None if recheck_of else _reuse(tx, key, target_text, targets, author_models, "conclusion")
+        if reused:
+            return reused
+        rid = tx.next_id("Ticket", "RV")
+        tx.create("Ticket", {"id": rid, "kind": "review", "subject": "conclusion",
+                             "status": "pending" if eligible else "unavailable", "target_id": target_text,
+                             "question": question, "dedupe_key": key, "candidates": [str(e) for e in eligible],
+                             "author_models": list(author_models), "recheck_of": recheck_of, "error": error})
+        for t in targets:
+            tx.link("targets", rid, t)
+    path = store.project.dir("packages") / f"{rid}.request.md"
+    path.write_text(f"# Conclusion review package {rid}\n\n{body}\n{CONCLUSION_PROTOCOL}", encoding="utf-8")
+    prep = documents.prepare(store.project, path, "review_request")
+    with store.write() as tx:
+        ref = documents.register(tx, prep)
+        tx.update(rid, {"request_ref": ref})
+        tx.event("review.requested", rid, f"conclusion on {target_text} key {short(key)}")
+    note = (f"candidates {', '.join(str(e) for e in eligible)}; run it: rl review run {rid} [--background], then "
+            f"cite it: rl decide ... --based-on {rid}"
+            if eligible else "no eligible reviewer configured: recorded unavailable (not a pass)")
+    return {"id": rid, "request_ref": ref, "summary": f"{rid} {note}"}
+
+
+def _result_line(res: dict) -> str:
+    m = res.get("manifest") or {}
+    shown = json.dumps({k: m[k] for k in ("metric", "metrics", "data_revision", "validator") if k in m},
+                       ensure_ascii=False, sort_keys=True)
+    flags = []
+    if res.get("spec_match") is False:
+        flags.append(f"differs from its RunSpec: {res.get('mismatches')}")
+    if res.get("usable_for_planned_comparison") is False:
+        flags.append("not usable for the pre-specified comparison")
+    if res["status"] == "rejected":
+        flags.append(f"rejected: {res.get('rejected_reason')}")
+    return (f"- result {res['id']}@{res['revision']} [{res['status']}] {shown[:3000]}"
+            + (f" ({'; '.join(flags)})" if flags else ""))
+
+
+def _conclusion_body(tx: Tx, store: Store, targets: list[str], proposal: str, question: str, prior: str) -> str:
+    """Everything the records hold behind the conclusion; deterministic, so its digest is the reuse key."""
+    parts = ["Independent check of a research conclusion before it is recorded. The records below are what the "
+             f"project knows about it.\n\nQuestion: {question}\n"]
+    if prior:
+        parts.append(f"This re-checks the conclusion after changes made in response to: {prior}\n")
+    parts.append(f"## Proposed conclusion\n\n{proposal.strip()}\n")
+    experiments: dict[str, dict] = {}
+    for hid in targets:
+        h = tx.require(hid, "Hypothesis")
+        lines = [f"## Hypothesis {brief(h)}\n", f"statement: {h['statement']}"]
+        lines += [f"scope: {h['scope']}"] if h.get("scope") else []
+        evidence = [(e, tx.require(e["id"])) for e in tx.inc(hid) if e["rel"] in ("supports", "challenges")]
+        lines.append("" if evidence else "\nNo evidence is linked to this hypothesis.")
+        for edge, ev in evidence:
+            bound = "" if edge.get("revision") == h["revision"] else f", bound to revision {edge.get('revision')}"
+            lines.append(f"### {ev['id']} {edge['rel']} {hid}{bound}: [{ev['evidence_level']}/{ev['validity']}] "
+                         f"{ev['summary']}")
+            lines += [f"- scope: {ev['scope']}"] if ev.get("scope") else []
+            lines += [f"- validity reason: {ev['validity_reason']}"] if ev.get("validity_reason") else []
+            for e in tx.out(ev["id"]):
+                if e["rel"] == "about":
+                    experiments.setdefault(e["id"], tx.require(e["id"]))
+                elif e["rel"] == "from_attempt":
+                    att = tx.require(e["id"])
+                    spec = tx.require(att["run_id"])["spec"]
+                    lines.append(f"- attempt {brief(att)} arm {spec.get('arm')} seed {spec.get('seed')}")
+                elif e["rel"] == "from_result":
+                    lines.append(_result_line(tx.require(e["id"])))
+        for e in tx.inc(hid, "tests"):
+            experiments.setdefault(e["id"], tx.require(e["id"]))
+        decisions = [brief(tx.require(e["id"])) for e in tx.inc(hid, "decides")]
+        lines += ["", "Decisions so far: " + ("; ".join(decisions) if decisions else "none")]
+        parts.append("\n".join(lines) + "\n")
+    for exp in experiments.values():
+        lines = [f"## Experiment {_contract(tx, store, exp)}"]
+        if exp.get("revised_after_results"):
+            lines.append("The contract was revised after results: later comparisons are exploratory.")
+        lines += _arm_table(tx, exp["id"])
+        code = [tx.require(e["id"]) for e in tx.inc(exp["id"], "targets") if e["label"] == "Ticket"]
+        code = [f"{brief(t)}" + (f" ({t['relation']})" if t.get("relation") else "")
+                for t in code if t["kind"] == "review" and t.get("subject") != "conclusion"]
+        lines.append("Code reviews: " + ("; ".join(code) if code else "none recorded"))
+        parts.append("\n".join(lines) + "\n")
+    others = [h for h in tx.all("Hypothesis") if h["id"] not in targets and h["disposition"] in ("active", "candidate")]
+    parts.append("## Other open hypotheses (competing explanations)\n\n"
+                 + ("\n".join(f"- {brief(h)}: {h['statement']}" for h in others) if others else "none") + "\n")
     return "\n".join(parts)
 
 

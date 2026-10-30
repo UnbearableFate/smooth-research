@@ -27,6 +27,9 @@ Who decided each item and when. The coordinator and executors follow this; the p
 
 ACTION_DISPOSITION = {"pause": "paused", "stop": "retired", "reopen": "active"}
 STAGE_ACTIONS = ("recommend_formal", "continue_probe", "pause", "stop")
+# Key conclusions get an independent, read-only check before anyone relies on them (rl review conclusion):
+# a hypothesis set supported or challenged, a retired route, a recommended formal experiment.
+KEY_STATUSES = ("supported", "challenged")
 
 
 # -- project --------------------------------------------------------------------------------------------------
@@ -296,6 +299,37 @@ def set_evidence(store: Store, evid: str, validity: str, reason: str) -> dict:
             "summary": f"{evid} -> {validity}" + (f"; re-check {', '.join(flagged)}" if flagged else "")}
 
 
+def _is_key(kind: str, action: str, evidence_status: str | None) -> bool:
+    return evidence_status in KEY_STATUSES or action == "stop" or (kind == "stage" and action == "recommend_formal")
+
+
+def key_hypotheses(tx: Tx, d: dict) -> list[str]:
+    """The hypotheses on which decision d states a key conclusion; empty when it states none."""
+    if not _is_key(d["kind"], d["action"], d.get("evidence_status_set")):
+        return []
+    return [e["id"] for e in tx.out(d["id"], "decides") if e["label"] == "Hypothesis"]
+
+
+def conclusion_reviews(tx: Tx, refs: list[str]) -> list[dict]:
+    tickets = [tx.require(r) for r in refs if label_of(r) == "Ticket"]
+    return [t for t in tickets if t.get("subject") == "conclusion"]
+
+
+def review_gap(reviews: list[dict]) -> str | None:
+    """Why a key conclusion has no passing independent check, or None when a cited review answered pass/issues."""
+    if any(t["status"] == "answered" and t.get("verdict") in ("pass", "issues") for t in reviews):
+        return None
+    if reviews:
+        last = reviews[-1]
+        return f"conclusion review {last['id']} is {last.get('verdict') or last['status']}, not a pass"
+    return "no conclusion review"
+
+
+def _review_hint(hyps: list[str], did: str) -> str:
+    return (f"rl review conclusion --target {','.join(hyps)} --proposal .. --author-model .., "
+            f"then rl link {did} based_on RV-x")
+
+
 def decide(store: Store, targets: list[str], action: str, rationale: str, based_on: list[str] = (),
            reopen_condition: str | None = None, kind: str = "route", implementation_ready: str | None = None,
            evidence_scope: str | None = None, set_evidence_status: str | None = None,
@@ -321,7 +355,7 @@ def decide(store: Store, targets: list[str], action: str, rationale: str, based_
         tx.create("Decision", {"id": did, "kind": kind, "action": action, "rationale": rationale,
                                "rationale_ref": documents.register(tx, prep) if prep else None,
                                "reopen_condition": reopen_condition, "implementation_ready": implementation_ready,
-                               "evidence_scope": evidence_scope})
+                               "evidence_scope": evidence_scope, "evidence_status_set": set_evidence_status})
         for rec in records:
             tx.link("decides", did, rec["id"], revision=rec.get("revision"))
             if rec["_label"] == "Hypothesis":
@@ -338,8 +372,13 @@ def decide(store: Store, targets: list[str], action: str, rationale: str, based_
                 tx.update(rec["id"], {"state": "stopped", "note": f"stopped by {did}"})
         for ref in based_on:
             tx.link("based_on", did, ref)
+        key = _is_key(kind, action, set_evidence_status)
+        hyps = [r["id"] for r in records if r["_label"] == "Hypothesis"] if key else []
+        gap = review_gap(conclusion_reviews(tx, list(based_on))) if hyps else None
         tx.event("decision", did, f"{action} {', '.join(targets)}: {rationale}")
-    return {"id": did, "summary": f"{did} {kind}:{action} on {', '.join(targets)}"}
+    note = (f"\nkey conclusion on {', '.join(hyps)}: {gap}; before relying on it: {_review_hint(hyps, did)}"
+            if gap else "")
+    return {"id": did, "conclusion_review_gap": gap, "summary": f"{did} {kind}:{action} on {', '.join(targets)}{note}"}
 
 
 def link(store: Store, source: str, rel: str, target: str, note: str | None = None, locator: str | None = None,
@@ -372,7 +411,8 @@ def _brief(rec: dict) -> str:
     if label == "Evidence":
         return f"{rec['id']} [{rec['evidence_level']}/{rec['validity']}] {rec['summary']}"
     if label == "Decision":
-        return f"{rec['id']} [{rec['kind']}:{rec['action']}] {rec['rationale'][:160]}"
+        status = f"->{rec['evidence_status_set']}" if rec.get("evidence_status_set") else ""
+        return f"{rec['id']} [{rec['kind']}:{rec['action']}{status}] {rec['rationale'][:160]}"
     if label == "Task":
         owner = f" owner={rec['owner_role']}" if rec.get("owner_role") else ""
         return f"{rec['id']} [{rec['kind']}/{rec['state']}{owner}] {rec['title']}"
@@ -380,7 +420,9 @@ def _brief(rec: dict) -> str:
         ident = rec.get("arxiv_id") or rec.get("doi") or "no-id"
         return f"{rec['id']} [{ident}, {rec['metadata_status']}] {rec['title']}"
     if label == "Ticket":
-        return f"{rec['id']} [{rec['kind']}/{rec['status']}{'/' + rec['verdict'] if rec.get('verdict') else ''}] {rec.get('question') or rec.get('target_id') or ''}"
+        kind = f"{rec['kind']}:{rec['subject']}" if rec.get("subject") == "conclusion" else rec["kind"]
+        verdict = f"/{rec['verdict']}" if rec.get("verdict") else ""
+        return f"{rec['id']} [{kind}/{rec['status']}{verdict}] {rec.get('question') or rec.get('target_id') or ''}"
     if label == "Attempt":
         return (f"{rec['id']} [{rec['execution_state']}/{rec['outcome']}/result:{rec['result_status']}"
                 f"{' NEEDS-CHECK' if rec.get('needs_check') else ''}]")
@@ -435,6 +477,15 @@ def attention(tx: Tx) -> list[str]:
     for e in tx.all("Experiment"):
         if e.get("revised_after_results"):
             items.append(f"{e['id']} contract revised after results: later comparisons are exploratory")
+    standing: dict[str, dict] = {}  # hypothesis -> the latest decision stating a key conclusion on it
+    for d in tx.all("Decision"):
+        for hid in key_hypotheses(tx, d):
+            standing[hid] = d
+    for did in sorted({d["id"] for d in standing.values()}):
+        gap = review_gap(conclusion_reviews(tx, [e["id"] for e in tx.out(did, "based_on")]))
+        if gap:
+            hyps = [h for h, d in standing.items() if d["id"] == did]
+            items.append(f"{did} key conclusion on {', '.join(hyps)}: {gap} — {_review_hint(hyps, did)}")
     return items
 
 
