@@ -17,7 +17,7 @@ from . import (adapters, context, delegate, hooks, literature, research, reviews
 from .project import find_project
 from .schema import ENUMS, LINKABLE, PAPER_ASSESSMENTS
 from .store import Store
-from .util import RLError, load_json_arg, now_utc, split_list
+from .util import RLError, load_json_arg, load_json_records, now_utc, split_list
 
 CONFLICT_CODES = {"CONFLICT", "STALE_EPOCH", "STALE_REVISION"}
 
@@ -237,17 +237,31 @@ def cmd_run(args):
         spec.update(_spec_from_flags(args))
         return runs.register(store, args.experiment, spec, args.request_id, args.run, _epoch(args))
     if a == "record":
-        obs = load_json_arg(args.observation) or {}
+        items = load_json_records(args.observation) if args.observation else [{}]
         flags = {"record_id": args.record_id, "attempt_id": args.attempt, "source": args.source,
                  "observed_at": args.observed_at, "source_sequence": args.sequence, "execution_state": args.state,
                  "outcome": args.outcome, "raw_state": args.raw_state, "source_ref": args.source_ref,
                  "correction_of": args.correction_of, "note": args.note}
-        obs.update({k: v for k, v in flags.items() if v is not None})
+        flags = {k: v for k, v in flags.items() if v is not None}
+        if len(items) > 1 and "record_id" in flags:
+            raise RLError("INVALID", "--record-id names one observation; a batch carries its ids in the records")
         if args.exec_id:
-            obs["execution_ref"] = {"kind": args.exec_kind, "executor_namespace": args.exec_namespace,
-                                    "opaque_id": args.exec_id, "locator": args.exec_locator}
-        obs.setdefault("observed_at", now_utc())
-        return runs.record(store, obs, _epoch(args))
+            flags["execution_ref"] = {"kind": args.exec_kind, "executor_namespace": args.exec_namespace,
+                                      "opaque_id": args.exec_id, "locator": args.exec_locator}
+        out = []
+        for n, obs in enumerate(items, 1):
+            obs = {"observed_at": now_utc(), **obs, **flags}
+            try:
+                out.append(runs.record(store, obs, _epoch(args)))
+            except RLError as exc:
+                if len(items) == 1:
+                    raise
+                raise RLError(exc.code, f"observation {n} of {len(items)}: {exc.message} ({n - 1} before it were "
+                                        "recorded; re-sending the batch is safe, received records are skipped)",
+                              **exc.details) from None
+        if len(out) == 1:
+            return out[0]
+        return {"records": out, "summary": "\n".join(r["summary"] for r in out)}
     if a == "import-result":
         manifest = load_json_arg(args.manifest)
         if not isinstance(manifest, dict):
@@ -562,7 +576,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--resume-from")
     s.add_argument("--param", action="append", help="k=v (JSON values allowed)")
     s = ss.add_parser("record", help="record an observation of an attempt (queries nothing)")
-    s.add_argument("--observation", help="observation JSON (inline, @file or path)")
+    s.add_argument("--observation", help="one observation, a JSON array or JSON Lines (inline, @file, path or -); "
+                   "flags fill in or override every record")
     s.add_argument("--attempt")
     s.add_argument("--source", help="tool or person that observed this, e.g. local-shell, qstat")
     s.add_argument("--observed-at", help="when the fact was observed (default: now)")
@@ -573,7 +588,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--sequence", type=int, help="the source's own sequence number, when it has one")
     s.add_argument("--record-id", help="stable id for deduplication (default: content digest)")
     s.add_argument("--exec-kind", choices=ENUMS["exec_kind"], default="local_process")
-    s.add_argument("--exec-namespace", help="e.g. host:boot-id or miyabi-g-pbs")
+    s.add_argument("--exec-namespace", help="e.g. host:<hostname>:<boot-id> or miyabi-pbs")
     s.add_argument("--exec-id", help="the external tool's full identifier")
     s.add_argument("--exec-locator")
     s.add_argument("--correction-of")
@@ -586,7 +601,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("id")
     s.add_argument("--reason", required=True)
     s = ss.add_parser("usage", help="optional resource usage; unreported is never zero")
-    s.add_argument("--accounting-ref", required=True, help="namespaced, e.g. miyabi-pbs:123456")
+    s.add_argument("--accounting-ref", required=True, help="namespaced, e.g. miyabi-pbs:3731052.opbs")
     s.add_argument("--quantity", type=float, required=True)
     s.add_argument("--unit", required=True, help="e.g. s, cpu_h, gpu_h, node_h, usd")
     s.add_argument("--resource-type", required=True, help="e.g. compute, api")

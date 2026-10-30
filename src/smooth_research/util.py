@@ -110,18 +110,39 @@ def split_list(value: str | list[str] | None) -> list[str]:
     return [part.strip() for item in items for part in item.split(",") if part.strip()]
 
 
+def _json_text(value: str) -> str:
+    try:
+        if value == "-":
+            import sys
+            return sys.stdin.read()
+        if value.startswith("@") or (not value.lstrip().startswith(("{", "[")) and Path(value).is_file()):
+            return Path(value.removeprefix("@")).read_text(encoding="utf-8")
+        return value
+    except OSError as exc:
+        raise RLError("INVALID", f"cannot read {value!r}: {exc}") from None
+
+
 def load_json_arg(value: str | None) -> Any:
     """A JSON argument is inline JSON, @file, or - for stdin."""
     if value is None:
         return None
     try:
-        if value == "-":
-            import sys
-            return json.load(sys.stdin)
-        if value.startswith("@") or (not value.lstrip().startswith(("{", "[")) and Path(value).is_file()):
-            return json.loads(Path(value.removeprefix("@")).read_text(encoding="utf-8"))
-        return json.loads(value)
+        return json.loads(_json_text(value))
     except json.JSONDecodeError as exc:
         raise RLError("INVALID", f"invalid JSON in {value[:60]!r}: {exc}") from None
-    except OSError as exc:
-        raise RLError("INVALID", f"cannot read {value!r}: {exc}") from None
+
+
+def load_json_records(value: str) -> list[dict]:
+    """Records handed over by another tool: one JSON object, a JSON array, or JSON Lines; inline, @file, path or -."""
+    text = _json_text(value)
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        try:
+            data = [json.loads(line) for line in text.splitlines() if line.strip()]
+        except json.JSONDecodeError as exc:
+            raise RLError("INVALID", f"{value[:60]!r} is neither JSON nor JSON Lines: {exc}") from None
+    data = data if isinstance(data, list) else [data]
+    if not data or not all(isinstance(item, dict) for item in data):
+        raise RLError("INVALID", f"{value[:60]!r} holds no records, or a record that is not a JSON object")
+    return data

@@ -25,8 +25,8 @@ SPEC_REQUIRED = (("arm",), ("code_ref",), ("config_digest", "config_ref"), ("dat
 COMPARED = ("config_digest", "config_ref", "data_revision", "model_revision", "metric_spec_ref", "metric",
             "environment_ref")
 FULL_COMMIT = re.compile(r"^[0-9a-f]{40}([0-9a-f]{24})?$")
-OBS_FIELDS = {"record_id", "attempt_id", "source", "observed_at", "source_sequence", "execution_state", "outcome",
-              "raw_state", "source_ref", "execution_ref", "usage", "correction_of", "note"}
+OBS_FIELDS = {"record_id", "attempt_id", "source", "observed_at", "occurred_at", "source_sequence", "execution_state",
+              "outcome", "raw_state", "source_ref", "execution_ref", "usage", "correction_of", "note"}
 STALE_AFTER_H = 6.0
 
 
@@ -195,6 +195,8 @@ def record(store: Store, obs: dict, epoch: int | None = None) -> dict:
     if obs.get("correction_of") and not obs.get("note"):
         raise RLError("INVALID", "a correction needs a note stating the evidence for it")
     parse_time(obs["observed_at"])
+    if obs.get("occurred_at"):
+        parse_time(obs["occurred_at"])  # the source's own event time; stored as evidence, never used for ordering
     content = {k: v for k, v in obs.items() if k != "record_id"}
     digest = digest_json(content)
     obs["record_id"] = obs.get("record_id") or f"OBS-{short(digest, 16)}"
@@ -225,6 +227,7 @@ def record(store: Store, obs: dict, epoch: int | None = None) -> dict:
                                   "source_sequence": obs.get("source_sequence"),
                                   "execution_state": obs["execution_state"], "outcome": obs["outcome"],
                                   "raw_state": obs.get("raw_state"), "source_ref": obs.get("source_ref"),
+                                  "occurred_at": obs.get("occurred_at"),
                                   "correction_of": obs.get("correction_of"), "note": obs.get("note"),
                                   "content_digest": digest, "effect": effect})
         if changes:
@@ -356,7 +359,7 @@ def _usage(tx: Tx, usage: dict, attempts: list[str], revise: bool = False) -> di
         if usage.get(key) in (None, ""):
             raise RLError("INVALID", f"usage needs {key} (unreported usage is simply not recorded, never zero)")
     if ":" not in usage["accounting_ref"]:
-        raise RLError("INVALID", "accounting_ref needs a namespace, e.g. miyabi-pbs:12345 or local:<host>:<run>")
+        raise RLError("INVALID", "accounting_ref needs a namespace, e.g. miyabi-pbs:3731052.opbs or local:<host>:<run>")
     body = {k: usage.get(k) for k in ("quantity", "unit", "resource_type", "hardware", "basis", "source_ref")}
     body["basis"] = body["basis"] or "reported"
     digest = digest_json({**body, "attempts": sorted(attempts)})
@@ -445,7 +448,8 @@ def show(store: Store, entity_id: str | None = None, active: bool = False) -> di
                         lines.append(f"    issue: {issue}")
                     for o in sorted(tx.all("Observation", attempt_id=att["id"]), key=lambda o: o["received_at"])[-5:]:
                         lines.append(f"    obs {o['id']} {o['observed_at']} {o['source']}: "
-                                     f"{o['execution_state']}/{o['outcome']} -> {o['effect']}")
+                                     f"{o['execution_state']}/{o['outcome']} -> {o['effect']}"
+                                     + (f" (event at {o['occurred_at']})" if o.get("occurred_at") else ""))
                     for r in tx.all("Result", attempt_id=att["id"]):
                         lines.append(f"    result {r['id']} r{r['revision']} {r['status']} spec_match={r['spec_match']} "
                                      f"({r['verification_scope']}) metrics={r['manifest'].get('metrics')}")

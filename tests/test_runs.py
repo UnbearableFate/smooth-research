@@ -139,7 +139,7 @@ def test_result_mismatch_remote_uris_partial_and_late_results(project, tmp_path)
     partial = runs.import_result(project, "ATT-0001-1", {"status": "partial", "metrics": {"acc": 0.7}}, "p1")
     complete = runs.import_result(project, "ATT-0001-1", {
         "status": "complete", "data_revision": "synthetic-v2", "metrics": {"acc": 0.8},
-        "artifacts": [{"path": "research/artifacts/m.json"}, {"uri": "remote:/ckpt.pt", "digest": "sha256:ab"}]},
+        "artifacts": [{"path": "research/artifacts/m.json"}, {"uri": "remote:/ckpt.pt", "digest": "md5:ab"}]},
         "c1")
     assert complete["mismatches"][0]["field"] == "data_revision"
     assert "remote_reference_not_read" in complete["verification_scope"]
@@ -191,3 +191,31 @@ def test_record_operations_start_query_or_retry_nothing(project, monkeypatch):
     runs.show(project, active=True)
     from smooth_research.context import resume_pack
     assert "nothing was queried" in resume_pack(project)["summary"]
+
+
+def test_a_batch_of_observations_from_an_executor_is_recorded_in_order_and_resent_safely(project, rl, tmp_path):
+    import json
+    register(project)
+    ref = {"kind": "hpc_job", "executor_namespace": "miyabi-g-pbs", "opaque_id": "123456.opbs"}
+    lines = [obs(None, "queued", at="2026-10-30T00:00:00+00:00", record_id="miyabi-g-pbs:123456.opbs:1",
+                 source_sequence=1, raw_state="Q", execution_ref=ref),
+             obs(None, "running", at="2026-10-30T00:01:00+00:00", record_id="miyabi-g-pbs:123456.opbs:2",
+                 source_sequence=2, raw_state="R", execution_ref=ref),
+             obs(None, "ended", "success", at="2026-10-30T00:03:00+00:00", record_id="miyabi-g-pbs:123456.opbs:3",
+                 source_sequence=3, raw_state="F Exit_status=0", execution_ref=ref,
+                 usage={"accounting_ref": "miyabi-pbs:123456.opbs", "quantity": 0.05, "unit": "node_h",
+                        "resource_type": "gpu_node", "hardware": "GH200", "basis": "reported"})]
+    for line in lines:
+        line.pop("attempt_id")
+    batch = tmp_path / "obs.jsonl"
+    batch.write_text("".join(json.dumps(line) + "\n" for line in lines))
+    code, out, _ = rl("run", "record", "--observation", batch, "--attempt", "ATT-0001-1")
+    assert code == 0 and out.count("applied") == 3
+    att = attempt(project)
+    assert (att["execution_state"], att["outcome"], att["last_sequence"]) == ("ended", "success", 3)
+    code, out, _ = rl("run", "record", "--observation", batch, "--attempt", "ATT-0001-1")
+    assert code == 0 and out.count("duplicate") == 3
+    lines[1]["execution_state"] = "finished"
+    batch.write_text(json.dumps([{**line, "record_id": line["record_id"] + "b"} for line in lines]))
+    code, _, err = rl("run", "record", "--observation", batch, "--attempt", "ATT-0001-1")
+    assert code == 1 and "observation 2 of 3" in err and "1 before it" in err

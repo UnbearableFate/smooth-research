@@ -30,6 +30,40 @@ fact was observed earlier). A crash is `--state ended --outcome failed`; a lost 
 `--state unknown`. A re-execution of the same RunSpec is a new attempt: `{{rl}} run register --experiment E-0001
 --run RUN-0001 --request-id <new>`. A changed config or code is a new run.
 
+## A remote or HPC run (Miyabi: pi-env-mcp and miyabi-mcp)
+
+pi-env-mcp moves files and runs remote commands; miyabi-mcp submits, queries, cancels and waits for PBS
+jobs and exports observations; `{{rl}}` only records. Write the remote root (for example
+`/work/<group>/<user>/<project>`) in `docs/plan/constraints.md`, and pass absolute remote paths: relative
+ones follow the remote shell's `cd`. Remote layout: `snapshots/<commit>/` read-only code, the Python
+environment built on the login node of the target system, `runs/<ATT>/` one directory per attempt.
+
+1. Commit the code and register with `--code-commit <full sha>`; add `--json` to get the full `spec_digest`.
+2. Stage the commit once, never edit it afterwards (PBS reads the code when the job starts, not when it is
+   submitted): `git archive --format=tar -o research/artifacts/snapshots/<sha>.tar <sha> src configs`, upload
+   that one file with pi-env-mcp to `<root>/snapshots/<sha>.tar`, then in pi-env-mcp bash:
+   `mkdir <root>/snapshots/<sha> && tar -xf <root>/snapshots/<sha>.tar -C <root>/snapshots/<sha> && chmod -R a-w <root>/snapshots/<sha>`.
+3. The job script runs code from the snapshot and writes only to `<root>/runs/$SR_ATTEMPT_ID/`, ending with
+   a `manifest.json` (format below) that carries `spec_digest`, `code_ref` and artifact digests written as
+   `blake2b:<hex>` (Python: `hashlib.blake2b(data, digest_size=32)`).
+4. Submit with miyabi-mcp `job_submit`: dry run first (show the plan when the user wants to confirm
+   submissions), then submit with `request_key: "sr:<ATT>"`, `client_ref: "<ATT>"`,
+   `env: {SR_ATTEMPT_ID, SR_SPEC_DIGEST}`, `labels: {code_commit: <sha>}` and the PBS log in `<root>/runs/<ATT>/`.
+   The same request key returns the same job, so a retried submit is safe; a new attempt needs a new key.
+5. Right after submitting and after every wake-up: `ledger_query(format="smooth-research", client_ref="<ATT>")`,
+   save the lines as `research/artifacts/<ATT>/observations.jsonl`, then
+   `{{rl}} run record --observation @research/artifacts/<ATT>/observations.jsonl`. The ended line carries the
+   measured node-hours as usage. Short jobs: `job_wait`; long ones: `watch_create`, run the returned waiter
+   in the background, end the turn, and `watch_ack` after waking up.
+6. After the end (PBS exit 0 is not application success): download `<root>/runs/<ATT>/manifest.json` and the
+   small files it lists into `research/artifacts/<ATT>/`; list checkpoints and other large files as
+   `{"uri": "miyabi:<absolute path>"}` (recorded as not read). Then `{{rl}} run import-result`.
+
+Without miyabi-mcp, submit with the miyabi skills through pi-env-mcp `bash` and record by hand:
+`{{rl}} run record --attempt ATT --source "qstat -H -f" --state ended --outcome success --raw-state "F Exit_status=0"
+--exec-kind hpc_job --exec-namespace miyabi-pbs --exec-id <full job id>`, plus `{{rl}} run usage
+--accounting-ref miyabi-pbs:<job id> ...` from `resources_used.walltime` x nodes.
+
 ## RunSpec fields
 
 `arm` (required), `code_ref` = `{commit: <full 40-hex>}` and/or `{content_digest: "blake2b:..."}` (or
@@ -39,21 +73,25 @@ fact was observed earlier). A crash is `--state ended --outcome failed`; a lost 
 `experiment_ref` and `protocol_ref` (the sealed contract). Branch names, HEAD and short hashes are refused.
 Same `--request-id` with the same content returns the earlier record; with different content it is refused.
 
-## Observation (flags or `--observation @file.json`)
+## Observation (flags, or `--observation` with one JSON object, a JSON array or JSON Lines)
 
 ```json
-{"record_id": "qstat-123456-0007", "attempt_id": "ATT-0003-1", "source": "miyabi-pbs-cmd qstat",
- "observed_at": "2026-10-30T09:12:00+09:00", "source_sequence": 7,
- "execution_state": "running", "outcome": "unknown", "raw_state": "R",
- "source_ref": "qstat -f 123456 output", "execution_ref": {"kind": "hpc_job",
- "executor_namespace": "miyabi-g-pbs", "opaque_id": "123456.opbs", "locator": "/work/.../job.sh"}}
+{"record_id": "miyabi-pbs:3731052.opbs:2", "attempt_id": "ATT-0003-1", "source": "miyabi-mcp",
+ "observed_at": "2026-10-30T05:43:10+09:00", "occurred_at": "2026-10-30T05:42:26+09:00", "source_sequence": 2,
+ "execution_state": "running", "outcome": "unknown", "raw_state": "R", "source_ref": "qstat -ll @miyabi-g1",
+ "execution_ref": {"kind": "hpc_job", "executor_namespace": "miyabi-pbs", "opaque_id": "3731052.opbs",
+                   "locator": "<miyabi-mcp record>"}}
 ```
 
 States: prepared, queued (optional), running, ended, unknown. Outcomes: success, failed, cancelled,
-unknown (only `ended` carries an outcome). The attempt's state is derived from the observations: an older
+unknown (only `ended` carries an outcome). `observed_at` is when the tool looked; `occurred_at` (optional) is
+the event time the source itself reports, kept as evidence. The attempt's state is derived from the
+observations: within one source the `source_sequence` orders them, otherwise `observed_at`; an older
 `running` never overrides a recorded end; a failed lookup after the end only adds an issue; conflicting ends
 mark the attempt for checking. Correct a wrong record explicitly with `--correction-of <record_id> --note
-"<evidence>"`. Several attempts may share one execution ref (one job running several seeds).
+"<evidence>"`. Several attempts may share one execution ref (one job running several seeds). A batch is
+recorded in order; records already received are skipped, so re-sending a whole export is safe, and flags such
+as `--attempt` fill in or override every record.
 
 ## Result manifest
 
@@ -62,7 +100,7 @@ mark the attempt for checking. Correct a wrong record explicitly with `--correct
  "code_ref": {"content_digest": "blake2b:..."}, "data_revision": "synthetic-v1 (...)",
  "metric": "test accuracy", "metrics": {"test_acc": 0.812, "train_loss": 0.41},
  "artifacts": [{"path": "research/artifacts/ATT-0001-1/metrics.json", "role": "metrics"},
-               {"uri": "miyabi:/work/.../ckpt.pt", "digest": "sha256:...", "role": "checkpoint"}],
+               {"uri": "miyabi:/work/.../ckpt.pt", "digest": "blake2b:...", "role": "checkpoint"}],
  "validator": {"name": "check_metrics.py", "passed": true, "source_ref": "stdout"}}
 ```
 
