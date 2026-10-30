@@ -1141,6 +1141,7 @@ GitHub 链接固定到本次读取的提交；外部产品文档按 2026-10-30 �
 
 - 43 项契约测试，对应 16.2 节场景：并发领取只有一个 owner、交接后旧 owner 回写被拒且产物保留、封存契约不随草稿变化、事务内异常与写进程被 SIGKILL 后无半写记录、封存中断只留下未登记对象、request_id 幂等与冲突、观测去重/乱序/unknown/矛盾与显式更正、命名空间隔离与共享外部执行、重新执行为新 attempt、结果版本不符/远程 URI/partial/迟到结果、共享用量只计一次且未报告不记零、记录操作不启动进程或模型调用、审查范围指纹复用与关键变化重审、无合格 reviewer 时如实记为不可用、阳性对照失败只作诊断、导出后恢复并生成恢复包；另有宿主适配（伪造的 claude/codex CLI）与构建检查。
 - 端到端：在 herdr 新 tab 中启动 Claude Code 2.1.314（Sonnet 5.5，effort medium），`--plugin-dir dist/claude/plugins/smooth-research` 加载插件，用本计划的小型研究（标签噪声下的权重衰减）跑完一次研究循环。结果见 21.6。
+- 其后增至 51 项：观测的批量导入与 `occurred_at`、miyabi-mcp 导出契约（`tests/test_executor_contract.py`，见 21.7）等。Miyabi 上的端到端测试见 21.8。
 
 ### 21.6 端到端测试结果（2026-10-30）
 
@@ -1155,3 +1156,71 @@ GitHub 链接固定到本次读取的提交；外部产品文档按 2026-10-30 �
 第二轮（插件更新后的复审，约 1.3 分钟）：`/reload-plugins` 后，构建号变化，agent 再次 `rl setup`。随后以 `--recheck-of RV-0002` 发起后台跨模型审查 RV-0004：实际模型为 gpt-6-astra（由 rollout 核实），关系为 cross_model，结论 `issues`，1 条真实的非阻塞发现（早停时 `train_loss` 与返回权重不一致）。agent 修复了代码，以 D-0006 记录影响范围与不重跑的理由，并写明审查只覆盖了静态阅读。
 
 其他：报告中逐个 attempt 的长列表改为按 arm 汇总的表格（描述性均值，4 位有效数字）。Codex 适配在隔离的 `CODEX_HOME` 中完成了 marketplace 添加、插件安装和 SessionStart hook 执行，hook 读到了 Claude 会话写入的同一份记录；Codex 的模型调用适配由两次真实审查验证。尚未在交互式 Codex 会话中跑完整的研究循环。
+
+### 21.7 Miyabi 集成：与 pi-env-mcp、miyabi-mcp 的分工（2026-10-30）
+
+与 pi-env-mcp、miyabi-mcp 的开发会话协商后确定。miyabi-mcp 一侧的权威说明在 miyabi-toolbox 的 `miyabi-mcp/DESIGN.md` 第 11 节。
+
+| 组件 | 负责 | 不负责 |
+| --- | --- | --- |
+| pi-env-mcp | 通用传输：exec、文件、终端、后台进程、上传下载 | 本地与远端项目的映射、同步（用户决定保持简单） |
+| miyabi-mcp | PBS 语义：提交、查询、取消、作业台账、用量、通知，以及导出为 Observation | 研究记录 |
+| smooth-research | 研究记录：RunSpec、attempt、绑定、观测排序与去重、结果、证据 | 调度、SSH、轮询 |
+
+接口要点：
+- **观测。** 导出是 miyabi-mcp 已存事件的纯函数，JSON Lines 格式。
+  - miyabi-mcp 返回一条本机可执行的 `export_command`，输出写入文件后交给 `rl run record --observation @file`，记录不经过模型转抄。
+  - `rl run record` 接受单个对象、数组或 JSON Lines，按 `record_id` 去重，所以整批重发是安全的。
+  - 新增字段 `occurred_at`，记录来源自己报告的事件时间。它只作证据，不参与排序。
+- **标识。** 命名空间是 `miyabi-pbs`，`record_id` 为 `miyabi-pbs:<job>:<seq>`。
+- **用量。** 单位不同的用量不相加：
+  - G 节点记为 `node_hours`，hardware 为 `GH200`；
+  - MIG 实例记为 `mig_instance_hours`，hardware 为 `GH200 MIG 2g.24gb`；
+  - TOKEN 用单独的 `accounting_ref`。
+- **提交。** 参数如下：
+  - `request_key` 为 `sr:<ATT>`，`client_ref` 为 ATT（导出时成为 `attempt_id`），`name` 为 ATT；
+  - `env` 带 `SR_ATTEMPT_ID` 和 `SR_SPEC_DIGEST`，`labels.code_commit` 记录提交的代码版本；
+  - 只能经 miyabi-mcp 提交和取消作业。
+- **代码与输出。** 远端根目录就是 miyabi-mcp 的项目目录，一个研究项目对应一个，不共用。
+  - 每个 commit 先 `git archive`，再上传，在远端解压为只读的 `snapshots/<sha>/`；
+  - 作业脚本和 workdir 都放在快照里，输出写到 `runs/<ATT>/`，以 blake2b 清单结尾。
+- **等待。** 一起分析的一批作业用一个通知组，在后台运行 listener。收到通知后先 `notify_ack`，再导出并记录。
+- **契约测试。** 用两份真实数据检查导出能被 `rl` 正确接收：
+  - 作业 3731052 的 `qstat -H -f` 构造的样例；
+  - miyabi-mcp 五个 debug-mig 演练作业的真实导出，覆盖成功、运行中 qdel（271）、HELD 时删除（FINISH no-start）、超过 walltime（−29）。
+
+### 21.8 Miyabi 端到端测试结果（2026-10-30）
+
+**环境**
+- herdr tab `sr-miyabi-e2e`：Claude Code 2.1.314，Sonnet 5.5，effort medium，auto 权限模式。
+- MCP 有两个：miyabi-g（pi-env-mcp），以及 miyabi-pbs（miyabi-mcp v0.1 e5ea326，经 ssh 在登录节点运行）。只预先放行了 miyabi-pbs。
+- 测试项目是 `/home/yu/workspace/sr-e2e/miyabi-bf16`，问题是 2 层 transformer 学模加法（p=97）时，bf16 autocast 与 fp32 有何差别。
+- 远端项目目录是 `/work/xg24i002/x10041/tmp/sr-e2e-bf16`。miyabi-mcp 的 policy 按用户授权设定：只用 debug-mig，每个作业 1 个 MIG 实例、walltime 不超过 10 分钟，24 小时内最多 6 个作业、申请量合计不超过 1.0 实例·小时。
+
+**过程**（约 10 分钟）
+1. 提交代码 1b1adbb，登记 3 个 RunSpec。每个 seed 一个作业，作业内依次跑三个臂：fp32、bf16 autocast、fp32 加 bf16 舍入的梯度。
+2. 上传代码快照，在远端解压并设为只读。
+3. seed 0 先 dry-run 再提交，用 `job_wait` 试跑。
+4. 提交 seed 1、2，三个作业组成通知组（expected 3），在后台运行 listener。
+5. 最后一个作业结束约 3 分钟后收到组通知。agent 依次执行 `notify_ack`、`export_command`、`rl run record`，下载清单并 `import-result`，再登记证据、做决策（`continue_probe`），生成报告。
+
+**核对**（独立进行）
+- 3 个作业都以 Exit_status=0 结束。申请 0.4、实际使用 0.155834 MIG 实例·小时，没有台账外的作业。
+- 本地的 observations.jsonl 与重新导出的结果逐字节一致。`rl` 中有 9 条观测，用量与台账一致。
+- `rl doctor` 无问题。
+
+**研究结果**（screening）
+- 速度：bf16 每步 9.2 ms，fp32 为 17.6 ms，快 1.91 倍。
+- 准确率：bf16 三个 seed 都是 1.000。fp32 的 seed 1 为 0.932，原因是第 4000 步时还没学完。因此未达到"差距小于 1 pp"的严格判据，但这不是 bf16 有害的证据。
+
+**发现并在 smooth-research 修复的问题**（a35ac78）
+- **manifest 字段。** 作业写的 metric 文字与 RunSpec 不同，结果都被标为不能用于计划比较。现在流程要求逐字复制 RunSpec 字段或者省略，导入提示也写明了这一点。
+- **重复记录用量。** 导出已带用量，agent 又用 `rl run usage` 手工记录，被判为 CONFLICT。现在流程说明不要重复记录，冲突信息会显示已记录的值。
+- **快照带入缓存。** 代码快照里带进了 `__pycache__`。现在 `rl init` 会在 `src/` 写入 `.gitignore`。
+- **可变代码警告。** 默认 workdir 是可写的项目目录，触发了 miyabi-mcp 的 code.mutable 警告。现在脚本和 workdir 都指向只读快照，已用 dry-run 确认不再警告。
+
+**转交 miyabi-mcp 的问题**
+- 默认 workdir 下 code.mutable 误报；
+- 未给作业名时使用脚本文件名；
+- 确认通知后 `notify_list` 的 daemons 为空；
+- 申请量求和的取整。
