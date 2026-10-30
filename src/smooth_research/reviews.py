@@ -253,7 +253,7 @@ def fingerprint(store: Store, files: list[str], configs: list[str], deps: list[s
 
 def request_review(store: Store, target: str | None, files: list[str], question: str, author_models: list[str],
                    configs: list[str] = (), deps: list[str] = (), ignore_keys: list[str] = (), scope: str = "",
-                   diff_base: str | None = None, recheck_of: str | None = None, epoch: int | None = None) -> dict:
+                   diff_base: str | None = None, recheck_of: str | None = None) -> dict:
     if not files:
         raise RLError("INVALID", "name the code under review with --files")
     if not author_models:
@@ -264,7 +264,7 @@ def request_review(store: Store, target: str | None, files: list[str], question:
     rule = store.project.config["models"]["reviewer"].get("relation_to_author", "different_family")
     entries = _entries(store, "review")
     eligible = [e for e in entries if rule != "different_family" or e.entry == "manual" or e.family not in authors]
-    with store.write(epoch) as tx:
+    with store.write() as tx:
         if target:
             tx.require(target)
         if not recheck_of:
@@ -362,7 +362,7 @@ def _evidence_version(tx: Tx) -> str:
     return digest_json({"evidence": state, "hypotheses": hyps})
 
 
-def prepare_advice(store: Store, question: str, target: str | None = None, epoch: int | None = None) -> dict:
+def prepare_advice(store: Store, question: str, target: str | None = None) -> dict:
     constraints = store.project.abs(store.project.config["constraints_ref"])
     with store.read() as tx:
         if target:
@@ -376,7 +376,7 @@ def prepare_advice(store: Store, question: str, target: str | None = None, epoch
                         "summary": f"{old['id']} already asks this with the same evidence ({old['status']}); "
                                    "send only new data, or wait for new evidence"}
     pack = advice_pack(store, target, question)
-    with store.write(epoch) as tx:
+    with store.write() as tx:
         aid = tx.next_id("Ticket", "AD")
         tx.create("Ticket", {"id": aid, "kind": "advice", "status": "pending", "target_id": target,
                              "question": question, "dedupe_key": key,

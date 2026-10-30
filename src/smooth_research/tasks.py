@@ -1,4 +1,4 @@
-"""Sessions, coordinator epochs, tasks with owner epochs, and the persistent message index.
+"""Sessions, tasks and the persistent message index.
 
 Chat notifications are only notices; the versioned task package is what a session resumes from. Every task
 transition writes one message (TASK, RESULT, WAIT, BLOCKED, HANDOFF, CANCEL) so a role can read its inbox
@@ -21,31 +21,22 @@ OPEN_STATES = ("ready", "active", "waiting", "blocked", "delivered")
 def start_session(store: Store, role: str, host: str, host_session_id: str | None = None,
                   model_requested: str | None = None, model_observed: str | None = None,
                   effort: str | None = None, worktree: str | None = None) -> dict:
-    """Register a session. A coordinator session takes over: the epoch increments and earlier ones are superseded."""
+    """Register a session. A new coordinator session marks the earlier active ones superseded."""
     with store.write() as tx:
         if host_session_id:
             for s in tx.all("Session", host_session_id=host_session_id, status="active"):
                 if s["role_id"] == role:
-                    epoch = tx.meta()["coordinator_epoch"]
-                    if role != COORDINATOR or s.get("epoch") == epoch:
-                        return {"id": s["id"], "epoch": s.get("epoch"), "reused": True,
-                                "summary": f"{s['id']} already registered as {role}"
-                                           + (f", coordinator epoch {epoch}" if role == COORDINATOR else "")}
+                    return {"id": s["id"], "reused": True, "summary": f"{s['id']} already registered as {role}"}
         sid = tx.next_id("Session")
-        epoch = None
         if role == COORDINATOR:
-            epoch = tx.meta()["coordinator_epoch"] + 1
-            tx.set_meta(coordinator_epoch=epoch)
             for s in tx.all("Session", status="active"):
                 if s["role_id"] == COORDINATOR:
                     tx.update(s["id"], {"status": "superseded", "ended_at": tx.meta()["updated_at"]})
         tx.create("Session", {"id": sid, "role_id": role, "host": host, "host_session_id": host_session_id,
                               "model_requested": model_requested, "model_observed": model_observed,
-                              "effort": effort, "epoch": epoch, "worktree": worktree, "status": "active"})
+                              "effort": effort, "worktree": worktree, "status": "active"})
         tx.event("session.start", sid, f"{role} on {host} {model_observed or model_requested or 'model unverified'}")
-    note = (f"; coordinator epoch {epoch} — pass --epoch {epoch} on coordinator writes"
-            if epoch is not None else "")
-    return {"id": sid, "epoch": epoch, "summary": f"{sid} {role} on {host}{note}"}
+    return {"id": sid, "summary": f"{sid} {role} on {host}"}
 
 
 def end_session(store: Store, sid: str) -> dict:
@@ -62,10 +53,9 @@ def end_session(store: Store, sid: str) -> dict:
 
 def _message(tx: Tx, type_: str, from_role: str, to_role: str, task_id: str | None = None,
              next_action: str | None = None, document_refs: list[str] = (), text: str | None = None,
-             owner_epoch: int | None = None, base_revision: int | None = None, in_reply_to: str | None = None,
-             message_id: str | None = None) -> dict:
+             base_revision: int | None = None, in_reply_to: str | None = None, message_id: str | None = None) -> dict:
     body = {"type": type_, "from": from_role, "to": to_role, "task": task_id, "next": next_action,
-            "docs": list(document_refs), "text": text, "epoch": owner_epoch, "reply": in_reply_to}
+            "docs": list(document_refs), "text": text, "reply": in_reply_to}
     digest = digest_json(body)
     if message_id:
         existing = tx.get(message_id, "Message")
@@ -78,9 +68,8 @@ def _message(tx: Tx, type_: str, from_role: str, to_role: str, task_id: str | No
     tx.set_meta(message_seq=seq)
     return tx.create("Message", {"id": mid, "seq": seq, "type": type_, "task_id": task_id, "from_role": from_role,
                                  "to_role": to_role, "document_refs": list(document_refs) or None,
-                                 "base_revision": base_revision, "owner_epoch": owner_epoch,
-                                 "in_reply_to": in_reply_to, "next_action": next_action, "text": text,
-                                 "digest": digest})
+                                 "base_revision": base_revision, "in_reply_to": in_reply_to,
+                                 "next_action": next_action, "text": text, "digest": digest})
 
 
 def send(store: Store, type_: str, from_role: str, to_role: str, text: str | None = None,
@@ -128,13 +117,13 @@ def inbox(store: Store, role: str, ack: bool = False, include_all: bool = False)
 
 def create_task(store: Store, title: str, kind: str, targets: list[str] = (), request: str | None = None,
                 to_role: str | None = None, next_action: str | None = None, depends_on: list[str] = (),
-                from_role: str = COORDINATOR, epoch: int | None = None) -> dict:
+                from_role: str = COORDINATOR) -> dict:
     prep = documents.prepare(store.project, request, "task_request") if request else None
-    with store.write(epoch) as tx:
+    with store.write() as tx:
         tid = tx.next_id("Task")
         ref = documents.register(tx, prep) if prep else None
         tx.create("Task", {"id": tid, "title": title, "kind": kind, "state": "ready", "to_role": to_role,
-                           "owner_epoch": 0, "request_ref": ref, "next_action": next_action, "revision": 1})
+                           "request_ref": ref, "next_action": next_action, "revision": 1})
         for target in targets:
             tx.link("targets", tid, target)
         for dep in depends_on:
@@ -147,54 +136,34 @@ def create_task(store: Store, title: str, kind: str, targets: list[str] = (), re
 
 
 def claim(store: Store, tid: str, role: str, session: str | None = None) -> dict:
-    """Exactly one claimant wins; the epoch increments on every new ownership."""
+    """Exactly one claimant wins."""
     with store.write() as tx:
         task = tx.require(tid, "Task")
         if task["state"] != "ready" or task.get("owner_role"):
-            raise RLError("CONFLICT", f"{tid} is {task['state']} (owner {task.get('owner_role') or 'none'} "
-                                      f"epoch {task['owner_epoch']}); it cannot be claimed now",
-                          current={k: task.get(k) for k in ("state", "owner_role", "owner_session", "owner_epoch",
-                                                            "next_action")})
+            raise RLError("CONFLICT", f"{tid} is {task['state']} (owner {task.get('owner_role') or 'none'}); "
+                                      "it cannot be claimed now",
+                          current={k: task.get(k) for k in ("state", "owner_role", "owner_session", "next_action")})
         open_deps = [d["id"] for d in tx.out(tid, "depends_on")
                      if d["label"] == "Task" and tx.require(d["id"])["state"] not in ("delivered", "accepted")]
-        epoch = task["owner_epoch"] + 1
-        tx.update(tid, {"state": "active", "owner_role": role, "owner_session": session, "owner_epoch": epoch,
+        tx.update(tid, {"state": "active", "owner_role": role, "owner_session": session,
                         "revision": task["revision"] + 1})
-        tx.event("task.claimed", tid, f"{role} epoch {epoch}")
+        tx.event("task.claimed", tid, role)
     warn = f"; waiting dependencies: {', '.join(open_deps)}" if open_deps else ""
-    return {"id": tid, "owner_epoch": epoch,
-            "summary": f"{tid} claimed by {role} with owner epoch {epoch} — pass --owner-epoch {epoch}{warn}"}
+    return {"id": tid, "summary": f"{tid} claimed by {role}{warn}"}
 
 
-def _owned(tx: Tx, tid: str, owner_epoch: int, preps: list) -> tuple[dict, list[str]]:
-    """Check ownership inside the write; a stale owner's documents are still sealed and reported, not applied."""
-    task = tx.require(tid, "Task")
-    refs = [documents.register(tx, p) for p in preps]
-    if owner_epoch != task["owner_epoch"] or not task.get("owner_role"):
-        raise RLError("STALE_EPOCH", f"{tid} is owned by {task.get('owner_role') or 'nobody'} at epoch "
-                                     f"{task['owner_epoch']}, not epoch {owner_epoch}; your write was not applied",
-                      kept_documents=refs, current_state=task["state"])
-    return task, refs
-
-
-def _stale_safe(store: Store, tid: str, owner_epoch: int, docs: list[str], doc_type: str, fn) -> dict:
+def _owner_write(store: Store, tid: str, docs: list[str], doc_type: str, fn) -> dict:
+    """Seal the documents and apply fn in one write; only a claimed task takes owner updates."""
     preps = [documents.prepare(store.project, d, doc_type) for d in docs]
-    try:
-        with store.write() as tx:
-            task, refs = _owned(tx, tid, owner_epoch, preps)
-            return fn(tx, task, refs)
-    except RLError as exc:
-        if exc.code != "STALE_EPOCH" or not preps:
-            raise
-        with store.write() as tx:  # keep the late worker's products for the coordinator to inspect
-            refs = [documents.register(tx, p) for p in preps]
-            _message(tx, "NOTE", f"stale-owner-epoch-{owner_epoch}", COORDINATOR, tid,
-                     "inspect late products from a superseded owner", refs, "write rejected: stale owner epoch")
-            tx.event("task.stale_write", tid, f"epoch {owner_epoch} rejected; kept {', '.join(refs)}")
-        raise
+    with store.write() as tx:
+        task = tx.require(tid, "Task")
+        if not task.get("owner_role"):
+            raise RLError("CONFLICT", f"{tid} is {task['state']} and has no owner; claim it first "
+                                      f"(rl task claim {tid} --role <role>)", current_state=task["state"])
+        return fn(tx, task, [documents.register(tx, p) for p in preps])
 
 
-def progress(store: Store, tid: str, owner_epoch: int, state: str, from_role: str, summary: str | None = None,
+def progress(store: Store, tid: str, state: str, from_role: str, summary: str | None = None,
              outputs: list[str] = (), next_action: str | None = None, attempts: list[str] = (),
              reason: str | None = None) -> dict:
     """deliver (RESULT), wait (WAIT on attempts), block (BLOCKED with a reason) or resume work (active)."""
@@ -219,29 +188,29 @@ def progress(store: Store, tid: str, owner_epoch: int, state: str, from_role: st
         if mtype:
             _message(tx, mtype, from_role, COORDINATOR, tid, next_action, refs,
                      summary or (f"waiting on {', '.join(attempts)}" if attempts else reason),
-                     owner_epoch=owner_epoch, base_revision=changes["revision"])
+                     base_revision=changes["revision"])
         tx.event(f"task.{state}", tid, summary or next_action or reason or "")
         return {"id": tid, "outputs": refs, "summary": f"{tid} -> {state}" + (f" outputs {', '.join(refs)}" if refs else "")}
 
-    return _stale_safe(store, tid, owner_epoch, list(outputs), "task_output", apply)
+    return _owner_write(store, tid, list(outputs), "task_output", apply)
 
 
-def handoff(store: Store, tid: str, owner_epoch: int, doc: str, from_role: str, to_role: str | None = None) -> dict:
-    """Seal the handoff, release ownership; the next claim gets a higher epoch, so the old owner cannot write."""
+def handoff(store: Store, tid: str, doc: str, from_role: str, to_role: str | None = None) -> dict:
+    """Seal the handoff and release ownership; the task is ready to claim again."""
     def apply(tx: Tx, task: dict, refs: list[str]) -> dict:
         tx.update(tid, {"state": "ready", "owner_role": None, "owner_session": None, "handoff_ref": refs[0],
                         "revision": task["revision"] + 1, "to_role": to_role or task.get("to_role")})
         _message(tx, "HANDOFF", from_role, to_role or task.get("to_role") or COORDINATOR, tid,
-                 "read the handoff, verify code and run records, then continue", refs, owner_epoch=owner_epoch)
+                 "read the handoff, verify code and run records, then continue", refs)
         tx.event("task.handoff", tid, refs[0])
         return {"id": tid, "handoff_ref": refs[0], "summary": f"{tid} handed off ({refs[0]}); ready to claim"}
 
-    return _stale_safe(store, tid, owner_epoch, [doc], "handoff", apply)
+    return _owner_write(store, tid, [doc], "handoff", apply)
 
 
-def review_task(store: Store, tid: str, verdict: str, reason: str, epoch: int | None = None) -> dict:
+def review_task(store: Store, tid: str, verdict: str, reason: str) -> dict:
     """Coordinator acceptance or stop. Stopping a research task does not cancel any external execution."""
-    with store.write(epoch) as tx:
+    with store.write() as tx:
         task = tx.require(tid, "Task")
         if verdict == "accept" and task["state"] != "delivered":
             raise RLError("INVALID", f"{tid} is {task['state']}; only delivered work can be accepted")

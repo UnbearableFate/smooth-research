@@ -30,8 +30,7 @@ evidence, decisions, reviews, literature); it never runs, polls or cancels exper
    continue from the first unfinished action. Otherwise `{{rl}} init --plan <plan.md>` (the plan is copied to
    `docs/plan/original.md` and sealed; it is never edited afterwards).
 2. Register this session: `{{rl}} session start --role coordinator --host {{host}} --host-session-id {{session_id}}
-   --model-observed <your model id>`. Pass `--epoch <n>` on coordinator writes
-   (decide, task create/accept/stop, hypothesis revise); a stale epoch means another session took over.
+   --model-observed <your model id>`.
 3. Fill `docs/plan/constraints.md` from the plan and the user: resource ceiling, allowed environments,
    models. Ask the user only about gaps that change the goal or the budget; fill low-risk details yourself
    and say so.
@@ -91,7 +90,7 @@ controls) · E2 minimal real model · E3 limited confirmation (pre-fixed compari
 
 - Split work into tasks only when it can proceed independently: `{{rl}} task create --title .. --kind ..
   --targets E-x --to-role researcher --next-action ..`. Owners `claim`, then `deliver`, `wait`, `block` or
-  `handoff` with `--owner-epoch`; you `accept` or `stop`. See host.md for native subagents and `{{rl}} delegate`.
+  `handoff`; you `accept` or `stop`. See host.md for native subagents and `{{rl}} delegate`.
 - Stuck between explanations after valid tests, or before a large cost step: skill `research-advise`.
 - `{{rl}} paper search ..`, `{{rl}} paper add <arXiv id|DOI> --fetch`, `{{rl}} paper link H-x P-y --relation nearest_work
   --assessment checked --locator "Sec. 3.2"`. A search hit is not a checked claim.

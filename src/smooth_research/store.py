@@ -1,7 +1,7 @@
 """The single store entry point: short serialized write transactions over an embedded LatticeDB graph.
 
-Every write runs under an exclusive process lock and one database transaction that checks epochs, revisions,
-references and required fields, updates records, relations and the event log, bumps data_version and commits.
+Every write runs under an exclusive process lock and one database transaction that checks revisions, references
+and required fields, updates records, relations and the event log, bumps data_version and commits.
 An exception anywhere rolls the whole transaction back.
 """
 
@@ -266,7 +266,7 @@ class Store:
             with db.write() as txn:
                 stamp = now_utc()
                 txn.create_node(labels=["Meta"], properties={
-                    "schema_version": SCHEMA_VERSION, "data_version": 0, "coordinator_epoch": 0,
+                    "schema_version": SCHEMA_VERSION, "data_version": 0,
                     "created_at": stamp, "updated_at": stamp, "title": title or project.root.name})
                 txn.commit()
 
@@ -324,15 +324,11 @@ class Store:
             yield tx
 
     @contextmanager
-    def write(self, coordinator_epoch: int | None = None) -> Iterator[Tx]:
-        """One atomic write. A given coordinator_epoch is checked inside the same transaction as the write."""
+    def write(self) -> Iterator[Tx]:
+        """One atomic write: everything inside commits together or not at all."""
         with self._lock(exclusive=True), self._open(write=True) as db, db.write() as txn:
             tx = Tx(txn, True, self.actor)
             meta = self._check_schema(tx)
-            if coordinator_epoch is not None and coordinator_epoch != meta.get("coordinator_epoch"):
-                raise RLError("STALE_EPOCH", f"coordinator epoch {coordinator_epoch} is no longer current "
-                                             f"(current {meta.get('coordinator_epoch')}); this session lost "
-                                             "coordination ownership. Read `rl resume` before acting.")
             yield tx
             tx.set_meta(data_version=meta["data_version"] + 1, updated_at=now_utc())
             txn.commit()

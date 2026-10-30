@@ -92,10 +92,9 @@ def init_project(root: Path, plan: str | None = None, title: str | None = None) 
 
 def add_hypothesis(store: Store, title: str, statement: str, scope: str | None = None,
                    disposition: str = "active", derived_from: list[str] = (), combines: list[str] = (),
-                   motivated_by: list[str] = (), origin: str | None = None, statement_file: str | None = None,
-                   epoch: int | None = None) -> dict:
+                   motivated_by: list[str] = (), origin: str | None = None, statement_file: str | None = None) -> dict:
     prep = documents.prepare(store.project, statement_file, "hypothesis") if statement_file else None
-    with store.write(epoch) as tx:
+    with store.write() as tx:
         hid = tx.next_id("Hypothesis")
         tx.create("Hypothesis", {"id": hid, "title": title, "statement": statement, "scope": scope,
                                  "statement_ref": documents.register(tx, prep) if prep else None,
@@ -110,9 +109,9 @@ def add_hypothesis(store: Store, title: str, statement: str, scope: str | None =
 
 def revise_hypothesis(store: Store, hid: str, reason: str, statement: str | None = None, scope: str | None = None,
                       title: str | None = None, base_revision: int | None = None,
-                      statement_file: str | None = None, epoch: int | None = None) -> dict:
+                      statement_file: str | None = None) -> dict:
     prep = documents.prepare(store.project, statement_file, "hypothesis") if statement_file else None
-    with store.write(epoch) as tx:
+    with store.write() as tx:
         h = tx.require(hid, "Hypothesis")
         if base_revision is not None and base_revision != h["revision"]:
             raise RLError("STALE_REVISION", f"{hid} is at revision {h['revision']}, not {base_revision}",
@@ -137,8 +136,8 @@ def revise_hypothesis(store: Store, hid: str, reason: str, statement: str | None
 
 
 def set_hypothesis(store: Store, hid: str, reason: str, evidence_status: str | None = None,
-                   disposition: str | None = None, rechecked: bool = False, epoch: int | None = None) -> dict:
-    with store.write(epoch) as tx:
+                   disposition: str | None = None, rechecked: bool = False) -> dict:
+    with store.write() as tx:
         tx.require(hid, "Hypothesis")
         changes = {k: v for k, v in (("evidence_status", evidence_status), ("disposition", disposition)) if v}
         if rechecked:
@@ -155,10 +154,10 @@ CONTRACT_FIELDS = ("question", "intervention", "comparator", "metric", "scope", 
 
 def add_experiment(store: Store, title: str, question: str, hypotheses: list[str], stage: str | None = None,
                    compared_with: list[str] = (), code_from: str | None = None, depends_on: list[str] = (),
-                   epoch: int | None = None, **contract: str | None) -> dict:
+                   **contract: str | None) -> dict:
     if not hypotheses:
         raise RLError("INVALID", "an experiment tests at least one hypothesis (--hypotheses H-0001)")
-    with store.write(epoch) as tx:
+    with store.write() as tx:
         eid = tx.next_id("Experiment")
         path = store.project.dir("experiments", "docs") / f"{eid}.md"
         refs = []
@@ -220,9 +219,9 @@ def seal_contract(tx: Tx, eid: str, prep: documents.Prepared, project: Project) 
     return f"{eid}@{changes['revision']}"
 
 
-def seal_experiment(store: Store, eid: str, epoch: int | None = None) -> dict:
+def seal_experiment(store: Store, eid: str) -> dict:
     prep = prepare_contract(store, eid)
-    with store.write(epoch) as tx:
+    with store.write() as tx:
         ref = seal_contract(tx, eid, prep, store.project)
         exp = tx.require(eid)
     flag = " (revised after results: exploratory, not pre-specified)" if exp.get("revised_after_results") else ""
@@ -245,10 +244,10 @@ def _front_matter(path: Path) -> dict:
 def add_evidence(store: Store, summary: str, level: str, validity: str = "pending", scope: str | None = None,
                  supports: list[str] = (), challenges: list[str] = (), attempts: list[str] = (),
                  results: list[str] = (), experiment: str | None = None, artifacts: list[str] = (),
-                 doc: str | None = None, epoch: int | None = None) -> dict:
+                 doc: str | None = None) -> dict:
     prep = documents.prepare(store.project, doc, "evidence") if doc else None
     warnings = []
-    with store.write(epoch) as tx:
+    with store.write() as tx:
         for res_id in results:
             res = tx.require(res_id, "Result")
             if not res.get("usable_for_planned_comparison", True):
@@ -278,9 +277,9 @@ def add_evidence(store: Store, summary: str, level: str, validity: str = "pendin
                        + (f" (challenges {', '.join(challenges)})" if challenges else "")}
 
 
-def set_evidence(store: Store, evid: str, validity: str, reason: str, epoch: int | None = None) -> dict:
+def set_evidence(store: Store, evid: str, validity: str, reason: str) -> dict:
     """Retraction marks only what actually depends on this evidence for re-checking."""
-    with store.write(epoch) as tx:
+    with store.write() as tx:
         ev = tx.require(evid, "Evidence")
         tx.update(evid, {"validity": validity, "validity_reason": reason})
         flagged = []
@@ -300,7 +299,7 @@ def set_evidence(store: Store, evid: str, validity: str, reason: str, epoch: int
 def decide(store: Store, targets: list[str], action: str, rationale: str, based_on: list[str] = (),
            reopen_condition: str | None = None, kind: str = "route", implementation_ready: str | None = None,
            evidence_scope: str | None = None, set_evidence_status: str | None = None,
-           rationale_file: str | None = None, epoch: int | None = None) -> dict:
+           rationale_file: str | None = None) -> dict:
     if not targets:
         raise RLError("INVALID", "a decision targets at least one hypothesis, experiment or task")
     if action == "pause" and not reopen_condition:
@@ -311,7 +310,7 @@ def decide(store: Store, targets: list[str], action: str, rationale: str, based_
         if not implementation_ready or not evidence_scope:
             raise RLError("INVALID", "a stage delivery records --implementation-ready and --evidence-scope separately")
     prep = documents.prepare(store.project, rationale_file, "decision") if rationale_file else None
-    with store.write(epoch) as tx:
+    with store.write() as tx:
         records = [tx.require(t, "Hypothesis", "Experiment", "Task") for t in targets]
         for rec in records:
             if rec["_label"] == "Hypothesis" and rec["disposition"] in ("paused", "retired") \
@@ -322,7 +321,7 @@ def decide(store: Store, targets: list[str], action: str, rationale: str, based_
         tx.create("Decision", {"id": did, "kind": kind, "action": action, "rationale": rationale,
                                "rationale_ref": documents.register(tx, prep) if prep else None,
                                "reopen_condition": reopen_condition, "implementation_ready": implementation_ready,
-                               "evidence_scope": evidence_scope, "coordinator_epoch": tx.meta()["coordinator_epoch"]})
+                               "evidence_scope": evidence_scope})
         for rec in records:
             tx.link("decides", did, rec["id"], revision=rec.get("revision"))
             if rec["_label"] == "Hypothesis":
@@ -344,10 +343,10 @@ def decide(store: Store, targets: list[str], action: str, rationale: str, based_
 
 
 def link(store: Store, source: str, rel: str, target: str, note: str | None = None, locator: str | None = None,
-         assessment: str | None = None, epoch: int | None = None) -> dict:
+         assessment: str | None = None) -> dict:
     if rel not in LINKABLE:
         raise RLError("INVALID", f"relation must be one of {', '.join(LINKABLE)}")
-    with store.write(epoch) as tx:
+    with store.write() as tx:
         source_rec, target_rec = tx.require(source), tx.require(target)
         props = {"note": note, "locator": locator, "assessment": assessment}
         if RELATIONS[rel].revision_bound:
@@ -375,7 +374,7 @@ def _brief(rec: dict) -> str:
     if label == "Decision":
         return f"{rec['id']} [{rec['kind']}:{rec['action']}] {rec['rationale'][:160]}"
     if label == "Task":
-        owner = f" owner={rec['owner_role']}#{rec['owner_epoch']}" if rec.get("owner_role") else ""
+        owner = f" owner={rec['owner_role']}" if rec.get("owner_role") else ""
         return f"{rec['id']} [{rec['kind']}/{rec['state']}{owner}] {rec['title']}"
     if label == "Paper":
         ident = rec.get("arxiv_id") or rec.get("doi") or "no-id"
@@ -450,8 +449,8 @@ def status(store: Store) -> dict:
         counts = {label: len(tx.all(label)) for label in ("Hypothesis", "Experiment", "Evidence", "Decision",
                                                            "Paper", "Task", "Run")}
         items = attention(tx)
-    lines = [f"project {store.project.root} · data_version {meta['data_version']} · coordinator epoch "
-             f"{meta['coordinator_epoch']}" + (f" ({coordinator[-1]['id']})" if coordinator else ""),
+    lines = [f"project {store.project.root} · data_version {meta['data_version']} · coordinator "
+             + (coordinator[-1]["id"] if coordinator else "none"),
              "counts: " + ", ".join(f"{k} {v}" for k, v in counts.items())]
     open_h = [h for h in hyps if h["disposition"] in ("active", "candidate")]
     lines += ["hypotheses (active/candidate):"] + [f"  {_brief(h)}" for h in open_h] if open_h else ["no open hypotheses"]
@@ -460,8 +459,8 @@ def status(store: Store) -> dict:
     lines += (["unfinished attempts:"] + [f"  {_brief(a)}" for a in attempts]) if attempts else []
     lines += (["open review/advice tickets:"] + [f"  {_brief(t)}" for t in tickets]) if tickets else []
     lines += (["attention:"] + [f"  {i}" for i in items]) if items else []
-    return {"data_version": meta["data_version"], "coordinator_epoch": meta["coordinator_epoch"],
-            "counts": counts, "attention": items, "summary": "\n".join(lines)}
+    return {"data_version": meta["data_version"], "counts": counts, "attention": items,
+            "summary": "\n".join(lines)}
 
 
 def history(store: Store, entity_id: str | None = None, limit: int = 30) -> dict:

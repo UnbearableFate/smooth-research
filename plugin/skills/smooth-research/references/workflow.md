@@ -146,14 +146,14 @@ several `--attempts`; never split it into invented per-run numbers. Different un
 
 - `{{rl}} task create --title .. --kind framework|implement|experiment|analysis|literature|review|advice|other
   --targets E-x --request docs/tasks/T-brief.md --to-role researcher --next-action ..`
-- Owner: `{{rl}} task claim T-x --role researcher` prints the owner epoch; then `{{rl}} task deliver T-x
-  --owner-epoch N --role researcher --summary .. --output <files>`, `task wait .. --attempts ATT-x
-  --next-action ..`, `task block .. --reason engineering|model_unavailable|budget|science`, `task resume`,
-  `task handoff .. --doc docs/tasks/T-x-handoff.md`. A stale epoch is refused; its files are kept for review.
+- Owner: `{{rl}} task claim T-x --role researcher` (one claimant wins); then `{{rl}} task deliver T-x
+  --role researcher --summary .. --output <files>`, `task wait .. --attempts ATT-x --next-action ..`,
+  `task block .. --reason engineering|model_unavailable|budget|science`, `task resume`,
+  `task handoff .. --doc docs/tasks/T-x-handoff.md` (the task is then ready to claim again).
 - Coordinator: `{{rl}} inbox --role coordinator` (add `--ack` after reading), `{{rl}} task accept|stop|reopen T-x
   --reason ..`. Stopping a task does not stop external runs: stop them with your tool and record that.
 - Rotating the coordinator: write a handoff note, end your session (`{{rl}} session end S-x`); the new session
-  registers as coordinator (the epoch increments) and starts from `{{rl}} resume`.
+  registers as coordinator and starts from `{{rl}} resume`.
 
 ## Literature
 

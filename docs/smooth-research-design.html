@@ -157,14 +157,9 @@
   .pk { fill: var(--text-dim); font: 500 14px var(--font-mono); dominant-baseline: central; }
   .pv text { fill: var(--text); font: 600 15px var(--font-mono); text-anchor: end; dominant-baseline: central; }
 
-  /* lanes: epoch timeline and timing staff */
+  /* lanes: timing staff */
   .lane { stroke: var(--border); stroke-width: 1; }
-  .lane-t { fill: var(--text); font: 600 15px var(--font-body); }
   .lane-m { fill: var(--text); font: 600 14px var(--font-mono); }
-  .lane-s { fill: var(--text-dim); font: 500 13px var(--font-mono); }
-  .bar rect { fill: url(#ve-node); stroke: var(--border-bright); stroke-width: 1.5; }
-  .bar text { fill: var(--text); font: 500 14px var(--font-mono); dominant-baseline: central; }
-  .bar.cur rect { stroke: var(--accent); stroke-width: 2; }
   .job { fill: url(#ve-node); stroke: var(--border-bright); stroke-width: 1.5; }
   .job-t { fill: var(--text); font: 500 13px var(--font-mono); dominant-baseline: central; }
   .job-w { fill: var(--text-dim); font: 500 13px var(--font-mono); dominant-baseline: central; }
@@ -173,7 +168,7 @@
   .ev { fill: var(--accent); }
   .ev-d { fill: var(--surface); stroke: var(--text-dim); stroke-width: 1.5; }
 
-  /* strip plot (Fig. 17) */
+  /* strip plot (Fig. 16) */
   .gridv { stroke: var(--border); stroke-width: 1; }
   .dot { fill: var(--text-dim); stroke: var(--bg); stroke-width: 1.5; }
   .dot.hot { fill: var(--accent); }
@@ -182,7 +177,7 @@
   .row-t { fill: var(--text); font: 500 14px var(--font-mono); dominant-baseline: central; }
   .lbl { fill: var(--text-dim); font: 500 14px var(--font-mono); }
 
-  /* bar charts (Fig. 21) */
+  /* bar charts (Fig. 20) */
   .bars text { fill: var(--text-dim); font: 500 14px var(--font-mono); dominant-baseline: central; }
   .bars .lab { text-anchor: end; fill: var(--text); }
   .bars .hd2 { font: 600 13px var(--font-mono); }
@@ -792,47 +787,21 @@
   <section id="team">
     <div class="sec-intro">
       <div class="sec-head"><p class="ve-label caps">团队与审查</p><h2>角色持续，session 可换，审查跨模型</h2></div>
-      <p>稳定的是角色、任务和封存文档，不是某个聊天上下文。<b>新 session 用 rl resume 接续</b>；旧 session 的写入被 epoch 挡住。</p>
+      <p>稳定的是角色、任务和封存文档，不是某个聊天上下文。<b>新 session 用 rl resume 接续</b>。</p>
     </div>
-
-    <figure>
-      <div class="frame">
-        <svg class="ve-svg" viewBox="0 0 1000 250" role="img" aria-label="示意。协调者 lane：S-0001 epoch 1，之后 session start 使 epoch 变为 2，S-0002 接管；S-0001 之后的写入被拒。研究者 lane：协调者发 TASK，R1 以 owner_epoch 1 领取 T-0001，HANDOFF 后 R2 以 owner_epoch 2 接手并发 RESULT；R1 之后的交付被拒，产物封存并以 NOTE 交给协调者。">
-          <text class="lane-t" x="20" y="72">协调者</text><text class="lane-s" x="20" y="94">epoch</text>
-          <text class="lane-t" x="20" y="172">研究者</text><text class="lane-s" x="20" y="194">owner_epoch</text>
-          <path class="ve-e" d="M250 92V162"/><text class="ve-el r" x="260" y="132">TASK</text>
-          <path class="ve-e" d="M700 162V92"/><text class="ve-el l" x="690" y="146">HANDOFF</text>
-          <path class="ve-e" d="M955 162V92"/><text class="ve-el l" x="945" y="132">RESULT</text>
-          <path class="ann" d="M430 52V104" stroke-dasharray="3 3"/>
-          <text class="ve-el" x="430" y="42">session start → epoch 2</text>
-          <path class="ve-e is-async no-ah" d="M420 112H516"/>
-          <path class="ve-x" d="M523 105l14 14M537 105l-14 14"/>
-          <text class="ve-el r is-risk" x="548" y="117">epoch 1 的写入被拒</text>
-          <path class="ve-e is-async no-ah" d="M690 212H826"/>
-          <path class="ve-x" d="M833 205l14 14M847 205l-14 14"/>
-          <text class="ve-el r is-risk" x="858" y="217">旧 owner 交付被拒</text>
-          <text class="ve-el r" x="858" y="240">产物封存 → NOTE</text>
-          <g class="bar"><rect x="180" y="64" width="240" height="26" rx="4"/><text x="192" y="77">S-0001 · epoch 1</text></g>
-          <g class="bar cur"><rect x="440" y="64" width="540" height="26" rx="4"/><text x="452" y="77">S-0002 · epoch 2</text></g>
-          <g class="bar"><rect x="240" y="164" width="450" height="26" rx="4"/><text x="252" y="177">T-0001 · R1 · owner_epoch 1</text></g>
-          <g class="bar cur"><rect x="710" y="164" width="250" height="26" rx="4"/><text x="722" y="177">R2 · owner_epoch 2</text></g>
-        </svg>
-      </div>
-      <figcaption><span class="fig-n">Fig. 10</span>示意，按契约测试的场景绘制。协调者和任务 owner 都带 epoch，校验与写入在同一个事务里；接管后旧 session 的写入被拒，产物仍被封存。</figcaption>
-    </figure>
 
     <figure>
       <div class="cases">
         <div class="case"><h3><code>work</code> 工作包</h3><p>当前任务、范围、代码索引、必要文献、最新有效结果、已排除的解释</p>
           <svg class="ve-mini rng" viewBox="0 0 240 56" role="img" aria-label="工作包目标约 2k 到 6k tokens"><path class="ax" d="M10 30H230"/><path class="tk" d="M10 26V34M120 26V34M230 26V34"/><rect class="hot" x="46.7" y="23" width="73.3" height="14" rx="2"/><text class="rv" x="83" y="11">2k–6k</text><text x="10" y="45">0</text><text class="rm" x="120" y="45">6k</text><text class="re" x="230" y="45">12k</text></svg></div>
-        <div class="case"><h3><code>resume</code> 恢复包</h3><p>角色与 epoch、首个未完成动作、未结束的 attempt、最后可信观测、工件位置</p>
+        <div class="case"><h3><code>resume</code> 恢复包</h3><p>角色、首个未完成动作、未结束的 attempt、最后可信观测、工件位置</p>
           <svg class="ve-mini rng" viewBox="0 0 240 56" role="img" aria-label="恢复包未设 token 目标"><path class="ax" d="M10 30H230"/><path class="tk" d="M10 26V34M120 26V34M230 26V34"/><text class="rm" x="120" y="11">未设目标</text><text x="10" y="45">0</text><text class="rm" x="120" y="45">6k</text><text class="re" x="230" y="45">12k</text></svg></div>
         <div class="case"><h3><code>review</code> 审查包</h3><p>精确快照与 diff、方法定义、执行配置、重点不变量、必要测试；代码内联</p>
           <svg class="ve-mini rng" viewBox="0 0 240 56" role="img" aria-label="审查包未设 token 目标"><path class="ax" d="M10 30H230"/><path class="tk" d="M10 26V34M120 26V34M230 26V34"/><text class="rm" x="120" y="11">未设目标</text><text x="10" y="45">0</text><text class="rm" x="120" y="45">6k</text><text class="re" x="230" y="45">12k</text></svg></div>
         <div class="case"><h3><code>advice</code> 咨询包</h3><p>瓶颈、关键正反证据、失败机制、尚存解释、预算、待决问题</p>
           <svg class="ve-mini rng" viewBox="0 0 240 56" role="img" aria-label="咨询包目标约 6k 到 12k tokens"><path class="ax" d="M10 30H230"/><path class="tk" d="M10 26V34M120 26V34M230 26V34"/><rect class="hot" x="120" y="23" width="110" height="14" rx="2"/><text class="rv" x="175" y="11">6k–12k</text><text x="10" y="45">0</text><text class="rm" x="120" y="45">6k</text><text class="re" x="230" y="45">12k</text></svg></div>
       </div>
-      <figcaption><span class="fig-n">Fig. 11</span>四种上下文包都围绕当前要做的决定。token 目标是待验证的默认值，按“ASCII 字符 / 4 + 非 ASCII 字符”估算；超出部分列为按需读取的索引。</figcaption>
+      <figcaption><span class="fig-n">Fig. 10</span>四种上下文包都围绕当前要做的决定。token 目标是待验证的默认值，按“ASCII 字符 / 4 + 非 ASCII 字符”估算；超出部分列为按需读取的索引。</figcaption>
     </figure>
 
     <figure>
@@ -866,7 +835,7 @@
             <g class="ve-n is-st"><rect class="sh is-off" x="148" y="36" width="90" height="44" rx="4"/><text x="193" y="51">—</text><text class="sub" x="193" y="69">无</text></g>
           </svg><p class="rel"><code>unavailable</code><span>不是通过</span></p></div>
       </div>
-      <figcaption><span class="fig-n">Fig. 12</span>审查者按代码作者选择，而不是按协调者。模型身份核实不了时记为 <code>*_unverified</code>；没有合格审查者时记为 unavailable，依赖它的扩大实验等待。第二轮本机 e2e 的 <span class="nb">RV-0004</span> 由 rollout 核实为 <span class="nb">gpt-6-astra</span>。</figcaption>
+      <figcaption><span class="fig-n">Fig. 11</span>审查者按代码作者选择，而不是按协调者。模型身份核实不了时记为 <code>*_unverified</code>；没有合格审查者时记为 unavailable，依赖它的扩大实验等待。第二轮本机 e2e 的 <span class="nb">RV-0004</span> 由 rollout 核实为 <span class="nb">gpt-6-astra</span>。</figcaption>
     </figure>
   </section>
 
@@ -914,7 +883,7 @@
         <li><span class="n">2</span><span>每个 commit 先 <code>git archive</code>，上传后解压为只读的 <code>snapshots/&lt;sha&gt;/</code>；作业脚本和 workdir 都在快照里，输出写到 <code>runs/&lt;ATT&gt;/</code>。</span></li>
         <li><span class="n">3</span><span>一批作业一个通知组；listener 在后台等待，收到后先 <code>notify_ack</code>，再导出并登记。</span></li>
       </ol>
-      <figcaption><span class="fig-n">Fig. 13</span><span class="nb">pi-env-mcp</span> 保持通用，不做项目映射；PBS 的全部语义在 <span class="nb">miyabi-mcp</span>；<span class="nb">smooth-research</span> 不碰调度和 SSH。</figcaption>
+      <figcaption><span class="fig-n">Fig. 12</span><span class="nb">pi-env-mcp</span> 保持通用，不做项目映射；PBS 的全部语义在 <span class="nb">miyabi-mcp</span>；<span class="nb">smooth-research</span> 不碰调度和 SSH。</figcaption>
     </figure>
 
     <figure>
@@ -943,7 +912,7 @@
           </dl>
         </div>
       </div>
-      <figcaption><span class="fig-n">Fig. 14</span>两条接口的全部要点。提交时用 attempt 编号绑定作业；导出时作业变成带命名空间的观测和用量。值取自 bf16 测试 seed 0 的真实记录。</figcaption>
+      <figcaption><span class="fig-n">Fig. 13</span>两条接口的全部要点。提交时用 attempt 编号绑定作业；导出时作业变成带命名空间的观测和用量。值取自 bf16 测试 seed 0 的真实记录。</figcaption>
     </figure>
   </section>
 
@@ -981,7 +950,7 @@
           <g class="ve-dim is-key"><path class="ext" d="M641.3 214V236M900.7 114V236"/><path class="ln" d="M641.3 230H900.7M637.3 234l8 -8M896.7 234l8 -8"/><text x="771" y="223">3 min 08 s</text></g>
         </svg>
       </div>
-      <figcaption><span class="fig-n">Fig. 15</span>Miyabi 端到端测试的实际时间线，按比例绘制。三个作业在 18:53:56 前全部结束；组通知等到 notifyd 的下一次轮询（每 300&nbsp;s 一次），12&nbsp;s 后 rl 已登记全部观测和用量。</figcaption>
+      <figcaption><span class="fig-n">Fig. 14</span>Miyabi 端到端测试的实际时间线，按比例绘制。三个作业在 18:53:56 前全部结束；组通知等到 notifyd 的下一次轮询（每 300&nbsp;s 一次），12&nbsp;s 后 rl 已登记全部观测和用量。</figcaption>
     </figure>
 
     <figure>
@@ -995,7 +964,7 @@
         <div class="kpi"><span class="ve-label">观测 · 与重新导出逐字节一致</span><span class="val"><span data-count="9">9</span></span>
           <svg class="ve-waffle" viewBox="0 0 170 76" role="img" aria-label="9 条观测：3 个作业，各有 queued、running、ended"><rect class="on" x="0" y="0" width="22" height="22" rx="2"/><rect class="on" x="26" y="0" width="22" height="22" rx="2"/><rect class="on" x="52" y="0" width="22" height="22" rx="2"/><rect class="on" x="0" y="26" width="22" height="22" rx="2"/><rect class="on" x="26" y="26" width="22" height="22" rx="2"/><rect class="on" x="52" y="26" width="22" height="22" rx="2"/><rect class="on" x="0" y="52" width="22" height="22" rx="2"/><rect class="on" x="26" y="52" width="22" height="22" rx="2"/><rect class="on" x="52" y="52" width="22" height="22" rx="2"/><text x="86" y="24">3 个作业</text><text x="86" y="50">× 3 状态</text></svg></div>
       </div>
-      <figcaption><span class="fig-n">Fig. 16</span>三个作业都在 policy 之内：只用 <span class="nb">debug-mig</span>，每个作业 1 个 MIG 实例、walltime&nbsp;≤&nbsp;10&nbsp;min。实际用量只有申请量的约 39%，没有台账外的作业。</figcaption>
+      <figcaption><span class="fig-n">Fig. 15</span>三个作业都在 policy 之内：只用 <span class="nb">debug-mig</span>，每个作业 1 个 MIG 实例、walltime&nbsp;≤&nbsp;10&nbsp;min。实际用量只有申请量的约 39%，没有台账外的作业。</figcaption>
     </figure>
 
     <figure>
@@ -1019,7 +988,7 @@
           <text class="lbl" x="974" y="75">×2</text><text class="lbl" x="974" y="140">×3</text><text class="lbl" x="974" y="200">×3</text>
         </svg>
       </div>
-      <figcaption><span class="fig-n">Fig. 17</span>bf16 三个 seed 都是 1.000。均值差 2.3&nbsp;pp 全部来自 fp32 的 <span class="ve-ref" data-ref="s1" tabindex="0">seed 1</span>，所以严格的“差距 &lt; 1&nbsp;pp”判据没有达到，但这不是 bf16 有害的证据。轴从 0.90 开始。</figcaption>
+      <figcaption><span class="fig-n">Fig. 16</span>bf16 三个 seed 都是 1.000。均值差 2.3&nbsp;pp 全部来自 fp32 的 <span class="ve-ref" data-ref="s1" tabindex="0">seed 1</span>，所以严格的“差距 &lt; 1&nbsp;pp”判据没有达到，但这不是 bf16 有害的证据。轴从 0.90 开始。</figcaption>
     </figure>
 
     <figure>
@@ -1040,7 +1009,7 @@
           </tbody>
         </table>
       </div>
-      <figcaption><span class="fig-n">Fig. 18</span>测试发现的 8 个问题按责任范围修复：4 个在 <span class="nb">smooth-research</span>，4 个在 <span class="nb">miyabi-mcp</span>，<span class="nb">pi-env-mcp</span> 无需改动。</figcaption>
+      <figcaption><span class="fig-n">Fig. 17</span>测试发现的 8 个问题按责任范围修复：4 个在 <span class="nb">smooth-research</span>，4 个在 <span class="nb">miyabi-mcp</span>，<span class="nb">pi-env-mcp</span> 无需改动。</figcaption>
     </figure>
 
     <figure>
@@ -1055,11 +1024,11 @@
             <tr><td class="k">用量</td><td class="num">约 53 cpu_s（实测）</td><td class="num">0.155834 mig_instance_hours（台账导出）</td></tr>
             <tr><td class="k">阶段交付</td><td><span class="chip info">continue_probe</span></td><td><span class="chip info">continue_probe</span></td></tr>
             <tr><td class="k">审查</td><td>第二轮 <span class="nb">RV-0004</span>：cross_model（<span class="nb">gpt-6-astra</span>），1 条非阻塞发现</td><td>未做跨模型审查，<span class="nb">D-0003</span> 已注明</td></tr>
-            <tr><td class="k">发现的问题</td><td>Codex 沙箱读不到审查包 → 审查包内联代码；无法解析的回答记为失败</td><td>8 个，见 Fig. 18</td></tr>
+            <tr><td class="k">发现的问题</td><td>Codex 沙箱读不到审查包 → 审查包内联代码；无法解析的回答记为失败</td><td>8 个，见 Fig. 17</td></tr>
           </tbody>
         </table>
       </div>
-      <figcaption><span class="fig-n">Fig. 19</span>两次端到端测试都由 Claude Code 2.1.314（Sonnet 5.5）在 herdr 新 tab 中加载插件完成，都停在 continue_probe，并如实报告了证据边界。</figcaption>
+      <figcaption><span class="fig-n">Fig. 18</span>两次端到端测试都由 Claude Code 2.1.314（Sonnet 5.5）在 herdr 新 tab 中加载插件完成，都停在 continue_probe，并如实报告了证据边界。</figcaption>
     </figure>
   </section>
 
@@ -1071,7 +1040,7 @@
 
     <figure>
       <div class="frame">
-        <svg class="ve-svg" viewBox="0 0 1000 392" role="img" aria-label="构建：共享的 plugin/（bin/rl、3 个 skill、workflow.md）和 src/smooth_research（17 个模块，4,337 行），加上 hosts/claude 或 hosts/codex 的适配文件，经 build_plugins.py 填占位符、检查并写 blake2b 清单，产出 dist/claude（33 个文件）和 dist/codex（32 个文件）。">
+        <svg class="ve-svg" viewBox="0 0 1000 392" role="img" aria-label="构建：共享的 plugin/（bin/rl、3 个 skill、workflow.md）和 src/smooth_research（17 个模块，4,286 行），加上 hosts/claude 或 hosts/codex 的适配文件，经 build_plugins.py 填占位符、检查并写 blake2b 清单，产出 dist/claude（33 个文件）和 dist/codex（32 个文件）。">
           <rect class="ve-bd" x="16" y="32" width="298" height="164" rx="4"/><text class="ve-bd-t" x="16" y="22">共享 · 两宿主相同</text>
           <rect class="ve-bd" x="16" y="220" width="298" height="162" rx="4"/><text class="ve-bd-t" x="16" y="212">宿主适配</text>
           <path class="ve-e is-hot" d="M300 76H350V180H398"/>
@@ -1082,7 +1051,7 @@
           <path class="ve-e" d="M620 228H660V280H698"/><text class="ve-el l" x="652" y="264">codex</text>
 
           <g class="ve-n" transform="translate(30 44)"><rect class="sh" width="270" height="64" rx="4"/><text class="m" x="135" y="22">plugin/</text><text class="sub" x="135" y="46">bin/rl · 3 个 skill · workflow.md</text></g>
-          <g class="ve-n" transform="translate(30 120)"><rect class="sh" width="270" height="64" rx="4"/><text class="m" x="135" y="22">src/smooth_research/</text><text class="sub" x="135" y="46">17 个模块 · 4,337 行</text></g>
+          <g class="ve-n" transform="translate(30 120)"><rect class="sh" width="270" height="64" rx="4"/><text class="m" x="135" y="22">src/smooth_research/</text><text class="sub" x="135" y="46">17 个模块 · 4,286 行</text></g>
           <g class="ve-n" transform="translate(30 232)"><rect class="sh" width="270" height="64" rx="4"/><text class="m" x="135" y="22">hosts/claude/</text><text class="sub" x="135" y="46">manifest · hook · 子代理 · host.md</text></g>
           <g class="ve-n" transform="translate(30 308)"><rect class="sh" width="270" height="64" rx="4"/><text class="m" x="135" y="22">hosts/codex/</text><text class="sub" x="135" y="46">manifest · hook · host.md</text></g>
           <g class="ve-n is-key" transform="translate(400 160)"><rect class="sh" width="220" height="88" rx="4"/><text class="m" x="110" y="32">build_plugins.py</text><text class="sub" x="110" y="60">填占位符 · 检查 · 清单</text></g>
@@ -1099,20 +1068,20 @@
         <li><span class="n">2</span><span>还有未填的占位符（如 <code>{{rl}}</code>、<code>{{session_id}}</code>）→ 拒绝构建。Claude 填 <code>${CLAUDE_PLUGIN_ROOT}/bin/rl</code> 与 <code>${CLAUDE_SESSION_ID}</code>；Codex 填 <code>rl</code>，绝对路径由 <span class="nb">session-start</span> 提示给出。</span></li>
         <li><span class="n">3</span><span>输出与源码重叠，或旧目录不是构建产物 → 拒绝覆盖。BUILD.json 记录每个文件的 blake2b；构建号随内容变化，<code>rl setup</code> 据此安装新环境。</span></li>
       </ol>
-      <figcaption><span class="fig-n">Fig. 20</span>两个宿主的插件从同一份源码组装，只差适配文件；Claude 包多一个 researcher 子代理。</figcaption>
+      <figcaption><span class="fig-n">Fig. 19</span>两个宿主的插件从同一份源码组装，只差适配文件；Claude 包多一个 researcher 子代理。</figcaption>
     </figure>
 
     <figure>
       <div class="frame">
-        <svg class="ve-svg bars" viewBox="0 0 1000 410" role="img" aria-label="模块行数：cli 724，runs 486，research 472，reviews 395，store 338，tasks 260，adapters 226，context 209，view 200，literature 188，schema 175，util 148，project 148，snapshot 114，documents 106，delegate 78，hooks 57。测试项数：records 18，runs 13，reviews 10，executor_contract 5，packaging 5。">
+        <svg class="ve-svg bars" viewBox="0 0 1000 410" role="img" aria-label="模块行数：cli 712，runs 485，research 471，reviews 395，store 334，tasks 229，adapters 226，context 209，view 200，literature 188，schema 175，util 148，project 148，snapshot 114，documents 106，delegate 78，hooks 55。测试项数：records 18，runs 13，reviews 10，executor_contract 5，packaging 5。">
           <text class="hd2" x="0" y="14">src/smooth_research · 行数</text>
           <text class="hd2" x="657" y="14">tests · 项数（共 51）</text>
-          <text class="lab" x="140" y="44">cli.py</text><rect class="hot" x="150" y="37" width="398.2" height="14" rx="2"/><text x="556" y="44">724</text>
-          <text class="lab" x="140" y="65">runs.py</text><rect class="hot" x="150" y="58" width="267.3" height="14" rx="2"/><text x="425" y="65">486</text>
-          <text class="lab" x="140" y="86">research.py</text><rect x="150" y="79" width="259.6" height="14" rx="2"/><text x="418" y="86">472</text>
+          <text class="lab" x="140" y="44">cli.py</text><rect class="hot" x="150" y="37" width="391.6" height="14" rx="2"/><text x="550" y="44">712</text>
+          <text class="lab" x="140" y="65">runs.py</text><rect class="hot" x="150" y="58" width="266.8" height="14" rx="2"/><text x="425" y="65">485</text>
+          <text class="lab" x="140" y="86">research.py</text><rect x="150" y="79" width="259.1" height="14" rx="2"/><text x="417" y="86">471</text>
           <text class="lab" x="140" y="107">reviews.py</text><rect x="150" y="100" width="217.3" height="14" rx="2"/><text x="375" y="107">395</text>
-          <text class="lab" x="140" y="128">store.py</text><rect x="150" y="121" width="185.9" height="14" rx="2"/><text x="344" y="128">338</text>
-          <text class="lab" x="140" y="149">tasks.py</text><rect x="150" y="142" width="143" height="14" rx="2"/><text x="301" y="149">260</text>
+          <text class="lab" x="140" y="128">store.py</text><rect x="150" y="121" width="183.7" height="14" rx="2"/><text x="342" y="128">334</text>
+          <text class="lab" x="140" y="149">tasks.py</text><rect x="150" y="142" width="126" height="14" rx="2"/><text x="284" y="149">229</text>
           <text class="lab" x="140" y="170">adapters.py</text><rect x="150" y="163" width="124.3" height="14" rx="2"/><text x="282" y="170">226</text>
           <text class="lab" x="140" y="191">context.py</text><rect x="150" y="184" width="115" height="14" rx="2"/><text x="273" y="191">209</text>
           <text class="lab" x="140" y="212">view.py</text><rect x="150" y="205" width="110" height="14" rx="2"/><text x="268" y="212">200</text>
@@ -1123,7 +1092,7 @@
           <text class="lab" x="140" y="317">snapshot.py</text><rect x="150" y="310" width="62.7" height="14" rx="2"/><text x="221" y="317">114</text>
           <text class="lab" x="140" y="338">documents.py</text><rect x="150" y="331" width="58.3" height="14" rx="2"/><text x="216" y="338">106</text>
           <text class="lab" x="140" y="359">delegate.py</text><rect x="150" y="352" width="42.9" height="14" rx="2"/><text x="201" y="359">78</text>
-          <text class="lab" x="140" y="380">hooks.py</text><rect x="150" y="373" width="31.4" height="14" rx="2"/><text x="189" y="380">57</text>
+          <text class="lab" x="140" y="380">hooks.py</text><rect x="150" y="373" width="30.3" height="14" rx="2"/><text x="188" y="380">55</text>
 
           <text class="lab" x="800" y="44">records</text><rect class="hot" x="810" y="37" width="144" height="14" rx="2"/><text x="962" y="44">18</text>
           <text class="lab" x="800" y="72">runs</text><rect class="hot" x="810" y="65" width="104" height="14" rx="2"/><text x="922" y="72">13</text>
@@ -1132,7 +1101,7 @@
           <text class="lab" x="800" y="156">packaging</text><rect x="810" y="149" width="40" height="14" rx="2"/><text x="858" y="156">5</text>
         </svg>
       </div>
-      <figcaption><span class="fig-n">Fig. 21</span>4,337 行 Python：17 个模块，加上 <code>__init__</code> 与 <code>__main__</code> 的 13 行；CLI 与 runs.py 合占约 28%。51 项测试中，记录与运行的契约测试占 31 项。</figcaption>
+      <figcaption><span class="fig-n">Fig. 20</span>4,286 行 Python：17 个模块，加上 <code>__init__</code> 与 <code>__main__</code> 的 13 行；CLI 与 runs.py 合占约 28%。51 项测试中，记录与运行的契约测试占 31 项。</figcaption>
     </figure>
 
     <div class="callout">

@@ -259,7 +259,7 @@ flowchart TD
 | 对象 | 主要字段 | 作用 |
 | --- | --- | --- |
 | Hypothesis | id, title, statement_ref, scope_ref, evidence_status, disposition, revision | 可被检验的科学判断 |
-| Task | id, kind, target_refs, owner_role, owner_epoch, state, request_ref, output_refs | 一段可交付工作，可关联多个假说 |
+| Task | id, kind, target_refs, owner_role, state, request_ref, output_refs | 一段可交付工作，可关联多个假说 |
 | Experiment | id, hypothesis_refs[{id, revision}], protocol_ref, stage, comparator_refs, cost_envelope | 一次实验设计，容纳多个臂和重复 |
 | Evidence | id, artifact_refs, validity, evidence_level, scope_ref, source_attempts | 观测、诊断与统计结果 |
 | Decision | id, target_refs, action, rationale_ref, evidence_refs, reopen_condition | 继续、修改、暂停、停止或投入决定 |
@@ -338,13 +338,12 @@ sealed_object: research/documents/objects/<digest>.md
 
 首版使用一个本地 store 写入入口，短期进程锁串行化写事务。数据库事务内同时完成：
 
-- 校验 coordinator_epoch 或 task_owner_epoch。
 - 校验目标 revision 与请求的 base_revision 相符。
 - 校验引用、唯一键和必需字段。
 - 更新实体、关系与对应事件。
 - 递增 data_version 并提交。
 
-epoch 检查与写入不能分成两个独立操作。失去所有权的旧 session 不能覆盖新 session 的状态。研究协调者只保留一个有效 epoch；跨主机自动 leader failover 不进入首版范围。
+不设协调者 epoch 或任务 owner_epoch。任务领取在事务内完成，只有一个 session 成为 owner；新 session 通过 `rl resume` 接续。跨主机自动 leader failover 不进入首版范围。
 
 这属于新接口必须验证的契约，不因旧库“有事务”就假定已满足所有并发和崩溃场景。
 
@@ -392,7 +391,6 @@ to_role: researcher-symbolic
 document_refs:
   - {id: DOC-0021, revision: 3, digest: "blake2b:..."}
 base_revision: 7
-owner_epoch: 2
 in_reply_to: null
 next_action: "实现预注册的线性读取对照并运行一次冒烟"
 ```
@@ -408,7 +406,7 @@ next_action: "实现预注册的线性读取对照并运行一次冒烟"
 按用途生成四种包：
 
 - **work**：当前任务、范围、相关代码索引、必要文献、最新有效结果与已排除解释。
-- **resume**：角色/epoch、首个未完成动作、未结束的 attempts、最后可信观测、未解决问题和工件位置。
+- **resume**：角色、首个未完成动作、未结束的 attempts、最后可信观测、未解决问题和工件位置。
 - **review**：精确 diff/快照、方法定义、执行配置、重点不变量与必要测试。
 - **advice**：瓶颈、关键正负证据、失败机制、尚存解释、预算和待决问题。
 
@@ -420,7 +418,7 @@ next_action: "实现预注册的线性读取对照并运行一次冒烟"
 
 相关任务继续复用当前 session；到自然任务边界、主题明显切换或上下文负担过大时生成 handoff，用同一个 role_id 开新 session。轮换阈值由使用量观测调整，不预先宣称频繁重启一定省钱。
 
-轮换流程为：封存交接 → 确认写入释放 → 更新 owner_epoch → 新 session 校验代码和运行记录 → 接续未完成动作。状态未知时应先通过外部工具核对，不能仅凭聊天中断就重派实验。
+轮换流程为：封存交接并释放任务 → 新 session 领取任务，校验代码和运行记录 → 接续未完成动作。状态未知时应先通过外部工具核对，不能仅凭聊天中断就重派实验。
 
 原生团队只是运行方式。Claude 当前文档仍将 agent teams 标为实验功能，且 /resume 不恢复 in-process teammates；跨 session 恢复因此必须依赖项目记录，而不是假定宿主保留所有队员。[O4]
 
@@ -879,7 +877,6 @@ M0–M3 合起来才是最小可用版，覆盖用户提出的六项能力。不
 | 场景 | 必须发生的行为 |
 | --- | --- |
 | 两个 session 同时领取任务 | 只有一个 owner 成功，另一个得到当前状态 |
-| 旧 worker 在交接后回写 | owner_epoch 检查拒绝覆盖；保留其产物供核对 |
 | 封存文档后编辑草稿 | 原实验仍指向旧 revision；不会静默变更历史契约 |
 | 文件与数据库登记之间或事务内中断 | 可恢复一致记录，无悬空有效证据或半写的节点/边 |
 | 同 request_id 重复 register | 返回同一记录；内容不同则冲突，新 request_id 允许合法重复实验 |
@@ -1125,7 +1122,7 @@ GitHub 链接固定到本次读取的提交；外部产品文档按 2026-10-30 �
 - 记录类型：六类图对象与辅助记录（DocRevision、Run、Attempt、ExecRef、Observation、Result、Usage、Session、Message、Cursor、Ticket、Event、Request）同在一个 LatticeDB 0.15.0 库；ID 计数器存于 Meta，不复用。写入在进程锁与单个数据库事务中完成，异常即整体回滚。
 - 绑定 revision 的关系（tests、supports、challenges、decides、cites 等）允许同类型平行边：修订假说后，旧证据仍绑定旧 revision，核对后可再绑定新 revision。
 - 实验契约：`rl experiment add` 在 `docs/experiments/` 生成草稿；首次被 run 登记、审查或任务正式引用时封存。封存后的修改形成新 revision；已有结果后再改则标记 `revised_after_results`（探索性，不算事前设定）。
-- 协调者 epoch：`rl session start --role coordinator` 递增并取代旧协调 session；协调写操作通过 `--epoch`（或 `SMOOTH_RESEARCH_EPOCH`）在同一事务内校验。简化：协调写操作的 epoch 为可选传入，任务的 `owner_epoch` 为强制。过期 owner 的产物照常封存并以 NOTE 消息交给协调者。
+- 会话与任务：不设 epoch。新的协调 session 把此前活动的协调 session 标为 superseded，只作记录；任务领取在事务内完成，只有一个 owner；deliver、wait、block、resume、handoff 只要求任务已被领取，handoff 后任务回到 ready。2026-10-30 按用户决定移除协调者 epoch 与任务 `owner_epoch`（没有必要）；旧库里遗留的 epoch 字段不影响读取。
 - 消息：任务状态变化自动生成 TASK/RESULT/WAIT/BLOCKED/HANDOFF/CANCEL；另有 NOTE。`rl inbox --ack` 只移动游标，不发回执。
 - 观测投影：同一来源有序号时按序号，否则按 `observed_at`；终态后的查询失败只记为观测问题；终态后更晚的非终态、两个不同终态、比最近观测更早的终态都标记待核对；只有带依据的 `--correction-of` 才能改变已确认终态。
 - 结果：本地路径计算 blake2b 并与报告摘要比较；远程 URI 只登记（“未读取”）；与 RunSpec 不一致的字段保留并标记不可用于预设比较；partial 不覆盖 complete。
@@ -1139,7 +1136,7 @@ GitHub 链接固定到本次读取的提交；外部产品文档按 2026-10-30 �
 
 ### 21.5 验证
 
-- 43 项契约测试，对应 16.2 节场景：并发领取只有一个 owner、交接后旧 owner 回写被拒且产物保留、封存契约不随草稿变化、事务内异常与写进程被 SIGKILL 后无半写记录、封存中断只留下未登记对象、request_id 幂等与冲突、观测去重/乱序/unknown/矛盾与显式更正、命名空间隔离与共享外部执行、重新执行为新 attempt、结果版本不符/远程 URI/partial/迟到结果、共享用量只计一次且未报告不记零、记录操作不启动进程或模型调用、审查范围指纹复用与关键变化重审、无合格 reviewer 时如实记为不可用、阳性对照失败只作诊断、导出后恢复并生成恢复包；另有宿主适配（伪造的 claude/codex CLI）与构建检查。
+- 43 项契约测试，对应 16.2 节场景：并发领取只有一个 owner、交接释放任务后由下一个 owner 接续、封存契约不随草稿变化、事务内异常与写进程被 SIGKILL 后无半写记录、封存中断只留下未登记对象、request_id 幂等与冲突、观测去重/乱序/unknown/矛盾与显式更正、命名空间隔离与共享外部执行、重新执行为新 attempt、结果版本不符/远程 URI/partial/迟到结果、共享用量只计一次且未报告不记零、记录操作不启动进程或模型调用、审查范围指纹复用与关键变化重审、无合格 reviewer 时如实记为不可用、阳性对照失败只作诊断、导出后恢复并生成恢复包；另有宿主适配（伪造的 claude/codex CLI）与构建检查。
 - 端到端：在 herdr 新 tab 中启动 Claude Code 2.1.314（Sonnet 5.5，effort medium），`--plugin-dir dist/claude/plugins/smooth-research` 加载插件，用本计划的小型研究（标签噪声下的权重衰减）跑完一次研究循环。结果见 21.6。
 - 其后增至 51 项：观测的批量导入与 `occurred_at`、miyabi-mcp 导出契约（`tests/test_executor_contract.py`，见 21.7）等。Miyabi 上的端到端测试见 21.8。
 

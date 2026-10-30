@@ -14,7 +14,6 @@ def project(tmp_path, monkeypatch):
     """An initialized project with one hypothesis and one experiment; cwd is the project root."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("SMOOTH_RESEARCH_PROJECT", raising=False)
-    monkeypatch.delenv("SMOOTH_RESEARCH_EPOCH", raising=False)
     (tmp_path / "plan.md").write_text("# Plan\nDoes weight decay help under label noise?\n", encoding="utf-8")
     research.init_project(tmp_path, "plan.md", "test")
     store = Store(find_project(), "test")

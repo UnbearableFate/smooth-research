@@ -1,14 +1,13 @@
 """`rl`: the single command-line entry point shared by every host.
 
 Output is a short summary with ids and pointers; --json prints the full result. Errors print
-`error[CODE]: message` on stderr and exit 1 (3 for conflicts, stale epochs and stale revisions).
+`error[CODE]: message` on stderr and exit 1 (3 for conflicts and stale revisions).
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 from pathlib import Path
 
@@ -19,18 +18,11 @@ from .schema import ENUMS, LINKABLE, PAPER_ASSESSMENTS
 from .store import Store
 from .util import RLError, load_json_arg, load_json_records, now_utc, split_list
 
-CONFLICT_CODES = {"CONFLICT", "STALE_EPOCH", "STALE_REVISION"}
+CONFLICT_CODES = {"CONFLICT", "STALE_REVISION"}
 
 
 def _store(args) -> Store:
     return Store(find_project(args.project), args.actor or "agent")
-
-
-def _epoch(args) -> int | None:
-    if args.epoch is not None:
-        return args.epoch
-    env = os.environ.get("SMOOTH_RESEARCH_EPOCH")
-    return int(env) if env and env.isdigit() else None
 
 
 def _list(value) -> list[str]:
@@ -94,7 +86,7 @@ def cmd_digest(args):
 
 def cmd_link(args):
     return research.link(_store(args), args.source, args.relation, args.target, args.note, args.locator,
-                         args.assessment, _epoch(args))
+                         args.assessment)
 
 
 def cmd_session(args):
@@ -110,12 +102,12 @@ def cmd_hypothesis(args):
     if args.action == "add":
         return research.add_hypothesis(store, args.title, args.statement, args.scope, args.disposition,
                                        _list(args.derived_from), _list(args.combines), _list(args.motivated_by),
-                                       args.origin, args.statement_file, _epoch(args))
+                                       args.origin, args.statement_file)
     if args.action == "revise":
         return research.revise_hypothesis(store, args.id, args.reason, args.statement, args.scope, args.title,
-                                          args.base_revision, args.statement_file, _epoch(args))
+                                          args.base_revision, args.statement_file)
     return research.set_hypothesis(store, args.id, args.reason, args.evidence_status, args.disposition,
-                                   args.rechecked, _epoch(args))
+                                   args.rechecked)
 
 
 def cmd_experiment(args):
@@ -123,10 +115,10 @@ def cmd_experiment(args):
     if args.action == "add":
         return research.add_experiment(store, args.title, args.question, _list(args.hypotheses), args.stage,
                                        _list(args.compared_with), args.code_from, _list(args.depends_on),
-                                       _epoch(args), intervention=args.intervention, comparator=args.comparator,
+                                       intervention=args.intervention, comparator=args.comparator,
                                        metric=args.metric, scope=args.scope, outcome_actions=args.outcome_actions,
                                        budget=args.budget, stop=args.stop)
-    return research.seal_experiment(store, args.id, _epoch(args))
+    return research.seal_experiment(store, args.id)
 
 
 def cmd_evidence(args):
@@ -134,14 +126,14 @@ def cmd_evidence(args):
     if args.action == "add":
         return research.add_evidence(store, args.summary, args.level, args.validity, args.scope,
                                      _list(args.supports), _list(args.challenges), _list(args.attempts),
-                                     _list(args.results), args.experiment, _list(args.artifacts), args.doc, _epoch(args))
-    return research.set_evidence(store, args.id, args.validity, args.reason, _epoch(args))
+                                     _list(args.results), args.experiment, _list(args.artifacts), args.doc)
+    return research.set_evidence(store, args.id, args.validity, args.reason)
 
 
 def cmd_decide(args):
     return research.decide(_store(args), _list(args.targets), args.action, args.rationale, _list(args.based_on),
                            args.reopen_condition, "stage" if args.stage else "route", args.implementation_ready,
-                           args.evidence_scope, args.set_evidence_status, args.rationale_file, _epoch(args))
+                           args.evidence_scope, args.set_evidence_status, args.rationale_file)
 
 
 def cmd_task(args):
@@ -149,23 +141,23 @@ def cmd_task(args):
     a = args.action
     if a == "create":
         return tasks.create_task(store, args.title, args.kind, _list(args.targets), args.request, args.to_role,
-                                 args.next_action, _list(args.depends_on), epoch=_epoch(args))
+                                 args.next_action, _list(args.depends_on))
     if a == "claim":
         return tasks.claim(store, args.id, args.role, args.session)
     if a in ("deliver", "wait", "block", "resume"):
         state = {"deliver": "delivered", "wait": "waiting", "block": "blocked", "resume": "active"}[a]
-        return tasks.progress(store, args.id, args.owner_epoch, state, args.role, args.summary,
+        return tasks.progress(store, args.id, state, args.role, args.summary,
                               _list(getattr(args, "output", None)), args.next_action,
                               _list(getattr(args, "attempts", None)), getattr(args, "reason", None))
     if a == "handoff":
-        return tasks.handoff(store, args.id, args.owner_epoch, args.doc, args.role, args.to_role)
+        return tasks.handoff(store, args.id, args.doc, args.role, args.to_role)
     if a == "list":
         with store.read() as tx:
             items = tx.all("Task") if args.all else tasks.open_tasks(tx)
         return {"tasks": items, "summary": "\n".join(research.brief(t) + (f" next: {t['next_action']}"
                                                                           if t.get("next_action") else "")
                                                      for t in items) or "no open tasks"}
-    return tasks.review_task(store, args.id, a, args.reason, _epoch(args))
+    return tasks.review_task(store, args.id, a, args.reason)
 
 
 def cmd_inbox(args):
@@ -235,7 +227,7 @@ def cmd_run(args):
     if a == "register":
         spec = load_json_arg(args.spec) or {}
         spec.update(_spec_from_flags(args))
-        return runs.register(store, args.experiment, spec, args.request_id, args.run, _epoch(args))
+        return runs.register(store, args.experiment, spec, args.request_id, args.run)
     if a == "record":
         items = load_json_records(args.observation) if args.observation else [{}]
         flags = {"record_id": args.record_id, "attempt_id": args.attempt, "source": args.source,
@@ -252,7 +244,7 @@ def cmd_run(args):
         for n, obs in enumerate(items, 1):
             obs = {"observed_at": now_utc(), **obs, **flags}
             try:
-                out.append(runs.record(store, obs, _epoch(args)))
+                out.append(runs.record(store, obs))
             except RLError as exc:
                 if len(items) == 1:
                     raise
@@ -266,14 +258,14 @@ def cmd_run(args):
         manifest = load_json_arg(args.manifest)
         if not isinstance(manifest, dict):
             raise RLError("INVALID", "--manifest is a JSON object (inline, @file or a path)")
-        return runs.import_result(store, args.attempt, manifest, args.request_id, _epoch(args))
+        return runs.import_result(store, args.attempt, manifest, args.request_id)
     if a == "reject-result":
-        return runs.reject_result(store, args.id, args.reason, _epoch(args))
+        return runs.reject_result(store, args.id, args.reason)
     if a == "usage":
         usage = {"accounting_ref": args.accounting_ref, "quantity": args.quantity, "unit": args.unit,
                  "resource_type": args.resource_type, "hardware": args.hardware, "basis": args.basis,
                  "source_ref": args.source_ref, "note": args.note}
-        return runs.add_usage(store, usage, _list(args.attempts), args.revise, _epoch(args))
+        return runs.add_usage(store, usage, _list(args.attempts), args.revise)
     return runs.show(store, args.id, args.active)
 
 
@@ -283,8 +275,7 @@ def cmd_review(args):
     if a == "request":
         return reviews.request_review(store, args.target, _list(args.files), args.question,
                                       _list(args.author_model), _list(args.configs), _list(args.deps),
-                                      _list(args.ignore_keys), args.scope or "", args.diff_base, args.recheck_of,
-                                      _epoch(args))
+                                      _list(args.ignore_keys), args.scope or "", args.diff_base, args.recheck_of)
     if a == "run":
         if args.background:
             return reviews.start_background(store, args.id, args.timeout)
@@ -299,7 +290,7 @@ def cmd_advise(args):
     store = _store(args)
     a = args.action
     if a == "prepare":
-        return reviews.prepare_advice(store, args.question, args.target, _epoch(args))
+        return reviews.prepare_advice(store, args.question, args.target)
     if a == "run":
         if args.background:
             return reviews.start_background(store, args.id, args.timeout)
@@ -360,7 +351,6 @@ def build_parser() -> argparse.ArgumentParser:
                                                         "evidence, decisions, reviews, advice and literature.")
     p.add_argument("--project", help="project directory (default: nearest smooth-research.yaml above cwd)")
     p.add_argument("--json", action="store_true", help="print the full JSON result")
-    p.add_argument("--epoch", type=int, help="coordinator epoch to check on writes (or $SMOOTH_RESEARCH_EPOCH)")
     p.add_argument("--actor", help="name recorded in the event log")
     sub = p.add_subparsers(dest="command", required=True, metavar="command")
 
@@ -406,7 +396,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--locator")
     sp.add_argument("--assessment", choices=PAPER_ASSESSMENTS)
 
-    sp = add("session", cmd_session, "register or end a host session (coordinator start takes over the epoch)")
+    sp = add("session", cmd_session, "register or end a host session")
     ss = sp.add_subparsers(dest="action", required=True)
     s = ss.add_parser("start")
     s.add_argument("--role", required=True, help="coordinator, researcher[-name], reviewer or advisor")
@@ -509,7 +499,6 @@ def build_parser() -> argparse.ArgumentParser:
     for name in ("deliver", "wait", "block", "resume", "handoff"):
         s = ss.add_parser(name)
         s.add_argument("id")
-        s.add_argument("--owner-epoch", type=int, required=True)
         s.add_argument("--role", required=True, help="your role, e.g. researcher")
         if name == "handoff":
             s.add_argument("--doc", required=True)
@@ -691,13 +680,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _accept_global_options_everywhere(parser: argparse.ArgumentParser) -> None:
-    """Let --project, --json and --epoch also follow a subcommand (`rl decide ... --epoch 2`)."""
+    """Let --project and --json also follow a subcommand (`rl decide ... --json`)."""
     for action in parser._actions:
         if isinstance(action, argparse._SubParsersAction):
             for sub in set(action.choices.values()):
                 sub.add_argument("--project", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
                 sub.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
-                sub.add_argument("--epoch", type=int, default=argparse.SUPPRESS, help=argparse.SUPPRESS)
                 _accept_global_options_everywhere(sub)
 
 

@@ -84,8 +84,7 @@ def work_pack(store: Store, task_id: str, budget: int | None = None) -> dict:
         task = tx.require(task_id, "Task")
         sections = [("Task", "\n".join(filter(None, [
             brief(task), f"next action: {task.get('next_action') or '-'}",
-            f"owner epoch {task['owner_epoch']} (pass --owner-epoch on updates)" if task.get("owner_role") else
-            f"unclaimed: rl task claim {task_id} --role <role>",
+            None if task.get("owner_role") else f"unclaimed: rl task claim {task_id} --role <role>",
             f"handoff: {task['handoff_ref']}" if task.get("handoff_ref") else None])))]
         if task.get("request_ref"):
             sections.append((f"Request {task['request_ref']}", _doc_text(tx, store, task["request_ref"])))
@@ -134,8 +133,9 @@ def resume_pack(store: Store, role: str | None = None, budget: int | None = None
         items = attention(tx)
         cursor = tx.get(f"CUR-{role}", "Cursor") if role else None
         unread = [m for m in tx.all("Message", to_role=role) if m["seq"] > (cursor["position"] if cursor else 0)] if role else []
-    identity = [f"coordinator epoch {meta['coordinator_epoch']}"
-                + (f" held by {coord[-1]['id']} ({coord[-1]['host']}, {coord[-1].get('model_observed') or coord[-1].get('model_requested') or 'model unverified'})" if coord else " (no active coordinator session)"),
+    c = coord[-1] if coord else None
+    model = (c.get("model_observed") or c.get("model_requested") or "model unverified") if c else None
+    identity = [f"coordinator {c['id']} ({c['host']}, {model})" if c else "no active coordinator session",
                 f"plan snapshot {meta.get('plan_ref') or 'none'}; constraints {store.project.config['constraints_ref']}",
                 f"data_version {meta['data_version']}"]
     first = []

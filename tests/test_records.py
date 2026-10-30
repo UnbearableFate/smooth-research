@@ -21,9 +21,10 @@ def _claim(root, role, queue):
     os.chdir(root)
     store = Store(find_project(), role)
     try:
-        queue.put(("ok", role, tasks.claim(store, "T-0001", role)["owner_epoch"]))
+        tasks.claim(store, "T-0001", role)
+        queue.put(("ok", role))
     except RLError as exc:
-        queue.put((exc.code, role, None))
+        queue.put((exc.code, role))
 
 
 def test_two_sessions_claiming_at_once_get_one_owner(project, tmp_path):
@@ -40,25 +41,25 @@ def test_two_sessions_claiming_at_once_get_one_owner(project, tmp_path):
     with project.read() as tx:
         task = tx.require("T-0001")
     winner = next(o for o in outcomes if o[0] == "ok")
-    assert task["owner_role"] == winner[1] and task["owner_epoch"] == 1
+    assert task["owner_role"] == winner[1]
 
 
-def test_old_owner_cannot_write_after_handoff_and_its_products_are_kept(project, tmp_path):
+def test_handoff_releases_the_task_for_the_next_owner(project, tmp_path):
     tasks.create_task(project, "analysis", "analysis", ["H-0001"], to_role="researcher")
     tasks.claim(project, "T-0001", "researcher-a")
     (tmp_path / "docs/tasks/handoff.md").write_text("state of work")
-    tasks.handoff(project, "T-0001", 1, "docs/tasks/handoff.md", "researcher-a")
-    assert tasks.claim(project, "T-0001", "researcher-b")["owner_epoch"] == 2
-    (tmp_path / "docs/notes/late.md").write_text("late result")
-    with pytest.raises(RLError) as exc:
-        tasks.progress(project, "T-0001", 1, "delivered", "researcher-a", "late", ["docs/notes/late.md"])
-    assert exc.value.code == "STALE_EPOCH"
-    with project.read() as tx:
-        assert tx.require("T-0001")["state"] == "active"
-    notes = tasks.inbox(project, "coordinator")["messages"]
-    assert any(m["type"] == "NOTE" and m["document_refs"] for m in notes)
-    tasks.progress(project, "T-0001", 2, "delivered", "researcher-b", "done")
+    tasks.handoff(project, "T-0001", "docs/tasks/handoff.md", "researcher-a")
+    with pytest.raises(RLError) as exc:  # a released task takes no owner updates until it is claimed again
+        tasks.progress(project, "T-0001", "delivered", "researcher-a", "done")
+    assert exc.value.code == "CONFLICT"
+    tasks.claim(project, "T-0001", "researcher-b")
+    (tmp_path / "docs/notes/result.md").write_text("result")
+    tasks.progress(project, "T-0001", "delivered", "researcher-b", "done", ["docs/notes/result.md"])
     tasks.review_task(project, "T-0001", "accept", "checked")
+    with project.read() as tx:
+        task = tx.require("T-0001")
+    assert (task["state"], task["owner_role"], len(task["output_refs"])) == ("accepted", "researcher-b", 1)
+    assert [m["type"] for m in tasks.inbox(project, "coordinator")["messages"]] == ["RESULT"]
 
 
 def test_inbox_cursor_and_repeated_message_delivery(project):
@@ -73,14 +74,11 @@ def test_inbox_cursor_and_repeated_message_delivery(project):
     assert len(tasks.inbox(project, "coordinator")["messages"]) == 0  # acknowledging sends nothing
 
 
-def test_coordinator_takeover_makes_the_old_epoch_stale(project):
+def test_a_new_coordinator_session_supersedes_the_old_one(project):
     old = tasks.start_session(project, "coordinator", "claude", "sess-a", model_observed="claude-sonnet-5-5")
     new = tasks.start_session(project, "coordinator", "codex", "thread-b", model_observed="gpt-6-astra")
-    assert (old["epoch"], new["epoch"]) == (1, 2)
-    with pytest.raises(RLError) as exc:
-        research.decide(project, ["H-0001"], "continue", "old session", epoch=old["epoch"])
-    assert exc.value.code == "STALE_EPOCH"
-    research.decide(project, ["H-0001"], "continue", "current session", epoch=new["epoch"])
+    again = tasks.start_session(project, "coordinator", "codex", "thread-b", model_observed="gpt-6-astra")
+    assert again["id"] == new["id"] and again["reused"]
     with project.read() as tx:
         states = {s["id"]: s["status"] for s in tx.all("Session")}
     assert states == {old["id"]: "superseded", new["id"]: "active"}
@@ -211,7 +209,7 @@ def test_export_restore_and_resume_without_any_session(project, tmp_path):
     runs.record(project, obs(state="unknown", at="2026-10-30T05:00:00Z"))
     tasks.create_task(project, "wait for run", "experiment", ["E-0001"], to_role="researcher")
     tasks.claim(project, "T-0001", "researcher")
-    tasks.progress(project, "T-0001", 1, "waiting", "researcher", attempts=["ATT-0001-1"],
+    tasks.progress(project, "T-0001", "waiting", "researcher", attempts=["ATT-0001-1"],
                    next_action="check job 77 with qstat")
     out = snapshot.export(project, str(tmp_path / "snap"))
     restored = snapshot.restore(out["path"], str(tmp_path / "restored"))

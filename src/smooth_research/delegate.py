@@ -26,13 +26,13 @@ def prompt_for(store: Store, task_id: str, role: str) -> str:
     return f"""You are a Smooth Research {role} session working on task {task_id} in {store.project.root}.
 The research records CLI is `{rl}` (run it from the project directory).
 
-1. Claim the task: `{rl} task claim {task_id} --role {role}` and note the owner epoch it prints.
+1. Claim the task: `{rl} task claim {task_id} --role {role}`.
 2. Do the work described below. Experiment code belongs in {store.project.config['code_root']}/, human-facing notes
    in {store.project.config['docs_root']}/notes/. Register every experiment run before executing it
    (`{rl} run register ...`), record what you observed (`{rl} run record ...`) and import results
    (`{rl} run import-result ...`). Never invent results, versions or model identities; unknown stays unknown.
-3. Finish with `{rl} task deliver {task_id} --owner-epoch <epoch> --role {role} --summary "<what changed, what was
-   found, what is still open>" --output <files>`; if blocked, `{rl} task block ... --reason <engineering|
+3. Finish with `{rl} task deliver {task_id} --role {role} --summary "<what changed, what was found, what is
+   still open>" --output <files>`; if blocked, `{rl} task block ... --reason <engineering|
    model_unavailable|budget|science>`. Stay inside the constraints document.
 
 {pack}

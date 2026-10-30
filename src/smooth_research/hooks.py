@@ -31,7 +31,6 @@ def session_start(host: str, raw: str) -> dict:
     store = Store(project, "hook")
     try:
         with store.read() as tx:
-            meta = tx.meta()
             coord = [s for s in tx.all("Session", status="active") if s["role_id"] == "coordinator"]
             tasks = [t for t in tx.all("Task") if t["state"] in OPEN_STATES]
             attempts = [a for a in tx.all("Attempt") if a["execution_state"] != "ended" or a.get("needs_check")]
@@ -44,8 +43,7 @@ def session_start(host: str, raw: str) -> dict:
                 + (f" --host-session-id {session_id}" if session_id else "")
                 + (f" --model-observed {model}" if model else ""))
     lines = [f"Smooth Research project at {project.root} (CLI: {rl}). Use the smooth-research skill.",
-             f"Coordinator epoch {meta['coordinator_epoch']}"
-             + (f", held by {coord[-1]['id']} ({coord[-1]['host']})" if coord else ", no active coordinator")
+             (f"Coordinator session {coord[-1]['id']} ({coord[-1]['host']})" if coord else "No active coordinator")
              + f". To coordinate from this session: {register}",
              f"Open tasks {len(tasks)}, unfinished attempts {len(attempts)}. Read `{rl} resume` before acting."]
     lines += [f"- {brief(t)}" for t in tasks[:5]]

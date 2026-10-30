@@ -55,12 +55,11 @@ def normalize_spec(spec: dict) -> dict:
     return spec
 
 
-def register(store: Store, experiment: str, spec: dict, request_id: str, run_id: str | None = None,
-             epoch: int | None = None) -> dict:
+def register(store: Store, experiment: str, spec: dict, request_id: str, run_id: str | None = None) -> dict:
     spec = normalize_spec(dict(spec))
     payload = digest_json({"experiment": experiment, "spec": spec, "run": run_id})
     prep = prepare_contract(store, experiment)  # a registered run is a formal reference: seal the contract
-    with store.write(epoch) as tx:
+    with store.write() as tx:
         previous = tx.request("run.register", request_id, payload)
         if previous:
             return {**previous, "duplicate": True,
@@ -180,7 +179,7 @@ def _bind(tx: Tx, attempt: str, ref: dict) -> str:
     return xid
 
 
-def record(store: Store, obs: dict, epoch: int | None = None) -> dict:
+def record(store: Store, obs: dict) -> dict:
     unknown = set(obs) - OBS_FIELDS
     if unknown:
         raise RLError("INVALID", f"unknown observation fields {sorted(unknown)}; allowed: {sorted(OBS_FIELDS)}")
@@ -205,7 +204,7 @@ def record(store: Store, obs: dict, epoch: int | None = None) -> dict:
     if ref and ref.get("kind") == "local_process" and str(ref.get("opaque_id", "")).isdigit() \
             and ref.get("executor_namespace", "").count(":") < 1:
         warnings.append("a bare PID is not unique: include host and boot/start identity in executor_namespace")
-    with store.write(epoch) as tx:
+    with store.write() as tx:
         existing = tx.get(obs["record_id"], "Observation")
         if existing:
             if existing["content_digest"] != digest:
@@ -294,7 +293,7 @@ def _best(results: list[dict]) -> str:
         "rejected" if results else "absent")
 
 
-def import_result(store: Store, attempt: str, manifest: dict, request_id: str, epoch: int | None = None) -> dict:
+def import_result(store: Store, attempt: str, manifest: dict, request_id: str) -> dict:
     if manifest.get("status") not in ("partial", "complete"):
         raise RLError("INVALID", "manifest.status is partial or complete")
     artifacts = manifest.get("artifacts") or []
@@ -303,7 +302,7 @@ def import_result(store: Store, attempt: str, manifest: dict, request_id: str, e
     verification, scope = _verify_artifacts(store.project, artifacts)
     manifest_digest = digest_json(manifest)
     payload = digest_json({"attempt": attempt, "manifest": manifest})
-    with store.write(epoch) as tx:
+    with store.write() as tx:
         previous = tx.request("run.import-result", request_id, payload)
         if previous:
             return {**previous, "duplicate": True, "summary": f"duplicate request {request_id}: {previous['result']}"}
@@ -342,8 +341,8 @@ def import_result(store: Store, attempt: str, manifest: dict, request_id: str, e
                        + ("; " + "; ".join(notes) if notes else "")}
 
 
-def reject_result(store: Store, result_id: str, reason: str, epoch: int | None = None) -> dict:
-    with store.write(epoch) as tx:
+def reject_result(store: Store, result_id: str, reason: str) -> dict:
+    with store.write() as tx:
         res = tx.require(result_id, "Result")
         tx.update(result_id, {"status": "rejected", "rejected_reason": reason, "usable_for_planned_comparison": False})
         results = tx.all("Result", attempt_id=res["attempt_id"])
@@ -388,8 +387,8 @@ def _usage(tx: Tx, usage: dict, attempts: list[str], revise: bool = False) -> di
     return {"usage": uid, "duplicate": False}
 
 
-def add_usage(store: Store, usage: dict, attempts: list[str], revise: bool = False, epoch: int | None = None) -> dict:
-    with store.write(epoch) as tx:
+def add_usage(store: Store, usage: dict, attempts: list[str], revise: bool = False) -> dict:
+    with store.write() as tx:
         out = _usage(tx, usage, attempts, revise)
         if not out["duplicate"]:
             tx.event("run.usage", out["usage"], f"{usage['quantity']} {usage['unit']} {usage['accounting_ref']}")
