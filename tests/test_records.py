@@ -263,3 +263,15 @@ def test_session_start_hook_reports_project_state(project, monkeypatch, tmp_path
     assert "/opt/plugin/bin/rl session start --role coordinator --host claude --host-session-id s1" in text
     elsewhere = hooks.session_start("codex", json.dumps({"cwd": "/"}))
     assert "available" in elsewhere["hookSpecificOutput"]["additionalContext"]
+
+
+def test_report_summarizes_arms_and_lives_in_reports(project, tmp_path):
+    from smooth_research import view
+    for seed, acc in ((0, 0.8), (1, 0.9)):
+        out = runs.register(project, "E-0001", {**SPEC, "seed": seed}, f"r{seed}")
+        runs.record(project, obs(attempt=out["attempt"], state="ended", outcome="success"))
+        runs.import_result(project, out["attempt"], {"status": "complete", "metrics": {"acc": acc}}, f"res{seed}")
+    path = view.report(project)["path"]
+    text = open(path, encoding="utf-8").read()
+    assert path.startswith(str(tmp_path / "reports"))
+    assert "| wd | 0,1 | 2 ended/success | 0.85 (n=2) |" in text

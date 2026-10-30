@@ -1141,3 +1141,17 @@ GitHub 链接固定到本次读取的提交；外部产品文档按 2026-10-30 �
 
 - 43 项契约测试，对应 16.2 节场景：并发领取只有一个 owner、交接后旧 owner 回写被拒且产物保留、封存契约不随草稿变化、事务内异常与写进程被 SIGKILL 后无半写记录、封存中断只留下未登记对象、request_id 幂等与冲突、观测去重/乱序/unknown/矛盾与显式更正、命名空间隔离与共享外部执行、重新执行为新 attempt、结果版本不符/远程 URI/partial/迟到结果、共享用量只计一次且未报告不记零、记录操作不启动进程或模型调用、审查范围指纹复用与关键变化重审、无合格 reviewer 时如实记为不可用、阳性对照失败只作诊断、导出后恢复并生成恢复包；另有宿主适配（伪造的 claude/codex CLI）与构建检查。
 - 端到端：在 herdr 新 tab 中启动 Claude Code 2.1.314（Sonnet 5.5，effort medium），`--plugin-dir dist/claude/plugins/smooth-research` 加载插件，用本计划的小型研究（标签噪声下的权重衰减）跑完一次研究循环。结果见 21.6。
+
+### 21.6 端到端测试结果（2026-10-30）
+
+环境：herdr 新 tab（`sr-e2e-claude`）中的 Claude Code 2.1.314，Sonnet 5.5，effort medium，auto 权限模式；`--plugin-dir dist/claude/plugins/smooth-research`；测试项目 `/home/yu/workspace/sr-e2e/wd-noise-claude`，计划为“对称标签噪声下 L2 权重衰减能否提升逻辑回归泛化”。
+
+第一轮（完整研究循环，约 5.7 分钟）：
+- 首次使用：SessionStart 提示 CLI 环境缺失，agent 运行 `rl setup` 后继续；插件 skill 中的 `${CLAUDE_PLUGIN_ROOT}/bin/rl` 与 `${CLAUDE_SESSION_ID}` 均被正确替换。
+- 记录：登记为 coordinator（epoch 1）；3 个假说（M1 active，竞争解释 C1/C2 先为 candidate）；E0/E1 两份契约（封存）；29 次运行全部先 register 再执行、record、import-result，并以实测 CPU 秒数登记用量（约 53 cpu_s）；4 条证据、5 个决策，最后以 `--stage` 交付 `continue_probe`，生成 `reports/` 报告与图视图；`rl doctor` 无问题。
+- 研究行为：E0 未达预设阈值时没有放过，而是登记并做大样本诊断，明确标注该诊断为事后补做；单次运行超出 30 秒上限也如实记录；M1 仅作为 screening 级支持，早停对照增益更大，因此 C1 未被排除。
+- 发现的问题：本机无法运行 Codex 的 bubblewrap 沙箱，只读审查者读不到审查包。agent 没有把它当作通过，改用同族子会话审查，并如实标注“非跨模型”。插件据此修复：审查包内联被审代码与配置，提示词直接携带整个包；自动调用没有可解析的结论时记为失败，不记为已回答。
+
+第二轮（插件更新后的复审，约 1.3 分钟）：`/reload-plugins` 后，构建号变化，agent 再次 `rl setup`。随后以 `--recheck-of RV-0002` 发起后台跨模型审查 RV-0004：实际模型为 gpt-6-astra（由 rollout 核实），关系为 cross_model，结论 `issues`，1 条真实的非阻塞发现（早停时 `train_loss` 与返回权重不一致）。agent 修复了代码，以 D-0006 记录影响范围与不重跑的理由，并写明审查只覆盖了静态阅读。
+
+其他：报告中逐个 attempt 的长列表改为按 arm 汇总的表格（描述性均值，4 位有效数字）。Codex 适配在隔离的 `CODEX_HOME` 中完成了 marketplace 添加、插件安装和 SessionStart hook 执行，hook 读到了 Claude 会话写入的同一份记录；Codex 的模型调用适配由两次真实审查验证。尚未在交互式 Codex 会话中跑完整的研究循环。

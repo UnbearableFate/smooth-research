@@ -109,6 +109,45 @@ A projection of the records; edit records with <code>rl</code>, not this page.</
     return {"path": str(path), "summary": f"wrote {store.project.rel(path)} (data_version {meta['data_version']})"}
 
 
+def _num(value: float) -> str:
+    return f"{value:.4g}"
+
+
+def _arm_table(tx: Tx, exp_id: str) -> list[str]:
+    """One row per arm: attempts, their states, and descriptive means of numeric metrics over usable results."""
+    arms: dict[str, dict] = {}
+    for run in tx.all("Run", experiment_id=exp_id):
+        arm = arms.setdefault(str(run["spec"].get("arm")), {"seeds": set(), "states": {}, "metrics": {},
+                                                             "mismatch": 0})
+        arm["seeds"].add(run["spec"].get("seed"))
+        for att in tx.all("Attempt", run_id=run["id"]):
+            state = f"{att['execution_state']}/{att['outcome']}"
+            arm["states"][state] = arm["states"].get(state, 0) + 1
+            results = [r for r in tx.all("Result", attempt_id=att["id"]) if r["status"] != "rejected"]
+            if not results:
+                continue
+            latest = results[-1]
+            if not latest.get("usable_for_planned_comparison", True):
+                arm["mismatch"] += 1
+                continue
+            for key, value in (latest["manifest"].get("metrics") or {}).items():
+                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                    arm["metrics"].setdefault(key, []).append(float(value))
+    if not arms:
+        return ["- no runs registered"]
+    keys = sorted({k for a in arms.values() for k in a["metrics"]})[:6]
+    lines = ["", f"| arm | seeds | attempts | {' | '.join(keys) or 'metrics'} |",
+             "|" + " --- |" * (3 + max(len(keys), 1))]
+    for name, a in sorted(arms.items()):
+        seeds = ",".join(str(s) for s in sorted(a["seeds"], key=str) if s is not None) or "-"
+        states = ", ".join(f"{n} {s}" for s, n in sorted(a["states"].items()))
+        cells = [(f"{_num(sum(v) / len(v))} (n={len(v)})" if (v := a["metrics"].get(k)) else "-") for k in keys] or ["-"]
+        flag = f" ({a['mismatch']} not usable: spec mismatch)" if a["mismatch"] else ""
+        lines.append(f"| {name} | {seeds} | {states}{flag} | {' | '.join(cells)} |")
+    lines += [f"\nMeans are descriptive over attempts; per-attempt records: `rl run show {exp_id}`.", ""]
+    return lines
+
+
 def report(store: Store, out: str | None = None, title: str | None = None) -> dict:
     """A human-facing progress/stage report generated from the records into reports/."""
     with store.read() as tx:
@@ -123,16 +162,7 @@ def report(store: Store, out: str | None = None, title: str | None = None) -> di
                              f"{exp.get('contract_ref') or 'draft (not sealed)'}"
                              + (" — revised after results (exploratory)" if exp.get("revised_after_results") else "")
                              + f"\n- question: {exp['question']}")
-            for run in tx.all("Run", experiment_id=exp["id"]):
-                arm = run["spec"].get("arm")
-                seed = run["spec"].get("seed")
-                for att in tx.all("Attempt", run_id=run["id"]):
-                    res = [r for r in tx.all("Result", attempt_id=att["id"]) if r["status"] != "rejected"]
-                    metrics = res[-1]["manifest"].get("metrics") if res else None
-                    exp_lines.append(f"- {run['id']}/{att['id']} arm={arm} seed={seed}: {att['execution_state']}/"
-                                     f"{att['outcome']}, result {att['result_status']}"
-                                     + (f", metrics {metrics}" if metrics else "")
-                                     + (" — differs from RunSpec" if res and not res[-1].get("spec_match", True) else ""))
+            exp_lines += _arm_table(tx, exp["id"])
         ev_lines = []
         for ev in evidence:
             rel = ", ".join(f"{e['rel']} {e['id']}@{e.get('revision')}" for e in tx.out(ev["id"])
