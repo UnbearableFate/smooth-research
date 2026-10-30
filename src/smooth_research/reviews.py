@@ -22,6 +22,9 @@ from .research import brief
 from .store import Store, Tx
 from .util import RLError, digest_file, digest_json, now_utc, short
 
+INLINE_FILE_CHARS = 60_000
+INLINE_TOTAL_CHARS = 240_000
+
 REVIEW_PROTOCOL = """## What to return
 
 Review the code against the method definition. For each problem give: location (file:line), the evidence
@@ -114,34 +117,48 @@ def run_ticket(store: Store, ticket_id: str, timeout: int = 1800, only: str | No
         candidates = [adapters.Entry.parse(only)]
     authors = set(filter(None, (adapters.family(m) for m in (t.get("author_models") or []))))
     calls = [c for c in (t.get("calls") or []) if not c.get("background")]
-    manual = None
+    # The whole package goes in the prompt: the answer must not depend on the callee's file tools or sandbox.
+    prompt = (f"You are the independent {'reviewer' if t['kind'] == 'review' else 'advisor'} for a research "
+              f"project at {store.project.root}. Everything you need is in the package below; you may read more "
+              "project files if your tools work, but do not modify anything. If something you need is missing, "
+              "say so (for a review: under 'unchecked'). Answer in the requested format.\n\n"
+              + request_path.read_text(encoding="utf-8"))
+    manual, answered = None, 0
     for entry in candidates:
         if entry.entry == "manual":
             manual = entry
             break
         log = store.project.dir("calls") / f"{ticket_id}.{entry.entry}.{len(calls) + 1}.log"
-        prompt = (f"Read the package at {request_path} and follow it exactly. It names project files to read; "
-                  f"paths are relative to {store.project.root}. Answer in the requested format.")
-        res = adapters.call(entry, prompt, store.project.root, read_only=True, timeout=timeout,
-                            log=log)
+        res = adapters.call(entry, prompt, store.project.root, read_only=True, timeout=timeout, log=log)
+        if res.ok and not _parsed(t["kind"], res.text):
+            answered += 1
+            res.ok, res.error = False, ("answer has no parseable result block: "
+                                        + " ".join(res.text.split())[:200])
         calls.append({"entry": str(entry), **res.as_dict(), "finished_at": now_utc()})
         if res.ok:
             return _store_answer(store, ticket_id, res.text, str(entry), res.observed_model, res.provider,
                                  res.session_id, res.usage, res.cost_usd, calls, authors)
-    status = "pending" if manual else "unavailable"
+    status = "pending" if manual else "failed" if answered else "unavailable"
+    errors = "; ".join(f"{c['entry']}: {c.get('error')}" for c in calls if c.get("error"))
     with store.write() as tx:
         tx.update(ticket_id, {"status": status, "calls": calls,
-                              "error": "; ".join(f"{c['entry']}: {c.get('error')}" for c in calls if c.get("error"))
-                                       or ("waiting for a manual answer" if manual else "no candidate could be called")})
-        tx.event(f"{t['kind']}.{status}", ticket_id, "no automatic answer")
+                              "error": errors or ("waiting for a manual answer" if manual else "no candidate could be called")})
+        tx.event(f"{t['kind']}.{status}", ticket_id, "no usable automatic answer")
     if manual:
         return {"id": ticket_id, "status": status,
                 "summary": f"{ticket_id}: submit {store.project.rel(request_path)} to {manual.model} yourself (or ask the "
                            f"user to), then `rl {t['kind'] if t['kind'] == 'review' else 'advise'} import {ticket_id} "
                            "--answer <file> --model-observed <model> --source <where>`"}
     return {"id": ticket_id, "status": status,
-            "summary": f"{ticket_id} unavailable: " + "; ".join(f"{c['entry']}: {c.get('error')}" for c in calls)
-                       + ". Recorded as unavailable — not a pass; independent low-cost work can continue."}
+            "summary": f"{ticket_id} {status}: {errors}. Recorded as {status} — not a pass; independent low-cost "
+                       f"work can continue (raw output in research/calls/)."}
+
+
+def _parsed(kind: str, text: str) -> bool:
+    data = adapters.last_json_block(text) or {}
+    if kind == "review":
+        return data.get("verdict") in ("pass", "issues", "blocking")
+    return isinstance(data.get("proposals"), list)
 
 
 def _store_answer(store: Store, ticket_id: str, text: str, entry: str, observed: str | None, provider: str | None,
@@ -301,10 +318,25 @@ def _review_package(store: Store, rid: str, target: str | None, question: str, s
         parts.append(f"This re-checks only what the earlier review raised, after fixes: {prior}\n")
     if contract:
         parts.append(f"## Method definition\n\n{contract}\n")
-    parts.append("## Files under review (read them yourself)\n\n" + "\n".join(f"- {p}" for p in detail["files"]))
+    budget = [INLINE_TOTAL_CHARS]
+
+    def inline(paths: list[str]) -> str:
+        """The exact content under review, so the package binds to this snapshot and needs no file tools."""
+        blocks = []
+        for p in paths:
+            text = store.project.abs(p).read_text(encoding="utf-8", errors="replace")
+            if len(text) > min(INLINE_FILE_CHARS, budget[0]):
+                blocks.append(f"### {p}\n\n(not inlined: {len(text)} characters; read the file at this path)")
+                continue
+            budget[0] -= len(text)
+            fence = "````" if "```" in text else "```"
+            blocks.append(f"### {p}\n\n{fence}{Path(p).suffix.lstrip('.')}\n{text.rstrip()}\n{fence}")
+        return "\n\n".join(blocks)
+
+    parts.append("## Files under review\n\n" + inline(list(detail["files"])))
     if detail["configs"]:
-        parts.append("\n## Execution configuration\n\n" + "\n".join(f"- {p}" for p in detail["configs"])
-                     + (f"\n(keys allowed to vary without a new review: {', '.join(detail['ignored_keys'])})"
+        parts.append("\n## Execution configuration\n\n" + inline(list(detail["configs"]))
+                     + (f"\n\n(keys allowed to vary without a new review: {', '.join(detail['ignored_keys'])})"
                         if detail["ignored_keys"] else ""))
     if detail["deps"]:
         parts.append("\n## Key dependencies\n\n" + "\n".join(f"- {p}" for p in detail["deps"]))

@@ -13,6 +13,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import tomllib
 import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -146,12 +147,25 @@ def _codex_rollout_model(thread_id: str) -> tuple[str | None, str | None]:
     return None, None
 
 
+def codex_write_sandbox() -> str:
+    """Writable sessions keep workspace-write unless the user chose full access for Codex themselves
+    (some hosts cannot run the bubblewrap sandbox at all)."""
+    config = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")) / "config.toml"
+    try:
+        with config.open("rb") as source:
+            if tomllib.load(source).get("sandbox_mode") == "danger-full-access":
+                return "danger-full-access"
+    except (OSError, tomllib.TOMLDecodeError):
+        pass
+    return "workspace-write"
+
+
 def call_codex(entry: Entry, prompt: str, cwd: Path, read_only: bool, timeout: int,
                add_dirs: list[str] = (), log: Path | None = None) -> Call:
     with tempfile.TemporaryDirectory(prefix="rl-codex-") as tmp:
         last = Path(tmp) / "last.txt"
         cmd = ["codex", "exec", "--json", "--skip-git-repo-check", "--model", entry.model, "--cd", str(cwd),
-               "--sandbox", "read-only" if read_only else "workspace-write", "-c", 'approval_policy="never"',
+               "--sandbox", "read-only" if read_only else codex_write_sandbox(), "-c", 'approval_policy="never"',
                "--output-last-message", str(last)]
         if entry.effort:
             cmd += ["-c", f'model_reasoning_effort="{entry.effort}"']

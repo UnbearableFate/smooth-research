@@ -4,6 +4,8 @@
 
 **本文档为事前制作的参考文档,并非权威, 实际执行中应当根据实际情况调整计划并对本文档进行更新**
 
+**v0.3（2026-10-30）首版已实现；实施中的调整与验证结果见第 21 节，与正文冲突时以第 21 节为准。**
+
 ## 核心建议
 
 从 research-tree 提炼“研究记忆与运行记录内核”，以 LoopLora 的实践重写研究工作流。用户与 GPT 等模型共同形成研究计划；插件帮助执行 agent 把计划转为可检验的假说，通过成本逐渐增加的实验形成证据，及时调整路线，并在瓶颈处调用最强可用模型。
@@ -45,6 +47,7 @@
 18. LoopLora 场景示例
 19. 核心 skill 的内容范围
 20. 设计决策与来源
+21. 实施记录（v0.3）
 
 ---
 
@@ -1087,3 +1090,54 @@ GitHub 链接固定到本次读取的提交；外部产品文档按 2026-10-30 �
 - [O4 Claude agent teams 与恢复限制](https://code.claude.com/docs/en/agent-teams)
 - [O5 Codex 非交互执行](https://developers.openai.com/codex/noninteractive)
 
+
+---
+
+## 21. 实施记录（v0.3）
+
+首版按 M0–M3 的范围实现为一个共享核心加两个宿主薄适配。下表记录与正文不同或正文未定的地方。
+
+### 21.1 结构与交付
+
+| 项 | 实施 | 原因 |
+| --- | --- | --- |
+| 包名与入口 | Python 包 `smooth_research`，console entry `rl = "smooth_research.cli:main"` | 与仓库名一致；`research_loop` 只是拟议名 |
+| 共通与适配 | `src/smooth_research/`（核心与 CLI）+ `plugin/`（`bin/rl` 与三个 skill）共享；`hosts/claude/`、`hosts/codex/` 只放 manifest、SessionStart hook、宿主说明与占位符取值；`scripts/build_plugins.py` 组装 `dist/claude`、`dist/codex` 两个 marketplace | 沿用 research-tree 的 shared + adapter + build 模式；适配层不得覆盖共享文件，构建时检查 |
+| Codex manifest | `.codex-plugin/plugin.json`（skills、hooks、interface） | 本机 Codex 0.163 的内置插件采用此形式；hook 使用 `${PLUGIN_ROOT}` |
+| Claude 包装 | `.claude-plugin/plugin.json`、`hooks/hooks.json`、`agents/researcher.md`；skill 中的 CLI 写作 `${CLAUDE_PLUGIN_ROOT}/bin/rl`，会话 ID 用 `${CLAUDE_SESSION_ID}`，调用时由宿主替换为绝对路径 | 不假定 PATH；`claude plugin validate --strict` 通过 |
+| CLI 环境 | `bin/rl setup` 一次性用 uv 按锁文件把包（非 editable）装进 `${XDG_DATA_HOME:-~/.local/share}/smooth-research/env-<build id>`；其它命令从不安装依赖，缺失时给出明确提示（SessionStart 提示同理） | 插件目录可能只读或随更新替换；构建号随内容变化，旧环境不会被误用 |
+| MCP | 未提供 | CLI 已覆盖两宿主；需要结构化工具时再加薄包装 |
+| 摘要算法 | 全部使用 blake2b（文档封存、RunSpec、构建清单） | 项目规则：不使用 SHA-256 |
+
+### 21.2 研究项目布局（用户要求）
+
+| 路径 | 内容 |
+| --- | --- |
+| `src/` | 实验代码 |
+| `docs/` | 面向人的文档：`plan/original.md`（导入计划快照，封存）、`plan/constraints.md`、`experiments/E-xxxx.md`（实验契约草稿）、`tasks/`、`notes/` |
+| `reports/` | 报告：`rl report` 生成的进度/阶段报告、`reviews/RV-xxxx.md`、`advice/AD-xxxx.md`、`research-graph.html` |
+| `research/` | 机器记录：`state/`（活动数据库与锁，不进 git）、`documents/objects/`（封存对象）、`packages/`（审查与咨询包）、`artifacts/<attempt>/`（运行输出，不进 git）、`calls/`、`snapshots/` |
+
+因此 12.3 节中的 `plan/`、`research/tasks|experiments|evidence|reviews|advice/`、`research/view.html` 分别移到上表位置。
+
+### 21.3 行为细节
+
+- 记录类型：六类图对象与辅助记录（DocRevision、Run、Attempt、ExecRef、Observation、Result、Usage、Session、Message、Cursor、Ticket、Event、Request）同在一个 LatticeDB 0.15.0 库；ID 计数器存于 Meta，不复用。写入在进程锁与单个数据库事务中完成，异常即整体回滚。
+- 绑定 revision 的关系（tests、supports、challenges、decides、cites 等）允许同类型平行边：修订假说后，旧证据仍绑定旧 revision，核对后可再绑定新 revision。
+- 实验契约：`rl experiment add` 在 `docs/experiments/` 生成草稿；首次被 run 登记、审查或任务正式引用时封存。封存后的修改形成新 revision；已有结果后再改则标记 `revised_after_results`（探索性，不算事前设定）。
+- 协调者 epoch：`rl session start --role coordinator` 递增并取代旧协调 session；协调写操作通过 `--epoch`（或 `SMOOTH_RESEARCH_EPOCH`）在同一事务内校验。简化：协调写操作的 epoch 为可选传入，任务的 `owner_epoch` 为强制。过期 owner 的产物照常封存并以 NOTE 消息交给协调者。
+- 消息：任务状态变化自动生成 TASK/RESULT/WAIT/BLOCKED/HANDOFF/CANCEL；另有 NOTE。`rl inbox --ack` 只移动游标，不发回执。
+- 观测投影：同一来源有序号时按序号，否则按 `observed_at`；终态后的查询失败只记为观测问题；终态后更晚的非终态、两个不同终态、比最近观测更早的终态都标记待核对；只有带依据的 `--correction-of` 才能改变已确认终态。
+- 结果：本地路径计算 blake2b 并与报告摘要比较；远程 URI 只登记（“未读取”）；与 RunSpec 不一致的字段保留并标记不可用于预设比较；partial 不覆盖 complete。
+- 模型入口写作 `<claude|codex|manual>:<model>[@effort]`。默认 reviewer 候选 `codex:gpt-6-astra@medium`、`claude:claude-opus-5-5@medium`，按作者模型族自动排除同族；advisor 默认 `claude:claude-fable-5-1@high`，后备 `codex:gpt-6-astra@high`、`manual:gpt-pro`。实际模型：Claude 取 `modelUsage`，Codex 取 rollout 文件中的 `turn_context.model`，取不到则记为未核实。审查/咨询可后台运行（独立 worker 进程），这是宿主适配层的模型调用，不涉及实验执行。
+- 跨 session：`rl delegate T-x --entry <entry>` 用 `codex exec` 或 `claude -p` 启动独立 session，按工作包领取并交付任务，记录线程/会话 ID 与请求/实际模型。同 session：Claude 插件提供 `smooth-research:researcher` 子代理。
+- 上下文包的 token 数为标注方法的估算（ASCII 字符/4 + 非 ASCII 字符），超出预算的部分列为按需读取的索引。
+
+### 21.4 首版未做
+
+向量检索、Zotero 同步、MCP 包装、自动 session 轮换阈值、跨主机协调者 failover；文献检索只接 arXiv（元数据核对另支持 Crossref DOI）。
+
+### 21.5 验证
+
+- 43 项契约测试，对应 16.2 节场景：并发领取只有一个 owner、交接后旧 owner 回写被拒且产物保留、封存契约不随草稿变化、事务内异常与写进程被 SIGKILL 后无半写记录、封存中断只留下未登记对象、request_id 幂等与冲突、观测去重/乱序/unknown/矛盾与显式更正、命名空间隔离与共享外部执行、重新执行为新 attempt、结果版本不符/远程 URI/partial/迟到结果、共享用量只计一次且未报告不记零、记录操作不启动进程或模型调用、审查范围指纹复用与关键变化重审、无合格 reviewer 时如实记为不可用、阳性对照失败只作诊断、导出后恢复并生成恢复包；另有宿主适配（伪造的 claude/codex CLI）与构建检查。
+- 端到端：在 herdr 新 tab 中启动 Claude Code 2.1.314（Sonnet 5.5，effort medium），`--plugin-dir dist/claude/plugins/smooth-research` 加载插件，用本计划的小型研究（标签噪声下的权重衰减）跑完一次研究循环。结果见 21.6。

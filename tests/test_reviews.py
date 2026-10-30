@@ -14,6 +14,8 @@ FAKE_CODEX = r"""#!{python}
 import json, os, sys, uuid, pathlib
 args = sys.argv[1:]
 prompt = sys.stdin.read()
+if os.environ.get("FAKE_PROMPT_OUT"):
+    pathlib.Path(os.environ["FAKE_PROMPT_OUT"]).write_text(prompt)
 model = args[args.index("--model") + 1]
 out = args[args.index("--output-last-message") + 1]
 thread = str(uuid.uuid4())
@@ -92,7 +94,8 @@ def test_claude_written_code_goes_to_a_codex_reviewer_and_is_reused_while_unchan
     assert "reused_from" not in fresh and fresh["id"] != rv["id"]
 
 
-def test_codex_written_code_goes_to_a_claude_reviewer(project, fakes, tmp_path):
+def test_codex_written_code_goes_to_a_claude_reviewer(project, fakes, tmp_path, monkeypatch):
+    monkeypatch.setenv("FAKE_ANSWER", '```json\n{"verdict": "issues", "findings": [{"location": "src/model.py:2"}]}\n```')
     code(tmp_path)
     rv = request(project, author="gpt-6-astra")
     with project.read() as tx:
@@ -126,11 +129,24 @@ def test_no_cross_family_candidate_means_unavailable_at_request(project, tmp_pat
         assert tx.require(rv["id"])["status"] == "unavailable"
 
 
+def test_the_prompt_carries_the_package_with_the_code_inline(project, fakes, tmp_path, monkeypatch):
+    code(tmp_path, body="def operator(x):\n    return x * 3  # unique-marker\n")
+    monkeypatch.setenv("FAKE_PROMPT_OUT", str(tmp_path / "prompt.txt"))
+    rv = request(project)
+    reviews.run_ticket(project, rv["id"])
+    prompt = (tmp_path / "prompt.txt").read_text()
+    assert "unique-marker" in prompt and "lr: 0.1" in prompt and "Method definition" in prompt
+
+
 def test_unparsed_answers_and_same_family_imports_are_labelled_honestly(project, fakes, tmp_path, monkeypatch):
     code(tmp_path)
-    monkeypatch.setenv("FAKE_ANSWER", "I think it is fine, no JSON here.")
+    monkeypatch.setenv("FAKE_ANSWER", "I could not read the package because the sandbox failed.")
     rv = request(project)
-    assert reviews.run_ticket(project, rv["id"])["verdict"] == "unparsed"
+    out = reviews.run_ticket(project, rv["id"])
+    assert out["status"] == "failed" and "not a pass" in out["summary"] and "sandbox failed" in out["summary"]
+    with project.read() as tx:
+        t = tx.require(rv["id"])
+    assert t["status"] == "failed" and not t.get("verdict") and not t.get("answer_ref")
     code(tmp_path, body="x = 1\n")
     rv2 = request(project)
     (tmp_path / "answer.md").write_text('```json\n{"verdict": "issues", "findings": [{"location": "a"}]}\n```')
