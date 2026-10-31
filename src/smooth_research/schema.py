@@ -93,7 +93,7 @@ ENTITIES: dict[str, Entity] = {e.label: e for e in [
     _e("Session", "S", role_id=F(required=True), host=F(required=True), host_session_id=F(),
        model_requested=F(), model_observed=F(), effort=F(), worktree=F(),
        status=F(required=True, enum="session_status"), ended_at=F(), role_kind=F(), entry=F(), cwd=F(),
-       branch=F(), assignment=F(), herdr_agent=F(), herdr_tab=F(), herdr_pane=F()),
+       branch=F(), assignment=F(), herdr_agent=F(), herdr_tab=F(), herdr_pane=F(), watch=F("json")),
     _e("Message", "MSG", seq=F("int", True), type=F(required=True, enum="message_type"), task_id=F(),
        from_role=F(required=True), to_role=F(required=True), document_refs=F("json"), base_revision=F("int"),
        in_reply_to=F(), next_action=F(), text=F(), digest=F(required=True)),

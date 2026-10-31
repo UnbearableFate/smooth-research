@@ -81,8 +81,28 @@ end your turn; the next notice wakes you.
 
 ## Dialogs
 
-A session that waits at a dialog when it starts (for example a folder trust question) or later (an approval)
-is reported, not answered. Look at it with `herdr agent read <name>` and ask the user before answering it.
+Claude Code and Codex ask whether to trust a folder the first time they start in it. `{{rl}} agent open`
+answers that question for you when it names the folder rl opened the session in (its worktree, or the project
+directory the user trusted when starting you), and records it. Every other dialog is reported, not answered:
+hooks to review, an MCP server to enable, an approval, a trust question for another folder. Look at it with
+`herdr agent read <name>` and ask the user before answering it.
+
+## Watcher
+
+`{{rl}} agent open` also starts the watcher in its own tab (`sr-watch`). Every `agents.watch_minutes`
+minutes (default 20) it looks at each open session:
+
+| Session | Watcher |
+| --- | --- |
+| Its agent exited, or its tab was closed | starts it again in its folder, in a new conversation that reads its brief (at most 3 times an hour) |
+| Idle, assignment unfinished, waiting for nothing | reminds it to continue (at most twice per assignment), then reports it to you |
+| Waiting: task recorded as waiting or blocked, a review it asked for, runs of its experiments queued or running, a message without an answer | leaves it alone |
+| At a dialog | answers only the trust question for the session's own folder; reports any other dialog once |
+
+What it did or found reaches you as one NOTE from `watch` per round. When you are idle with messages unread
+for a whole round, it reminds you once. End sessions with `{{rl}} agent close`: a session closed any other way
+counts as an unexpected stop. `{{rl}} agent check` runs one round now; `{{rl}} agent watch --stop` stops the
+watcher and `--start` starts it again. It ends by itself when no session is open.
 
 ## Subagents
 

@@ -11,8 +11,9 @@ directories above the smooth-research SKILL.md). Write the absolute path in each
   opened with `rl agent open` ([team.md](team.md)). A Codex session gets `-m <model>`,
   `-c model_reasoning_effort=..` for an `@effort`, `--search` when it is an advisor, and the arguments in
   `agents.args.codex` of `smooth-research.yaml`; rl adds no sandbox or approval flags (set them there if you
-  want them). A session that starts at a dialog is reported, not answered: ask the user. The bullets below are
-  the forms without herdr.
+  want them). `rl agent open` answers Codex's question whether to trust the folder it opened the session in;
+  any other dialog (hooks to review, an approval) is reported, not answered: ask the user. A watcher tab
+  restarts sessions that stopped unexpectedly (team.md). The bullets below are the forms without herdr.
 - Researchers: for each implementation or run task, use a Codex subagent if they are enabled, or
   `rl delegate T-x --background` for an independent session with the first available entry of
   models.researcher in `smooth-research.yaml` (`--entry codex:<model>@high` or `--entry claude:<model>` picks

@@ -9,9 +9,9 @@ the absolute path from SKILL.md.
 - Inside herdr (`HERDR_ENV=1`): researchers, reviewers and advisors are agent sessions in their own tabs,
   opened with `rl agent open` ([team.md](team.md)). They get the arguments in `agents.args.<host>` of
   `smooth-research.yaml` (for Claude Code `--permission-mode auto` by default) and no permission-bypass flags.
-  A Claude Code session in a new worktree first asks whether to trust the folder: `rl agent open` reports that
-  it waits at a dialog; look at it with `herdr agent read <name>` and ask the user before answering. The
-  bullets below are the forms without herdr.
+  Claude Code asks whether to trust a new worktree's folder; `rl agent open` answers that question for the
+  folder it opened the session in. Any other dialog is reported, not answered: ask the user. A watcher tab
+  restarts sessions that stopped unexpectedly (team.md). The bullets below are the forms without herdr.
 - Researchers: for each implementation or run task, start the native subagent `smooth-research:researcher`
   (Agent tool) with the task id and a role name such as `researcher-1`. Give a short brief; it reads its own
   work pack and has your tools, including MCP servers such as pi-env-mcp and miyabi-mcp. When it reports

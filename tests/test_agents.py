@@ -16,36 +16,103 @@ FAKE_HERDR = r"""#!{python}
 import json, os, sys, pathlib
 args = sys.argv[1:]
 state_path = pathlib.Path(os.environ["FAKE_HERDR_STATE"])
-state = json.loads(state_path.read_text()) if state_path.exists() else {"n": 0, "agents": {}}
+state = json.loads(state_path.read_text()) if state_path.exists() else {}
+state.setdefault("n", 0)
+for key in ("agents", "cwd", "dialog", "status", "labels", "kinds", "seq"):
+    state.setdefault(key, {})
+state.setdefault("closed", [])
+state.setdefault("deaf", [])
 with open(os.environ["FAKE_HERDR_LOG"], "a") as log:
     log.write(json.dumps(args) + "\n")
+DIALOGS = {  # the options (the first one selected at the start) and the screen
+    "claude": (["No, exit", "Yes, I trust this folder"], " Accessing workspace:\n\n {cwd}\n\n Quick safety check: "
+               "Is this a project you created or one you trust?\n\n{options}\n\n Enter to confirm · Esc to cancel"),
+    "codex": (["Trust and continue", "Open restricted"], "  Trust this folder?\n  {cwd}\n  Codex can read, edit and run "
+              "files here.\n{options}"),
+    "mcp": (["Use this MCP server", "Continue without it"], " New MCP server found in .mcp.json: codegraph\n{options}"),
+}
 
-def done(result=None, error=None):
+def done(result=None, error=None, text=None):
     state_path.write_text(json.dumps(state))
     if error:
         print(json.dumps({"error": {"code": error[0], "message": error[1]}}), file=sys.stderr)
         sys.exit(1)
-    print(json.dumps({"id": "cli", "result": result}))
+    print(text if text is not None else json.dumps({"id": "cli", "result": result}))
     sys.exit(0)
+
+def screen(name):
+    d = state["dialog"].get(name)
+    if not d:
+        return "> "
+    options, text = DIALOGS[d["kind"]]
+    lines = "\n".join((" ❯ " if i == d["sel"] else "   ") + o for i, o in enumerate(options))
+    return text.replace("{cwd}", d["cwd"]).replace("{options}", lines)
+
+def open_tab(tab):  # the coordinator's tab w1:t99 and the tabs created here, until closed
+    return tab not in state["closed"] and (tab == "w1:t99" or tab in state["labels"])
 
 group, action = args[0], args[1]
 if (group, action) == ("tab", "create"):
     state["n"] += 1
+    state["cwd"][f"w1:p{state['n']}"] = args[args.index("--cwd") + 1]
+    state["labels"][f"w1:t{state['n']}"] = args[args.index("--label") + 1]
     done({"tab": {"tab_id": f"w1:t{state['n']}"}, "root_pane": {"pane_id": f"w1:p{state['n']}"}})
 if (group, action) == ("tab", "close"):
     state["agents"] = {k: v for k, v in state["agents"].items() if v != args[2]}
+    state["closed"].append(args[2])
+    done({"type": "ok"})
+if (group, action) == ("tab", "get"):
+    if not open_tab(args[2]):
+        done(error=("tab_not_found", f"tab {args[2]} not found"))
+    done({"tab": {"tab_id": args[2], "label": state["labels"].get(args[2], "1")}})
+if (group, action) == ("pane", "get"):
+    tab = "w1:t" + args[2].split(":p")[1]
+    if not open_tab(tab):
+        done(error=("pane_not_found", f"pane {args[2]} not found"))
+    held = [state["kinds"].get(k, "claude") for k, v in state["agents"].items() if v == tab]
+    done({"pane": {"pane_id": args[2], "tab_id": tab, "agent": held[0] if held else None,
+                   "cwd": state["cwd"].get(args[2])}})
+if (group, action) == ("pane", "run"):
     done({"type": "ok"})
 if (group, action) == ("agent", "start"):
-    state["agents"][args[2]] = "w1:t" + args[args.index("--pane") + 1].split(":p")[1]
-    if os.environ.get("FAKE_HERDR_BLOCKED"):
-        done(error=("agent_not_ready", f"agent {args[2]} is blocked during startup"))
-    done({"agent": {"name": args[2], "agent_status": "idle"}})
+    name, pane = args[2], args[args.index("--pane") + 1]
+    state["agents"][name] = "w1:t" + pane.split(":p")[1]
+    state["kinds"][name] = args[args.index("--kind") + 1]
+    state["seq"][name] = state["seq"].get(name, 0) + 1
+    blocked = os.environ.get("FAKE_HERDR_BLOCKED")
+    if blocked:  # 1 or mcp: another dialog; claude, codex: their trust question; claude-other: for another folder
+        kind = {"1": "mcp"}.get(blocked, blocked).replace("-other", "")
+        cwd = "/elsewhere/project" if blocked.endswith("-other") else state["cwd"].get(pane, "")
+        state["dialog"][name] = {"kind": kind, "sel": 0, "cwd": cwd}
+        done(error=("agent_not_ready", f"agent {name} is blocked during startup"))
+    done({"agent": {"name": name, "agent_status": "idle"}})
+if (group, action) == ("agent", "read"):
+    if args[2] not in state["agents"]:
+        done(error=("agent_not_found", f"agent target {args[2]} not found"))
+    done(text=screen(args[2]))
+if (group, action) == ("agent", "send-keys"):
+    for key in args[3:]:
+        d = state["dialog"].get(args[2])
+        if d and key == "down":
+            d["sel"] = min(d["sel"] + 1, len(DIALOGS[d["kind"]][0]) - 1)
+        elif d and key == "enter":
+            del state["dialog"][args[2]]
+            if DIALOGS[d["kind"]][0][d["sel"]] == "No, exit":
+                state["agents"].pop(args[2], None)
+    done({"type": "ok"})
 if (group, action) in (("agent", "prompt"), ("agent", "get")):
     if args[2] not in state["agents"] and not args[2].startswith("w1:p"):
         done(error=("agent_not_found", f"agent target {args[2]} not found"))
+    if args[2] in state["dialog"]:
+        if action == "prompt":
+            done(error=("agent_blocked", "the agent waits at a dialog"))
+        done({"agent": {"agent_status": "blocked", "state_change_seq": state["seq"].get(args[2], 1)}})
     if action == "prompt" and "--wait" in args and args[3].startswith("/"):
         done(error=("agent_prompt_stalled", "no working state observed"))
-    done({"agent": {"agent_status": "idle"}})
+    if action == "prompt" and args[2] not in state["deaf"]:  # it works on the prompt and becomes idle again
+        state["seq"][args[2]] = state["seq"].get(args[2], 1) + 2
+    done({"agent": {"agent_status": state["status"].get(args[2], "idle"),
+                    "state_change_seq": state["seq"].get(args[2], 1)}})
 done(error=("unknown", " ".join(args)))
 """
 
@@ -143,7 +210,9 @@ def test_a_researcher_works_in_its_own_worktree_with_a_branch_per_task(project, 
     assert git(wt, "log", "-1", "--format=%s") == "start"  # a new branch from main, not from the last task
     closed = agents.close(project, "researcher-1")
     assert "kept (a new session named researcher-1 reuses it)" in closed["summary"]
-    assert calls(herdr_log)[-1] == ["tab", "close", "w1:t1"]
+    assert "the watcher in tab w1:t2 stopped" in closed["summary"]  # the last open session closed
+    assert [c for c in calls(herdr_log) if c[:2] == ["tab", "close"]] == [["tab", "close", "w1:t1"],
+                                                                          ["tab", "close", "w1:t2"]]
     with project.read() as tx:
         s = tx.require(out["id"])
     assert s["status"] == "ended" and s["assignment"] == "T-0002"
@@ -209,15 +278,34 @@ def test_reviewer_and_advisor_sessions_answer_and_talk_through_messages(project,
     assert agents.list_sessions(project)["summary"].startswith(f"{opened['id']} reviewer-1 [reviewer, idle]")
 
 
-def test_a_session_waiting_at_a_startup_dialog_is_reported_not_answered(project, herdr_log, monkeypatch):
-    monkeypatch.setenv("FAKE_HERDR_BLOCKED", "1")
+def test_a_session_waiting_at_another_dialog_is_reported_not_answered(project, herdr_log, monkeypatch):
+    for n, (dialog, said) in enumerate((("mcp", "waits at a dialog: look at it"),
+                                        ("claude-other", "a folder trust question that does not name")), 1):
+        monkeypatch.setenv("FAKE_HERDR_BLOCKED", dialog)
+        task = tasks.create_task(project, "implement", "implement", ["E-0001"], to_role="researcher")["id"]
+        out = agents.open_session(project, "researcher", f"researcher-{n}", task=task, worktree=False)
+        assert said in out["summary"] and "ask the user before answering it" in out["summary"]
+        with project.read() as tx:
+            s = tx.require(out["id"])
+        assert s["status"] == "active" and s["assignment"] == task
+    assert not any(c[:2] in (["agent", "prompt"], ["agent", "send-keys"]) for c in calls(herdr_log))
+
+
+@pytest.mark.parametrize("host", ["claude", "codex"])
+def test_the_trust_question_for_the_folder_rl_opened_the_session_in_is_answered(project, herdr_log, tmp_path,
+                                                                                 monkeypatch, host):
+    monkeypatch.setenv("FAKE_HERDR_BLOCKED", host)
     tasks.create_task(project, "implement", "implement", ["E-0001"], to_role="researcher")
-    out = agents.open_session(project, "researcher", "researcher-1", task="T-0001", worktree=False)
-    assert "waits at a dialog" in out["summary"] and "ask the user before answering it" in out["summary"]
-    assert not any(c[:2] == ["agent", "prompt"] for c in calls(herdr_log))
+    commit_all(tmp_path)
+    out = agents.open_session(project, "researcher", "researcher-1", entry_text=f"{host}:m", task="T-0001")
+    wt = tmp_path.parent / f"{tmp_path.name}-worktrees" / "researcher-1"
+    assert f"answered {host}'s folder trust question for {wt}: trusted" in out["summary"]
+    log = calls(herdr_log)
+    keys = [c[3:] for c in log if c[:2] == ["agent", "send-keys"]]
+    assert keys == ([["down"], ["enter"]] if host == "claude" else [["enter"]])  # Claude selects "No, exit" first
+    assert any(c[:2] == ["agent", "prompt"] and "agent brief researcher-1" in c[3] for c in log)
     with project.read() as tx:
-        s = tx.require(out["id"])
-    assert s["status"] == "active" and s["assignment"] == "T-0001"
+        assert any(e["type"] == "session.trusted" for e in tx.all("Event"))
 
 
 def test_sessions_need_herdr_but_messages_do_not(project, monkeypatch):

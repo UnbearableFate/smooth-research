@@ -67,11 +67,49 @@ def prompt(target: str, text: str, wait_ms: int | None = None) -> str | None:
         return exc.message
 
 
+def read(target: str) -> str:
+    """What a live agent's terminal shows now, as text ('' when it cannot be read)."""
+    try:
+        out = subprocess.run(["herdr", "agent", "read", target, "--source", "visible"], capture_output=True,
+                             text=True, timeout=15)
+    except (subprocess.TimeoutExpired, OSError):
+        return ""
+    return out.stdout if out.returncode == 0 else ""
+
+
+def keys(target: str, *names: str) -> None:
+    """Press keys (herdr's logical names, such as down or enter) in a live agent's terminal."""
+    call("agent", "send-keys", target, *names, timeout=15)
+
+
+def agent(target: str) -> dict | None:
+    """A live agent as herdr sees it (agent_status, state_change_seq, pane_id, ...); None when no agent answers to
+    target (it exited, or its tab was closed)."""
+    try:
+        return call("agent", "get", target, timeout=15).get("agent") or {}
+    except RLError as exc:
+        if exc.details.get("herdr_code") == "agent_not_found":
+            return None
+        raise
+
+
 def status(target: str) -> str:
     try:
-        return call("agent", "get", target, timeout=15).get("agent", {}).get("agent_status") or "unknown"
+        found = agent(target)
+    except RLError:
+        return "not checked"
+    return "gone" if found is None else found.get("agent_status") or "unknown"
+
+
+def get(kind: str, ident: str) -> dict | None:
+    """A herdr pane or tab (kind) as herdr sees it (a tab's label, a pane's tab_id and agent), or None when it is
+    closed. IDs start again after herdr restarts, so the label tells whether a tab is still the one rl made."""
+    try:
+        return call(kind, "get", ident, timeout=15).get(kind) or {}
     except RLError as exc:
-        return "gone" if exc.details.get("herdr_code") == "agent_not_found" else "not checked"
+        if exc.details.get("herdr_code") == f"{kind}_not_found":
+            return None
+        raise
 
 
 def notify(store, message: dict) -> str | None:

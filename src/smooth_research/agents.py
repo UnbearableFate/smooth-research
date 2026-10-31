@@ -6,7 +6,9 @@ the typed prompt stays one line. A researcher works in its own git worktree (one
 session) at <project>/../<project>-worktrees/<name>, on a new branch per task made from the branch of the main
 checkout; the coordinator merges accepted branches. Sessions talk through recorded messages; a live recipient
 gets a one-line notice. After an assignment the coordinator resets a session for reuse (compact or clear) or
-closes it with its tab. Without herdr the headless commands remain: rl delegate, rl review run, rl advise run.
+closes it with its tab. A host's question whether to trust the folder rl opened the session in is answered for
+the coordinator; every other dialog is left for the user. Without herdr the headless commands remain: rl
+delegate, rl review run, rl advise run.
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import time
 import uuid
 from pathlib import Path
 
@@ -29,6 +32,12 @@ ROLE_KINDS = ("researcher", "reviewer", "advisor")
 NAME_RE = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
 SLASH = {"claude": {"compact": "/compact", "clear": "/clear"}, "codex": {"compact": "/compact", "clear": "/new"},
          "pi": {"compact": "/compact", "clear": "/new"}}
+# The folder trust question of each host: the text that marks it and the option that trusts the folder. rl answers
+# it only for the folder it opened the session in: the session's worktree, or the project root, which the user
+# trusted when starting the coordinator there.
+TRUST_QUESTIONS = {"claude": ("Quick safety check", "Yes, I trust this folder"),
+                   "codex": ("Trust this folder?", "Trust and continue")}
+SELECTED = ("❯", "›", "▶", ">")
 
 
 # -- git worktrees --------------------------------------------------------------------------------------------
@@ -178,6 +187,14 @@ def launch_args(store: Store, entry: adapters.Entry, kind: str, name: str, host_
     return args + [str(a) for a in extra]
 
 
+def new_tab(store: Store, s: dict) -> dict:
+    """A herdr tab for a session, in its folder, with the environment that names its project, session and checkout."""
+    env = {ENV_PROJECT: str(store.project.root), "SMOOTH_RESEARCH_RL": rl_command(), ENV_SESSION: s["id"],
+           ENV_ROLE: s["role_id"], **({ENV_CHECKOUT: s["cwd"]} if s.get("worktree") else {})}
+    return herdr.call("tab", "create", "--cwd", s["cwd"], "--label", s["role_id"], "--no-focus",
+                      *[a for k, v in env.items() for a in ("--env", f"{k}={v}")])
+
+
 def open_session(store: Store, kind: str, name: str | None = None, entry_text: str | None = None,
                  task: str | None = None, ticket: str | None = None, worktree: bool = True,
                  base: str | None = None, timeout: int = 90) -> dict:
@@ -204,21 +221,18 @@ def open_session(store: Store, kind: str, name: str | None = None, entry_text: s
     host_session = str(uuid.uuid4()) if entry.entry in ("claude", "pi") else None
     with store.write() as tx:
         sid = tx.next_id("Session")
-        tx.create("Session", {"id": sid, "role_id": name, "role_kind": kind, "host": entry.entry, "entry": str(entry),
-                              "host_session_id": host_session, "model_requested": entry.model, "effort": entry.effort,
-                              "worktree": str(wt) if wt else None, "cwd": str(cwd), "branch": branch,
-                              "status": "active"})
+        record = tx.create("Session", {"id": sid, "role_id": name, "role_kind": kind, "host": entry.entry,
+                                       "entry": str(entry), "host_session_id": host_session, "model_requested": entry.model,
+                                       "effort": entry.effort, "worktree": str(wt) if wt else None, "cwd": str(cwd),
+                                       "branch": branch, "status": "active"})
         tx.event("session.opened", sid, f"{name} ({kind}) {entry} in {cwd}")
-    env = {ENV_PROJECT: str(store.project.root), "SMOOTH_RESEARCH_RL": rl_command(), ENV_SESSION: sid,
-           ENV_ROLE: name, **({ENV_CHECKOUT: str(cwd)} if wt else {})}
     try:
-        tab = herdr.call("tab", "create", "--cwd", str(cwd), "--label", name, "--no-focus",
-                         *[a for k, v in env.items() for a in ("--env", f"{k}={v}")])
+        tab = new_tab(store, record)
     except RLError as exc:
         _end(store, sid, f"herdr tab not created: {exc.message}")
         raise
     tab_id, pane = tab["tab"]["tab_id"], tab["root_pane"]["pane_id"]
-    waiting = None
+    waiting = trusted = None
     try:
         herdr.call("agent", "start", name, "--kind", entry.entry, "--pane", pane, "--timeout", str(timeout * 1000),
                    "--", *launch_args(store, entry, kind, name, host_session), timeout=timeout + 30)
@@ -229,12 +243,14 @@ def open_session(store: Store, kind: str, name: str | None = None, entry_text: s
             finally:
                 _end(store, sid, f"agent did not start: {exc.message}")
             raise
-        waiting = (f"{name} started but waits at a dialog (for example a folder trust question): look at it with "
-                   f"`herdr agent read {name}` and ask the user before answering it")
+        waiting = _answer_trust(name, entry.entry, Path(cwd), timeout)
+        trusted = None if waiting else f"answered {entry.entry}'s folder trust question for {cwd}: trusted"
     with store.write() as tx:
         tx.update(sid, {"herdr_agent": name, "herdr_tab": tab_id, "herdr_pane": pane})
+        if trusted:
+            tx.event("session.trusted", sid, trusted)
     where = f"worktree {wt} on {branch or 'a detached HEAD'}" if wt else f"in {cwd}"
-    summary = f"{sid} {name} ({kind}, {entry}) open in herdr tab {tab_id}, {where}"
+    summary = f"{sid} {name} ({kind}, {entry}) open in herdr tab {tab_id}, {where}" + (f"; {trusted}" if trusted else "")
     out = {"id": sid, "name": name, "tab": tab_id, "pane": pane, "entry": str(entry), "worktree": str(wt) if wt else None,
            "branch": branch}
     if task or ticket:
@@ -242,7 +258,56 @@ def open_session(store: Store, kind: str, name: str | None = None, entry_text: s
         summary += "\n" + given["summary"]
     if waiting:
         summary += f"\n{waiting}; then `rl agent assign {name} {'--task ' + task if task else '--ticket ' + ticket if ticket else '...'}`"
+    from . import watch  # the watcher uses this module
+    try:
+        started = watch.start(store)
+        if started.get("started"):
+            summary += "\n" + started["summary"]
+    except RLError as exc:
+        summary += f"\nthe watcher did not start ({exc.message}): `rl agent watch --start`"
     return {**out, "summary": summary}
+
+
+def _answer_trust(name: str, host: str, folder: Path, timeout: int) -> str | None:
+    """Answer the host's question whether to trust the folder rl opened the session in, as the coordinator's
+    choice. None once the agent is ready; otherwise why it still waits (any other dialog is left for the user)."""
+    ask = f"look at it with `herdr agent read {name}` and ask the user before answering it"
+    question, accept = TRUST_QUESTIONS.get(host, (None, None))
+    try:
+        screen = herdr.read(name)
+        if not question or question not in screen:
+            return f"{name} waits at a dialog: {ask}"
+        if not _names(screen, folder):
+            return f"{name} waits at a folder trust question that does not name {folder}: {ask}"
+        for _ in range(4):  # move the selection to the option that trusts the folder, then confirm it
+            if next((x for x in screen.splitlines() if accept in x), "").lstrip().startswith(SELECTED):
+                break
+            herdr.keys(name, "down")
+            screen = herdr.read(name)
+        else:
+            return f"{name} waits at the folder trust question for {folder}; rl could not select '{accept}': {ask}"
+        herdr.keys(name, "enter")
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            state = herdr.status(name)
+            if state in ("idle", "done"):
+                return None
+            if state == "gone":
+                return f"{name} exited at the folder trust question; close it with `rl agent close {name}`"
+            if state == "blocked" and question not in herdr.read(name):
+                return f"{name} trusted {folder} and now waits at another dialog: {ask}"
+            time.sleep(0.5)
+        return f"{name} trusted {folder} but was not ready within {timeout}s: {ask}"
+    except RLError as exc:
+        return f"{name} waits at a dialog ({exc.message}): {ask}"
+
+
+def _names(screen: str, folder: Path) -> bool:
+    """Does the dialog name exactly this folder (absolute or under ~), not a longer path that starts with it?"""
+    home = str(Path.home())
+    names = [str(folder)] + (["~" + str(folder)[len(home):]] if str(folder).startswith(home + os.sep) else [])
+    ends = r"(?=$|[\s,;:)'\"]|\.(?:\s|$))"
+    return any(re.search(re.escape(n) + ends, line) for n in names for line in screen.splitlines())
 
 
 def _end(store: Store, sid: str, note: str) -> None:
@@ -333,7 +398,11 @@ def close(store: Store, name: str, remove_worktree: bool = False) -> dict:
     notes = []
     if s.get("herdr_tab"):
         try:
-            herdr.call("tab", "close", s["herdr_tab"], timeout=30)
+            tab = herdr.get("tab", s["herdr_tab"])
+            if tab and tab.get("label") not in (None, name):  # herdr restarted and gave the id to another tab
+                notes.append(f"tab {s['herdr_tab']} is now {tab.get('label')!r}, not this session's: left open")
+            elif tab:
+                herdr.call("tab", "close", s["herdr_tab"], timeout=30)
         except RLError as exc:
             notes.append(f"tab {s['herdr_tab']}: {exc.message}")
     _end(store, s["id"], f"{name} closed")
@@ -347,6 +416,10 @@ def close(store: Store, name: str, remove_worktree: bool = False) -> dict:
             notes.append(f"worktree kept: {exc.message}")
     elif s.get("worktree"):
         notes.append(f"worktree {s['worktree']} kept (a new session named {name} reuses it)")
+    if not _sessions(store):
+        from . import watch
+        stopped = watch.stop(store)
+        notes += [stopped["summary"]] if stopped["stopped"] else []
     return {"id": s["id"], "summary": f"{s['id']} {name} closed" + "".join(f"\n  {n}" for n in notes)}
 
 
@@ -360,6 +433,11 @@ def list_sessions(store: Store, include_all: bool = False) -> dict:
                      + (f" tab {s['herdr_tab']}" if s.get("herdr_tab") else "")
                      + (f" assignment {s['assignment']}" if s.get("assignment") else "")
                      + (f" branch {s['branch']}" if s.get("branch") else ""))
+    with store.read() as tx:
+        meta = tx.meta()
+    if meta.get("watch_tab"):
+        lines.append(f"watcher: tab {meta['watch_tab']}, a round every {meta.get('watch_every') or '?'} min, "
+                     f"last {meta.get('watch_beat') or 'never'}")
     return {"sessions": sessions, "summary": "\n".join(lines) or "no agent sessions open"}
 
 

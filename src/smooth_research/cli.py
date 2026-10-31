@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 from . import (adapters, agents, context, delegate, hooks, literature, research, reviews, runs, snapshot, tasks,
-               view)
+               view, watch)
 from .project import advice_limit, find_project, model_entries
 from .schema import ENUMS, LINKABLE, PAPER_ASSESSMENTS
 from .store import Store
@@ -359,6 +359,14 @@ def cmd_agent(args):
         return agents.close(store, args.name, args.remove_worktree)
     if a == "brief":
         return agents.brief(store, args.name)
+    if a == "check":
+        return watch.check(store)
+    if a == "watch":
+        if args.stop:
+            return watch.stop(store)
+        if args.start:
+            return watch.start(store, args.every)
+        return watch.run(store, args.every, args.own_tab)
     return agents.list_sessions(store, args.all)
 
 
@@ -739,7 +747,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--digest")
     ss.add_parser("list")
 
-    sp = add("agent", cmd_agent, "agent sessions in herdr tabs: open, assign, tell, reset, close, list, brief")
+    sp = add("agent", cmd_agent, "agent sessions in herdr tabs: open, assign, tell, reset, close, list, brief, "
+                                 "check, watch")
     ss = sp.add_subparsers(dest="action", required=True)
     s = ss.add_parser("open", help="open a researcher, reviewer or advisor session in a new herdr tab")
     s.add_argument("name", nargs="?", help="session name, e.g. researcher-1 (default: <role>-<n>)")
@@ -772,6 +781,15 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("name", nargs="?")
     s = ss.add_parser("list")
     s.add_argument("--all", action="store_true", help="closed sessions too")
+    ss.add_parser("check", help="one watcher round now: restart agents that exited, remind idle sessions of an "
+                                "unfinished assignment, report the rest to the coordinator")
+    s = ss.add_parser("watch", help="the watcher: a round every agents.watch_minutes over the open sessions (rl "
+                                    "agent open starts it in its own herdr tab)")
+    s.add_argument("--every", type=float, help="minutes between rounds (default: agents.watch_minutes, 20)")
+    g = s.add_mutually_exclusive_group()
+    g.add_argument("--start", action="store_true", help="run it in its own herdr tab unless it already runs")
+    g.add_argument("--stop", action="store_true", help="stop it and close its tab")
+    s.add_argument("--own-tab", action="store_true", help=argparse.SUPPRESS)
 
     sp = add("delegate", cmd_delegate, "run a ready task in an independent Claude/Codex/pi CLI session")
     sp.add_argument("task")

@@ -21,8 +21,9 @@ ENV_CHECKOUT = "SMOOTH_RESEARCH_CHECKOUT"
 # Model entries are "<entry>:<model>[@effort]"; entry is claude, codex, pi or manual (a person submits the
 # package). Researchers and reviewers use the first available entry of their list; every available advisor is
 # asked, each on its own. agents.args are extra launch arguments for the sessions `rl agent open` starts in
-# herdr tabs (no sandbox or approval flags are added otherwise: each CLI's own settings apply). Every key here
-# is read by the CLI; docs/configuration.md explains each one.
+# herdr tabs (no sandbox or approval flags are added otherwise: each CLI's own settings apply);
+# agents.watch_minutes is the time between the watcher's rounds over those sessions (0 turns it off). Every key
+# here is read by the CLI; docs/configuration.md explains each one.
 DEFAULT_CONFIG: dict = {
     "version": 1,
     "plan": "docs/plan/original.md",
@@ -37,7 +38,7 @@ DEFAULT_CONFIG: dict = {
         "advisor": ["codex:gpt-6-astra@max", "claude:claude-fable-5-1@high"],
     },
     "advice": {"max_rounds": 3},
-    "agents": {"args": {"claude": ["--permission-mode", "auto"], "codex": [], "pi": []}},
+    "agents": {"args": {"claude": ["--permission-mode", "auto"], "codex": [], "pi": []}, "watch_minutes": 20},
     "context": {"work_target_tokens": 4000, "advice_target_tokens": 10000},
 }
 MODEL_ROLES = ("researcher", "reviewer", "advisor")
@@ -179,6 +180,11 @@ def config_warnings(config: dict) -> list[str]:
     if not _count(rounds):
         out.append(f"{CONFIG_NAME}: advice.max_rounds must be a whole number of rounds, not {rounds!r}; using "
                    f"{DEFAULT_CONFIG['advice']['max_rounds']}")
+    agents = config.get("agents")
+    watch = agents.get("watch_minutes") if isinstance(agents, dict) else None
+    if watch is not None and not _minutes(watch):
+        out.append(f"{CONFIG_NAME}: agents.watch_minutes must be a number of minutes (0 turns the watcher off), not "
+                   f"{watch!r}; using {DEFAULT_CONFIG['agents']['watch_minutes']}")
     return out
 
 
@@ -199,6 +205,17 @@ def model_entries(config: dict, role: str) -> list[str]:
     if isinstance(value, dict):
         return [str(v) for v in value.get("candidates") or [value.get("primary")] if v]
     return [str(v) for v in value]
+
+
+def watch_minutes(config: dict) -> float:
+    """Minutes between the watcher's rounds (agents.watch_minutes); 0 turns the watcher off."""
+    agents = config.get("agents")
+    value = agents.get("watch_minutes") if isinstance(agents, dict) else None
+    return float(value) if _minutes(value) else float(DEFAULT_CONFIG["agents"]["watch_minutes"])
+
+
+def _minutes(value) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0
 
 
 def advice_limit(config: dict) -> int:
@@ -297,6 +314,7 @@ def write_default_config(root: Path) -> Path:
         text = ("# Smooth Research configuration. Resource limits and scope live in the constraints document.\n"
                 "# Model entries: <entry>:<model>[@effort]; entry is claude, codex, pi or manual. Researchers and\n"
                 "# reviewers use the first available entry of their list; every available advisor is asked.\n"
-                "# agents.args: extra launch arguments for sessions opened in herdr tabs (rl agent open).\n")
+                "# agents.args: extra launch arguments for sessions opened in herdr tabs (rl agent open);\n"
+                "# agents.watch_minutes: minutes between the watcher's rounds over those sessions (0: off).\n")
         path.write_text(text + yaml.safe_dump(DEFAULT_CONFIG, sort_keys=False, allow_unicode=True), encoding="utf-8")
     return path
