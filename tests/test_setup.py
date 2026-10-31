@@ -140,3 +140,11 @@ def test_a_project_made_before_its_own_environment_runs_on_the_plugins_until_rl_
     assert done.returncode == 0 and "already initialized" in done.stdout, done.stderr
     assert (root / ".venv/bin/python").exists() and set(DEPS) <= set(dependencies(root))
     assert "on the project's .venv" in rl(root, "upgrade").stdout
+
+
+def test_init_help_makes_nothing(tmp_path):
+    root = tmp_path / "p"
+    root.mkdir()
+    done = rl(root, "init", "--help")
+    assert done.returncode == 0 and "--python" in done.stdout, done.stderr
+    assert list(root.iterdir()) == []

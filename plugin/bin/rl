@@ -182,6 +182,11 @@ sys.exit(main())' "$package/src" "$@"
 
 case ${1-} in
   init)
+    for arg in "$@"; do  # help builds nothing in the directory
+      case $arg in
+        -h|--help) plugin_ready || plugin_env auto; exec "$env_dir/bin/rl" "$@" ;;
+      esac
+    done
     python=$(option --python "$@") || python=$default_python
     case $python in
       [0-9]*.[0-9]*) ;;
