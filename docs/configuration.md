@@ -80,7 +80,7 @@
   - pi：`--model`、`--thinking`、`--session-id`、`--name`。
   - 不加任何绕过沙箱、审批或权限的参数。
 - **researcher 的 worktree。** 每个 researcher 会话一个 git worktree，在 `<项目目录>/../<项目名>-worktrees/<会话名>`。每个任务一个分支 `sr/<会话名>/<任务>`，从主 checkout 当前的分支建（`--base` 可以改）。项目必须是至少有一次提交的 git 仓库，否则用 `--no-worktree`。研究记录总是写进主项目的 `research/`。
-- **信任文件夹的问题由 CLI 回答，其他对话框不回答。** Claude Code 和 Codex 在新目录里会先问是否信任这个文件夹。如果问的正是 `rl agent open` 开会话的目录（会话的 worktree，或者用户启动协调者时已经信任的项目目录），CLI 就替协调者选“信任”，并记一条 `session.trusted` 事件。其他对话框只报告，由协调者问用户，比如审查 hooks、启用 MCP 服务器、审批，以及问的是别的目录的信任问题。
+- **信任文件夹的问题由 CLI 回答，其他对话框不回答。** Claude Code 和 Codex 在新目录里会先问是否信任这个文件夹。如果问的正是 `rl agent open` 开会话的目录（会话的 worktree，或者用户启动协调者时已经信任的项目目录），CLI 就替协调者选“信任”，并记一条 `session.trusted` 事件。Codex 把信任记在主仓库的根目录下（`~/.codex/config.toml` 的 `[projects]`），之后同一项目的 worktree 不再问。其他对话框只报告，由协调者问用户，比如审查 hooks、启用 MCP 服务器、审批，以及问的是别的目录的信任问题。
 - **监视程序。** `rl agent open` 同时在单独的 tab（`sr-watch`）里启动监视程序，每 `agents.watch_minutes` 分钟查看一次所有打开的会话：
   - agent 退出了，或者 tab 被关掉了：在原来的目录里重新启动，开一个新对话，从 `rl agent brief` 读回任务。一小时最多重启 3 次；
   - 空闲、任务没做完、又没在等什么：提醒它继续。同一项任务最多提醒 2 次，之后报告协调者；

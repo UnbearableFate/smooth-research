@@ -84,6 +84,7 @@ def _round(store: Store, s: dict) -> tuple[str, bool]:
         return why, _once(store, s, "blocked", seq)
     if state not in ("idle", "done"):  # working, or a state herdr cannot tell
         return f"{name}: {state}" + (f" on {what}" if what else ""), False
+    state = "idle"  # herdr's done is an idle agent whose last turn nobody has looked at yet
     stopped, desc, problems = _assignment(store, s)
     if not stopped:
         held = (s.get("watch") or {}).get("problems") or []

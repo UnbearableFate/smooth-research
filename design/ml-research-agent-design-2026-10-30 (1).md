@@ -1334,3 +1334,11 @@ GitHub 链接固定到本次读取的提交；外部产品文档按 2026-10-30 �
    - reviewer 和 researcher 一开始用 sleep 轮询 inbox。brief 里加了一句：结束这一轮，等通知。
    - deepseek 审 deepseek 被记成跨模型未核实。加了模型族表和同名判断。
    - 批准前登记的 run 看不到后来的批准。见上表“批准之后”。
+
+**实测：监视程序**（2026-10-31。协调者是 Claude Code 2.1.314 + Sonnet 5.5，auto 模式；researcher 和 reviewer 都是 Codex 0.166 + gpt-6.1-sol@medium；herdr 0.9.5；临时项目 `sr-e2e/watch-codex`。为了实测，`agents.watch_minutes` 设成 3）
+1. **信任问题：** 协调者目录的 Claude Code 信任对话框由用户决定，用户让我代选“信任”。Codex 在 researcher-1 的 worktree 里问是否信任，`rl agent open` 自动回答，并记下 `session.trusted`。Codex 把信任记在主仓库的根目录下，所以 researcher-2 的新 worktree 没有再问。
+2. **正常的暂停：** 第一轮时 researcher-1 在等结论审查 RV-0002，监视程序没有提醒它。但监视程序报告 RV-0002 没有 reviewer，而协调者 2 秒前刚开了 reviewer，这条报告就过时了。协调者认出它过时，没有动作。之后改为：需要协调者处理的等待，下一轮仍然存在才报告；重启之前再读一次会话记录，已关闭的会话不重启。
+3. **意外退出：** 用 `kill -9` 杀掉 researcher-1 的 Codex 进程。协调者收到审查结果的通知后发现 researcher-1 不在了，按 team.md 运行 `rl agent check`。监视程序在原来的 pane 里开新对话重启它，researcher 从 brief 读回任务，记录证据并交付。协调者接受任务，用合并提交合并分支，记录决定 D-0001（停止 H-0001），然后关闭全部会话，监视程序随之停止。
+4. **空闲提醒：** 后续任务 T-0002 中，我在 researcher-2 工作时按 Esc 打断它。下一轮监视程序提醒它继续（`session.reminded`），它 11 秒后恢复任务、提交代码并请求代码审查 RV-0003。再下一轮两个会话都在工作，监视程序没有打扰。T-0002 交付、接受、合并，记录决定 D-0002（停止 H-0002）。
+5. **结果：** λ=1e-2 和 λ=1e-1 都没有提高干净测试集上的准确率（三个配对种子的平均差分别为 −0.017 和 −0.043 个百分点），属于筛查级证据。四次审查都通过，没有发现问题；12 次运行共用约 2 秒 CPU。
+6. **其他观察：** Codex 会弹出账户安全提示（“Set up security for Daybreak mode”）。herdr 把这时的会话算作空闲而不是 blocked，打字就会关掉提示，所以通知照常送达。rl 不回答这个提示。herdr 的 `done` 状态在监视程序的报告里写作 idle。
