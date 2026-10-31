@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import json
 import os
 import shlex
 from dataclasses import dataclass
@@ -11,7 +12,7 @@ from pathlib import Path
 import yaml
 
 from .adapters import Entry
-from .util import RLError
+from .util import RLError, atomic_write
 
 CONFIG_NAME = "smooth-research.yaml"
 ENV_PROJECT = "SMOOTH_RESEARCH_PROJECT"
@@ -26,6 +27,9 @@ CODE_DIR, DOCS_DIR, RESEARCH_DIR = "src", "docs", "research"
 PLAN_PATH, CONSTRAINTS_PATH = "docs/plan.md", "docs/constraints.md"
 # Where projects made before 2026-10-31 keep them; read while the new file is absent.
 EARLIER_PLAN, EARLIER_CONSTRAINTS = "docs/plan/original.md", "docs/plan/constraints.md"
+# The settings read the last time the configuration file parsed: used while it does not.
+LAST_READ = "research/state/config.last-read.json"
+UNREAD = "_unread"  # in a loaded configuration: why the file could not be read
 
 # Model entries are "<entry>:<model>[@effort]"; entry is claude, codex, pi or manual (a person submits the
 # package). Researchers and reviewers use the first available entry of their list; every available advisor is
@@ -60,6 +64,9 @@ RETIRED_KEYS = {
                     f"in {DOCS_DIR}/",
     "research_root": f"the records are in {RESEARCH_DIR}/",
 }
+
+# Directory keys of earlier versions and the fixed directory that replaced each.
+MOVED_DIRS = {"code_root": CODE_DIR, "docs_root": DOCS_DIR, "research_root": RESEARCH_DIR}
 
 RESEARCH_DIRS = ("state", "documents/objects", "packages", "mailbox", "snapshots", "literature", "calls",
                  "artifacts", "experiments", "tasks", "notes", "reviews", "advice", "reports")
@@ -171,32 +178,47 @@ class Project:
 
 
 def config_warnings(config: dict) -> list[str]:
-    """Keys of a loaded configuration that the CLI does not read (a typo or a retired key), model lists in an
-    older form or with an entry that does not parse, and an advice limit that is not a count. None stops a
-    command."""
-    out = []
+    """What in a loaded configuration the CLI does not read or reads differently from what it says: a file that
+    does not parse, an unknown version, a typo or a retired key, a section that is not a mapping, model lists in
+    an older form or with entries that do not parse, and values that are not usable. None stops a command; each
+    says what is used instead."""
+    out = [f"{CONFIG_NAME}: {config[UNREAD]}"] if config.get(UNREAD) else []
+    if config.get("version") != 1:
+        out.append(f"{CONFIG_NAME}: version {config.get('version')!r} is not known; read as version 1")
 
     def walk(given: dict, default: dict, prefix: str) -> None:
         for key, value in given.items():
             path = prefix + str(key)
+            if str(key).startswith("_"):
+                continue
             if path in RETIRED_KEYS:
-                out.append(f"{CONFIG_NAME}: {path} is no longer used ({RETIRED_KEYS[path]}); delete it")
+                moved = MOVED_DIRS.get(path)
+                hint = (f"; move what is in {value}/ to {moved}/" if moved and value is not None
+                        and Path(str(value)) != Path(moved) else "")
+                out.append(f"{CONFIG_NAME}: {path} is no longer used ({RETIRED_KEYS[path]}){hint}; delete it")
             elif key not in default:
                 out.append(f"{CONFIG_NAME}: unknown key {path} has no effect (a typo?)")
+            elif isinstance(default[key], dict) and not isinstance(value, dict):
+                out.append(f"{CONFIG_NAME}: {path} must hold keys like the default, not {value!r}; its settings are "
+                           "at their defaults")
             elif isinstance(value, dict) and isinstance(default[key], dict):
                 walk(value, default[key], path + ".")
 
     walk(config, DEFAULT_CONFIG, "")
     models = config.get("models")
     for role in MODEL_ROLES if isinstance(models, dict) else ():
-        if isinstance(models.get(role), dict) or models.get(role) == "inherit":
+        value = models.get(role)
+        if isinstance(value, dict) or value == "inherit":
             out.append(f"{CONFIG_NAME}: models.{role} has the form used before 2026-10-31; write it as a list of "
                        f"model entries (read now as {model_entries(config, role)})")
+        elif not isinstance(value, (str, list)):
+            out.append(f"{CONFIG_NAME}: models.{role} must be a list of model entries, not {value!r}; using the "
+                       f"defaults {model_entries(config, role)}")
         for text in model_entries(config, role):
             try:
                 Entry.parse(text)
             except RLError as exc:
-                out.append(f"{CONFIG_NAME}: models.{role}: {exc.message}")
+                out.append(f"{CONFIG_NAME}: models.{role}: {exc.message}; it is skipped")
     rounds = (config.get("advice") or {}).get("max_rounds") if isinstance(config.get("advice"), dict) else None
     if not _count(rounds):
         out.append(f"{CONFIG_NAME}: advice.max_rounds must be a whole number of rounds, not {rounds!r}; using "
@@ -206,6 +228,17 @@ def config_warnings(config: dict) -> list[str]:
     if watch is not None and not _minutes(watch):
         out.append(f"{CONFIG_NAME}: agents.watch_minutes must be a number of minutes (0 turns the watcher off), not "
                    f"{watch!r}; using {DEFAULT_CONFIG['agents']['watch_minutes']}")
+    args = agents.get("args") if isinstance(agents, dict) else None
+    for host, value in args.items() if isinstance(args, dict) else ():
+        if value is not None and not isinstance(value, (str, list)):
+            out.append(f"{CONFIG_NAME}: agents.args.{host} must be a list of arguments, not {value!r}; using "
+                       f"{agent_args(config, host)}")
+    context = config.get("context")
+    for key in DEFAULT_CONFIG["context"]:
+        value = context.get(key) if isinstance(context, dict) else None
+        if value is not None and not _tokens(value):
+            out.append(f"{CONFIG_NAME}: context.{key} must be a positive whole number of tokens, not {value!r}; "
+                       f"using {DEFAULT_CONFIG['context'][key]}")
     manuscript = config.get("manuscript")
     latex = manuscript.get("latex") if isinstance(manuscript, dict) else None
     if latex is not None and not latex_command(config):
@@ -221,16 +254,56 @@ def _count(value) -> bool:
 def model_entries(config: dict, role: str) -> list[str]:
     """A role's model entries in order. Forms written before 2026-10-31 are still read: reviewer
     {candidates, relation_to_author} gives its candidates, advisor {primary, fallback} its primary, and
-    researcher "inherit" the default list."""
+    researcher "inherit" the default list. Anything else that is not a list gives the default list."""
     models = config.get("models")
     value = models.get(role) if isinstance(models, dict) else None
-    if value is None or value == "inherit":
-        return list(DEFAULT_CONFIG["models"][role])
-    if isinstance(value, str):
+    if isinstance(value, str) and value != "inherit":
         return [value]
     if isinstance(value, dict):
-        return [str(v) for v in value.get("candidates") or [value.get("primary")] if v]
-    return [str(v) for v in value]
+        items = value.get("candidates") or [value.get("primary")]
+        items = [items] if isinstance(items, str) else items if isinstance(items, list) else []
+        return [str(v) for v in items if v]
+    if isinstance(value, list):
+        return [str(v) for v in value]
+    return list(DEFAULT_CONFIG["models"][role])
+
+
+def usable_entries(config: dict, role: str) -> list[Entry]:
+    """A role's model entries that parse, in order; config_warnings names the others, which are skipped."""
+    out = []
+    for text in model_entries(config, role):
+        try:
+            out.append(Entry.parse(text))
+        except RLError:
+            continue
+    return out
+
+
+def agent_args(config: dict, host: str) -> list[str]:
+    """Extra launch arguments for one host's sessions (agents.args.<host>): a list, or a string split as a shell
+    would; a value of another kind gives the default."""
+    agents = config.get("agents")
+    args = agents.get("args") if isinstance(agents, dict) else None
+    value = args.get(host) if isinstance(args, dict) else DEFAULT_CONFIG["agents"]["args"].get(host)
+    if isinstance(value, str):
+        try:
+            return shlex.split(value)
+        except ValueError:
+            return value.split()
+    if isinstance(value, list):
+        return [str(v) for v in value]
+    return [] if value is None else list(DEFAULT_CONFIG["agents"]["args"].get(host) or [])
+
+
+def context_target(config: dict, key: str) -> int:
+    """A context pack's token target: context.work_target_tokens or context.advice_target_tokens."""
+    context = config.get("context")
+    value = context.get(key) if isinstance(context, dict) else None
+    return value if _tokens(value) else DEFAULT_CONFIG["context"][key]
+
+
+def _tokens(value) -> bool:
+    return _count(value) and value > 0
 
 
 def watch_minutes(config: dict) -> float:
@@ -267,17 +340,29 @@ def advice_limit(config: dict) -> int:
 
 
 def load_config(root: Path) -> dict:
-    path = root / CONFIG_NAME
+    """The configuration over the defaults. Nothing in the file stops a command: while it does not parse, the
+    settings read the last time it did are used (the defaults before that), and config_warnings says so."""
+    path, last = root / CONFIG_NAME, root / LAST_READ
     try:
         data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    except yaml.YAMLError as exc:
-        raise RLError("INVALID", f"{path} is not valid YAML: {exc}") from None
-    if data.get("version") != 1:
-        raise RLError("INVALID", f"{path}: unsupported config version {data.get('version')!r}; expected 1")
-    moved = data.get("research_root")
-    if moved is not None and Path(str(moved)) != Path(RESEARCH_DIR):
-        raise RLError("INVALID", f"{path}: research_root is no longer read; the records are always in "
-                                 f"{RESEARCH_DIR}/. Rename {moved}/ to {RESEARCH_DIR}/, then delete research_root")
+        if not isinstance(data, dict):
+            raise ValueError(f"it holds a {type(data).__name__}, not keys and values")
+    except (OSError, ValueError, yaml.YAMLError) as exc:
+        reason = " ".join(str(exc).split())[:300]
+        try:
+            data, used = json.loads(last.read_text(encoding="utf-8")), "the settings read the last time it could be"
+        except (OSError, ValueError):
+            data = None
+        if not isinstance(data, dict):
+            data, used = {}, "the defaults"
+        return {**_merge(DEFAULT_CONFIG, data), UNREAD: f"the file could not be read ({reason}); {used} are used "
+                                                        "until it is fixed"}
+    text = json.dumps(data, sort_keys=True, ensure_ascii=False, default=str)
+    try:
+        if last.parent.is_dir() and (not last.exists() or last.read_text(encoding="utf-8") != text):
+            atomic_write(last, text.encode("utf-8"))
+    except OSError:
+        pass  # a read-only checkout: the fallback stays as it was
     return _merge(DEFAULT_CONFIG, data)
 
 

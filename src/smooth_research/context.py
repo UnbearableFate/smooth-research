@@ -7,6 +7,7 @@ rest is listed as an index to read on demand. Nothing here queries external syst
 from __future__ import annotations
 
 from . import documents
+from .project import context_target
 from .research import _front_matter, attention, brief
 from .runs import describe_attempt
 from .store import Store, Tx
@@ -90,7 +91,7 @@ def locations(store: Store) -> str:
 
 
 def work_pack(store: Store, task_id: str, budget: int | None = None) -> dict:
-    budget = budget or store.project.config["context"]["work_target_tokens"]
+    budget = budget or context_target(store.project.config, "work_target_tokens")
     with store.read() as tx:
         task = tx.require(task_id, "Task")
         coord = [s for s in tx.all("Session", status="active") if s["role_id"] == "coordinator"]
@@ -135,7 +136,7 @@ def work_pack(store: Store, task_id: str, budget: int | None = None) -> dict:
 
 
 def resume_pack(store: Store, role: str | None = None, budget: int | None = None) -> dict:
-    budget = budget or store.project.config["context"]["work_target_tokens"]
+    budget = budget or context_target(store.project.config, "work_target_tokens")
     with store.read() as tx:
         meta = tx.meta()
         sessions = [s for s in tx.all("Session", status="active")]
@@ -179,7 +180,7 @@ def resume_pack(store: Store, role: str | None = None, budget: int | None = None
 
 
 def advice_pack(store: Store, target: str | None, question: str, budget: int | None = None) -> dict:
-    budget = budget or store.project.config["context"]["advice_target_tokens"]
+    budget = budget or context_target(store.project.config, "advice_target_tokens")
     with store.read() as tx:
         meta = tx.meta()
         plan = _doc_text(tx, store, meta.get("plan_ref"), 4000)

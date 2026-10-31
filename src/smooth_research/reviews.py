@@ -29,7 +29,7 @@ import yaml
 from . import adapters, documents, herdr
 from .context import advice_pack, _contract
 from .herdr import caller_role
-from .project import advice_limit, model_entries
+from .project import advice_limit, usable_entries
 from .research import brief, review_mark, review_passes
 from .runs import code_review_summary, evidence_attempts
 from .store import Store, Tx
@@ -117,8 +117,7 @@ End with exactly one ```json block:
 
 
 def _entries(store: Store, kind: str) -> list[adapters.Entry]:
-    role = "reviewer" if kind == "review" else "advisor"
-    return [adapters.Entry.parse(r) for r in model_entries(store.project.config, role)]
+    return usable_entries(store.project.config, "reviewer" if kind == "review" else "advisor")
 
 
 def _relation(author_models: list[str], observed: str | None, requested: str) -> str:

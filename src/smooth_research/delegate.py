@@ -12,7 +12,7 @@ import sys
 
 from . import adapters
 from .context import work_pack
-from .project import model_entries
+from .project import usable_entries
 from .store import Store
 from .util import RLError, now_utc
 
@@ -114,7 +114,7 @@ def delegate(store: Store, task_id: str, entry_text: str | None = None, role: st
         if entries[0].entry == "manual":
             raise RLError("INVALID", "a manual entry cannot run a task session")
     else:
-        entries = [adapters.Entry.parse(e) for e in model_entries(store.project.config, "researcher")]
+        entries = usable_entries(store.project.config, "researcher")
     with store.read() as tx:
         task = tx.require(task_id, "Task")
     own = task.get("owner_role") == role and task["state"] in ("active", "waiting", "blocked")

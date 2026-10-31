@@ -8,18 +8,25 @@
 
 ### 加载规则
 
-- `version` 必须是 `1`，否则命令报错。
+配置里的任何问题都不会让命令失败。CLI 用能用的值继续运行，并给出警告，说明它实际用了什么。
+
 - 文件里的值和默认值深度合并：字典逐键覆盖，列表整体替换。比如 `models.reviewer` 只写一个条目，默认的两个就都没了。
-- 不认识的键不会让命令失败，但每条命令都会给出警告：
-  - 普通输出末尾的 `warning:` 行；
+- 警告出现在三个地方：
+  - 普通输出末尾的 `warning:` 行；命令失败时，警告和错误一起打印，它们可能正好说明失败的原因；
   - `--json` 结果里的 `warnings`；
   - 会话开始时的 hook 提示。
-- 下面几种情况也会警告：
+- 下面这些情况会警告：
+  - **文件解析不了**（YAML 写错，或者顶层不是键值对）：沿用上一次成功读取的设置，直到文件改好。这份设置由 CLI 自动保存在 `research/state/config.last-read.json`；从没读成功过时用默认值；
+  - `version` 不是 `1`：按版本 1 读取；
+  - 不认识的键（拼错了？）：没有作用；
   - 旧版本写进配置、现在不再读取的键，包括以前的目录键（见本节最后）；
-  - 模型列表还是 2026-10-31 以前的写法（见本节最后），或者有条目格式不对；
-  - `advice.max_rounds` 不是非负整数，这时按 3 计算；
-  - `manuscript.latex` 不是一条命令，这时写 Markdown 草稿。
-- 配置文件不能加载时（YAML 写错、`version` 不对，或旧的 `research_root` 不是 `research`），每条命令都报错。会话开始的 hook 也会直接说明这个错误，不会当成"没有项目"。
+  - 某一节（如 `models`、`context`）不是键值对：这一节全用默认值；
+  - 模型列表还是 2026-10-31 以前的写法（见本节最后）：照旧读取；不是列表：用默认列表；某个条目格式不对：跳过这一条，用列表里其余的条目；
+  - `advice.max_rounds` 不是非负整数：按 3 计算；
+  - `agents.watch_minutes` 不是分钟数：按 20 分钟计算；
+  - `agents.args.<宿主>` 不是参数列表：用默认参数（写成一个字符串时，按 shell 的规则拆开，不警告）；
+  - `context` 的 token 目标不是正整数：用默认值；
+  - `manuscript.latex` 不是一条命令：写 Markdown 草稿。
 
 ### 目录（固定）
 
@@ -67,7 +74,7 @@
 
 | 键 | 默认值 | 含义 |
 |---|---|---|
-| `agents.args.claude` | `["--permission-mode", "auto"]` | 追加给交互式 Claude Code 会话的参数 |
+| `agents.args.claude` | `["--permission-mode", "auto"]` | 追加给交互式 Claude Code 会话的参数。三个宿主都可以写成列表，也可以写成一个字符串（按 shell 的规则拆开） |
 | `agents.args.codex` | `[]` | 追加给交互式 Codex 会话的参数。沙箱和审批方式要用户自己写在这里，比如 `["-s", "workspace-write"]` |
 | `agents.args.pi` | `[]` | 追加给交互式 pi 会话的参数 |
 | `agents.watch_minutes` | `20` | 监视程序每隔几分钟查看一次各个会话；`0` 表示关闭 |
@@ -126,7 +133,7 @@
 
 ### 旧版本的写法
 
-2026-10-31 以前生成的配置文件可能有下面的写法。除了改过名的 `research_root`，CLI 都读得懂，但每条命令都会警告，按最后一栏改写即可：
+2026-10-31 以前生成的配置文件可能有下面的写法。命令照常运行，每条命令都会警告，按最后一栏改写即可：
 
 | 旧写法 | 现在怎样读 | 改成 |
 |---|---|---|
@@ -135,7 +142,7 @@
 | `models.advisor: {primary: X, fallback: [...]}` | 只读 `primary` | `models.advisor: [...]`，列出每一轮都要咨询的模型 |
 | `artifacts.content_digest: blake2b`、`artifacts.keep_raw_evidence: true` | 不读：摘要算法写死为 blake2b，CLI 从不删除原始产物 | 删掉 |
 | `plan`、`constraints_ref`、`code_root`、`docs_root`、`reports_root` | 不读：目录固定（见"目录"）。旧位置的计划和约束文档仍然读得到 | 删掉。`code_root` 不是 `src` 时，把代码移到 `src/` |
-| `research_root` | 是 `research` 时不读，只警告；不是 `research` 时每条命令都报错 | 把记录目录改名为 `research/`，再删掉这个键 |
+| `research_root` | 不读，只警告。记录总在 `research/`；改过名的旧项目在改回之前找不到记录，命令报 NO_PROJECT，同时打印这条警告 | 把记录目录改名为 `research/`，再删掉这个键 |
 
 ## 2. 约束文档 `docs/constraints.md`
 

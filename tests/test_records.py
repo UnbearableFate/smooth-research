@@ -302,10 +302,37 @@ def test_configuration_keys_the_cli_does_not_read_are_reported(project, rl, tmp_
     assert "advice.max_rounds must be a whole number of rounds, not 'three'; using 3" in out
     assert "codex-gpt-6-astra: invalid" in out and "advice rounds used: 0 of 3" in out
 
-    # a configuration that does not load is reported at session start, not mistaken for no project
-    cfg.write_text("version: 2\n", encoding="utf-8")
-    hook = hooks.session_start("claude", json.dumps({"cwd": str(tmp_path)}))["hookSpecificOutput"]
-    assert "status` fails" in hook["additionalContext"] and "unsupported config version" in hook["additionalContext"]
+
+def test_nothing_in_the_configuration_stops_a_command(project, rl, tmp_path):
+    from smooth_research import hooks
+    from smooth_research.adapters import Entry
+    from smooth_research.project import DEFAULT_CONFIG, agent_args, model_entries, usable_entries
+    cfg = tmp_path / "smooth-research.yaml"
+    data = yaml.safe_load(cfg.read_text(encoding="utf-8"))
+    data.update(version=2, context=None, advice={"max_rounds": 5},
+                models={**data["models"], "reviewer": ["codex-gpt-6-astra", "claude:claude-opus-5-5"], "advisor": 5},
+                agents={"args": {"claude": "--permission-mode auto --verbose", "codex": 7}})
+    cfg.write_text(yaml.safe_dump(data), encoding="utf-8")
+    p = find_project()
+    assert usable_entries(p.config, "reviewer") == [Entry.parse("claude:claude-opus-5-5")]  # the typo is skipped
+    assert model_entries(p.config, "advisor") == DEFAULT_CONFIG["models"]["advisor"]
+    assert agent_args(p.config, "claude") == ["--permission-mode", "auto", "--verbose"] and agent_args(p.config, "codex") == []
+    code, out, _ = rl("resume", "--role", "coordinator")
+    assert code == 0 and "# Resume pack" in out and "## Identity" in out
+    for text in ("version 2 is not known; read as version 1", "context must hold keys like the default, not None",
+                 "models.reviewer: model entry 'codex-gpt-6-astra' must be", "it is skipped",
+                 "models.advisor must be a list of model entries, not 5; using the defaults",
+                 "agents.args.codex must be a list of arguments, not 7; using []"):
+        assert text in out, text
+
+    # a file that does not parse: the settings read the last time it did stay in use
+    cfg.write_text("models: [unclosed\n", encoding="utf-8")
+    code, out, _ = rl("models")
+    assert code == 0 and "advice rounds used: 0 of 5" in out
+    assert "smooth-research.yaml: the file could not be read (" in out
+    assert "the settings read the last time it could be are used until it is fixed" in out
+    hook = hooks.session_start("claude", json.dumps({"cwd": str(tmp_path)}))["hookSpecificOutput"]["additionalContext"]
+    assert "- configuration: smooth-research.yaml: the file could not be read" in hook and "Use the smooth-research" in hook
 
 
 def test_the_layout_is_fixed_with_documents_for_people_in_docs_and_the_rest_in_research(project, tmp_path):
@@ -350,8 +377,11 @@ def test_a_project_from_before_the_fixed_layout_keeps_its_files_and_hears_about_
 
     cfg.write_text(cfg.read_text(encoding="utf-8").replace("research_root: research/", "research_root: records"),
                    encoding="utf-8")
+    (tmp_path / "research").rename(tmp_path / "records")  # a renamed records directory: the warning says what to do
     code, _, err = rl("status")
-    assert code == 1 and "the records are always in research/. Rename records/ to research/" in err
+    assert code == 1 and "no research database at" in err
+    assert "warning: smooth-research.yaml: research_root is no longer used (the records are in research/); move " \
+           "what is in records/ to research/; delete it" in err
 
 
 def test_report_summarizes_arms_and_lives_in_research_reports(project, tmp_path):

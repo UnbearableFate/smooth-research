@@ -844,6 +844,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error[{exc.code}]: {exc.message}", file=sys.stderr)
         if exc.details:
             print(json.dumps(exc.details, ensure_ascii=False, default=str, indent=1), file=sys.stderr)
+        for warning in getattr(args, "config_warnings", None) or []:  # they may explain the error
+            print(f"warning: {warning}", file=sys.stderr)
         return 3 if exc.code in CONFLICT_CODES else 1
     if getattr(args, "config_warnings", None):
         result["warnings"] = [*(result.get("warnings") or []), *args.config_warnings]

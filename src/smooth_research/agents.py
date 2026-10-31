@@ -24,7 +24,7 @@ from pathlib import Path
 from . import adapters, herdr
 from .delegate import SUBAGENTS, WAITING, prompt_for, rl_command
 from .herdr import ENV_ROLE, ENV_SESSION, caller_role
-from .project import ENV_CHECKOUT, ENV_PROJECT, linked_worktree, model_entries, repo_top
+from .project import ENV_CHECKOUT, ENV_PROJECT, agent_args, linked_worktree, repo_top, usable_entries
 from .store import Store
 from .tasks import _message
 from .util import RLError, now_utc
@@ -155,20 +155,20 @@ def _free_name(store: Store, kind: str) -> str:
 
 def _choose_entry(store: Store, kind: str, entry_text: str | None, ticket: dict | None) -> adapters.Entry:
     if entry_text:
-        entries = [entry_text]
+        entries = [adapters.Entry.parse(entry_text)]
     elif ticket and ticket.get("candidates"):
-        entries = ticket["candidates"]
+        entries = [adapters.Entry.parse(text) for text in ticket["candidates"]]
     else:
-        entries = model_entries(store.project.config, kind)
+        entries = usable_entries(store.project.config, kind)
     tried = []
-    for text in entries:
-        entry = adapters.Entry.parse(text)
+    for entry in entries:
         problem = ("a manual entry is answered by a person, not a session" if entry.entry == "manual"
                    else adapters.available(entry))
         if not problem:
             return entry
         tried.append(f"{entry}: {problem}")
-    raise RLError("UNAVAILABLE", f"no {kind} entry can run a session here: " + "; ".join(tried))
+    raise RLError("UNAVAILABLE", f"no {kind} entry can run a session here: "
+                                 + ("; ".join(tried) or f"models.{kind} lists none that parses"))
 
 
 def launch_args(store: Store, entry: adapters.Entry, kind: str, name: str, host_session: str | None) -> list[str]:
@@ -184,8 +184,7 @@ def launch_args(store: Store, entry: adapters.Entry, kind: str, name: str, host_
     else:
         args = ["--model", entry.model, "--session-id", host_session, "--name", name]
         args += ["--thinking", entry.effort] if entry.effort else []
-    extra = ((store.project.config.get("agents") or {}).get("args") or {}).get(entry.entry) or []
-    return args + [str(a) for a in extra]
+    return args + agent_args(store.project.config, entry.entry)
 
 
 def new_tab(store: Store, s: dict) -> dict:

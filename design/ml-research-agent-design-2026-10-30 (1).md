@@ -826,7 +826,7 @@ manuscript:
   latex: null
 ```
 
-（2026-10-31 按实现更新。上面每个键都由 CLI 读取。原稿中的 `artifacts` 一节没有代码读取，已经删除。模型选择统一写在这里：三个角色各有一个模型列表，researcher 和 reviewer 按顺序使用第一个可用的，advisor 每轮咨询全部可用的。旧写法（`researcher: inherit`、reviewer 的 `candidates`/`relation_to_author`、advisor 的 `primary`/`fallback`）仍能读取，但会给出警告；拼错的键也会警告。各键的含义见 `docs/configuration.md`。2026-10-31 按用户要求，目录改为固定的 `src/`、`docs/`、`research/`，`plan`、`constraints_ref`、`code_root`、`docs_root`、`reports_root`、`research_root` 不再配置，旧配置里的这些键会给出警告，见 §21.10；新增 `manuscript.latex`。）
+（2026-10-31 按实现更新。上面每个键都由 CLI 读取。原稿中的 `artifacts` 一节没有代码读取，已经删除。模型选择统一写在这里：三个角色各有一个模型列表，researcher 和 reviewer 按顺序使用第一个可用的，advisor 每轮咨询全部可用的。旧写法（`researcher: inherit`、reviewer 的 `candidates`/`relation_to_author`、advisor 的 `primary`/`fallback`）仍能读取，但会给出警告；拼错的键也会警告。配置里的问题都不会让命令失败，见 §21.11。各键的含义见 `docs/configuration.md`。2026-10-31 按用户要求，目录改为固定的 `src/`、`docs/`、`research/`，`plan`、`constraints_ref`、`code_root`、`docs_root`、`reports_root`、`research_root` 不再配置，旧配置里的这些键会给出警告，见 §21.10；新增 `manuscript.latex`。）
 
 模型别名由用户环境映射到可用入口；token 目标是待验证示例。配置不包含实验执行 profile、队列、SSH、调度器后端或固定 node·h 预算 schema。用户在约束文档中说明资源范围、允许的环境与成本上限，协调者和执行者遵守；已知用量可导入并与约束对照，但这不是调度预算预留或平台限制的实现。
 
@@ -1175,7 +1175,7 @@ GitHub 链接固定到本次读取的提交；外部产品文档按 2026-10-30 �
 - 配置（2026-10-31，见 §13.1 和 `docs/configuration.md`）：
   - 删除了没有代码读取的 `models.researcher`、`artifacts.content_digest`、`artifacts.keep_raw_evidence`。
   - 以下几种情况会给出警告，但不阻止命令：CLI 不认识的键、旧版本写下的上述键、旧的模型写法或格式不对的模型条目、不是非负整数的 `advice.max_rounds`。警告出现在每条命令的输出和会话开始的 hook 里。
-  - 配置文件不能加载时，hook 直接说明错误，不再当成没有项目。
+  - 配置文件不能加载时，hook 直接说明错误，不再当成没有项目。（之后按用户要求改为：解析不了时沿用上次读到的设置，只警告，见 §21.11。）
   - 工作包新增 Locations 一行。skill 和 researcher 子代理改为按它放文件，文中路径按默认值书写并注明。（目录固定后，Locations 一行保留，文中不再注明默认值，见 §21.10。）
   - `rl decide` 对结论审查不检查 relation，和 §8.6 不一致；按用户决定，当时未修改。随后的模型选择调整让 relation 不再作为任何检查的条件，这个不一致随之消失。
 - 模型选择（2026-10-31，用户要求，见 §8.1、§9.2、§13.1）：
@@ -1221,6 +1221,7 @@ GitHub 链接固定到本次读取的提交；外部产品文档按 2026-10-30 �
   - 旧项目：旧位置的计划和约束仍然读得到，旧的目录键给出警告，换计划仍报 CONFLICT，`research_root` 改过名时报错（原来的“改名后的目录布局用于 init 和工作包”一项随之删除）；
   - Markdown 草稿：刷新记录块、保留正文、列出还要写的节、报告被删掉的块；
   - LaTeX 草稿：转义和符号映射，用伪造的编译命令测试成功、失败（给出错误行）和命令不存在；装了 pdflatex 时，再用它真实编译一次。
+- 再增至 84 项：配置里的问题不让命令失败（未知版本、不是键值对的一节、格式不对的模型条目被跳过、不是列表的模型列表、字符串形式和错误类型的 `agents.args`；文件解析不了时沿用上次读到的设置，会话开始的提示照常给出）。
 
 ### 21.6 端到端测试结果（2026-10-30）
 
@@ -1357,7 +1358,7 @@ GitHub 链接固定到本次读取的提交；外部产品文档按 2026-10-30 �
 | 项 | 实施 | 原因 |
 | --- | --- | --- |
 | 固定目录 | `project.py` 的常量 `CODE_DIR`、`DOCS_DIR`、`RESEARCH_DIR`、`PLAN_PATH`、`CONSTRAINTS_PATH`。`Project.dir` 只剩 research 和 docs 两个区域 | 用户要求 |
-| 旧配置 | `plan`、`constraints_ref`、`code_root`、`docs_root`、`reports_root`、`research_root` 进入 `RETIRED_KEYS`，每条命令给出警告，说明东西现在在哪里。`research_root` 不是 `research` 时，`load_config` 直接报错，让用户把目录改名 | 记录目录找不到时，命令会在空目录里失败，不如直接说明 |
+| 旧配置 | `plan`、`constraints_ref`、`code_root`、`docs_root`、`reports_root`、`research_root` 进入 `RETIRED_KEYS`，每条命令给出警告，说明东西现在在哪里；目录键的值不是固定目录时，警告里写明把那个目录的内容移过去 | 最初 `research_root` 改过名时直接报错；按用户要求改为只警告，见 §21.11 |
 | 旧文件 | `Project.plan_path`、`constraints_path`：新位置没有文件、旧的默认位置（`docs/plan/original.md`、`docs/plan/constraints.md`）有时，读旧位置 | 旧项目不用搬文件也能继续 |
 | 计划不能换 | `rl init --plan` 先比对已封存的计划（meta 里的 `plan_ref`），再比对快照文件 | 原来只比对配置里那个路径的文件；路径变了以后，换一份计划就能绕过检查 |
 | researcher 笔记 | 写在自己 checkout 的 `research/notes/`，随分支合并。工作包的 Locations 和 `rl delegate` 的提示词都改了 | `docs/` 不再放 agent 的工作文档 |
@@ -1367,3 +1368,18 @@ GitHub 链接固定到本次读取的提交；外部产品文档按 2026-10-30 �
 | `rl report` | 保留，写进 `research/reports/`，作为内部的阶段报告 | 它是给协调者看的进度汇总，论文草稿才是给人读的 |
 | 解释说明 | SKILL.md：用户让协调者解释时，写进 `docs/explanations/<主题>.md` | 用户要求 |
 | 共用代码 | `view.py` 的结果表拆成 `arm_rows`（结构化的行），证据行、决定行和结论审查的核对也拆成函数，报告和论文草稿共用 | 两处的数字来自同一段代码 |
+
+### 21.11 配置不阻止命令（2026-10-31）
+
+用户要求：不需要“改了配置就会阻止研究进行”的设置。此前有三种配置问题会让每条命令报错：YAML 写错、`version` 不是 1、旧的 `research_root` 改过名。还有几种会让部分命令报错或崩溃：模型列表里有一个条目格式不对时，开会话、请求审查、开一轮建议和 `rl delegate` 都报错；`context` 不是键值对或 token 目标不是数字，工作包和恢复包会崩溃；`agents.args` 写成字符串时会被拆成单个字符。
+
+| 项 | 实施 |
+| --- | --- |
+| 原则 | 配置里的问题只产生警告，警告说明实际用了什么。命令失败时，配置警告和错误一起打印 |
+| 文件解析不了 | 每次成功读取后，CLI 把设置存进 `research/state/config.last-read.json`（内容变了才写，写不进去就跳过）。解析不了时沿用这份设置，从没读成功过就用默认值 |
+| 版本 | `version` 不是 1 时按版本 1 读取 |
+| 目录键 | `research_root` 等只警告；值不是固定目录时，警告里写明把内容移到固定目录 |
+| 模型条目 | `usable_entries` 跳过解析不了的条目，审查、建议、`rl agent open` 和 `rl delegate` 用其余的；列表不是列表时用默认列表 |
+| 其他值 | `context_target`、`agent_args` 和已有的 `advice_limit`、`watch_minutes`、`latex_command` 一样，值不能用时回到默认值；`agents.args` 写成字符串时按 shell 规则拆开 |
+| 保留的报错 | 命令行参数写错（如 `--entry` 格式不对）仍报错，因为那是这一次调用的问题，不是配置。`models.advisor` 一个可用条目都没有时，`rl advise prepare` 仍报错，因为没有人可问；审查者为空时照旧记为不可用 |
+
