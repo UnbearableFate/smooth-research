@@ -69,6 +69,13 @@ def test_an_agent_that_exited_is_started_again_in_its_folder(project, herdr_log,
         assert len([e for e in tx.all("Event") if e["type"] == "session.restarted"]) == 2
     assert (s["herdr_tab"], s["herdr_pane"]) == ("w1:t3", "w1:p3")  # w1:t2 is the watcher's
 
+    with project.read() as tx:
+        stale = tx.require(opened["id"])
+    agents._end(project, opened["id"], "closed by the coordinator during the round")
+    assert watch._restart(project, stale) == ("researcher-1: closed", False)
+    with project.write() as tx:
+        tx.update(opened["id"], {"status": "active", "ended_at": None})
+
     for _ in range(2):  # the third restart within the hour is the last
         fake(herdr_log, lambda st: st["agents"].pop("researcher-1"))
         out = watch.check(project)
@@ -133,9 +140,11 @@ def test_normal_pauses_are_not_woken(project, herdr_log, tmp_path, monkeypatch):
     assert f"researcher-2: idle, T-0002 active, waiting for runs {attempt}" in lines
     assert f"researcher-3: idle, T-0003 active, waiting for review {rv['id']}" in lines
     assert "researcher-4: idle, T-0004 active, waiting for a reply to" in lines
-    assert first["news"] == [line.strip() for line in lines.splitlines() if "has no reviewer session" in line]
+    assert f"{rv['id']} has no reviewer session" in lines and not first["news"]  # the coordinator gets a round
+    second = watch.check(project)
+    assert second["news"] == [x.strip() for x in second["summary"].splitlines() if "has no reviewer session" in x]
     assert not any(reminders(herdr_log, f"researcher-{n}") for n in range(1, 5))
-    assert not watch.check(project)["note"]  # the missing reviewer is reported once
+    assert not watch.check(project)["note"]  # and hears it once
 
     tasks.inbox(project, "coordinator", ack=True)  # the coordinator read the question and gave no answer
     assert "researcher-4: was idle with T-0004 active; reminded" in watch.check(project)["summary"]

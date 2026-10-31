@@ -9,7 +9,8 @@ runs of the task's experiments still queued or running, and a message the sessio
 the coordinator: one it has not read). A gone agent is started again in its folder, in a new conversation that
 reads its assignment from the records (rl agent brief); an idle one is reminded to continue, at most twice per
 assignment. A session that keeps exiting or does not react to a reminder, and a dialog other than the trust
-question for the session's own folder, go to the coordinator, which asks the user where the user decides. The
+question for the session's own folder, go to the coordinator, which asks the user where the user decides; a wait
+the coordinator should resolve (a review without a reviewer) goes to it when it is still there a round later. The
 coordinator gets one recorded note for a round that changed or found something, and one reminder for messages it
 has left unread for a whole round while idle. The watcher runs in its own herdr tab (sr-watch): rl agent open
 starts it, and it stops when no session is open.
@@ -85,8 +86,12 @@ def _round(store: Store, s: dict) -> tuple[str, bool]:
         return f"{name}: {state}" + (f" on {what}" if what else ""), False
     stopped, desc, problems = _assignment(store, s)
     if not stopped:
-        fresh = [p for p in problems if _once(store, s, p.split()[0], p)]
-        return f"{name}: {state}, {desc}" + "".join(f"; {p}" for p in problems), bool(fresh)
+        held = (s.get("watch") or {}).get("problems") or []
+        if held != problems:
+            _remember(store, s, None, problems=problems)
+        # what the coordinator should resolve goes to it when it is still there a round later, and once
+        due = [p for p in problems if p in held and _once(store, s, p.split()[0], p)]
+        return f"{name}: {state}, {desc}" + "".join(f"; {p}" for p in problems), bool(due)
     memo = s.get("watch") or {}
     count = memo.get("reminders", 0) if memo.get("assignment") == what else 0
     if count and (memo.get("seq") == seq or count >= MAX_REMINDERS):
@@ -174,6 +179,8 @@ def _restart(store: Store, s: dict) -> tuple[str, bool]:
         return (f"{name}: its agent exited again after {len(recent)} restarts within the hour; not started again: "
                 f"look at it and decide (rl agent close {name}, or open a new session)"), \
             _once(store, s, "given_up", recent[0])
+    if not _open(store, s["id"]):  # the coordinator closed it during this round
+        return f"{name}: closed", False
     tab, pane = s.get("herdr_tab"), s.get("herdr_pane")
     found = herdr.get("pane", pane) if pane else None
     ours = found and found.get("tab_id") == tab and (herdr.get("tab", tab) or {}).get("label") == name
@@ -197,6 +204,10 @@ def _restart(store: Store, s: dict) -> tuple[str, bool]:
             _remember(store, s, None, restarts=recent + [now_utc()])
             return f"{name}: its agent had exited and could not be started again: {exc.message}", True
         waiting = _answer_trust(name, entry.entry, Path(s["cwd"]), 90)
+    if not _open(store, s["id"]):  # closed while it started; rl agent close closed the recorded tab, not a new one
+        if not ours:
+            herdr.call("tab", "close", tab, timeout=30)
+        return f"{name}: closed while the watcher started it again", False
     with store.write() as tx:
         tx.update(s["id"], {"herdr_tab": tab, "herdr_pane": pane, "host_session_id": host_session})
     _remember(store, s, ("session.restarted", s["id"], f"{name} started again in {s['cwd']}"),
@@ -215,6 +226,12 @@ def _restart(store: Store, s: dict) -> tuple[str, bool]:
                                  f"(a new conversation). {go_on}{NOT_USER}")
     return (f"{name}: its agent had exited; started again in {s['cwd']}"
             + (f" (not told: {problem})" if problem else f" and told to continue {what}" if stopped else "")), True
+
+
+def _open(store: Store, sid: str) -> bool:
+    with store.read() as tx:
+        found = tx.get(sid, "Session")
+    return bool(found and found["status"] == "active")
 
 
 def _coordinator(store: Store, quiet: bool = False) -> str | None:
