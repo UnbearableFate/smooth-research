@@ -4,7 +4,10 @@ how the code of a commit gets there.
 rl connects to, copies to and starts nothing on any of them. It reads the configuration, checks what it can see
 locally (the ssh command, the git remote, whether a commit is on a branch and pushed as of the last push or
 fetch) and prints the steps for the agent's own tools: Bash, ssh, pi-env-mcp, and the MCP server or skill that
-submits jobs. A remote run always executes a read-only snapshot of one full commit,
+submits jobs. The one exception is the git side of sync: for the resources that fetch code by git, rl compute
+sync (and the coordinator's rl session start) pushes the current branch, after creating the git remote as a
+private GitHub repository when it is missing and compute.repository allows it; the clone on the host is again a
+printed step. A remote run always executes a read-only snapshot of one full commit,
 <workspace>/snapshots/<commit>/, so the branch or worktree it came from does not matter and a branch that moves
 on cannot change a queued job. An attempt registered with --resource keeps the resource and its planned
 locations.
@@ -12,11 +15,14 @@ locations.
 
 from __future__ import annotations
 
+import os
 import re
 import shlex
 import shutil
+import subprocess
+from pathlib import Path
 
-from .project import Project, Resource, compute_default, compute_resources, repo_top
+from .project import Project, Resource, compute_default, compute_repository, compute_resources, repo_top
 from .store import Store
 from .util import RLError
 from .worktrees import _git
@@ -49,7 +55,8 @@ def _git_facts(project: Project, res: Resource, commit: str | None) -> dict:
     if res.remote and res.code == "git":
         facts["url"] = res.git_url or _git(checkout, "remote", "get-url", res.git_remote, check=False) or None
         if not _git(checkout, "remote", "get-url", res.git_remote, check=False):
-            facts["problem"] = (f"no git remote {res.git_remote!r} in {checkout}: add one (git remote add "
+            facts["problem"] = (f"no git remote {res.git_remote!r} in {checkout}: rl compute sync creates one "
+                                "(compute.repository), or add one (git remote add "
                                 f"{res.git_remote} <GitHub URL>) or set compute.resources.{res.name}.git_remote")
     if not commit:
         return facts
@@ -103,7 +110,8 @@ def pack_text(project: Project) -> str:
     found, _ = compute_resources(project.config)
     default = compute_default(project.config)
     lines = [f"default: {default or 'none'} · register with --resource <name>; rl compute steps --attempt ATT "
-             "prints how to stage the commit there, run it and fetch the results (rl runs nothing)"]
+             "prints how to stage the commit there, run it and fetch the results (rl runs nothing); rl compute "
+             "sync pushes your branch for the resources that fetch code by git"]
     lines += [f"- {res.describe()}" for res in found.values()]
     return "\n".join(lines)
 
@@ -226,10 +234,8 @@ def _sync_steps(project: Project, res: Resource, commit: str | None, facts: dict
             lines.append(f"   a. Push a branch that contains it: git push {res.git_remote} <branch> (no local branch "
                          "contains it)")
         url = facts.get("url") or "<repository URL>"
-        script = ("set -eu\n" + head
-                  + f"[ -d \"$ws/repo.git\" ] || git clone --bare --quiet {_sh(url)} \"$ws/repo.git\"\n"
-                  "git -C \"$ws/repo.git\" fetch --quiet --prune origin '+refs/heads/*:refs/heads/*'\n"
-                  "git -C \"$ws/repo.git\" cat-file -e \"$sha^{commit}\"\n"
+        script = ("set -eu\n" + head + _clone(url)
+                  + "git -C \"$ws/repo.git\" cat-file -e \"$sha^{commit}\"\n"
                   "git -C \"$ws/repo.git\" archive \"$sha\" | tar -x -C \"$tmp\"\n" + tail)
         lines.append("   b. Fetch it on the host and extract that commit (the host needs read access to the "
                      "repository: a deploy key or token there):")
@@ -250,6 +256,12 @@ def _sync_steps(project: Project, res: Resource, commit: str | None, facts: dict
               f"{ws}/snapshots/{sha}.tar",
               "   c. Extract it:", _remote(res, script)]
     return lines
+
+
+def _clone(url: str) -> str:
+    """Shell lines (with $ws set) that keep $ws/repo.git a bare clone of url with every branch fetched."""
+    return (f"[ -d \"$ws/repo.git\" ] || git clone --bare --quiet {_sh(url)} \"$ws/repo.git\"\n"
+            "git -C \"$ws/repo.git\" fetch --quiet --prune origin '+refs/heads/*:refs/heads/*'\n")
 
 
 def _run_steps(res: Resource, env: str, att: str, where: dict) -> list[str]:
@@ -286,3 +298,112 @@ def _fetch_steps(project: Project, res: Resource, att: str, where: dict) -> list
     return [f"3. After the end (exit 0 is not application success): {fetch}; list checkpoints and other large "
             f"files as {{\"uri\": \"{res.name}:<absolute path>\"}} (recorded as not read).",
             f"4. rl run import-result --attempt {att} --manifest @{local}/manifest.json --request-id <unique>"]
+
+
+# -- sync: the git side of the resources that fetch code by git -----------------------------------------------
+
+QUIET = {"GIT_TERMINAL_PROMPT": "0", "GH_PROMPT_DISABLED": "1"}  # fail instead of asking for a password
+
+
+def _call(cwd: Path, *args: str, timeout: int = 300) -> tuple[bool, str]:
+    """Run git or gh without prompts: (succeeded, the last of its output)."""
+    try:
+        done = subprocess.run(list(args), cwd=cwd, capture_output=True, text=True, timeout=timeout,
+                              env={**os.environ, **QUIET})
+    except (OSError, subprocess.SubprocessError) as exc:
+        return False, str(exc)
+    return done.returncode == 0, (done.stderr.strip() + "\n" + done.stdout.strip()).strip()[-400:]
+
+
+def _create_repository(store: Store, top: Path, remote: str) -> tuple[str | None, str]:
+    """gh repo create <directory name> --private, added as the git remote: (its URL, what happened)."""
+    gh = shutil.which("gh")
+    if not gh:
+        return None, (f"no git remote {remote!r} and gh is not on PATH: create a repository yourself and add it "
+                      f"(git remote add {remote} <URL>), then rl compute sync")
+    ok, said = _call(top, gh, "repo", "create", top.name, "--private", "--source", str(top), "--remote", remote,
+                     timeout=120)
+    url = _git(top, "remote", "get-url", remote, check=False) or None
+    if not ok or not url:
+        return None, (f"gh repo create {top.name} --private failed: {said or 'no output'}. Fix that (gh auth login; "
+                      f"another name if it exists), or add a repository yourself (git remote add {remote} <URL>), "
+                      "then rl compute sync")
+    with store.write() as tx:
+        tx.event("compute.repository", None, f"created the private GitHub repository {url} (git remote {remote})")
+    return url, f"created the private GitHub repository {url} as git remote {remote} (compute.repository)"
+
+
+def sync(store: Store, name: str | None = None) -> dict:
+    """rl compute sync, and the coordinator's rl session start: for the remote resources that fetch code by git,
+    push the current branch of the caller's checkout to their git remote (creating it first as a private GitHub
+    repository when it is missing, compute.repository allows it and the project is its own repository), then
+    print the step that clones it into each resource's workspace and checks that the host has the commit. The
+    clone runs through the resource's connection (pi-env-mcp or ssh), so the agent runs it; every step is safe
+    to repeat. Problems are reported, never raised: a session start does not fail on them."""
+    project = store.project
+    found, _ = compute_resources(project.config)
+    if name:
+        found = {name: resource(project, name)}
+    targets = [r for r in found.values() if r.remote and r.code == "git"]
+    if not targets:
+        return {"pushed": [], "problems": [], "summary": "" if not name else
+                f"compute sync: {name} does not fetch code by git (code: archive or local); nothing to push"}
+    checkout = project.checkout
+    top = repo_top(checkout)
+    lines: list[str] = [f"compute sync ({', '.join(r.name for r in targets)}: code by git)"]
+    problems: list[str] = []
+    pushed: list[dict] = []
+    head = _git(checkout, "rev-parse", "--verify", "--quiet", "HEAD", check=False) if top else ""
+    branch = _git(checkout, "symbolic-ref", "--quiet", "--short", "HEAD", check=False) if top else ""
+    if top is None:
+        problems.append(f"{checkout} is in no git repository: git init, commit the project, then rl compute sync")
+    elif not head:
+        problems.append(f"no commit yet in {top}: commit the project (git add . && git commit), then rl compute sync")
+    elif not branch:
+        problems.append("HEAD is detached: push the branch you run from yourself (git push <remote> <branch>)")
+    urls: dict[str, str | None] = {}
+    for remote in sorted({r.git_remote for r in targets}):
+        if top is None:
+            break
+        url = _git(checkout, "remote", "get-url", remote, check=False) or None
+        if not url and head:
+            policy = compute_repository(project.config)
+            if any(r.git_url for r in targets if r.git_remote == remote):
+                problems.append(f"no git remote {remote!r} here, while git_url names where the host fetches: add "
+                                f"the repository you push to (git remote add {remote} <URL>)")
+            elif policy != "github-private":
+                problems.append(f"no git remote {remote!r} and compute.repository is {policy}: ask the user where "
+                                f"the code goes, add it (git remote add {remote} <URL>), then rl compute sync")
+            elif (own := repo_top(project.root)) is None or own.resolve() != project.root.resolve():
+                problems.append(f"no git remote {remote!r}: the project is a part of the repository {own}, so rl "
+                                f"creates none for it; add one (git remote add {remote} <URL>)")
+            else:
+                url, said = _create_repository(store, own, remote)
+                (lines if url else problems).append(said)
+        urls[remote] = url
+        if url and head and branch:
+            upstream = _git(checkout, "rev-parse", "--abbrev-ref", f"{branch}@{{upstream}}", check=False)
+            ok, said = _call(checkout, "git", "push", *([] if upstream else ["-u"]), remote, branch)
+            if ok:
+                pushed.append({"remote": remote, "branch": branch, "commit": head, "url": url})
+                lines.append(f"pushed {branch} ({head[:12]}) to {remote} ({url})")
+                with store.write() as tx:
+                    tx.event("compute.push", None, f"{branch} {head[:12]} -> {remote} {url}")
+            else:
+                problems.append(f"git push {remote} {branch} failed: {said}. Fix it (never force a shared branch), "
+                                "then rl compute sync")
+    if head and branch and _git(checkout, "status", "--porcelain", "--untracked-files=no", check=False):
+        lines.append("uncommitted changes to tracked files are not pushed: a run uses only committed code")
+    for res in targets:
+        url = res.git_url or urls.get(res.git_remote)
+        if not url:
+            continue
+        check = (f"git -C \"$ws/repo.git\" cat-file -e {head}^{{commit}} && echo \"ready: $ws/repo.git has "
+                 f"{head[:12]}\"\n" if head and pushed else "echo \"ready: $ws/repo.git\"\n")
+        script = f"set -eu\nws={_sh(res.workspace)}; mkdir -p \"$ws/snapshots\" \"$ws/runs\"\n" + _clone(url) + check
+        lines.append(f"{res.name}: run now, to clone the repository into {res.workspace}/repo.git (or fetch it) and "
+                     f"check that {res.host} can read it (it needs read access there: gh auth login or a deploy key; "
+                     "safe to repeat):")
+        lines.append(_remote(res, script.rstrip("\n")))
+    lines += [f"problem: {p}" for p in problems]
+    return {"pushed": pushed, "problems": problems, "summary": "\n".join(lines)}

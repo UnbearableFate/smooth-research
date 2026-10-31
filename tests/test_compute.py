@@ -2,6 +2,7 @@
 staging steps rl prints. The steps are run here against local directories that stand in for the remote host, so
 the snapshot a remote job would run is checked, not only the text."""
 
+import os
 import stat
 import subprocess
 from pathlib import Path
@@ -223,3 +224,134 @@ def test_rl_compute_lists_resources_with_local_checks(project, tmp_path, rl):
     assert code == 0 and f"snapshots/{sha}" in out
     code, _, err = rl("compute", "--attempt", "ATT-0001-1")
     assert code != 0 and "rl compute steps" in err
+
+
+# -- sync: push for the resources that fetch code by git, and their clone step -----------------------------------
+
+FAKE_GH = """#!/bin/sh
+# gh repo create NAME --private --source DIR --remote R, with a local bare repository standing in for GitHub
+echo "$*" >> "$FAKE_GITHUB/calls"
+[ "$1" = repo ] && [ "$2" = create ] || exit 2
+name=$3; shift 3
+while [ $# -gt 0 ]; do case "$1" in --source) src=$2; shift 2;; --remote) remote=$2; shift 2;; *) shift;; esac; done
+if [ -e "$FAKE_GITHUB/$name.git" ]; then echo "GraphQL: Name already exists on this account" >&2; exit 1; fi
+git init -q --bare "$FAKE_GITHUB/$name.git"
+git -C "$src" remote add "$remote" "$FAKE_GITHUB/$name.git"
+echo "https://github.com/me/$name"
+"""
+
+
+@pytest.fixture
+def fake_gh(tmp_path, monkeypatch):
+    """A gh on PATH that creates local bare repositories; returns their directory (with calls: its arguments)."""
+    hub = tmp_path.parent / f"{tmp_path.name}-hub"
+    bin_dir = tmp_path.parent / f"{tmp_path.name}-bin"
+    hub.mkdir()
+    bin_dir.mkdir()
+    (bin_dir / "gh").write_text(FAKE_GH)
+    (bin_dir / "gh").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setenv("FAKE_GITHUB", str(hub))
+    return hub
+
+
+def _git_resource(root: Path, tmp_path: Path, **compute_extra) -> tuple[Store, Path]:
+    ws = tmp_path.parent / f"{tmp_path.name}-remote"
+    path = root / "smooth-research.yaml"
+    cfg = yaml.safe_load(path.read_text())
+    cfg["compute"] = {"default": "box", **compute_extra, "resources": {
+        "local": {"kind": "local"}, "box": {"host": "box", "workspace": str(ws), "code": "git"},
+        "upload": {"host": "box", "workspace": str(ws) + "-archive", "code": "archive"}}}
+    path.write_text(yaml.safe_dump(cfg, sort_keys=False))
+    return Store(find_project(), "coordinator"), ws
+
+
+def _commit(root: Path):
+    git(root, "init", "-q", "-b", "main")
+    git(root, "add", ".")
+    git(root, "commit", "-q", "-m", "start")
+    return git(root, "rev-parse", "HEAD")
+
+
+def test_session_start_creates_a_private_repository_pushes_and_prints_the_clone(project, tmp_path, fake_gh, rl):
+    store, ws = _git_resource(tmp_path, tmp_path)
+    sha = _commit(tmp_path)
+    code, out, err = rl("session", "start", "--role", "coordinator", "--host", "other")
+    assert code == 0, err
+    name = tmp_path.name
+    assert (fake_gh / "calls").read_text().split() == ["repo", "create", name, "--private", "--source",
+                                                       str(tmp_path), "--remote", "origin"]
+    assert f"created the private GitHub repository {fake_gh / name}.git as git remote origin" in out
+    assert f"pushed main ({sha[:12]}) to origin" in out and "problem:" not in out
+    assert git(fake_gh / f"{name}.git", "rev-parse", "main") == sha
+    assert git(tmp_path, "rev-parse", "--abbrev-ref", "main@{upstream}") == "origin/main"
+    assert "box: run now, to clone the repository" in out and "upload" not in out  # archive: nothing to sync
+    script = _heredoc(out)  # what ssh would run on the host
+    for _ in range(2):  # safe to repeat: clones once, then fetches
+        done = subprocess.run(["sh", "-s"], input=script, capture_output=True, text=True)
+        assert done.returncode == 0, done.stderr
+        assert f"ready: {ws}/repo.git has {sha[:12]}" in done.stdout
+    assert git(ws / "repo.git", "rev-parse", "main") == sha and (ws / "snapshots").is_dir()
+    with store.read() as tx:
+        kinds = [e["type"] for e in tx.all("Event")]
+    assert kinds.count("compute.repository") == 1 and kinds.count("compute.push") == 1
+
+    (tmp_path / "src/train.py").write_text("print('v1')\n")
+    git(tmp_path, "add", ".")
+    git(tmp_path, "commit", "-q", "-m", "train")
+    (tmp_path / "src/train.py").write_text("print('v2')\n")
+    code, out, err = rl("compute", "sync")  # again: the remote exists, the new commit is pushed
+    new = git(tmp_path, "rev-parse", "HEAD")
+    assert code == 0 and "created" not in out and f"pushed main ({new[:12]})" in out
+    assert "uncommitted changes to tracked files are not pushed" in out
+    assert len((fake_gh / "calls").read_text().splitlines()) == 1
+
+
+def test_sync_reports_what_it_cannot_do_and_session_start_goes_on(project, tmp_path, fake_gh, rl):
+    store, ws = _git_resource(tmp_path, tmp_path, repository="none")
+    code, out, err = rl("session", "start", "--role", "coordinator", "--host", "other")
+    assert code == 0 and "problem: " in out and "is in no git repository" in out
+
+    _commit(tmp_path)
+    out = compute.sync(store)
+    assert "compute.repository is none: ask the user" in out["summary"] and not (fake_gh / "calls").exists()
+    assert out["pushed"] == [] and "clone" not in out["summary"]
+
+    git(tmp_path, "remote", "add", "origin", str(tmp_path.parent / "missing.git"))
+    code, out, err = rl("session", "start", "--role", "coordinator", "--host", "other")
+    assert code == 0 and "problem: git push origin main failed" in out and "never force" in out
+    code, out, err = rl("session", "start", "--role", "coordinator", "--host", "other", "--no-sync")
+    assert code == 0 and "compute sync" not in out
+    code, out, err = rl("compute", "sync", "upload")
+    assert code == 0 and "upload does not fetch code by git" in out
+
+
+def test_no_commit_yet_or_a_project_inside_a_larger_repository_gets_no_new_repository(tmp_path, fake_gh,
+                                                                                       monkeypatch):
+    from smooth_research import research
+    outer = tmp_path / "outer"
+    root = outer / "demos" / "p"
+    root.mkdir(parents=True)
+    (root / "plan.md").write_text("# Plan\n", encoding="utf-8")
+    research.init_project(root, str(root / "plan.md"), "t")
+    monkeypatch.chdir(root)
+    store, _ = _git_resource(root, tmp_path)
+    git(outer, "init", "-q", "-b", "main")
+    assert "no commit yet in" in compute.sync(store)["summary"]
+    git(outer, "add", ".")
+    git(outer, "commit", "-q", "-m", "start")
+    out = compute.sync(store)
+    assert f"the project is a part of the repository {outer}, so rl creates none" in out["summary"]
+    assert not (fake_gh / "calls").exists()
+
+
+def test_session_start_without_git_resources_says_nothing_about_sync(project, rl):
+    code, out, err = rl("session", "start", "--role", "coordinator", "--host", "other")
+    assert code == 0 and "compute sync" not in out and "problem" not in out
+
+
+def test_an_unknown_repository_setting_warns_and_creates_nothing():
+    from smooth_research.project import compute_repository
+    cfg = config({"repository": "gitlab"})
+    assert compute_repository(cfg) == "none" and compute_repository(DEFAULT_CONFIG) == "github-private"
+    assert any("compute.repository must be github-private or none, not 'gitlab'" in w for w in config_warnings(cfg))

@@ -94,7 +94,8 @@ research/                everything else: experiments/ (contracts), tasks/, note
 The layout is fixed. Every configuration key, environment variable and command-line override is explained in
 [docs/configuration.md](docs/configuration.md) (in Chinese).
 
-Typical loop: `rl init --plan plan.md` -> `rl session start --role coordinator ...` ->
+Typical loop: `rl init --plan plan.md` (also `uv init`) -> commit -> `rl session start --role coordinator ...`
+(pushes for remote `code: git` resources; run the clone step it prints) ->
 `rl hypothesis add` -> `rl experiment add` -> code in `src/` -> `rl review request/run` for new core
 paths -> `rl run register --resource ..` -> `rl compute steps` -> run with your own tool -> `rl run record` ->
 `rl run import-result` ->

@@ -35,7 +35,7 @@
 
 | 位置 | 内容 |
 |---|---|
-| `src/` | 实验代码。init 会创建它，并放一个忽略 `__pycache__` 和 `*.pyc` 的 `.gitignore`。工作包和 `rl delegate` 的提示词让 agent 把代码放这里，但不强制，审查范围和 RunSpec 可以引用任何路径 |
+| `src/` | 实验代码。init 会创建它，并放一个忽略 `__pycache__` 和 `*.pyc` 的 `.gitignore`。新项目里 init 还运行 `uv init . --python=3.13 --no-workspace`（见第 4 节 `rl init`），代码包在 `src/<包名>/`。工作包和 `rl delegate` 的提示词让 agent 把代码放这里，但不强制，审查范围和 RunSpec 可以引用任何路径 |
 | `docs/` | 只放给人读的文档：`plan.md`（`rl init --plan` 导入的原始计划，封存）、`constraints.md`（约束文档，见第 2 节）、`research-graph.html`（`rl view`）、论文草稿（`rl manuscript`，见下面的"论文草稿"）、`explanations/`（用户让 agent 解释某件事时，agent 把说明写在这里） |
 | `research/` | 其余的一切。agent 的工作文档：`experiments/`（实验契约）、`tasks/`（任务说明和交接笔记）、`notes/`（researcher 的笔记，写在它自己的 checkout 里，随分支合并）、`reviews/` 和 `advice/`（审查和建议的回答）、`reports/`（`rl report` 的阶段报告）。机器记录：数据库 `state/research.lattice` 和写锁、封存的文档 `documents/objects/`、请求包 `packages/`、模型调用日志 `calls/`、run 产物 `artifacts/<attempt>/` 等。init 写的 `.gitignore` 让 `state/`、`calls/`、`artifacts/` 不进 git |
 
@@ -155,11 +155,12 @@ Claude Code 和 Codex 一般用订阅，有 5 小时和每周两个窗口。某�
 
 ### 计算资源
 
-`compute` 一节写实验在哪里跑：本机，以及远程主机或集群。每个资源写清楚怎样连上去、用什么启动作业、远程的工作目录，以及代码怎样过去。rl 不连接任何资源，不复制文件，也不启动作业：它只读配置，检查本地能看到的东西，打印步骤，由 agent 用 Bash、ssh、pi-env-mcp 和提交作业的 MCP 或 skill 执行。预算和队列限制不写在这里，写在约束文档里（第 2 节）。
+`compute` 一节写实验在哪里跑：本机，以及远程主机或集群。每个资源写清楚怎样连上去、用什么启动作业、远程的工作目录，以及代码怎样过去。rl 不连接任何资源，不复制文件，也不启动作业：它只读配置，检查本地能看到的东西，打印步骤，由 agent 用 Bash、ssh、pi-env-mcp 和提交作业的 MCP 或 skill 执行。唯一的例外是 git 这一侧：对 `code: git` 的资源，`rl compute sync`（协调者的 `rl session start` 会运行它）在本地推送当前分支，remote 不存在时先建一个 private GitHub 仓库（见下面的“开始时同步”）；主机上的 clone 仍然是打印出来、由 agent 执行的步骤。预算和队列限制不写在这里，写在约束文档里（第 2 节）。
 
 ```yaml
 compute:
   default: miyabi
+  repository: github-private
   resources:
     local:
       kind: local
@@ -174,6 +175,7 @@ compute:
 | 键 | 默认值 | 含义 |
 |---|---|---|
 | `compute.default` | `local` | 任务和协调者没有另外指定时用哪个资源。只写进工作包作为提示；`rl run register` 不写 `--resource` 时不记录资源，不按默认值猜 |
+| `compute.repository` | `github-private` | `code: git` 的资源的 git remote 不存在时怎么办。`github-private`：`rl session start` / `rl compute sync` 用 `gh repo create <项目目录名> --private` 建仓库并加成这个 remote；`none`：不建，由 agent 问用户代码放在哪里。其他值有警告，按 `none` 处理 |
 | `compute.resources` | `{local: {kind: local}}` | 资源名到设置的映射。名字只能用字母、数字、`.`、`_`、`-`。整体替换默认值 |
 | `<资源>.kind` | 有 `host` 时是 `remote`，否则是 `local` | `local`：本机，代码就在调用者的 checkout 里，输出在 `research/artifacts/<attempt>/`，下面除 `jobs` 和 `notes` 以外的键对它都没有作用。`remote`：远程主机 |
 | `<资源>.host` | 无，远程资源必填 | 远程连接用的主机名：`connect: ssh` 时是 ssh 别名，用 pi-env-mcp 时是 pi-env-mcp 里的主机名 |
@@ -189,7 +191,12 @@ compute:
 - **`rl compute` 只检查本地。** 它列出各资源，检查 `ssh` 在不在 PATH 上、git remote 在不在，加 `--commit` 时还看这个 commit 是否已经推送（按最后一次 push 或 fetch，不访问网络）。pi-env-mcp、MCP 服务和 skill 是 agent 的工具，由 agent 自己检查。
 - **`rl compute steps` 给出一次运行的全部步骤。** 带 `--attempt` 时用 attempt 记录的资源和 RunSpec 里的 commit；不带时用 `--commit`，再不带就用 checkout 的 HEAD。步骤依次是：推送分支（code 为 git，已经推送时说明），在主机上 fetch 并取出那个 commit 的脚本（code 为 archive 时是打包、传输、解开），启动方式和要设的环境变量（`SR_ATTEMPT_ID`、`SR_SPEC_DIGEST`），以及取回 `manifest.json` 和 `rl run import-result`。connect 为 ssh 时给出能直接在 Bash 里运行的命令，为 pi-env-mcp 时写明用哪个工具、哪个服务和主机。attempt 的 RunSpec 只有内容摘要、没有 commit 时，它说明远程的 run 要用 `--code-commit` 登记，而不是改用 HEAD。
 - **`--resource` 把资源记到 attempt 上。** `rl run register ... --resource <名字>` 记下资源的设置和计划中的位置（远程的快照目录和 `runs/<attempt>/`），`rl run show` 显示 `on <名字>`。名字不在配置里时报 NOT_FOUND。资源名属于请求的一部分：同一个 `--request-id` 换了资源会报 CONFLICT。资源不属于 RunSpec，同一个 RunSpec 可以在不同资源上各跑一个 attempt。
-- **researcher 推送自己的任务分支。** code 为 git 时，researcher 在需要时推送自己 worktree 的任务分支 `sr/<名字>/<任务>`，从不强推：记录过的 run 指向这些 commit。合并后的 main 要不要推送，由协调者和用户决定。
+- **开始时同步（code 为 git）。** 协调者的 `rl session start` 运行 `rl compute sync`（`--no-sync` 跳过）。对每个 `code: git` 的资源用到的 git remote：
+  1. remote 不存在、`compute.repository` 是 `github-private`、项目自己就是一个 git 仓库（不是更大仓库里的一个目录）、也没有写 `git_url` 时，用 `gh repo create <项目目录名> --private --source <项目> --remote <git_remote>` 建仓库，记一条 `compute.repository` 事件。gh 不在、没有登录或重名时说明原因和手工的做法，不让会话启动失败。
+  2. 用 `git push`（没有 upstream 时加 `-u`）推送当前分支，记一条 `compute.push` 事件。不强推；失败时说明原因。还没有 commit、HEAD 是 detached 时只说明，不推送。没有提交的修改不会过去，它也会提醒。
+  3. 给每个资源打印一个脚本：在 `<workspace>/repo.git` bare clone 仓库（已经有就 fetch），并检查主机上有刚推送的 commit。agent 要立刻用这个资源的连接（pi-env-mcp 或 ssh）执行它，这样主机读不了仓库（要在主机上 `gh auth login`，或者配 deploy key）在第一次运行之前就能发现。重复执行是安全的。
+  没有 `code: git` 的远程资源时，什么都不做，也不输出。
+- **researcher 推送自己的任务分支。** code 为 git 时，researcher 在需要时用 `rl compute sync` 推送自己 worktree 的任务分支 `sr/<名字>/<任务>`，从不强推：记录过的 run 指向这些 commit。合并后的 main 由协调者用 `rl compute sync` 再推送一次。
 - **工作包和恢复包带上资源列表。** researcher 和接手的会话不用读约束文档就知道去哪里跑。
 
 ## 2. 约束文档 `docs/constraints.md`
@@ -237,7 +244,8 @@ compute:
 - **订阅额度：** `rl usage` 显示各宿主的窗口；`rl usage statusline` 是 Claude Code 的状态栏命令，从标准输入读状态栏的 JSON，任何输入都不会让它失败。
 - **论文草稿：** `rl manuscript [--title ..]` 写或刷新草稿，`--title` 只用于新建的草稿，见第 1 节"论文草稿"。
 - **插件升级：** `rl upgrade` 显示项目的记录格式和插件 build、做过的升级、新版本读法不同的地方和可以自己调整的范围；`--note "<改了什么>"` 记下 agent 手工做的调整；`--move <旧> <新>` 移动旧布局里的文件或目录，并在同一个事务里改写记录里的路径。见第 6 节。
-- **计算资源：** `rl compute [--commit <sha>]` 列出资源和本地检查；`rl compute steps [<资源>] [--attempt ATT] [--commit <sha>]` 给出同步、运行和取回结果的步骤；`rl run register ... --resource <资源>` 把资源记到 attempt 上。见第 1 节“计算资源”。
+- **`rl init`：** 新项目除了配置、目录和计划，还在项目根目录运行 `uv init . --python=<版本> --no-workspace --name <目录名>`：写 `pyproject.toml`、`.python-version` 和 `src/<包名>/__init__.py`；项目不在任何 git 仓库里时 uv 还会 `git init`。`--no-workspace` 让放在别的 uv 项目里面的研究项目（比如一个仓库里的 demo）保持独立，不被加进那个项目的 workspace。已经有 `pyproject.toml` 时不动它。项目已经在一个 git 仓库里时 uv 不写 `.gitignore`，rl 写 uv 的那份（或者在已有的 `.gitignore` 后面加 `.venv`）。`--python <版本>` 改版本（默认 3.13），`--no-uv` 不运行 uv。uv 不在 PATH 上或失败时，init 照常完成，并给出要手工运行的命令。之后把新项目提交一次，`rl session start` 才有东西可推送。
+- **计算资源：** `rl compute [--commit <sha>]` 列出资源和本地检查；`rl compute steps [<资源>] [--attempt ATT] [--commit <sha>]` 给出同步、运行和取回结果的步骤；`rl compute sync [<资源>]` 推送当前分支并打印 clone 步骤（见第 1 节“开始时同步”）；`rl session start --no-sync` 跳过它；`rl run register ... --resource <资源>` 把资源记到 attempt 上。见第 1 节“计算资源”。
 - **监视程序：** `rl agent check` 立刻查看一轮；`rl agent watch --start` 在单独的 tab 里启动（已经在运行就不重复启动），`--stop` 停止并关掉它的 tab；`--every <分钟>` 改间隔，不写就用 `agents.watch_minutes`。不带 `--start` 或 `--stop` 时在当前终端前台运行。
 
 ## 5. 写死的常量（不能配置）

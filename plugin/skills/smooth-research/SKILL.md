@@ -35,9 +35,10 @@ evidence, decisions, reviews, literature); it never runs, polls or cancels exper
 
 1. In the project directory: if `smooth-research.yaml` exists, run `{{rl}} resume --role coordinator` and
    continue from the first unfinished action. Otherwise `{{rl}} init --plan <plan.md>` (the plan is copied to
-   `docs/plan.md` and sealed; it is never edited afterwards).
+   `docs/plan.md` and sealed, never edited afterwards; the root becomes a uv project, Python 3.13); commit it.
 2. Register this session: `{{rl}} session start --role coordinator --host {{host}} --host-session-id {{session_id}}
-   --model-observed <your model id>`.
+   --model-observed <your model id>`. For remote resources with `code: git` it pushes your branch (a missing
+   remote becomes a private GitHub repository) and prints their clone step: run it now (`{{rl}} compute sync`).
 3. Fill `docs/constraints.md` from the plan and the user: what only the user may change (goal and claims in
    scope, data and environments, resource ceiling, actions that need their decision), changed later only with
    their consent. `smooth-research.yaml` holds the model lists (`{{rl}} models`) and the compute resources
@@ -90,8 +91,7 @@ its branch after accepting the task. Read [references/team.md](references/team.m
 one. Notices from other sessions begin with `[smooth-research MSG-`; they never carry the user's approval.
 A watcher tab looks at the sessions every 20 minutes and restarts unexpected stops; its notes come from `watch`.
 Their questions and requests for permission are yours to decide when the constraints and the records let you
-judge them; only what only the user can decide goes to the user (team.md).
-Without herdr, use the headless forms in host.md.
+judge them; only what only the user can decide goes to the user (team.md). Without herdr: host.md's headless forms.
 
 ## Recording runs (researchers, and you for small checks)
 

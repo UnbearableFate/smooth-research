@@ -41,6 +41,8 @@ UNREAD = "_unread"  # in a loaded configuration: why the file could not be read
 # manuscript.latex is the command that builds the manuscript (the paper draft) as a PDF (null: Markdown).
 # compute: where experiments run (this machine, remote hosts, clusters), how the agent reaches each one and how
 # the code of a commit gets there; rl connects to none of them (compute.py). Budgets stay in docs/constraints.md.
+# compute.repository: when a remote resource fetches code by git and the git remote is missing, the
+# coordinator's rl session start creates it (github-private: gh repo create --private) or leaves it (none).
 # Every key here is read by the CLI; docs/configuration.md explains each one.
 DEFAULT_CONFIG: dict = {
     "version": 1,
@@ -54,7 +56,7 @@ DEFAULT_CONFIG: dict = {
     "usage": {"switch_left_percent": 10, "coordinator_host_left_percent": 20},
     "context": {"work_target_tokens": 4000, "advice_target_tokens": 10000},
     "manuscript": {"latex": None},
-    "compute": {"default": "local", "resources": {"local": {"kind": "local"}}},
+    "compute": {"default": "local", "repository": "github-private", "resources": {"local": {"kind": "local"}}},
 }
 MODEL_ROLES = ("researcher", "reviewer", "advisor")
 # Mappings the file replaces as a whole instead of merging into the defaults: compute.resources names the user's
@@ -232,6 +234,11 @@ def config_warnings(config: dict) -> list[str]:
     if latex is not None and not latex_command(config):
         out.append(f"{CONFIG_NAME}: manuscript.latex must be a build command such as 'latexmk -pdf "
                    f"-interaction=nonstopmode', or null for a Markdown draft, not {latex!r}; writing Markdown")
+    compute = config.get("compute")
+    repository = compute.get("repository") if isinstance(compute, dict) else None
+    if repository is not None and repository not in REPOSITORIES:
+        out.append(f"{CONFIG_NAME}: compute.repository must be {' or '.join(REPOSITORIES)}, not {repository!r}; "
+                   "using none (rl creates no repository)")
     return out + [f"{CONFIG_NAME}: {text}" for text in compute_resources(config)[1]]
 
 
@@ -447,6 +454,18 @@ def compute_resources(config: dict) -> tuple[dict[str, Resource], list[str]]:
     return found, out
 
 
+REPOSITORIES = ("github-private", "none")
+
+
+def compute_repository(config: dict) -> str:
+    """How rl session start creates a missing git remote for the resources that fetch code by git: github-private
+    (gh repo create --private) or none. An unknown value creates nothing."""
+    compute = config.get("compute")
+    value = compute.get("repository", DEFAULT_CONFIG["compute"]["repository"]) if isinstance(compute, dict) \
+        else DEFAULT_CONFIG["compute"]["repository"]
+    return value if value in REPOSITORIES else "none"
+
+
 def compute_default(config: dict) -> str | None:
     """The resource experiments run on unless a task or the coordinator says otherwise (compute.default, else the
     first usable resource)."""
@@ -584,6 +603,8 @@ def write_default_config(root: Path) -> Path:
                 "#     connect: pi-env-mcp:miyabi-g    # ssh, or pi-env-mcp:<MCP server name>\n"
                 "#     jobs: mcp:miyabi-pbs            # shell, mcp:<server> or skill:<name>\n"
                 "#     workspace: /work/<group>/<user>/<project>   # absolute; miyabi-mcp's --project-dir\n"
-                "#     code: git                       # git (push, the host fetches) or archive (upload)\n")
+                "#     code: git                       # git (push, the host fetches) or archive (upload)\n"
+                "# compute.repository: github-private lets the coordinator's rl session start create a missing git\n"
+                "# remote of those resources as a private GitHub repository (gh) before it pushes; none: never.\n")
         path.write_text(text + yaml.safe_dump(DEFAULT_CONFIG, sort_keys=False, allow_unicode=True), encoding="utf-8")
     return path

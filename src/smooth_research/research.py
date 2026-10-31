@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import re
 import shutil
+import subprocess
 from pathlib import Path
 
 import yaml
@@ -26,6 +28,12 @@ where the CLI reads them.
 - Resource ceiling (per experiment / per batch / total; units such as CPU-h, GPU-h, node-h; queues):
 - Actions that need the user's decision first:
 """
+
+# What uv init writes to .gitignore when it creates the git repository itself; written here when the project was
+# already in one (uv then writes none), so the uv environment never lands in git.
+UV_GITIGNORE = ("# Python-generated files\n__pycache__/\n*.py[oc]\nbuild/\ndist/\nwheels/\n*.egg-info\n\n"
+                "# Virtual environments\n.venv\n")
+DEFAULT_PYTHON = "3.13"
 
 ACTION_DISPOSITION = {"pause": "paused", "stop": "retired", "reopen": "active"}
 STAGE_ACTIONS = ("recommend_formal", "continue_probe", "pause", "stop")
@@ -63,15 +71,53 @@ def ensure_layout(project: Project, skip: list[Path] = ()) -> list[str]:
     return made
 
 
-def init_project(root: Path, plan: str | None = None, title: str | None = None) -> dict:
+def init_python(root: Path, python: str) -> str:
+    """The experiment code as a uv project: uv init --python <version> --no-workspace, only where there is no
+    pyproject.toml. uv writes pyproject.toml, .python-version and src/<package>/, and runs git init when the
+    project is in no git repository. --no-workspace: a project inside another uv project (a demo in a repository,
+    say) stays standalone instead of being added to that project's workspace. Never fails the init: what did not
+    happen is said, with the command to run."""
+    by_hand = f"uv init . --python={python} --no-workspace"
+    if (root / "pyproject.toml").exists():
+        return "python: kept the existing pyproject.toml"
+    uv = shutil.which("uv")
+    if not uv:
+        return f"python: uv is not on PATH; to make src/ a uv project run in the project root: {by_hand}"
+    name = re.sub(r"[^A-Za-z0-9._-]+", "-", root.name).strip("-._") or "research"
+    try:
+        done = subprocess.run([uv, "init", ".", f"--python={python}", "--no-workspace", "--name", name, "--quiet"],
+                              cwd=root, capture_output=True, text=True, timeout=120)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return f"python: uv init did not run ({exc}); run in the project root: {by_hand}"
+    if done.returncode != 0:
+        return f"python: uv init failed: {(done.stderr or done.stdout).strip()[-300:]}; run in the project root: " \
+               f"{by_hand}"
+    ignore = root / ".gitignore"
+    if not ignore.exists():
+        ignore.write_text(UV_GITIGNORE, encoding="utf-8")
+    elif not any(line.strip().strip("/") == ".venv" for line in ignore.read_text(encoding="utf-8").splitlines()):
+        text = ignore.read_text(encoding="utf-8")
+        ignore.write_text(text + ("" if text.endswith("\n") or not text else "\n") + "\n# uv environment\n.venv\n",
+                          encoding="utf-8")
+    packages = sorted(p.parent.name for p in (root / "src").glob("*/__init__.py"))
+    return (f"python: uv project for Python {python} (pyproject.toml, .python-version"
+            + (f", src/{packages[0]}/" if packages else "") + "); add packages with uv add, run code with uv run")
+
+
+def init_project(root: Path, plan: str | None = None, title: str | None = None, python: str | None = None) -> dict:
+    """Create the project (or check an existing one) and import the plan. With python, a new project's code
+    directory also becomes a uv project for that Python version (rl init does this by default)."""
     root = root.resolve()
     root.mkdir(parents=True, exist_ok=True)
     write_default_config(root)
     project = Project(root, load_config(root))
     ensure_layout(project)
     created = not project.db_path.exists()
+    python_line = None
     if created:
         Store.create(project, title)
+        if python:
+            python_line = init_python(root, python)
     store = Store(project, "coordinator")
     prep = None
     if plan:
@@ -105,8 +151,11 @@ def init_project(root: Path, plan: str | None = None, title: str | None = None) 
                            else "; no plan imported yet")
                         + "\nlayout: experiment code src/ · for people docs/ (the plan, the constraints, the "
                           "research graph page, the manuscript, explanations/) · records and working documents "
-                          "research/"),
-            "next": [f"fill {project.rel(project.constraints_path)} with what only the user may change: goal and "
+                          "research/" + (f"\n{python_line}" if python_line else "")),
+            "next": (["commit the new project in its root (git add . && git commit; git init first if it is in no "
+                      "repository): runs use committed code, and rl session start pushes it to remote resources"]
+                     if created else [])
+                    + [f"fill {project.rel(project.constraints_path)} with what only the user may change: goal and "
                      "claims in scope, data and environments, resource ceiling, actions that need their decision",
                      f"put the user's model choices in {CONFIG_NAME} (models) and check them: rl models",
                      "register yourself: rl session start --role coordinator ...",

@@ -66,9 +66,10 @@ notes (`src/`, `research/notes/`) are committed on the branch; records always go
 outlive the worktree.
 
 For a remote resource with `code: git` the researcher pushes its own task branch, so the host can fetch the
-commit it registered (`{{rl}} compute steps --attempt ATT` says when); nobody force-pushes a branch whose
-commits runs name. The host runs a read-only snapshot of that commit, so merging the branch later changes
-nothing there. Pushing the merged main is yours to decide with the user.
+commit it registered (`{{rl}} compute steps --attempt ATT` says when; `{{rl}} compute sync` pushes it); nobody
+force-pushes a branch whose commits runs name. The host runs a read-only snapshot of that commit, so merging
+the branch later changes nothing there. Your `{{rl}} session start` pushes the main checkout's branch; after a
+merge, `{{rl}} compute sync` pushes it again.
 
 ## Reviews
 

@@ -56,8 +56,8 @@ def prompt_for(store: Store, task_id: str, role: str, session: dict | None = Non
         checkout = f"""
 Your checkout is {session['cwd']}: a git worktree of the project on branch {session.get('branch')}, made from the
 branch of the main checkout. Write and commit the code there; do not merge or rebase (the coordinator merges
-the branch after it accepts the task). Push only this branch, only when `{rl} compute steps` says a remote
-resource needs it, and never force-push: recorded runs name its commits. `{rl}` records into the project at
+the branch after it accepts the task). Push only this branch (`{rl} compute sync`), only when `{rl} compute
+steps` says a remote resource needs it, and never force-push: recorded runs name its commits. `{rl}` records into the project at
 {store.project.root} from here. Write local run outputs under {artifacts}/<attempt>/ (absolute paths, so they
 outlive the worktree) and register runs with `--code-commit <the commit they run>`.
 """

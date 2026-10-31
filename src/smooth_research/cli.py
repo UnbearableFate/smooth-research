@@ -45,7 +45,8 @@ def _list(value) -> list[str]:
 
 
 def cmd_init(args):
-    return research.init_project(Path(args.dir or "."), args.plan, args.title)
+    return research.init_project(Path(args.dir or "."), args.plan, args.title,
+                                 python=None if args.no_uv else args.python)
 
 
 def cmd_status(args):
@@ -113,6 +114,12 @@ def cmd_session(args):
         if args.role == "coordinator" and args.host == "claude":  # its status line reports Claude's usage
             note = usage.install_statusline(store.project.root, delegate.rl_command())
             out["summary"] += f"\nClaude usage: {note}" if note else ""
+        if args.role == "coordinator" and not args.no_sync:  # remote resources get the committed code
+            try:
+                synced = compute.sync(store)
+            except RLError as exc:
+                synced = {"summary": f"compute sync: {exc}; fix it, then rl compute sync"}
+            out["summary"] += f"\n{synced['summary']}" if synced["summary"] else ""
         return out
     return tasks.end_session(store, args.id)
 
@@ -431,6 +438,11 @@ def cmd_compute(args):
     store = _store(args)
     if args.action == "steps":
         return compute.steps(store, args.resource, args.commit, args.attempt)
+    if args.action == "sync":
+        if args.commit or args.attempt:
+            raise RLError("INVALID", "rl compute sync pushes the current branch; --commit and --attempt go with "
+                                     "`rl compute steps`")
+        return compute.sync(store, args.resource)
     if args.resource or args.attempt:
         raise RLError("INVALID", "rl compute lists every resource; a resource or --attempt goes with "
                                  "`rl compute steps`")
@@ -468,6 +480,10 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--plan", help="the research plan (copied once to docs/plan.md and sealed)")
     sp.add_argument("--title")
     sp.add_argument("--dir", help="project directory (default: cwd)")
+    sp.add_argument("--python", default=research.DEFAULT_PYTHON,
+                    help=f"Python version of the uv project a new project's code becomes (uv init --python; default "
+                         f"{research.DEFAULT_PYTHON}); an existing pyproject.toml is kept")
+    sp.add_argument("--no-uv", action="store_true", help="do not run uv init")
     add("status", cmd_status, "short project status and attention items")
     sp = add("resume", cmd_resume, "resume pack: roles, unfinished tasks and attempts, last observations")
     sp.add_argument("--role")
@@ -503,10 +519,12 @@ def build_parser() -> argparse.ArgumentParser:
                     "rewrite the paths the records keep for it")
     sp = add("compute", cmd_compute, "compute resources (compute in smooth-research.yaml) with local checks; "
                                      "steps: how to stage a commit there, run it and fetch the results (rl "
-                                     "connects to, copies to and starts nothing)")
-    sp.add_argument("action", nargs="?", choices=["show", "steps"], default="show")
-    sp.add_argument("resource", nargs="?", help="a resource name (steps; default: the attempt's, else "
-                                                 "compute.default)")
+                                     "connects to, copies to and starts nothing); sync: push the current branch "
+                                     "for the resources that fetch code by git (creating a private GitHub "
+                                     "repository when compute.repository allows) and print their clone step")
+    sp.add_argument("action", nargs="?", choices=["show", "steps", "sync"], default="show")
+    sp.add_argument("resource", nargs="?", help="a resource name (steps: default the attempt's, else "
+                                                 "compute.default; sync: default every resource that uses git)")
     sp.add_argument("--commit", help="full commit id (default: the attempt's, else HEAD of your checkout)")
     sp.add_argument("--attempt", help="an attempt: its resource, commit and output directory")
     sp = add("usage", cmd_usage, "the Claude and Codex subscription windows, and the hosts that are low (their "
@@ -531,6 +549,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--model-observed", help="model the host reports it is running")
     s.add_argument("--effort")
     s.add_argument("--worktree")
+    s.add_argument("--no-sync", action="store_true", help="coordinator: skip rl compute sync (push to the git "
+                                                          "remote of the remote resources, print their clone step)")
     s = ss.add_parser("end")
     s.add_argument("id")
 

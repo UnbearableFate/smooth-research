@@ -58,10 +58,20 @@ Workspace layout: `repo.git` (a bare clone the host fetches into, code: git), `s
 `runs/<ATT>/` (one directory per attempt), and for miyabi-mcp `.miyabi-mcp/` (its ledger and PBS logs; do not
 edit). One workspace per research project, never shared: request keys are unique only inside it.
 
+Code by git, at the start: the coordinator's `{{rl}} session start` runs `{{rl}} compute sync`. For the resources
+with `code: git` it pushes the current branch to their git remote. When that remote is missing and
+`compute.repository` is `github-private` (the default), it first creates a private GitHub repository named
+after the project directory (`gh repo create --private`) and adds it as the remote. It creates none for a project
+that is part of a larger repository, when `git_url` is set, or with `none` (then ask the user where the code
+goes). It then prints, per resource, a script that clones the repository into `<workspace>/repo.git` (or
+fetches it) and checks that the host has the pushed commit: run it at once through that resource's connection,
+so a host that cannot read the repository shows up before the first run (it needs `gh auth login` there, or a
+deploy key). Before a run, a researcher runs `{{rl}} compute sync` in its worktree to push its task branch.
+
 1. Commit the code (sources only: no `__pycache__`, outputs or data), then register with `--code-commit
    <full sha> --resource <name>`. The code review check reads the files of that commit, not the working tree.
 2. `{{rl}} compute steps --attempt ATT` prints the steps for that attempt's commit and resource: push your task
-   branch (code: git; the host needs read access to the repository: a deploy key or token there), then one
+   branch (code: git, `{{rl}} compute sync`; the host needs read access to the repository), then one
    script for the host that fetches the commit into `repo.git` and extracts it read-only; or (code: archive)
    `git archive` streamed over ssh, or written locally and uploaded with pi-env-mcp, then extracted. Run them
    with Bash, ssh or the pi-env-mcp tools as printed; each is safe to repeat. rl runs none of it.

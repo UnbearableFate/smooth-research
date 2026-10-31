@@ -1630,3 +1630,23 @@ GitHub 链接固定到本次读取的提交；外部产品文档按 2026-10-30 �
 **开发规则**：改记录格式时提高 `SCHEMA_VERSION`、加迁移、冻结一份新格式项目，保留旧的；不再删除读取旧项目的能力（取代 §21.14 的做法）。
 
 验证：136 项测试通过（新增 10 项，`tests/test_upgrade.py`）。对 sr-e2e 三个项目的副本运行新 CLI：记录从格式 1 升级到 2 并留下备份，`rl upgrade` 列出 `docs/experiments`、`reports` 等旧布局，`--move` 后合同照常封存。从 dist 运行启动器、`SMOOTH_RESEARCH_HOME` 为空：hook 在后台构建，两条同时启动的命令都等它完成，只构建一次。
+
+### 21.20 init 建 uv 项目，会话开始时推送并 clone（2026-10-31）
+
+用户的要求：先在 demo 上手工走一遍 `uv init . --python=3.13`、`gh` 建 private 仓库并推送、在 Miyabi 上 git clone；走得通就加进插件：`uv init` 放进 `rl init`，push 和 clone 放进 `rl session start`。
+
+手工流程（`demos/demo-261031-0e92bb1`）全部走通：GitHub 上的 private 仓库 `UnbearableFate/demo-261031-0e92bb1`；Miyabi 上 gh 已经登录（https，`repo` 权限），能读这个仓库；`<workspace>/repo.git` bare clone 以后，原来 `rl compute steps` 的 `code: git` 脚本在 Miyabi 上解出了只读快照。发现一个问题：项目放在另一个 uv 项目（smooth-research 本身）的目录里时，`uv init` 会把它加进外面那个项目的 `[tool.uv.workspace]`，改了外面的 `pyproject.toml`；所以必须带 `--no-workspace`。
+
+这部分推翻了 §21.18 “rl 不推送”的决定：git 这一侧（建仓库、push）由 rl 在本地执行；主机上的 clone 仍然是打印出来、由 agent 用 pi-env-mcp 或 ssh 执行的步骤（MCP 工具 rl 调用不了，“rl 不连接远程主机”不变）。
+
+| 部分 | 内容 |
+| --- | --- |
+| `rl init` | 新项目且没有 `pyproject.toml` 时运行 `uv init . --python=<版本> --no-workspace --name <目录名>`（`--python` 默认 3.13，`--no-uv` 跳过）。项目已经在 git 仓库里时 uv 不写 `.gitignore`，rl 补上 uv 的那份或在已有的后面加 `.venv`。uv 缺失或失败不让 init 失败，给出手工命令。`next` 里加“提交新项目” |
+| `compute.repository` | 新键，默认 `github-private`；`none` 不建仓库。只在有 `code: git` 的远程资源、对应的 git remote 不存在、项目自己就是仓库根目录、没写 `git_url` 时才建 |
+| `rl compute sync [<资源>]`（新） | 建仓库（`gh repo create <目录名> --private --source --remote`，记 `compute.repository` 事件）→ `git push [-u] <remote> <当前分支>`（不强推，记 `compute.push` 事件）→ 每个资源打印 clone/fetch 并检查 commit 的脚本。git 和 gh 都不弹提示（`GIT_TERMINAL_PROMPT=0`、`GH_PROMPT_DISABLED=1`），有超时。所有问题只报告，不抛出 |
+| `rl session start` | 协调者注册后运行 `rl compute sync`（`--no-sync` 跳过）；没有 `code: git` 的远程资源时不输出 |
+| skill、team.md、researcher 提示 | 开始时提交新项目，运行打印的 clone 步骤；researcher 用 `rl compute sync` 推送任务分支；合并后的 main 由协调者再 sync 一次（取代“合并后的 main 要不要推送由用户决定”） |
+
+**不做的**：rl 不在远程主机上执行 clone；不强推；不给已经在更大仓库里的项目建仓库；不在已有项目上补跑 `uv init`。
+
+验证：145 项测试通过（新增 9 项：`tests/test_setup.py` 4 项，`tests/test_compute.py` 5 项）。sync 的测试用假的 `gh`（建本地 bare 仓库）和本地目录代替 GitHub 和 Miyabi，并真的执行打印出来的 clone 脚本。真实环境：在 demo 里用重新构建的插件运行 `rl compute sync`，推送到 GitHub；打印的脚本在 Miyabi 上对已有的 `repo.git` 做了 fetch，在一个临时 workspace 里从头 clone，两次都确认有刚推送的 commit（临时 workspace 已删除）。
