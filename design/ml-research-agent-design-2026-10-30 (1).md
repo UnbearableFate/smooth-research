@@ -1223,6 +1223,8 @@ GitHub 链接固定到本次读取的提交；外部产品文档按 2026-10-30 �
   - LaTeX 草稿：转义和符号映射，用伪造的编译命令测试成功、失败（给出错误行）和命令不存在；装了 pdflatex 时，再用它真实编译一次。
 - 再增至 87 项：代码审查包只列路径，审查期间文件变了的回答不算数，审查者读得到项目外的 worktree，headless 的 Codex 审查者不加沙箱参数（21.12）；回答的 JSON 块里有带 ``` 的补丁时也能解析。
 - 再增至 98 项（全项目审查后的修复，见 21.13）：带日期和数字键的配置、同一工单一次只由一个进程回答、结论审查按假设覆盖、只有 owner 能更新任务且关闭后不能再改、会话结束时间、`--exec-id` 缺命名空间时报 INVALID、表格优先取 complete 结果、manifest 写错 arm/seed 时不可用、拒绝结果后标记依赖、文献重复链接更新评估、两个会话先后被分配时合并提示指向认领者的分支、监视程序空转时不写库。
+- 删除旧格式兼容代码后为 97 项：删去只测旧格式的一项（21.14）。
+- 再增至 101 项：装了真实的 claude、codex、pi、herdr 时，检查 rl 给它们的参数仍在各自的帮助里（每个宿主一项，没装的跳过；21.14）。
 - 此前增至 84 项：配置里的问题不让命令失败（未知版本、不是键值对的一节、格式不对的模型条目被跳过、不是列表的模型列表、字符串形式和错误类型的 `agents.args`；文件解析不了时沿用上次读到的设置，会话开始的提示照常给出）。
 
 ### 21.6 端到端测试结果（2026-10-30）
@@ -1466,3 +1468,9 @@ GitHub 链接固定到本次读取的提交；外部产品文档按 2026-10-30 �
 - 合并三处状态摘要：`context.open_work` 给出协调者会话，未完成的任务、attempt 和工单，以及需要注意的事项；`rl status`、`rl resume` 和 SessionStart hook 都从它开始。三处原来的筛选条件写法不同，但结果相同：任务是“不是 accepted 或 stopped”与 `OPEN_STATES`，工单是“不是 answered”与列出其余四种状态。`rl status` 因此从 research.py 移到 context.py。
 - 被别的模块使用的函数改成公开的名字，例如 `_message` 改为 `messages.record`，`_answer_trust` 改为 `launch.answer_trust`，`watch._assignment` 改为 `watch.assignment_state`，`context._contract` 改为 `contract_summary`。
 - 验证：97 项测试通过。在三个已有项目的副本上，分别用重构前（b1aaaad）和重构后的代码运行 status、resume（不指定角色、coordinator、researcher-1）、review show、agent list 和 SessionStart hook，并生成论文草稿的各个区块和合同摘要，两边输出完全相同。
+
+**宿主参数检查。** 其他测试用的都是伪造的宿主，宿主新版本改名或删掉一个参数时，只有真正使用时才会发现。新测试 `tests/test_hosts.py` 只读真实宿主的帮助，不启动 agent；没装的宿主跳过。
+- claude、codex、pi：命令行由 rl 自己的代码生成，包括 headless 调用（只读、带网络搜索、可写三种）和三种角色的会话启动参数（含默认配置的 `agents.args`）。测试检查其中每个参数，以及帮助里列出取值的那几个参数的取值（如 `--permission-mode dontAsk`、`--sandbox workspace-write`）。
+- herdr：rl 用到的子命令和参数列成一张表（`agent start --kind --pane --timeout --`、`agent prompt --wait --timeout`、`tab create --cwd --label --env --no-focus` 等），与 `herdr agent`、`herdr tab`、`herdr pane` 列出的用法对照，并检查 `--kind` 支持 claude、codex、pi。不带子命令的命令组只列出用法，不执行任何操作；不带参数的 `herdr` 会打开界面，测试不运行它。
+- 帮助里没有的不检查：codex `-c` 的配置键、工具名和按键名、herdr 的 JSON 字段和错误码。
+- 本机版本（Claude Code 2.1.316、codex-cli 0.166.0、pi 1.0.4、herdr 0.9.5）4 项都通过。另外用假的帮助输出确认：去掉 claude 的 `--safe-mode`、codex exec 的 `--skip-git-repo-check`、pi 的 `--thinking`、herdr 的 `agent prompt --wait` 和 `--kind codex` 后，对应的一项失败，并指出缺的参数；PATH 里没有这些宿主时 4 项都跳过。
