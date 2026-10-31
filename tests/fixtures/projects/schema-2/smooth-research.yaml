@@ -1,0 +1,32 @@
+version: 1
+models:
+  researcher:
+  - claude:claude-opus-5-5@high
+  - codex:gpt-6-astra@high
+  reviewer:
+  - manual:reviewer-person
+  advisor:
+  - manual:advisor-person
+advice:
+  max_rounds: 3
+agents:
+  args:
+    claude:
+    - --permission-mode
+    - auto
+    codex: []
+    pi: []
+  watch_minutes: 20
+usage:
+  switch_left_percent: 10
+  coordinator_host_left_percent: 20
+context:
+  work_target_tokens: 4000
+  advice_target_tokens: 10000
+manuscript:
+  latex: null
+compute:
+  default: local
+  resources:
+    local:
+      kind: local

@@ -19,6 +19,7 @@ from latticedb import LatticeDatabaseLockedError
 
 from .project import Project
 from .schema import ENTITIES, ENUMS, PREFIX_LABEL, RELATIONS, SCHEMA_VERSION
+from .upgrade import build, migrate
 from .util import RLError, now_utc
 
 LOCK_TIMEOUT_S = 60.0
@@ -258,6 +259,9 @@ class Store:
         self.project = project
         self.path = project.db_path
         self.actor = actor
+        self.newer: int | None = None  # the schema of a project written by a newer plugin (read only here)
+        self.upgraded: dict | None = None  # what the automatic upgrade did when this store opened an older one
+        self._checked = False
 
     @staticmethod
     def create(project: Project, title: str | None = None) -> None:
@@ -273,7 +277,7 @@ class Store:
             with db.write() as txn:
                 stamp = now_utc()
                 txn.create_node(labels=["Meta"], properties={
-                    "schema_version": SCHEMA_VERSION, "data_version": 0,
+                    "schema_version": SCHEMA_VERSION, "data_version": 0, "last_build": build(),
                     "created_at": stamp, "updated_at": stamp, "title": title or project.root.name})
                 txn.commit()
 
@@ -315,27 +319,37 @@ class Store:
         finally:
             db.close()
 
-    @staticmethod
-    def _check_schema(tx: Tx) -> dict:
-        meta = tx.meta()
-        if meta.get("schema_version") != SCHEMA_VERSION:
-            raise RLError("UNSUPPORTED", f"database schema_version {meta.get('schema_version')!r}; this tool "
-                                         f"supports {SCHEMA_VERSION}. Keep the old store unchanged.")
-        return meta
+    def _ready(self) -> None:
+        """Once per store: an older project is upgraded in place (upgrade.migrate); a newer one is only read."""
+        if self._checked:
+            return
+        with self._lock(exclusive=False), self._open(write=False) as db, db.read() as txn:
+            version = Tx(txn, False, self.actor).meta().get("schema_version")
+        if not isinstance(version, int):
+            raise RLError("CORRUPT", f"the research database has no schema version: {self.path}")
+        if version < SCHEMA_VERSION:
+            self.upgraded = migrate(self)
+        elif version > SCHEMA_VERSION:
+            self.newer = version
+        self._checked = True
 
     @contextmanager
     def read(self) -> Iterator[Tx]:
+        self._ready()
         with self._lock(exclusive=False), self._open(write=False) as db, db.read() as txn:
-            tx = Tx(txn, False, self.actor)
-            self._check_schema(tx)
-            yield tx
+            yield Tx(txn, False, self.actor)
 
     @contextmanager
     def write(self) -> Iterator[Tx]:
         """One atomic write: everything inside commits together or not at all."""
+        self._ready()
+        if self.newer:
+            raise RLError("UNSUPPORTED", f"this project was written by a newer smooth-research (record format "
+                                         f"{self.newer}; this CLI writes {SCHEMA_VERSION}): it can still be read, "
+                                         "but writes need the newer plugin. Update the plugin; nothing was written")
         with self._lock(exclusive=True), self._open(write=True) as db, db.write() as txn:
             tx = Tx(txn, True, self.actor)
-            meta = self._check_schema(tx)
+            meta = tx.meta()
             yield tx
             tx.set_meta(data_version=meta["data_version"] + 1, updated_at=now_utc())
             txn.commit()

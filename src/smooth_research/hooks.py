@@ -37,7 +37,7 @@ def session_start(host: str, raw: str) -> dict:
                     f"{caller_role()}` (wait for an assignment if it names none).")
     store = Store(project, "hook")
     try:
-        with store.read() as tx:
+        with store.read() as tx:  # the first open by a newer plugin upgrades the records (upgrade.py)
             work = open_work(tx)
     except RLError as exc:
         return _out(f"Smooth Research project at {project.root}, but its records could not be read: {exc.message}")
@@ -52,6 +52,12 @@ def session_start(host: str, raw: str) -> dict:
              + f". To coordinate from this session: {register}",
              f"Open tasks {len(work['tasks'])}, unfinished attempts {len(work['attempts'])}. Read `{rl} resume` "
              "before acting."]
+    if store.newer:
+        lines.append(f"This project was written by a newer smooth-research (record format {store.newer}): it can "
+                     "be read, but nothing can be recorded until the plugin is updated. Tell the user.")
+    elif store.upgraded:
+        lines.append(f"Its records were upgraded from format {store.upgraded['from']} to {store.upgraded['to']} for "
+                     f"this plugin version (a copy of the old database: {store.upgraded['backup']}).")
     lines += [f"- {brief(t)}" for t in work["tasks"][:5]]
     lines += [f"- attention: {i}" for i in work["attention"][:5]]
     lines += [f"- configuration: {w}" for w in project.warnings]

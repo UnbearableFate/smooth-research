@@ -13,7 +13,7 @@ from . import documents
 from .context import resume_pack
 from .project import CONFIG_NAME, Project, load_config
 from .schema import ENTITIES, SCHEMA_VERSION
-from .store import Store
+from .store import Store, Tx
 from .util import RLError, atomic_write, digest_file
 
 FORMAT = "smooth-research-snapshot/1"
@@ -51,8 +51,12 @@ def export(store: Store, out: str | None = None) -> dict:
 def restore(snapshot: str, into: str) -> dict:
     source = Path(snapshot)
     data = json.loads((source / "snapshot.json").read_text(encoding="utf-8"))
-    if data.get("format") != FORMAT or data.get("schema_version") != SCHEMA_VERSION:
-        raise RLError("UNSUPPORTED", f"{snapshot} is {data.get('format')} schema {data.get('schema_version')}")
+    version = data.get("schema_version")
+    if data.get("format") != FORMAT or not isinstance(version, int):
+        raise RLError("UNSUPPORTED", f"{snapshot} is not a smooth-research snapshot ({data.get('format')})")
+    if version > SCHEMA_VERSION:
+        raise RLError("UNSUPPORTED", f"{snapshot} was written by a newer smooth-research (record format {version}; "
+                                     f"this CLI writes {SCHEMA_VERSION}): restore it with the newer plugin")
     root = Path(into).resolve()
     root.mkdir(parents=True, exist_ok=True)
     if not (root / CONFIG_NAME).exists():
@@ -67,7 +71,7 @@ def restore(snapshot: str, into: str) -> dict:
             shutil.copyfile(obj, project.objects_dir / obj.name)
     with Database(project.db_path) as db, db.write() as txn:
         meta_id = txn.get_nodes_by_label("Meta")[0]
-        for key, value in data["meta"].items():
+        for key, value in {**data["meta"], "schema_version": version}.items():
             txn.set_property(meta_id, key, value)
         ids = {}
         for label, rows in data["nodes"].items():
@@ -78,17 +82,20 @@ def restore(snapshot: str, into: str) -> dict:
             txn.create_edge(ids[(e["source_label"], e["source"])], ids[(e["target_label"], e["target"])], e["edge"],
                             properties=e["props"] or None)
         txn.commit()
-    store = Store(project, "restore")
-    with store.read() as tx:
-        check = documents.verify(tx, project)
-        restored = tx.meta()["data_version"]
+    with Database(project.db_path, read_only=True) as db, db.read() as txn:  # as restored, before any upgrade
+        restored = Tx(txn, False, "restore").meta()["data_version"]
     if restored != data["meta"]["data_version"]:
         raise RLError("CORRUPT", "restored data_version differs from the snapshot")
+    store = Store(project, "restore")  # an older snapshot is upgraded on this first open
+    with store.read() as tx:
+        check = documents.verify(tx, project)
     pack = resume_pack(store)
     problems = check["problems"]
     return {"project": str(root), "problems": problems,
             "summary": f"restored into {root} (data_version {restored}); sealed documents: "
                        + ("all verified" if not problems else f"PROBLEMS: {problems}")
+                       + (f"\nrecords upgraded from format {version} to {SCHEMA_VERSION}; see rl upgrade"
+                          if store.upgraded else "")
                        + "\nNothing was queried or restarted. Check unknown attempts with your execution tool.\n\n"
                        + pack["summary"]}
 

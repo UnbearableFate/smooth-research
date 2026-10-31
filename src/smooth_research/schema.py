@@ -9,7 +9,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-SCHEMA_VERSION = 1
+# The record format. A change that older records do not already satisfy (a field every record of a type is read
+# with, a renamed field or enum value) raises it and adds a migration to upgrade.MIGRATIONS; tests open a frozen
+# project of every earlier version (tests/fixtures/projects/).
+SCHEMA_VERSION = 2
 
 ENUMS: dict[str, tuple[str, ...]] = {
     "evidence_status": ("untested", "supported", "challenged", "inconclusive"),

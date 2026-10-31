@@ -215,6 +215,7 @@ compute:
 | `SMOOTH_RESEARCH_PROJECT` | 项目目录。查找顺序：先看 `--project`，再看这个变量，最后从当前目录往上找 `smooth-research.yaml` |
 | `SMOOTH_RESEARCH_HOME` | 插件 CLI 环境的安装位置。设了 `XDG_DATA_HOME` 时默认为 `$XDG_DATA_HOME/smooth-research`，否则为 `~/.local/share/smooth-research`。`rl setup` 在这里建 `env-<build-id>`；Claude 的额度读数存在这里的 `usage/claude.json` |
 | `SMOOTH_RESEARCH_RL` | `bin/rl` 启动器自动把它设成自己的绝对路径，让 hook 提示、delegate 子会话和 agent 会话调用同一个 CLI。一般不用手动设 |
+| `SMOOTH_RESEARCH_BUILD` | `bin/rl` 启动器设成插件的 build id（源码里运行时没有，按 `dev` 计算）。项目记下最后一次 `rl upgrade` 时的 build；两者不同时，`rl status`、`rl resume` 和会话开始的提示会说插件变了，要运行 `rl upgrade`。一般不用手动设 |
 | `SMOOTH_RESEARCH_CHECKOUT` | `rl agent open` 给 researcher 会话设成它的 worktree。代码路径、代码审查的指纹和 `rl run register` 的代码检查都按这个 checkout 读；研究记录仍写进 `SMOOTH_RESEARCH_PROJECT` 指向的项目。不设时从当前目录判断：在项目的 linked worktree 里就用这个 worktree |
 | `SMOOTH_RESEARCH_SESSION`、`SMOOTH_RESEARCH_ROLE` | `rl agent open` 给每个会话设成它的会话记录（S-x）和会话名（如 `reviewer-1`）。设了 `SMOOTH_RESEARCH_ROLE` 的会话不能批准审查轮次（`rl review approve`），发消息时默认以这个名字发送 |
 | `HERDR_ENV`、`HERDR_PANE_ID` | herdr 设置，CLI 只读。`HERDR_ENV=1` 时才能开 agent 会话、发通知；协调者 `rl session start` 时记下 `HERDR_PANE_ID`，通知发到这个 pane |
@@ -235,6 +236,7 @@ compute:
 - **agent 会话：** `rl agent open [名字] --role researcher|reviewer|advisor [--task T-x | --ticket RV-x/AD-x] [--entry ..] [--no-worktree] [--base ..]`，以及 `assign`、`tell`、`reset --compact|--clear`、`close [--remove-worktree]`、`switch <名字> [--entry ..] [--now]`（换一个模型继续这个会话的工作，见第 1 节“订阅额度”；`--now` 连还在工作的会话也换）、`brief`、`list [--all]`、`dialog <名字>`（会话现在显示的对话框和选项）、`answer <名字> <选项编号或文字> --reason ..`（协调者回答对话框）。
 - **订阅额度：** `rl usage` 显示各宿主的窗口；`rl usage statusline` 是 Claude Code 的状态栏命令，从标准输入读状态栏的 JSON，任何输入都不会让它失败。
 - **论文草稿：** `rl manuscript [--title ..]` 写或刷新草稿，`--title` 只用于新建的草稿，见第 1 节"论文草稿"。
+- **插件升级：** `rl upgrade` 显示项目的记录格式和插件 build、做过的升级、新版本读法不同的地方和可以自己调整的范围；`--note "<改了什么>"` 记下 agent 手工做的调整；`--move <旧> <新>` 移动旧布局里的文件或目录，并在同一个事务里改写记录里的路径。见第 6 节。
 - **计算资源：** `rl compute [--commit <sha>]` 列出资源和本地检查；`rl compute steps [<资源>] [--attempt ATT] [--commit <sha>]` 给出同步、运行和取回结果的步骤；`rl run register ... --resource <资源>` 把资源记到 attempt 上。见第 1 节“计算资源”。
 - **监视程序：** `rl agent check` 立刻查看一轮；`rl agent watch --start` 在单独的 tab 里启动（已经在运行就不重复启动），`--stop` 停止并关掉它的 tab；`--every <分钟>` 改间隔，不写就用 `agents.watch_minutes`。不带 `--start` 或 `--stop` 时在当前终端前台运行。
 
@@ -250,3 +252,15 @@ compute:
 | `BUILD_TIMEOUT` | 300 秒 | `rl manuscript` 运行一次 LaTeX 编译命令的上限（`manuscript.py`） |
 | `MAX_REMINDERS` | 2 次 | 同一项任务，监视程序最多提醒几次；之后，或者提醒后会话毫无反应，就报告协调者（`watch.py`） |
 | `USAGE_MINUTES` | 5 分钟 | 监视程序在两轮之间看订阅额度的间隔；`agents.watch_minutes` 更短时按它（`watch.py`） |
+
+## 6. 插件升级
+
+插件升级不会让进行中的研究停下来。
+
+- **CLI 环境。** 每个插件版本有自己的环境（`$SMOOTH_RESEARCH_HOME/env-<build>`）。会话开始的 hook 在后台开始构建，第一条 `rl` 命令等它构建完；几个会话同时启动时只构建一次。`rl setup` 强制重建。需要 uv。
+- **记录自动升级。** 新版本的 CLI 第一次打开旧项目时，在写锁下先把数据库文件复制到 `research/state/backups/schema-<旧格式>-<时间>/`，再在一个事务里运行旧格式到当前格式之间的全部迁移，记一条 `project.upgrade` 事件。迁移只补充和填写，不删除记录，不改记录下来的事实，不碰封存的文档。做了升级的那条命令会给出一条警告。`rl restore` 也接受旧版本的快照，恢复后同样自动升级。
+- **更新的项目只读。** 项目由更新的插件写过（记录格式比 CLI 新）时，CLI 照常读取，但拒绝写入（UNSUPPORTED），提示更新插件。
+- **`rl upgrade`。** 插件 build 和项目记下的不同时，`rl status`、`rl resume` 和会话开始的提示都会提醒。`rl upgrade` 补建新布局要的目录，列出旧布局放在别处的文件、配置警告、找不到的合同文件和记录问题，并说明 agent 可以自己调整什么；运行后记下当前 build，提醒消失。
+- **agent 自己调整旧资产，不用问用户。** 可以改配置文件、只是格式变了的约束文档措辞、旧布局里的文件位置、未封存的合同草稿、任务说明、笔记、worktree 和分支，也可以用 `rl` 命令补上新版本需要的记录。只有会改变研究目标、结论范围、数据或预算的调整才问用户。记录下来的事实（观察、结果、证据、决定、审查）和封存的文档不改：新版本要求另一种形式时，新增一条引用旧记录的记录或修订。改完用 `rl upgrade --note` 记下来并提交。
+- **移动旧布局的文件。** 记录里存着合同和文档的路径，直接 `mv` 会让记录指向不存在的文件。`rl upgrade --move <旧> <新>` 移动文件或目录，并在同一个事务里改写这些路径；事务失败时文件移回原处。文件当初从哪里封存（修订记录、事件）保持原样。数据库和封存对象（`research/state/`、`research/documents/`）不能移动。父目录里还有另有去处的旧子目录时（比如 `reports/reviews`），先移子目录。
+- **开发规则。** 改记录格式时提高 `SCHEMA_VERSION`，在 `upgrade.MIGRATIONS` 里加迁移，并在 `tests/fixtures/projects/` 冻结一份新格式的项目；旧的冻结项目保留，测试用每一份恢复项目、运行全部命令。不要删除读取旧项目的能力。

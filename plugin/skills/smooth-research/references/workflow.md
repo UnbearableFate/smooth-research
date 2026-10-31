@@ -208,6 +208,29 @@ novelty proof.
 `{{rl}} history [id]`, `{{rl}} report` (research/reports/), `{{rl}} view` (docs/research-graph.html), `{{rl}} export`
 (consistent snapshot into research/snapshots/), `{{rl}} restore <snapshot> --into <new dir>`, `{{rl}} doctor`.
 
+## After a plugin update
+
+A plugin update never stops a project.
+
+- **Environment.** The first `{{rl}}` command of a new plugin version builds its environment (the session-start
+  hook starts it in the background; concurrent sessions wait for one build).
+- **Records.** The first command that opens an older project upgrades its records in place: the database files
+  are copied to `research/state/backups/schema-<old>-<time>/` first, the migrations only add or fill in, and a
+  `project.upgrade` event says what changed. The command that did it prints a warning; nothing else changes.
+- **What is left to you.** `{{rl}} status` and the session note say when the plugin changed. Run `{{rl}} upgrade`: it
+  creates directories the new layout adds, lists files an older layout keeps elsewhere, configuration warnings,
+  missing contract files and record problems, and the rules for adjusting. Adjust the old research assets
+  yourself without asking the user, unless a change would alter the goal, the claims in scope, the data or the
+  budget.
+- **Moving files.** Records keep the paths of contracts and documents, so a plain `mv` breaks them:
+  `{{rl}} upgrade --move <old> <new>` moves a file or directory and rewrites those paths in one transaction (the
+  files go back if it fails). Where a file was sealed from stays as recorded. Commit the move.
+- **Facts stay.** Never rewrite observations, results, evidence, decisions, reviews or sealed documents; when the
+  new version wants them in another form, add a new record or revision that cites the old one.
+- **Record it.** `{{rl}} upgrade --note "<what you adjusted and why>"` (a `project.adjusted` event), then commit.
+- **A newer project.** A project written by a newer plugin is read but not written (`UNSUPPORTED`): tell the
+  user to update the plugin on this machine.
+
 ## The manuscript
 
 `{{rl}} manuscript` writes `docs/manuscript.md` from the records: a section per part of a paper (abstract,

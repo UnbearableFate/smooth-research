@@ -66,9 +66,16 @@ codex plugin marketplace add <repo path>
 codex plugin add smooth-research@smooth-research
 ```
 
-The first time, the CLI environment is built once from the bundled, locked package (needs uv):
-`<plugin>/bin/rl setup`. The session-start note says so when it is missing. Skills in Claude Code call
-`${CLAUDE_PLUGIN_ROOT}/bin/rl`; in Codex the note prints the absolute path.
+The CLI environment is built from the bundled, locked package (needs uv), once per plugin version: the
+session-start hook starts the build in the background and the first `rl` command waits for it (`<plugin>/bin/rl
+setup` rebuilds it). Skills in Claude Code call `${CLAUDE_PLUGIN_ROOT}/bin/rl`; in Codex the note prints the
+absolute path.
+
+A plugin update never stops a running project. The first command that opens an older project upgrades its records
+in place (a copy of the old database is kept in `research/state/backups/`); `rl upgrade` then lists what the agent
+adjusts by hand (configuration, files an older layout keeps elsewhere: `rl upgrade --move` moves them with their
+recorded paths), and the agent does it without asking, leaving recorded facts and sealed documents as they are.
+Frozen projects of every earlier record format (`tests/fixtures/projects/`) must keep working in the tests.
 
 ## A research project
 

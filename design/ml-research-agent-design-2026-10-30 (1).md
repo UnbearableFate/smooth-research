@@ -1452,7 +1452,7 @@ GitHub 链接固定到本次读取的提交；外部产品文档按 2026-10-30 �
 
 用户对 21.13 待决定事项的决定：做 1（删除兼容代码）、2（模块重构）和 5 中的宿主 CLI 参数检查测试；3、4 和其余测试缺口不做。
 
-**删除旧格式兼容代码。** 先迁移已有项目，再删代码。本机只有三个项目：`/home/yu/workspace/sr-e2e/` 下的 `wd-noise-claude`、`miyabi-bf16`、`watch-codex`。迁移脚本只用一次，没有放进仓库。迁移前备份了每个项目（不含 `.venv`、`.git`）。
+**删除旧格式兼容代码。**（2026-10-31 后改：这种“一次性脚本迁移、再删代码”的做法让以后遇到的旧项目无法继续，已由 §21.19 的版本化迁移取代。）先迁移已有项目，再删代码。本机只有三个项目：`/home/yu/workspace/sr-e2e/` 下的 `wd-noise-claude`、`miyabi-bf16`、`watch-codex`。迁移脚本只用一次，没有放进仓库。迁移前备份了每个项目（不含 `.venv`、`.git`）。
 
 | 项 | 迁移 | 删掉的代码 |
 | --- | --- | --- |
@@ -1598,3 +1598,35 @@ GitHub 链接固定到本次读取的提交；外部产品文档按 2026-10-30 �
 **不做的**：rl 不连接、不推送、不上传、不提交作业；不检查 pi-env-mcp、MCP 服务和 skill 是否可用（那是 agent 的工具）；不管理远程 Python 环境和数据；不把预算写进配置。
 
 测试：126 项通过（新增 9 项，`tests/test_compute.py`）。git 和 archive 两种同步的步骤在测试里真的执行：用本地 bare 仓库代替 GitHub、本地目录代替远程 workspace，检查快照是 worktree 分支上那个 commit 的内容、只读、重复执行不出错，分支之后再提交也不影响快照。
+
+### 21.19 插件升级不阻止进行中的研究（2026-10-31）
+
+用户的要求：插件更新不能让已经跑了一段时间的研究在装上新版后无法继续；应当允许 agent 自己调整旧的研究资产以适配新插件。
+
+**原来会卡住的地方**
+
+| 位置 | 问题 |
+| --- | --- |
+| `store.py` | 记录格式（`schema_version`）不同就报 UNSUPPORTED，并说 “Keep the old store unchanged” |
+| `snapshot.py` | 旧格式的快照不能恢复 |
+| 读取记录的代码 | 后来加的字段直接按下标读（attempt 的 `code_review`、advice 工单的 `advice_round`、审查的 `code_scope`）。§21.14 删掉兼容代码后，比那次迁移更早的项目一读就抛 KeyError：清空迁移表、用同样的旧数据运行 `rl run show`，确实抛出 KeyError |
+| `bin/rl` | 每次插件更新 build id 都变，环境要重建；在运行 `rl setup` 之前，所有命令以退出码 3 失败，各个会话同时 setup 还会争用同一个环境目录 |
+| skill | “research/ 里只写合同、任务说明和笔记，其余由 rl 写”，agent 会以为不能动旧资产 |
+| 旧布局 | 合同在 `docs/experiments/`、报告在根目录 `reports/` 的项目，文件按记录里的路径照常可用；但 agent 手工搬到新位置后，记录指向不存在的文件。`rl init`/布局补建还会在旧约束文件存在时新建一份空模板 |
+
+**做法**
+
+| 部分 | 内容 |
+| --- | --- |
+| 版本化迁移（`upgrade.py`，新） | `SCHEMA_VERSION` 升到 2。CLI 第一次打开旧项目时，在写锁下先把数据库文件复制到 `research/state/backups/schema-<旧>-<时间>/`，再在一个事务里运行 `MIGRATIONS` 里旧格式之后的全部迁移，记 `project.upgrade` 事件；并发的 CLI 等锁后发现已经升级。迁移只补充和填写，不删记录、不改事实、不碰封存文档。v2：旧 attempt 的代码审查检查记为 unchecked（“登记时还没有记录代码审查检查”），旧 advice 工单按请求包分组补上轮次。审查的 `code_scope` 缺失时改为容错读取（没有范围的审查不覆盖任何文件） |
+| 更新的格式 | 由更新插件写过的项目照常读取，写入报 UNSUPPORTED，提示更新插件；会话开始的提示让 agent 告诉用户 |
+| 快照恢复 | 接受旧格式的快照，按快照里的格式写入，第一次打开时自动升级；data_version 的核对放在升级之前 |
+| 插件 build | 启动器导出 `SMOOTH_RESEARCH_BUILD`；新项目记下创建时的 build，`rl upgrade` 记下当前 build。两者不同时 `rl status`/`rl resume`/会话开始的 attention 第一条提醒运行 `rl upgrade` |
+| `rl upgrade` | 补建新布局要的目录（旧布局里还有对应文件时不新建模板）；列出旧布局放在别处的文件、配置警告、找不到的合同文件和 doctor 的问题；打印 agent 可以自己调整的范围和不能改的东西。`--note` 记 `project.adjusted`；`--move <旧> <新>` 移动文件或目录并在同一事务里改写 `Experiment.contract_path` 和 `Document.path`，事务失败时文件移回；封存来源（修订、事件）不改；数据库和封存对象不能移；父目录里还有另有去处的旧子目录时要求先移子目录 |
+| 启动器 | 环境缺失时第一条命令自动构建（`mkdir` 锁，一次只构建一个，其他会话等待；完成后写 `.ready`）；hook 不等待，在后台开始构建并说明；`rl setup` 强制重建 |
+| skill 与文档 | SKILL.md 的 CLI 一节加一条：升级后运行 `rl upgrade`，按它列出的内容自己调整旧资产，不用问用户，不改记录的事实和封存文档；workflow.md 新增 “After a plugin update”；`docs/configuration.md` 新增第 6 节 |
+| 冻结项目 | `tests/fixtures/projects/schema-2/`：用当前 CLI 生成的一个包含全部记录类型的项目快照（假设和修订、封存合同、任务交付与接受、会话、消息、run 的观察、结果和用量、证据、代码审查与结论审查、建议轮、文献、路线和阶段决定），永不重新生成。测试恢复每一份冻结项目，运行全部读命令、`show` 每条记录和几条写命令 |
+
+**开发规则**：改记录格式时提高 `SCHEMA_VERSION`、加迁移、冻结一份新格式项目，保留旧的；不再删除读取旧项目的能力（取代 §21.14 的做法）。
+
+验证：136 项测试通过（新增 10 项，`tests/test_upgrade.py`）。对 sr-e2e 三个项目的副本运行新 CLI：记录从格式 1 升级到 2 并留下备份，`rl upgrade` 列出 `docs/experiments`、`reports` 等旧布局，`--move` 后合同照常封存。从 dist 运行启动器、`SMOOTH_RESEARCH_HOME` 为空：hook 在后台构建，两条同时启动的命令都等它完成，只构建一次。

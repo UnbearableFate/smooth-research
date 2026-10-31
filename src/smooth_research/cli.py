@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 from . import (adapters, agents, compute, context, delegate, hooks, literature, manuscript, messages, research,
-               reviews, runs, snapshot, tasks, usage, view, watch)
+               reviews, runs, snapshot, tasks, upgrade, usage, view, watch)
 from .project import advice_limit, find_project, model_entries
 from .schema import ENUMS, LINKABLE, PAPER_ASSESSMENTS
 from .store import Store
@@ -24,7 +24,17 @@ CONFLICT_CODES = {"CONFLICT", "STALE_REVISION"}
 def _store(args) -> Store:
     project = find_project(args.project)
     args.config_warnings = project.warnings
-    return Store(project, args.actor or "agent")
+    args.store = Store(project, args.actor or "agent")
+    return args.store
+
+
+def _upgrade_notice(args) -> list[str]:
+    """Told once, by the command whose first open upgraded the records of an older plugin."""
+    done = getattr(getattr(args, "store", None), "upgraded", None)
+    if not done or args.command == "upgrade":
+        return []
+    return [f"the records were upgraded from format {done['from']} to {done['to']} for this plugin version (a copy "
+            f"of the old database: {done['backup']}); run `rl upgrade` to see what else to adjust"]
 
 
 def _list(value) -> list[str]:
@@ -427,6 +437,13 @@ def cmd_compute(args):
     return compute.show(store, args.commit)
 
 
+def cmd_upgrade(args):
+    store = _store(args)
+    if args.move:
+        return upgrade.move(store, *args.move)
+    return upgrade.report(store, args.note)
+
+
 def cmd_hook(args):
     return hooks.session_start(args.host, sys.stdin.read() if not sys.stdin.isatty() else "")
 
@@ -479,6 +496,11 @@ def build_parser() -> argparse.ArgumentParser:
     sp = add("digest", cmd_digest, "blake2b digests of files or directories (for RunSpecs and manifests)")
     sp.add_argument("paths", nargs="+")
     add("models", cmd_models, "configured reviewer and advisor entries and whether their CLIs exist")
+    sp = add("upgrade", cmd_upgrade, "after a plugin update: the project's record format and plugin build, the "
+                                     "upgrades done, what this version reads differently and what you may adjust")
+    sp.add_argument("--note", help="record what you adjusted by hand for this version (a project.adjusted event)")
+    sp.add_argument("--move", nargs=2, metavar=("OLD", "NEW"), help="move a file or directory of an older layout and "
+                    "rewrite the paths the records keep for it")
     sp = add("compute", cmd_compute, "compute resources (compute in smooth-research.yaml) with local checks; "
                                      "steps: how to stage a commit there, run it and fetch the results (rl "
                                      "connects to, copies to and starts nothing)")
@@ -894,8 +916,9 @@ def main(argv: list[str] | None = None) -> int:
         for warning in getattr(args, "config_warnings", None) or []:  # they may explain the error
             print(f"warning: {warning}", file=sys.stderr)
         return 3 if exc.code in CONFLICT_CODES else 1
-    if getattr(args, "config_warnings", None):
-        result["warnings"] = [*(result.get("warnings") or []), *args.config_warnings]
+    if getattr(args, "config_warnings", None) or _upgrade_notice(args):
+        result["warnings"] = [*(result.get("warnings") or []), *(getattr(args, "config_warnings", None) or []),
+                              *_upgrade_notice(args)]
     if args.command == "hook" or args.json:
         print(json.dumps(result, ensure_ascii=False, default=str, indent=None if args.command == "hook" else 1))
     else:

@@ -11,6 +11,7 @@ from . import documents
 from .project import CONFIG_NAME, DOCS_DIRS, RESEARCH_DIRS, Project, load_config, write_default_config
 from .schema import ENUMS, LINKABLE, RELATIONS
 from .store import Store, Tx, label_of
+from .upgrade import build
 from .util import RLError, digest_file
 
 CONSTRAINTS_TEMPLATE = """# Constraints
@@ -36,27 +37,38 @@ KEY_STATUSES = ("supported", "challenged")
 # -- project --------------------------------------------------------------------------------------------------
 
 
+def ensure_layout(project: Project, skip: list[Path] = ()) -> list[str]:
+    """The fixed directories and starter files, created where missing (nothing existing is changed). Run by init and
+    by rl upgrade, so a project made by an older plugin gets what a newer layout adds; skip names files not to
+    create because an older layout still holds them elsewhere. Returns what it created."""
+    made = []
+
+    def write(path: Path, text: str) -> None:
+        if not path.exists() and path not in skip:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8")
+            made.append(project.rel(path))
+
+    for path in [project.code_root] + [(project.docs_root if area == "docs" else project.research_root) / name
+                                       for area, names in (("research", RESEARCH_DIRS), ("docs", DOCS_DIRS))
+                                       for name in names]:
+        if not path.is_dir():
+            path.mkdir(parents=True, exist_ok=True)
+            made.append(project.rel(path) + "/")
+    write(project.research_root / ".gitignore", "# the active database, call logs and raw run artifacts stay out of "
+          "git;\n# sealed documents are kept, and `rl export` writes consistent snapshots\nstate/\ncalls/\nartifacts/\n")
+    # a commit is staged as the code snapshot of remote runs: sources only
+    write(project.code_root / ".gitignore", "__pycache__/\n*.py[cod]\n")
+    write(project.constraints_path, CONSTRAINTS_TEMPLATE)
+    return made
+
+
 def init_project(root: Path, plan: str | None = None, title: str | None = None) -> dict:
     root = root.resolve()
     root.mkdir(parents=True, exist_ok=True)
     write_default_config(root)
     project = Project(root, load_config(root))
-    project.code_root.mkdir(parents=True, exist_ok=True)
-    for area, names in (("research", RESEARCH_DIRS), ("docs", DOCS_DIRS)):
-        for name in names:
-            project.dir(name, area)
-    gitignore = project.research_root / ".gitignore"
-    if not gitignore.exists():
-        gitignore.write_text("# the active database, call logs and raw run artifacts stay out of git;\n"
-                             "# sealed documents are kept, and `rl export` writes consistent snapshots\n"
-                             "state/\ncalls/\nartifacts/\n", encoding="utf-8")
-    code_ignore = project.code_root / ".gitignore"
-    if not code_ignore.exists():  # a commit is staged as the code snapshot of remote runs: sources only
-        code_ignore.write_text("__pycache__/\n*.py[cod]\n", encoding="utf-8")
-    constraints = project.constraints_path
-    if not constraints.exists():
-        constraints.parent.mkdir(parents=True, exist_ok=True)
-        constraints.write_text(CONSTRAINTS_TEMPLATE, encoding="utf-8")
+    ensure_layout(project)
     created = not project.db_path.exists()
     if created:
         Store.create(project, title)
@@ -520,6 +532,10 @@ def show(store: Store, entity_id: str) -> dict:
 
 def attention(tx: Tx) -> list[str]:
     items = []
+    last = tx.meta().get("last_build")
+    if last != build():
+        items.append(f"the plugin changed since this project was last used (build {last or 'unknown'} -> {build()}): "
+                     "run rl upgrade and adjust the old research assets to this version as it lists")
     for h in tx.all("Hypothesis"):
         if h.get("needs_recheck"):
             items.append(f"{h['id']} needs re-check: {h.get('recheck_reason')}")

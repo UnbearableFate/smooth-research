@@ -1,6 +1,8 @@
 #!/bin/sh
-# Smooth Research CLI for the host plugins. It runs `rl` from a dedicated environment built once from this
-# plugin's pinned Python package: `rl setup` builds it with uv; no other command installs anything.
+# Smooth Research CLI for the host plugins. It runs `rl` from a dedicated environment built with uv from this
+# plugin's pinned Python package, one environment per plugin build. The first command after an install or an
+# update builds it (the session-start hook starts that build in the background; `rl setup` rebuilds it on
+# request), one build at a time; nothing else is installed.
 set -eu
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 root=$(dirname -- "$here")
@@ -10,26 +12,52 @@ build=$(cat "$root/.build-id" 2>/dev/null || echo dev)
 home=${SMOOTH_RESEARCH_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/smooth-research}
 env_dir="$home/env-$build"
 SMOOTH_RESEARCH_RL="$here/rl"
-export SMOOTH_RESEARCH_RL
+SMOOTH_RESEARCH_BUILD=$build
+export SMOOTH_RESEARCH_RL SMOOTH_RESEARCH_BUILD
 
-if [ "${1-}" = "setup" ]; then
+ready() { [ -f "$env_dir/.ready" ] && [ -x "$env_dir/bin/rl" ]; }
+
+build_env() {  # $1 = force: sync even when the environment is ready
   if ! command -v uv >/dev/null 2>&1; then
-    echo "smooth-research setup needs uv: https://docs.astral.sh/uv/getting-started/installation/" >&2
+    echo "smooth-research needs uv to build its CLI environment: https://docs.astral.sh/uv/getting-started/installation/" >&2
     exit 2
   fi
   mkdir -p "$home"
-  UV_PROJECT_ENVIRONMENT="$env_dir" uv sync --project "$project" --frozen --no-dev --no-editable --quiet
-  "$env_dir/bin/rl" --help >/dev/null
+  lock="$env_dir.building"
+  waited=0
+  until mkdir "$lock" 2>/dev/null; do  # another session is building it: wait, then use it
+    if [ "$1" != force ] && ready; then return 0; fi
+    if [ "$waited" -ge 600 ]; then
+      echo "smooth-research: $lock has been held for 10 minutes; if no build is running, remove it and retry" >&2
+      exit 3
+    fi
+    sleep 1
+    waited=$((waited + 1))
+  done
+  trap 'rmdir "$lock" 2>/dev/null' EXIT INT TERM
+  if [ "$1" = force ] || ! ready; then
+    echo "smooth-research: building the CLI environment of plugin build $build (once per plugin version)" >&2
+    rm -f "$env_dir/.ready"
+    UV_PROJECT_ENVIRONMENT="$env_dir" uv sync --project "$project" --frozen --no-dev --no-editable --quiet
+    "$env_dir/bin/rl" --help >/dev/null
+    : > "$env_dir/.ready"
+  fi
+  rmdir "$lock" 2>/dev/null || true
+  trap - EXIT INT TERM
+}
+
+if [ "${1-}" = "setup" ]; then
+  build_env force
   echo "smooth-research CLI ready: $here/rl (environment $env_dir)"
   exit 0
 fi
 
-if [ ! -x "$env_dir/bin/rl" ]; then
-  if [ "${1-}" = "hook" ]; then  # never break the host session; tell the agent what to do instead
-    printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"Smooth Research plugin: its CLI environment is not installed yet. Before using the smooth-research skill, run once: %s setup"}}\n' "$here/rl"
+if ! ready; then
+  if [ "${1-}" = "hook" ]; then  # never block or break the host session: build in the background, say so
+    ( build_env auto >/dev/null 2>&1 & ) >/dev/null 2>&1
+    printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"Smooth Research plugin: the CLI environment of this plugin version is being built in the background; the first %s command waits for it (needs uv; %s setup rebuilds it). Then read the session notes with %s status."}}\n' "$here/rl" "$here/rl" "$here/rl"
     exit 0
   fi
-  echo "smooth-research: the CLI environment is not installed; run once: $here/rl setup" >&2
-  exit 3
+  build_env auto
 fi
 exec "$env_dir/bin/rl" "$@"

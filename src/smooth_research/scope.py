@@ -172,7 +172,7 @@ def code_coverage(store: Store, experiment: str, code_ref, named: list[str] = ()
     older: dict[str, list[str]] = {}  # path -> passing reviews that saw another version
     try:
         for t in passing:
-            scope = t["code_scope"]
+            scope = t.get("code_scope") or {}  # a review from before code scopes were recorded covers no file
             for kind in ("files", "deps", "configs"):
                 for path, digest in (scope.get(kind) or {}).items():
                     now = current(path, kind, scope.get("ignored_keys") or [])

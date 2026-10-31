@@ -1,0 +1,1129 @@
+{
+ "format": "smooth-research-snapshot/1",
+ "exported_at": "20261031T135608Z",
+ "schema_version": 2,
+ "meta": {
+  "schema_version": 2,
+  "data_version": 27,
+  "last_build": "dev",
+  "created_at": "2026-10-31T13:56:07+00:00",
+  "updated_at": "2026-10-31T13:56:08+00:00",
+  "title": "fixture",
+  "seq_DOC": 9,
+  "seq_EVT": 36,
+  "plan_ref": "DOC-0001@1",
+  "plan_source": "/tmp/claude-1056/-home-yu-workspace-smooth-research/2e58608e-f987-4a8d-82aa-8385ace9461e/scratchpad/fixture/proj/plan.md",
+  "seq_S": 1,
+  "seq_H": 2,
+  "seq_E": 1,
+  "seq_T": 1,
+  "seq_MSG": 3,
+  "message_seq": 3,
+  "seq_RV": 2,
+  "seq_RUN": 1,
+  "seq_X": 1,
+  "seq_RES": 1,
+  "seq_U": 1,
+  "seq_EV": 1,
+  "seq_D": 2,
+  "seq_AD": 1,
+  "seq_P": 1
+ },
+ "nodes": {
+  "Hypothesis": [
+   {
+    "created_at": "2026-10-31T13:56:07+00:00",
+    "updated_at": "2026-10-31T13:56:08+00:00",
+    "id": "H-0001",
+    "title": "WD helps",
+    "statement": "weight decay 1e-2 raises test accuracy under 20% symmetric noise",
+    "scope": "toy MLP",
+    "evidence_status": "supported",
+    "disposition": "active",
+    "revision": 2,
+    "origin": "plan §1",
+    "needs_recheck": false,
+    "recheck_reason": null
+   },
+   {
+    "created_at": "2026-10-31T13:56:07+00:00",
+    "updated_at": "2026-10-31T13:56:07+00:00",
+    "id": "H-0002",
+    "title": "Noise memorization",
+    "statement": "without wd the model memorizes noisy labels",
+    "evidence_status": "untested",
+    "disposition": "candidate",
+    "revision": 1,
+    "origin": "plan §1"
+   }
+  ],
+  "Experiment": [
+   {
+    "created_at": "2026-10-31T13:56:07+00:00",
+    "updated_at": "2026-10-31T13:56:07+00:00",
+    "id": "E-0001",
+    "title": "WD smoke",
+    "question": "does wd beat no wd?",
+    "stage": "E1",
+    "contract_path": "research/experiments/E-0001.md",
+    "revision": 1,
+    "contract_ref": "DOC-0004@1"
+   }
+  ],
+  "Evidence": [
+   {
+    "created_at": "2026-10-31T13:56:07+00:00",
+    "updated_at": "2026-10-31T13:56:07+00:00",
+    "id": "EV-0001",
+    "summary": "wd 0.81 vs 0.74 (one seed)",
+    "validity": "valid",
+    "evidence_level": "screening"
+   }
+  ],
+  "Decision": [
+   {
+    "created_at": "2026-10-31T13:56:08+00:00",
+    "updated_at": "2026-10-31T13:56:08+00:00",
+    "id": "D-0001",
+    "kind": "route",
+    "action": "continue",
+    "rationale": "screening signal",
+    "evidence_status_set": "supported"
+   },
+   {
+    "created_at": "2026-10-31T13:56:08+00:00",
+    "updated_at": "2026-10-31T13:56:08+00:00",
+    "id": "D-0002",
+    "kind": "stage",
+    "action": "continue_probe",
+    "rationale": "needs seeds",
+    "implementation_ready": "code and eval ready",
+    "evidence_scope": "one-seed screening"
+   }
+  ],
+  "Paper": [
+   {
+    "created_at": "2026-10-31T13:56:08+00:00",
+    "updated_at": "2026-10-31T13:56:08+00:00",
+    "id": "P-0001",
+    "title": "LoRA: Low-Rank Adaptation of Large Language Models",
+    "arxiv_id": "2106.09685",
+    "metadata_status": "unverified",
+    "fulltext_access": "available"
+   }
+  ],
+  "Task": [
+   {
+    "created_at": "2026-10-31T13:56:07+00:00",
+    "updated_at": "2026-10-31T13:56:08+00:00",
+    "id": "T-0001",
+    "title": "run smoke",
+    "kind": "experiment",
+    "state": "accepted",
+    "to_role": "researcher",
+    "next_action": "implement and run",
+    "revision": 4,
+    "owner_role": "researcher-1",
+    "owner_session": null,
+    "branch": null,
+    "note": "records check out",
+    "output_refs": "[\"DOC-0009@1\"]",
+    "blocked_reason": null
+   }
+  ],
+  "Document": [
+   {
+    "created_at": "2026-10-31T13:56:07+00:00",
+    "updated_at": "2026-10-31T13:56:07+00:00",
+    "id": "DOC-0001",
+    "path": "docs/plan.md",
+    "doc_type": "plan",
+    "latest_revision": 1,
+    "latest_digest": "blake2b:9a5a5bc67a553abfd1ff1763b92a6657e747204ccb8fd51eba9ccfc4245fe8f0"
+   },
+   {
+    "created_at": "2026-10-31T13:56:07+00:00",
+    "updated_at": "2026-10-31T13:56:07+00:00",
+    "id": "DOC-0002",
+    "path": "research/packages/RV-0001.request.md",
+    "doc_type": "review_request",
+    "latest_revision": 1,
+    "latest_digest": "blake2b:4ff444d8645eba951d9eee6db68fa27f0f8aa569c52f75b028be37e317678380"
+   },
+   {
+    "created_at": "2026-10-31T13:56:07+00:00",
+    "updated_at": "2026-10-31T13:56:07+00:00",
+    "id": "DOC-0003",
+    "path": "research/reviews/RV-0001.md",
+    "doc_type": "review_answer",
+    "latest_revision": 1,
+    "latest_digest": "blake2b:10d654d4e7575c0700179f7d956464a0f70e2f55e0814f066422502e2acd04d1"
+   },
+   {
+    "created_at": "2026-10-31T13:56:07+00:00",
+    "updated_at": "2026-10-31T13:56:07+00:00",
+    "id": "DOC-0004",
+    "path": "research/experiments/E-0001.md",
+    "doc_type": "experiment_contract",
+    "latest_revision": 1,
+    "latest_digest": "blake2b:0c03abb49ef6a83263dfcada1070baa71a53d51832b3f0d6d600c1806118650b"
+   },
+   {
+    "created_at": "2026-10-31T13:56:07+00:00",
+    "updated_at": "2026-10-31T13:56:07+00:00",
+    "id": "DOC-0005",
+    "path": "research/packages/RV-0002.request.md",
+    "doc_type": "review_request",
+    "latest_revision": 1,
+    "latest_digest": "blake2b:49dad33daf95ba079444f0428279e6c3a0ffe4568c119501b38b2c0bad4071f0"
+   },
+   {
+    "created_at": "2026-10-31T13:56:08+00:00",
+    "updated_at": "2026-10-31T13:56:08+00:00",
+    "id": "DOC-0006",
+    "path": "research/reviews/RV-0002.md",
+    "doc_type": "review_answer",
+    "latest_revision": 1,
+    "latest_digest": "blake2b:09977a3d5af3f3bf75b9bf02cb0ff97f5819d0fed23b648b07466d3121e6c1d6"
+   },
+   {
+    "created_at": "2026-10-31T13:56:08+00:00",
+    "updated_at": "2026-10-31T13:56:08+00:00",
+    "id": "DOC-0007",
+    "path": "research/packages/advice-round-1.request.md",
+    "doc_type": "advice_request",
+    "latest_revision": 1,
+    "latest_digest": "blake2b:7fe9c7684bc4d914d1f59005a79566fbcc165549b792c40d8ff85f43e329cb67"
+   },
+   {
+    "created_at": "2026-10-31T13:56:08+00:00",
+    "updated_at": "2026-10-31T13:56:08+00:00",
+    "id": "DOC-0008",
+    "path": "research/advice/AD-0001.md",
+    "doc_type": "advice_answer",
+    "latest_revision": 1,
+    "latest_digest": "blake2b:cce7f9ec8e9f699c64bbf295bd8b737adf0c5071c3d2226abf1d501b45078069"
+   },
+   {
+    "created_at": "2026-10-31T13:56:08+00:00",
+    "updated_at": "2026-10-31T13:56:08+00:00",
+    "id": "DOC-0009",
+    "path": "research/artifacts/ATT-0001-1/manifest.json",
+    "doc_type": "task_output",
+    "latest_revision": 1,
+    "latest_digest": "blake2b:d3a7d3ff92eef7e5e016383ef7972ea13f83af42df177628f99b14cb119535b6"
+   }
+  ],
+  "DocRevision": [
+   {
+    "created_at": "2026-10-31T13:56:07+00:00",
+    "updated_at": "2026-10-31T13:56:07+00:00",
+    "id": "DOC-0001@1",
+    "document_id": "DOC-0001",
+    "revision": 1,
+    "digest": "blake2b:9a5a5bc67a553abfd1ff1763b92a6657e747204ccb8fd51eba9ccfc4245fe8f0",
+    "object_path": "research/documents/objects/9a5a5bc67a553abfd1ff1763b92a6657e747204ccb8fd51eba9ccfc4245fe8f0.md",
+    "source_path": "docs/plan.md",
+    "size": 77
+   },
+   {
+    "created_at": "2026-10-31T13:56:07+00:00",
+    "updated_at": "2026-10-31T13:56:07+00:00",
+    "id": "DOC-0002@1",
+    "document_id": "DOC-0002",
+    "revision": 1,
+    "digest": "blake2b:4ff444d8645eba951d9eee6db68fa27f0f8aa569c52f75b028be37e317678380",
+    "object_path": "research/documents/objects/4ff444d8645eba951d9eee6db68fa27f0f8aa569c52f75b028be37e317678380.md",
+    "source_path": "research/packages/RV-0001.request.md",
+    "size": 1702
+   },
+   {
+    "created_at": "2026-10-31T13:56:07+00:00",
+    "updated_at": "2026-10-31T13:56:07+00:00",
+    "id": "DOC-0003@1",
+    "document_id": "DOC-0003",
+    "revision": 1,
+    "digest": "blake2b:10d654d4e7575c0700179f7d956464a0f70e2f55e0814f066422502e2acd04d1",
+    "object_path": "research/documents/objects/10d654d4e7575c0700179f7d956464a0f70e2f55e0814f066422502e2acd04d1.md",
+    "source_path": "research/reviews/RV-0001.md",
+    "size": 226
+   },
+   {
+    "created_at": "2026-10-31T13:56:07+00:00",
+    "updated_at": "2026-10-31T13:56:07+00:00",
+    "id": "DOC-0004@1",
+    "document_id": "DOC-0004",
+    "revision": 1,
+    "digest": "blake2b:0c03abb49ef6a83263dfcada1070baa71a53d51832b3f0d6d600c1806118650b",
+    "object_path": "research/documents/objects/0c03abb49ef6a83263dfcada1070baa71a53d51832b3f0d6d600c1806118650b.md",
+    "source_path": "research/experiments/E-0001.md",
+    "size": 444
+   },
+   {
+    "created_at": "2026-10-31T13:56:07+00:00",
+    "updated_at": "2026-10-31T13:56:07+00:00",
+    "id": "DOC-0005@1",
+    "document_id": "DOC-0005",
+    "revision": 1,
+    "digest": "blake2b:49dad33daf95ba079444f0428279e6c3a0ffe4568c119501b38b2c0bad4071f0",
+    "object_path": "research/documents/objects/49dad33daf95ba079444f0428279e6c3a0ffe4568c119501b38b2c0bad4071f0.md",
+    "source_path": "research/packages/RV-0002.request.md",
+    "size": 2844
+   },
+   {
+    "created_at": "2026-10-31T13:56:08+00:00",
+    "updated_at": "2026-10-31T13:56:08+00:00",
+    "id": "DOC-0006@1",
+    "document_id": "DOC-0006",
+    "revision": 1,
+    "digest": "blake2b:09977a3d5af3f3bf75b9bf02cb0ff97f5819d0fed23b648b07466d3121e6c1d6",
+    "object_path": "research/documents/objects/09977a3d5af3f3bf75b9bf02cb0ff97f5819d0fed23b648b07466d3121e6c1d6.md",
+    "source_path": "research/reviews/RV-0002.md",
+    "size": 226
+   },
+   {
+    "created_at": "2026-10-31T13:56:08+00:00",
+    "updated_at": "2026-10-31T13:56:08+00:00",
+    "id": "DOC-0007@1",
+    "document_id": "DOC-0007",
+    "revision": 1,
+    "digest": "blake2b:7fe9c7684bc4d914d1f59005a79566fbcc165549b792c40d8ff85f43e329cb67",
+    "object_path": "research/documents/objects/7fe9c7684bc4d914d1f59005a79566fbcc165549b792c40d8ff85f43e329cb67.md",
+    "source_path": "research/packages/advice-round-1.request.md",
+    "size": 2976
+   },
+   {
+    "created_at": "2026-10-31T13:56:08+00:00",
+    "updated_at": "2026-10-31T13:56:08+00:00",
+    "id": "DOC-0008@1",
+    "document_id": "DOC-0008",
+    "revision": 1,
+    "digest": "blake2b:cce7f9ec8e9f699c64bbf295bd8b737adf0c5071c3d2226abf1d501b45078069",
+    "object_path": "research/documents/objects/cce7f9ec8e9f699c64bbf295bd8b737adf0c5071c3d2226abf1d501b45078069.md",
+    "source_path": "research/advice/AD-0001.md",
+    "size": 166
+   },
+   {
+    "created_at": "2026-10-31T13:56:08+00:00",
+    "updated_at": "2026-10-31T13:56:08+00:00",
+    "id": "DOC-0009@1",
+    "document_id": "DOC-0009",
+    "revision": 1,
+    "digest": "blake2b:d3a7d3ff92eef7e5e016383ef7972ea13f83af42df177628f99b14cb119535b6",
+    "object_path": "research/documents/objects/d3a7d3ff92eef7e5e016383ef7972ea13f83af42df177628f99b14cb119535b6.json",
+    "source_path": "research/artifacts/ATT-0001-1/manifest.json",
+    "size": 343
+   }
+  ],
+  "Session": [
+   {
+    "created_at": "2026-10-31T13:56:07+00:00",
+    "updated_at": "2026-10-31T13:56:07+00:00",
+    "id": "S-0001",
+    "role_id": "coordinator",
+    "host": "claude",
+    "host_session_id": "sess-1",
+    "model_observed": "claude-opus-5-5",
+    "status": "active"
+   }
+  ],
+  "Message": [
+   {
+    "created_at": "2026-10-31T13:56:07+00:00",
+    "updated_at": "2026-10-31T13:56:07+00:00",
+    "id": "MSG-0001",
+    "seq": 1,
+    "type": "TASK",
+    "task_id": "T-0001",
+    "from_role": "coordinator",
+    "to_role": "researcher",
+    "base_revision": 1,
+    "next_action": "implement and run",
+    "text": "run smoke",
+    "digest": "blake2b:9996580e9079787e20c6bc9ab73734b3cac84011e0790eeb4e1bbb132978900b"
+   },
+   {
+    "created_at": "2026-10-31T13:56:08+00:00",
+    "updated_at": "2026-10-31T13:56:08+00:00",
+    "id": "MSG-0002",
+    "seq": 2,
+    "type": "NOTE",
+    "from_role": "coordinator",
+    "to_role": "researcher-1",
+    "text": "use 3 seeds next",
+    "digest": "blake2b:d92aec5720f6b419a09039afab163ac28d8a808368ffe5a5c2f0c52bf3f6445e"
+   },
+   {
+    "created_at": "2026-10-31T13:56:08+00:00",
+    "updated_at": "2026-10-31T13:56:08+00:00",
+    "id": "MSG-0003",
+    "seq": 3,
+    "type": "RESULT",
+    "task_id": "T-0001",
+    "from_role": "researcher-1",
+    "to_role": "coordinator",
+    "document_refs": "[\"DOC-0009@1\"]",
+    "base_revision": 3,
+    "text": "smoke done",
+    "digest": "blake2b:0ba8be055500a698ceec3401db2865cc9569cfabedfcadbb6451ab275df5999a"
+   }
+  ],
+  "Cursor": [],
+  "Run": [
+   {
+    "created_at": "2026-10-31T13:56:07+00:00",
+    "updated_at": "2026-10-31T13:56:07+00:00",
+    "id": "RUN-0001",
+    "experiment_id": "E-0001",
+    "experiment_ref": "E-0001@1",
+    "request_id": "E-0001-wd-s0",
+    "spec": "{\"arm\": \"wd\", \"code_ref\": {\"content_digest\": \"blake2b:772a0c10898e7e942caefb79646eec1ca7b350babbd9a45cf802e99473e995dd\"}, \"config_digest\": \"unknown\", \"data_revision\": \"synthetic-v1\", \"experiment_ref\": \"E-0001@1\", \"metric\": \"test acc\", \"output_spec\": \"research/artifacts/ATT-0001-1/metrics.json\", \"protocol_ref\": \"DOC-0004@1\", \"seed\": 0}",
+    "spec_digest": "blake2b:f4a4ef307d58d458f3a19ff50ab63a997d451451a5e2c62d1ec3ed4f05bbbdcd",
+    "attempt_count": 1
+   }
+  ],
+  "Attempt": [
+   {
+    "created_at": "2026-10-31T13:56:07+00:00",
+    "updated_at": "2026-10-31T13:56:07+00:00",
+    "id": "ATT-0001-1",
+    "run_id": "RUN-0001",
+    "index": 1,
+    "request_id": "E-0001-wd-s0",
+    "execution_state": "ended",
+    "outcome": "success",
+    "result_status": "complete",
+    "issues": "[]",
+    "code_review": "{\"reviews\": [\"RV-0001 pass\"], \"source\": \"working tree\", \"status\": \"covered\"}",
+    "resource": "{\"checkout\": \"/tmp/claude-1056/-home-yu-workspace-smooth-research/2e58608e-f987-4a8d-82aa-8385ace9461e/scratchpad/fixture/proj\", \"jobs\": \"shell\", \"kind\": \"local\", \"name\": \"local\", \"run_dir\": \"research/artifacts/ATT-0001-1\"}",
+    "last_observed_at": "2026-10-31T00:10:00+00:00",
+    "last_record_id": "OBS-9370d9af96d4f80c",
+    "last_source": "local-shell",
+    "last_sequence": null,
+    "last_trusted_state": "ended",
+    "last_trusted_at": "2026-10-31T00:10:00+00:00",
+    "closed_at": "2026-10-31T13:56:07+00:00"
+   }
+  ],
+  "ExecRef": [
+   {
+    "created_at": "2026-10-31T13:56:07+00:00",
+    "updated_at": "2026-10-31T13:56:07+00:00",
+    "id": "X-0001",
+    "kind": "local_process",
+    "executor_namespace": "host:fixture",
+    "opaque_id": "4242"
+   }
+  ],
+  "Observation": [
+   {
+    "created_at": "2026-10-31T13:56:07+00:00",
+    "updated_at": "2026-10-31T13:56:07+00:00",
+    "id": "OBS-405fb6d7aa5695e1",
+    "attempt_id": "ATT-0001-1",
+    "source": "local-shell",
+    "observed_at": "2026-10-31T00:00:00+00:00",
+    "received_at": "2026-10-31T13:56:07+00:00",
+    "execution_state": "running",
+    "outcome": "unknown",
+    "content_digest": "blake2b:405fb6d7aa5695e1e0d8e75be14e51df309f8f608f072af96b82c458a667987a",
+    "effect": "applied"
+   },
+   {
+    "created_at": "2026-10-31T13:56:07+00:00",
+    "updated_at": "2026-10-31T13:56:07+00:00",
+    "id": "OBS-9370d9af96d4f80c",
+    "attempt_id": "ATT-0001-1",
+    "source": "local-shell",
+    "observed_at": "2026-10-31T00:10:00+00:00",
+    "received_at": "2026-10-31T13:56:07+00:00",
+    "execution_state": "ended",
+    "outcome": "success",
+    "content_digest": "blake2b:9370d9af96d4f80c2c8e3ec4f518f8a7ca456fc82007622f5c00d9c792d29281",
+    "effect": "applied"
+   }
+  ],
+  "Result": [
+   {
+    "created_at": "2026-10-31T13:56:07+00:00",
+    "updated_at": "2026-10-31T13:56:07+00:00",
+    "id": "RES-0001",
+    "attempt_id": "ATT-0001-1",
+    "request_id": "ATT-0001-1-result",
+    "revision": 1,
+    "status": "complete",
+    "manifest": "{\"artifacts\": [{\"digest\": \"blake2b:140ee5bd85feba94356660eb7668bed48a53ec0daf9ad344f2e369c80061049d\", \"path\": \"research/artifacts/ATT-0001-1/metrics.json\", \"role\": \"metrics\"}], \"attempt_id\": \"ATT-0001-1\", \"metrics\": {\"acc\": 0.81}, \"spec_digest\": \"blake2b:f4a4ef307d58d458f3a19ff50ab63a997d451451a5e2c62d1ec3ed4f05bbbdcd\", \"status\": \"complete\"}",
+    "manifest_digest": "blake2b:bfbc928de655be17fb292e9a6152634459026cbca3d761f77914542610d4daf6",
+    "spec_match": true,
+    "verification": "[{\"check\": \"verified_locally\", \"digest\": \"blake2b:140ee5bd85feba94356660eb7668bed48a53ec0daf9ad344f2e369c80061049d\", \"local_digest\": \"blake2b:140ee5bd85feba94356660eb7668bed48a53ec0daf9ad344f2e369c80061049d\", \"path\": \"research/artifacts/ATT-0001-1/metrics.json\", \"role\": \"metrics\"}]",
+    "verification_scope": "1 verified_locally; fields not reported: data_revision, metric, code_ref.content_digest",
+    "usable_for_planned_comparison": true
+   }
+  ],
+  "Usage": [
+   {
+    "created_at": "2026-10-31T13:56:07+00:00",
+    "updated_at": "2026-10-31T13:56:07+00:00",
+    "id": "U-0001",
+    "accounting_ref": "local:4242",
+    "quantity": 0.2,
+    "unit": "h",
+    "resource_type": "cpu",
+    "hardware": "laptop",
+    "basis": "measured",
+    "revision": 1,
+    "content_digest": "blake2b:ad4c32efad9ac2d928edcda17e51a5c686c51f1c7bb1d9d41e781137d4330427"
+   }
+  ],
+  "Ticket": [
+   {
+    "created_at": "2026-10-31T13:56:07+00:00",
+    "updated_at": "2026-10-31T13:56:07+00:00",
+    "id": "RV-0001",
+    "kind": "review",
+    "subject": "code",
+    "status": "answered",
+    "target_id": "E-0001",
+    "question": "is training correct?",
+    "dedupe_key": "blake2b:2e6c55ced4f29b29dd39f4a84926077c779983be0ee3332150f49e2a88f839a5",
+    "candidates": "[\"manual:reviewer-person\"]",
+    "author_models": "[\"claude-opus-5-5\"]",
+    "code_scope": "{\"configs\": {}, \"deps\": {}, \"files\": {\"src/train.py\": \"blake2b:777e77f2f4ab80f180043563bd57ae9cc0d63931b3ab26258491066aaf23b542\"}, \"ignored_keys\": [], \"scope\": \"is training correct?\"}",
+    "request_ref": "DOC-0002@1",
+    "code_checkout": "/tmp/claude-1056/-home-yu-workspace-smooth-research/2e58608e-f987-4a8d-82aa-8385ace9461e/scratchpad/fixture/proj",
+    "round_of": "RV-0001",
+    "round_index": 1,
+    "answer_ref": "DOC-0003@1",
+    "verdict": "pass",
+    "relation": "cross_model",
+    "requested_entry": "manual:manual",
+    "observed_model": "gpt-6-astra",
+    "provider": null,
+    "host_session_id": null,
+    "usage": null,
+    "cost_usd": null,
+    "calls": "[{\"entry\": \"manual:manual\", \"imported_at\": \"2026-10-31T13:56:07+00:00\"}]",
+    "summary": "0 finding(s)",
+    "answered_at": "2026-10-31T13:56:07+00:00",
+    "error": null,
+    "open_severity": "none",
+    "escalated": null,
+    "answered_by": null,
+    "earlier_answers": null,
+    "changed_during_review": null
+   },
+   {
+    "created_at": "2026-10-31T13:56:07+00:00",
+    "updated_at": "2026-10-31T13:56:08+00:00",
+    "id": "RV-0002",
+    "kind": "review",
+    "subject": "conclusion",
+    "status": "answered",
+    "target_id": "H-0001",
+    "question": "Do the records support this conclusion, at this evidence level and within this scope?",
+    "dedupe_key": "blake2b:c14c03e08a460baaeb6cc9d842e000ecc1cad1d08327af135d451dd6c2c3a358",
+    "candidates": "[\"manual:reviewer-person\"]",
+    "author_models": "[\"claude-opus-5-5\"]",
+    "request_ref": "DOC-0005@1",
+    "round_of": "RV-0002",
+    "round_index": 1,
+    "answer_ref": "DOC-0006@1",
+    "verdict": "pass",
+    "relation": "cross_model",
+    "requested_entry": "manual:manual",
+    "observed_model": "gpt-6-astra",
+    "provider": null,
+    "host_session_id": null,
+    "usage": null,
+    "cost_usd": null,
+    "calls": "[{\"entry\": \"manual:manual\", \"imported_at\": \"2026-10-31T13:56:07+00:00\"}]",
+    "summary": "0 finding(s)",
+    "answered_at": "2026-10-31T13:56:08+00:00",
+    "error": null,
+    "open_severity": "none",
+    "escalated": null,
+    "answered_by": null,
+    "earlier_answers": null,
+    "changed_during_review": null
+   },
+   {
+    "created_at": "2026-10-31T13:56:08+00:00",
+    "updated_at": "2026-10-31T13:56:08+00:00",
+    "id": "AD-0001",
+    "kind": "advice",
+    "status": "answered",
+    "target_id": "H-0001",
+    "question": "what is the cheapest test that separates the two explanations?",
+    "dedupe_key": "blake2b:12738809e06ae7a3ef4aa02da9ab38e6c18f8b2b7d1f177ce4ca6adb65faafba",
+    "candidates": "[\"manual:advisor-person\"]",
+    "advice_round": 1,
+    "request_ref": "DOC-0007@1",
+    "answer_ref": "DOC-0008@1",
+    "verdict": null,
+    "relation": null,
+    "requested_entry": "manual:manual",
+    "observed_model": "gpt-6-astra-pro",
+    "provider": null,
+    "host_session_id": null,
+    "usage": null,
+    "cost_usd": null,
+    "calls": "[{\"entry\": \"manual:manual\", \"imported_at\": \"2026-10-31T13:56:08+00:00\"}]",
+    "summary": "0 proposal(s)",
+    "answered_at": "2026-10-31T13:56:08+00:00",
+    "error": null,
+    "open_severity": null,
+    "escalated": null,
+    "answered_by": null,
+    "earlier_answers": null,
+    "changed_during_review": null
+   }
+  ],
+  "Event": [
+   {
+    "created_at": "2026-10-31T13:56:07+00:00",
+    "updated_at": "2026-10-31T13:56:07+00:00",
+    "id": "EVT-000001",
+    "seq": 1,
+    "type": "doc.sealed",
+    "entity_id": "DOC-0001@1",
+    "actor": "coordinator",
+    "summary": "docs/plan.md (plan) 9a5a5bc67a55"
+   },
+   {
+    "created_at": "2026-10-31T13:56:07+00:00",
+    "updated_at": "2026-10-31T13:56:07+00:00",
+    "id": "EVT-000002",
+    "seq": 2,
+    "type": "project.init",
+    "actor": "coordinator",
+    "summary": "plan DOC-0001@1"
+   },
+   {
+    "created_at": "2026-10-31T13:56:07+00:00",
+    "updated_at": "2026-10-31T13:56:07+00:00",
+    "id": "EVT-000003",
+    "seq": 3,
+    "type": "session.start",
+    "entity_id": "S-0001",
+    "actor": "agent",
+    "summary": "coordinator on claude claude-opus-5-5"
+   },
+   {
+    "created_at": "2026-10-31T13:56:07+00:00",
+    "updated_at": "2026-10-31T13:56:07+00:00",
+    "id": "EVT-000004",
+    "seq": 4,
+    "type": "hypothesis.added",
+    "entity_id": "H-0001",
+    "actor": "agent",
+    "summary": "WD helps"
+   },
+   {
+    "created_at": "2026-10-31T13:56:07+00:00",
+    "updated_at": "2026-10-31T13:56:07+00:00",
+    "id": "EVT-000005",
+    "seq": 5,
+    "type": "hypothesis.added",
+    "entity_id": "H-0002",
+    "actor": "agent",
+    "summary": "Noise memorization"
+   },
+   {
+    "created_at": "2026-10-31T13:56:07+00:00",
+    "updated_at": "2026-10-31T13:56:07+00:00",
+    "id": "EVT-000006",
+    "seq": 6,
+    "type": "hypothesis.revised",
+    "entity_id": "H-0001",
+    "actor": "agent",
+    "summary": "rev 2: narrowed"
+   },
+   {
+    "created_at": "2026-10-31T13:56:07+00:00",
+    "updated_at": "2026-10-31T13:56:07+00:00",
+    "id": "EVT-000007",
+    "seq": 7,
+    "type": "experiment.added",
+    "entity_id": "E-0001",
+    "actor": "agent",
+    "summary": "WD smoke"
+   },
+   {
+    "created_at": "2026-10-31T13:56:07+00:00",
+    "updated_at": "2026-10-31T13:56:07+00:00",
+    "id": "EVT-000008",
+    "seq": 8,
+    "type": "task.created",
+    "entity_id": "T-0001",
+    "actor": "agent",
+    "summary": "run smoke"
+   },
+   {
+    "created_at": "2026-10-31T13:56:07+00:00",
+    "updated_at": "2026-10-31T13:56:07+00:00",
+    "id": "EVT-000009",
+    "seq": 9,
+    "type": "task.claimed",
+    "entity_id": "T-0001",
+    "actor": "agent",
+    "summary": "researcher-1"
+   },
+   {
+    "created_at": "2026-10-31T13:56:07+00:00",
+    "updated_at": "2026-10-31T13:56:07+00:00",
+    "id": "EVT-000010",
+    "seq": 10,
+    "type": "doc.sealed",
+    "entity_id": "DOC-0002@1",
+    "actor": "agent",
+    "summary": "research/packages/RV-0001.request.md (review_request) 4ff444d8645e"
+   },
+   {
+    "created_at": "2026-10-31T13:56:07+00:00",
+    "updated_at": "2026-10-31T13:56:07+00:00",
+    "id": "EVT-000011",
+    "seq": 11,
+    "type": "review.requested",
+    "entity_id": "RV-0001",
+    "actor": "agent",
+    "summary": "E-0001 fingerprint 2e6c55ced4f2"
+   },
+   {
+    "created_at": "2026-10-31T13:56:07+00:00",
+    "updated_at": "2026-10-31T13:56:07+00:00",
+    "id": "EVT-000012",
+    "seq": 12,
+    "type": "doc.sealed",
+    "entity_id": "DOC-0003@1",
+    "actor": "agent",
+    "summary": "research/reviews/RV-0001.md (review_answer) 10d654d4e757"
+   },
+   {
+    "created_at": "2026-10-31T13:56:07+00:00",
+    "updated_at": "2026-10-31T13:56:07+00:00",
+    "id": "EVT-000013",
+    "seq": 13,
+    "type": "review.answered",
+    "entity_id": "RV-0001",
+    "actor": "agent",
+    "summary": "pass 0 finding(s) via manual:manual"
+   },
+   {
+    "created_at": "2026-10-31T13:56:07+00:00",
+    "updated_at": "2026-10-31T13:56:07+00:00",
+    "id": "EVT-000014",
+    "seq": 14,
+    "type": "doc.sealed",
+    "entity_id": "DOC-0004@1",
+    "actor": "agent",
+    "summary": "research/experiments/E-0001.md (experiment_contract) 0c03abb49ef6"
+   },
+   {
+    "created_at": "2026-10-31T13:56:07+00:00",
+    "updated_at": "2026-10-31T13:56:07+00:00",
+    "id": "EVT-000015",
+    "seq": 15,
+    "type": "experiment.sealed",
+    "entity_id": "E-0001",
+    "actor": "agent",
+    "summary": "DOC-0004@1"
+   },
+   {
+    "created_at": "2026-10-31T13:56:07+00:00",
+    "updated_at": "2026-10-31T13:56:07+00:00",
+    "id": "EVT-000016",
+    "seq": 16,
+    "type": "run.register",
+    "entity_id": "ATT-0001-1",
+    "actor": "agent",
+    "summary": "RUN-0001 attempt 1 prepared"
+   },
+   {
+    "created_at": "2026-10-31T13:56:07+00:00",
+    "updated_at": "2026-10-31T13:56:07+00:00",
+    "id": "EVT-000017",
+    "seq": 17,
+    "type": "run.record",
+    "entity_id": "ATT-0001-1",
+    "actor": "agent",
+    "summary": "OBS-405fb6d7aa5695e1 running/unknown -> applied"
+   },
+   {
+    "created_at": "2026-10-31T13:56:07+00:00",
+    "updated_at": "2026-10-31T13:56:07+00:00",
+    "id": "EVT-000018",
+    "seq": 18,
+    "type": "run.record",
+    "entity_id": "ATT-0001-1",
+    "actor": "agent",
+    "summary": "OBS-9370d9af96d4f80c ended/success -> applied"
+   },
+   {
+    "created_at": "2026-10-31T13:56:07+00:00",
+    "updated_at": "2026-10-31T13:56:07+00:00",
+    "id": "EVT-000019",
+    "seq": 19,
+    "type": "run.import_result",
+    "entity_id": "ATT-0001-1",
+    "actor": "agent",
+    "summary": "RES-0001 complete (1 verified_locally; fields not reported: data_revision, metric, code_ref.content_digest)"
+   },
+   {
+    "created_at": "2026-10-31T13:56:07+00:00",
+    "updated_at": "2026-10-31T13:56:07+00:00",
+    "id": "EVT-000020",
+    "seq": 20,
+    "type": "run.usage",
+    "entity_id": "U-0001",
+    "actor": "agent",
+    "summary": "0.2 h local:4242"
+   },
+   {
+    "created_at": "2026-10-31T13:56:07+00:00",
+    "updated_at": "2026-10-31T13:56:07+00:00",
+    "id": "EVT-000021",
+    "seq": 21,
+    "type": "evidence.added",
+    "entity_id": "EV-0001",
+    "actor": "agent",
+    "summary": "screening/valid: wd 0.81 vs 0.74 (one seed)"
+   },
+   {
+    "created_at": "2026-10-31T13:56:07+00:00",
+    "updated_at": "2026-10-31T13:56:07+00:00",
+    "id": "EVT-000022",
+    "seq": 22,
+    "type": "doc.sealed",
+    "entity_id": "DOC-0005@1",
+    "actor": "agent",
+    "summary": "research/packages/RV-0002.request.md (review_request) 49dad33daf95"
+   },
+   {
+    "created_at": "2026-10-31T13:56:07+00:00",
+    "updated_at": "2026-10-31T13:56:07+00:00",
+    "id": "EVT-000023",
+    "seq": 23,
+    "type": "review.requested",
+    "entity_id": "RV-0002",
+    "actor": "agent",
+    "summary": "conclusion on H-0001 key c14c03e08a46"
+   },
+   {
+    "created_at": "2026-10-31T13:56:08+00:00",
+    "updated_at": "2026-10-31T13:56:08+00:00",
+    "id": "EVT-000024",
+    "seq": 24,
+    "type": "doc.sealed",
+    "entity_id": "DOC-0006@1",
+    "actor": "agent",
+    "summary": "research/reviews/RV-0002.md (review_answer) 09977a3d5af3"
+   },
+   {
+    "created_at": "2026-10-31T13:56:08+00:00",
+    "updated_at": "2026-10-31T13:56:08+00:00",
+    "id": "EVT-000025",
+    "seq": 25,
+    "type": "review.answered",
+    "entity_id": "RV-0002",
+    "actor": "agent",
+    "summary": "pass 0 finding(s) via manual:manual"
+   },
+   {
+    "created_at": "2026-10-31T13:56:08+00:00",
+    "updated_at": "2026-10-31T13:56:08+00:00",
+    "id": "EVT-000026",
+    "seq": 26,
+    "type": "decision",
+    "entity_id": "D-0001",
+    "actor": "agent",
+    "summary": "continue H-0001: screening signal"
+   },
+   {
+    "created_at": "2026-10-31T13:56:08+00:00",
+    "updated_at": "2026-10-31T13:56:08+00:00",
+    "id": "EVT-000027",
+    "seq": 27,
+    "type": "doc.sealed",
+    "entity_id": "DOC-0007@1",
+    "actor": "agent",
+    "summary": "research/packages/advice-round-1.request.md (advice_request) 7fe9c7684bc4"
+   },
+   {
+    "created_at": "2026-10-31T13:56:08+00:00",
+    "updated_at": "2026-10-31T13:56:08+00:00",
+    "id": "EVT-000028",
+    "seq": 28,
+    "type": "advice.prepared",
+    "entity_id": "AD-0001",
+    "actor": "agent",
+    "summary": "round 1 (1 advisors): what is the cheapest test that separates the two explanations?"
+   },
+   {
+    "created_at": "2026-10-31T13:56:08+00:00",
+    "updated_at": "2026-10-31T13:56:08+00:00",
+    "id": "EVT-000029",
+    "seq": 29,
+    "type": "doc.sealed",
+    "entity_id": "DOC-0008@1",
+    "actor": "agent",
+    "summary": "research/advice/AD-0001.md (advice_answer) cce7f9ec8e9f"
+   },
+   {
+    "created_at": "2026-10-31T13:56:08+00:00",
+    "updated_at": "2026-10-31T13:56:08+00:00",
+    "id": "EVT-000030",
+    "seq": 30,
+    "type": "advice.answered",
+    "entity_id": "AD-0001",
+    "actor": "agent",
+    "summary": " 0 proposal(s) via manual:manual"
+   },
+   {
+    "created_at": "2026-10-31T13:56:08+00:00",
+    "updated_at": "2026-10-31T13:56:08+00:00",
+    "id": "EVT-000031",
+    "seq": 31,
+    "type": "paper.added",
+    "entity_id": "P-0001",
+    "actor": "agent",
+    "summary": "LoRA: Low-Rank Adaptation of Large Language Models"
+   },
+   {
+    "created_at": "2026-10-31T13:56:08+00:00",
+    "updated_at": "2026-10-31T13:56:08+00:00",
+    "id": "EVT-000032",
+    "seq": 32,
+    "type": "paper.link",
+    "entity_id": "H-0001",
+    "actor": "agent",
+    "summary": "H-0001 nearest_work P-0001 (checked, Sec. 3)"
+   },
+   {
+    "created_at": "2026-10-31T13:56:08+00:00",
+    "updated_at": "2026-10-31T13:56:08+00:00",
+    "id": "EVT-000033",
+    "seq": 33,
+    "type": "doc.sealed",
+    "entity_id": "DOC-0009@1",
+    "actor": "agent",
+    "summary": "research/artifacts/ATT-0001-1/manifest.json (task_output) d3a7d3ff92ee"
+   },
+   {
+    "created_at": "2026-10-31T13:56:08+00:00",
+    "updated_at": "2026-10-31T13:56:08+00:00",
+    "id": "EVT-000034",
+    "seq": 34,
+    "type": "task.delivered",
+    "entity_id": "T-0001",
+    "actor": "agent",
+    "summary": "smoke done"
+   },
+   {
+    "created_at": "2026-10-31T13:56:08+00:00",
+    "updated_at": "2026-10-31T13:56:08+00:00",
+    "id": "EVT-000035",
+    "seq": 35,
+    "type": "task.accept",
+    "entity_id": "T-0001",
+    "actor": "agent",
+    "summary": "records check out"
+   },
+   {
+    "created_at": "2026-10-31T13:56:08+00:00",
+    "updated_at": "2026-10-31T13:56:08+00:00",
+    "id": "EVT-000036",
+    "seq": 36,
+    "type": "decision",
+    "entity_id": "D-0002",
+    "actor": "agent",
+    "summary": "continue_probe H-0001: needs seeds"
+   }
+  ],
+  "Request": [
+   {
+    "created_at": "2026-10-31T13:56:07+00:00",
+    "updated_at": "2026-10-31T13:56:07+00:00",
+    "id": "run.register:E-0001-wd-s0",
+    "op": "run.register",
+    "request_id": "E-0001-wd-s0",
+    "digest": "blake2b:68e2f77c029154513d9a24a38b8c55ff5bee2611d08e16b58389b6fb4fd1ad5f",
+    "result": "{\"attempt\": \"ATT-0001-1\", \"code_review\": {\"reviews\": [\"RV-0001 pass\"], \"source\": \"working tree\", \"status\": \"covered\"}, \"resource\": {\"checkout\": \"/tmp/claude-1056/-home-yu-workspace-smooth-research/2e58608e-f987-4a8d-82aa-8385ace9461e/scratchpad/fixture/proj\", \"jobs\": \"shell\", \"kind\": \"local\", \"name\": \"local\", \"run_dir\": \"research/artifacts/ATT-0001-1\"}, \"run\": \"RUN-0001\", \"spec_digest\": \"blake2b:f4a4ef307d58d458f3a19ff50ab63a997d451451a5e2c62d1ec3ed4f05bbbdcd\"}"
+   },
+   {
+    "created_at": "2026-10-31T13:56:07+00:00",
+    "updated_at": "2026-10-31T13:56:07+00:00",
+    "id": "run.import-result:ATT-0001-1-result",
+    "op": "run.import-result",
+    "request_id": "ATT-0001-1-result",
+    "digest": "blake2b:8294bb2f14006276be21488a879e9777e23c1b5368f3693125fe9e50c8ab1993",
+    "result": "{\"attempt\": \"ATT-0001-1\", \"result\": \"RES-0001\"}"
+   }
+  ]
+ },
+ "edges": [
+  {
+   "source": "H-0001",
+   "source_label": "Hypothesis",
+   "edge": "NEAREST_WORK",
+   "target": "P-0001",
+   "target_label": "Paper",
+   "props": {
+    "source_revision": 2,
+    "assessment": "checked",
+    "locator": "Sec. 3"
+   }
+  },
+  {
+   "source": "H-0002",
+   "source_label": "Hypothesis",
+   "edge": "DERIVED_FROM",
+   "target": "H-0001",
+   "target_label": "Hypothesis",
+   "props": {}
+  },
+  {
+   "source": "E-0001",
+   "source_label": "Experiment",
+   "edge": "TESTS",
+   "target": "H-0001",
+   "target_label": "Hypothesis",
+   "props": {
+    "revision": 2
+   }
+  },
+  {
+   "source": "EV-0001",
+   "source_label": "Evidence",
+   "edge": "SUPPORTS",
+   "target": "H-0001",
+   "target_label": "Hypothesis",
+   "props": {
+    "revision": 2
+   }
+  },
+  {
+   "source": "EV-0001",
+   "source_label": "Evidence",
+   "edge": "FROM_ATTEMPT",
+   "target": "ATT-0001-1",
+   "target_label": "Attempt",
+   "props": {}
+  },
+  {
+   "source": "EV-0001",
+   "source_label": "Evidence",
+   "edge": "FROM_RESULT",
+   "target": "RES-0001",
+   "target_label": "Result",
+   "props": {}
+  },
+  {
+   "source": "EV-0001",
+   "source_label": "Evidence",
+   "edge": "ABOUT",
+   "target": "E-0001",
+   "target_label": "Experiment",
+   "props": {}
+  },
+  {
+   "source": "D-0001",
+   "source_label": "Decision",
+   "edge": "DECIDES",
+   "target": "H-0001",
+   "target_label": "Hypothesis",
+   "props": {
+    "revision": 2
+   }
+  },
+  {
+   "source": "D-0001",
+   "source_label": "Decision",
+   "edge": "BASED_ON",
+   "target": "EV-0001",
+   "target_label": "Evidence",
+   "props": {}
+  },
+  {
+   "source": "D-0001",
+   "source_label": "Decision",
+   "edge": "BASED_ON",
+   "target": "RV-0002",
+   "target_label": "Ticket",
+   "props": {}
+  },
+  {
+   "source": "D-0002",
+   "source_label": "Decision",
+   "edge": "DECIDES",
+   "target": "H-0001",
+   "target_label": "Hypothesis",
+   "props": {
+    "revision": 2
+   }
+  },
+  {
+   "source": "T-0001",
+   "source_label": "Task",
+   "edge": "TARGETS",
+   "target": "E-0001",
+   "target_label": "Experiment",
+   "props": {}
+  },
+  {
+   "source": "RUN-0001",
+   "source_label": "Run",
+   "edge": "OF_EXPERIMENT",
+   "target": "E-0001",
+   "target_label": "Experiment",
+   "props": {}
+  },
+  {
+   "source": "ATT-0001-1",
+   "source_label": "Attempt",
+   "edge": "OF_RUN",
+   "target": "RUN-0001",
+   "target_label": "Run",
+   "props": {}
+  },
+  {
+   "source": "ATT-0001-1",
+   "source_label": "Attempt",
+   "edge": "BOUND_TO",
+   "target": "X-0001",
+   "target_label": "ExecRef",
+   "props": {}
+  },
+  {
+   "source": "U-0001",
+   "source_label": "Usage",
+   "edge": "COVERS",
+   "target": "ATT-0001-1",
+   "target_label": "Attempt",
+   "props": {}
+  },
+  {
+   "source": "RV-0001",
+   "source_label": "Ticket",
+   "edge": "TARGETS",
+   "target": "E-0001",
+   "target_label": "Experiment",
+   "props": {}
+  },
+  {
+   "source": "RV-0002",
+   "source_label": "Ticket",
+   "edge": "TARGETS",
+   "target": "H-0001",
+   "target_label": "Hypothesis",
+   "props": {}
+  },
+  {
+   "source": "AD-0001",
+   "source_label": "Ticket",
+   "edge": "TARGETS",
+   "target": "H-0001",
+   "target_label": "Hypothesis",
+   "props": {}
+  }
+ ]
+}

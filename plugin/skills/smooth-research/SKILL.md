@@ -14,7 +14,10 @@ evidence, decisions, reviews, literature); it never runs, polls or cancels exper
 ## The CLI
 
 {{cli_note}}
-- If it says the environment is missing, run `{{rl}} setup` once (uses uv). Install nothing else for it.
+- The first command after an install or update builds its environment (uv; `{{rl}} setup` rebuilds it).
+- After a plugin update the records are upgraded on first use (a copy of the old database is kept). When the
+  session note or `{{rl}} status` says the plugin changed, run `{{rl}} upgrade` and adjust the old research assets
+  to this version yourself as it lists, without asking the user; never rewrite recorded facts or sealed documents.
 - Commands print a short summary with ids; `--json` gives full records; `{{rl}} <command> --help` shows flags.
 - Host-specific notes (sessions, subagents, default reviewer): [references/host.md](references/host.md).
   Exact formats (RunSpec, observation, manifest) and recipes: [references/workflow.md](references/workflow.md).
@@ -26,7 +29,7 @@ evidence, decisions, reviews, literature); it never runs, polls or cancels exper
   user asks you to explain something, write the explanation there (`docs/explanations/<topic>.md`).
 - `src/` experiment code · `research/` everything else: contracts (`experiments/`), `tasks/`, researcher
   `notes/`, review and advice answers, stage reports, run outputs (`artifacts/<attempt-id>/`) and the records.
-  Write there only contracts, task notes and notes; `{{rl}}` writes the rest.
+  Write there only contracts, task notes and notes (and what `{{rl}} upgrade` lists); `{{rl}}` writes the rest.
 
 ## Start or resume
 
@@ -62,17 +65,15 @@ controls) · E2 minimal real model · E3 limited confirmation (pre-fixed compari
    sealed. Later edits become a new revision; edits after seeing results are recorded as exploratory.
 2. Delegate: `{{rl}} task create --title .. --kind implement|experiment|analysis --targets E-x --to-role researcher
    --next-action ..`, then start a researcher with the task id and a role name such as `researcher-1`: in herdr a
-   session in its own tab and worktree (next section), otherwise a native subagent or `{{rl}} delegate`
-   (host.md). It writes the code, gets the code review the change needs, registers, runs and records (section
-   after next), adds evidence and delivers. Start several at once only when their tasks can proceed
-   independently.
+   session in its own tab and worktree (next section), otherwise a native subagent or `{{rl}} delegate` (host.md).
+   It writes the code, gets the code review the change needs, registers, runs and records (section after next),
+   adds evidence and delivers. Start several at once only when their tasks can proceed independently.
 3. Wait without polling: a researcher with long runs ends with WAIT in `{{rl}} inbox --role coordinator` (the
    attempts, and what reports their end). You own the wake-up (host.md); when it fires, start the researcher
    again with the same role and it resumes the task.
 4. Check each delivery: the RESULT message, the records it names (`{{rl}} show`, `{{rl}} run show E-x`, which
-   includes each attempt's code review check) and the outputs; then `{{rl}} task accept T-x --reason ..` (it
-   names the task's branch to merge), or `{{rl}} task reopen T-x --reason "<what to change>"` and start the
-   researcher again.
+   includes each attempt's code review check) and the outputs; then `{{rl}} task accept T-x --reason ..` (it names
+   the task's branch to merge), or `{{rl}} task reopen T-x --reason "<what to change>"` and start the researcher again.
 5. Before a key conclusion (a hypothesis set supported or challenged, a route stopped, a formal experiment
    recommended), get a conclusion review (skill `research-review`) and cite it with `--based-on RV-x`. A
    review round that ends with medium or higher findings open comes to you: approve it with your reason
@@ -111,9 +112,8 @@ Without herdr, use the headless forms in host.md.
    prints how to stage it, start it and fetch the results; you run them. On Miyabi submit with miyabi-mcp,
    the attempt id as the request key, record its ledger export with `{{rl}} run record --observation @file`
    and wait for its notification instead of polling; recipe in workflow.md.
-4. `{{rl}} run import-result --attempt ATT --request-id <unique> --manifest @<manifest.json>`; optionally
-   `{{rl}} run usage ...` with measured time, unless the executor's export already carried it. Unreported
-   usage is not zero.
+4. `{{rl}} run import-result --attempt ATT --request-id <unique> --manifest @<manifest.json>`; optionally `{{rl}} run
+   usage ...` with measured time, unless the executor's export already carried it. Unreported usage is not zero.
 5. Evidence: `{{rl}} evidence add --summary .. --level diagnostic|screening|exploratory|confirmatory
    --validity valid|invalid|pending --supports|--challenges H-x --attempts ATT --results RES --experiment E-x`.
 
