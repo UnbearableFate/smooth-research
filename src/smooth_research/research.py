@@ -17,11 +17,11 @@ from .util import RLError, digest_file
 CONSTRAINTS_TEMPLATE = """# Constraints
 
 Who decided each item and when. The coordinator and executors follow this; the plugin does not enforce it.
+Model choices are not kept here: they live in smooth-research.yaml (models), where the CLI reads them.
 
 - Research goal and claims in scope:
-- Allowed data, models and environments:
+- Allowed data and environments:
 - Resource ceiling (per experiment / per batch / total; units such as CPU-h, GPU-h, node-h):
-- Model choices and substitutes (reviewer, advisor):
 - Actions that need the user's decision first:
 """
 
@@ -86,7 +86,8 @@ def init_project(root: Path, plan: str | None = None, title: str | None = None) 
                         + (f"; plan snapshot {plan_ref} ({cfg['plan']})" if plan_ref else "; no plan imported yet")
                         + f"\nlayout: experiment code {cfg['code_root']}/ · documents {cfg['docs_root']}/ · "
                           f"reports {cfg['reports_root']}/ · records {cfg['research_root']}/"),
-            "next": [f"fill {cfg['constraints_ref']} with the user's resource scope and model choices",
+            "next": [f"fill {cfg['constraints_ref']} with the user's goal, environments and resource scope",
+                     f"put the user's model choices in {CONFIG_NAME} (models) and check them: rl models",
                      "register yourself: rl session start --role coordinator ...",
                      "extract near-term hypotheses: rl hypothesis add ..."]}
 

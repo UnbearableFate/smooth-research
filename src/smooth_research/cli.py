@@ -13,7 +13,7 @@ from pathlib import Path
 
 from . import (adapters, context, delegate, hooks, literature, research, reviews, runs, snapshot, tasks,
                view)
-from .project import find_project
+from .project import advice_limit, find_project, model_entries
 from .schema import ENUMS, LINKABLE, PAPER_ASSESSMENTS
 from .store import Store
 from .util import RLError, load_json_arg, load_json_records, now_utc, split_list
@@ -296,11 +296,15 @@ def cmd_advise(args):
     store = _store(args)
     a = args.action
     if a == "prepare":
-        return reviews.prepare_advice(store, args.question, args.target)
+        return reviews.prepare_advice(store, args.question, args.target, args.user_approved)
     if a == "run":
+        if len(args.id) > 1:
+            if args.entry:
+                raise RLError("INVALID", "--entry overrides the model of one ticket; name one ticket")
+            return reviews.run_many(store, args.id, args.timeout, args.background)
         if args.background:
-            return reviews.start_background(store, args.id, args.timeout)
-        return reviews.run_ticket(store, args.id, args.timeout, args.entry)
+            return reviews.start_background(store, args.id[0], args.timeout)
+        return reviews.run_ticket(store, args.id[0], args.timeout, args.entry)
     if a == "import":
         return reviews.import_answer(store, args.id, args.answer, args.model_observed, args.source, args.provider,
                                      args.session_id)
@@ -334,14 +338,24 @@ def cmd_delegate(args):
 
 def cmd_models(args):
     store = _store(args)
-    models = store.project.config["models"]
+    config = store.project.config
     lines = []
-    for role, entries in (("reviewer", models["reviewer"]["candidates"]),
-                          ("advisor", [models["advisor"]["primary"], *models["advisor"].get("fallback", [])])):
-        for text in entries:
-            entry = adapters.Entry.parse(text)
+    for role, rule in (("researcher", "the first available one is used"), ("reviewer", "the first available one is used"),
+                       ("advisor", "every available one is asked, each on its own")):
+        lines.append(f"{role} ({rule}):")
+        for text in model_entries(config, role):
+            try:
+                entry = adapters.Entry.parse(text)
+            except RLError as exc:
+                lines.append(f"  {text}: invalid ({exc.message})")
+                continue
             problem = adapters.available(entry)
-            lines.append(f"{role}: {entry} family={entry.family} " + (f"unavailable ({problem})" if problem else "callable"))
+            lines.append(f"  {entry} family={entry.family or 'unknown'} "
+                         + (f"unavailable ({problem})" if problem else "callable"))
+    with store.read() as tx:
+        used = len(reviews.advice_rounds(tx))
+    lines.append(f"advice rounds used: {used} of {advice_limit(config)} (advice.max_rounds; more need the user's "
+                 "approval)")
     return {"summary": "\n".join(lines) + "\n(callable = the CLI exists; the model itself is verified on first use)"}
 
 
@@ -615,9 +629,10 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("id", nargs="?")
     s.add_argument("--active", action="store_true")
 
-    for name, fn, help_ in (("review", cmd_review, "cross-model reviews: code before costly runs, key conclusions "
-                                                   "before they are recorded"),
-                            ("advise", cmd_advise, "bottleneck consultation with the strongest configured model")):
+    for name, fn, help_ in (("review", cmd_review, "independent reviews by the configured reviewer: code before "
+                                                   "costly runs, key conclusions before they are recorded"),
+                            ("advise", cmd_advise, "advice rounds: every configured advisor answers on its own; "
+                                                   "advice.max_rounds per project")):
         sp = add(name, fn, help_)
         ss = sp.add_subparsers(dest="action", required=True)
         if name == "review":
@@ -644,11 +659,15 @@ def build_parser() -> argparse.ArgumentParser:
             s = ss.add_parser("prepare")
             s.add_argument("--question", required=True)
             s.add_argument("--target")
+            s.add_argument("--user-approved", help="the user's approval of a round beyond advice.max_rounds")
         s = ss.add_parser("run")
-        s.add_argument("id")
+        if name == "review":
+            s.add_argument("id")
+        else:
+            s.add_argument("id", nargs="+", help="the tickets of a round; several run at the same time")
         s.add_argument("--background", action="store_true")
         s.add_argument("--timeout", type=int, default=1800)
-        s.add_argument("--entry", help="override: one model entry <claude|codex>:<model>[@effort]")
+        s.add_argument("--entry", help="override: one model entry <claude|codex|pi>:<model>[@effort]")
         s = ss.add_parser("import")
         s.add_argument("id")
         s.add_argument("--answer", required=True)
@@ -685,9 +704,10 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--digest")
     ss.add_parser("list")
 
-    sp = add("delegate", cmd_delegate, "run a ready task in an independent Codex/Claude CLI session")
+    sp = add("delegate", cmd_delegate, "run a ready task in an independent Claude/Codex/pi CLI session")
     sp.add_argument("task")
-    sp.add_argument("--entry", required=True, help="<claude|codex>:<model>[@effort]")
+    sp.add_argument("--entry", help="<claude|codex|pi>:<model>[@effort] (default: the models.researcher entries in "
+                                     "order)")
     sp.add_argument("--role", default="researcher")
     sp.add_argument("--timeout", type=int, default=3600)
     sp.add_argument("--background", action="store_true")

@@ -20,8 +20,10 @@ containers and HPC skills (for example miyabi-toolbox) stay independent.
 | `tests/` | Contract tests for the invariants in design §16.2 |
 
 Model calls for reviews, advice and delegated sessions go through `src/smooth_research/adapters.py`
-(`claude -p`, `codex exec --json`, or a manual entry a person submits); the requested model, the observed
-model (or "unverified"), the exact session id, usage and cost are recorded with each ticket.
+(`claude -p`, `codex exec --json`, `pi -p --mode json`, or a manual entry a person submits); the requested
+model, the observed model (or "unverified"), the exact session id, usage and cost are recorded with each
+ticket. Which models are called is set in the project's `smooth-research.yaml`: researchers and reviewers
+use the first available entry of their list, and every listed advisor answers each advice round on its own.
 
 ## Build and install
 
@@ -51,7 +53,7 @@ The first time, the CLI environment is built once from the bundled, locked packa
 ## A research project
 
 ```
-smooth-research.yaml     configuration (models, context targets)
+smooth-research.yaml     configuration (layout, model lists per role, advice rounds, context targets)
 src/                     experiment code
 docs/                    human-facing documents: plan/original.md (imported, sealed), plan/constraints.md,
                          experiments/E-xxxx.md (contracts), tasks/, notes/

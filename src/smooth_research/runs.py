@@ -108,7 +108,7 @@ def _review_hint(check: dict) -> str:
         last = max(i for ids in check["changed"].values() for i in ids)
         return f". Before a costly run, re-check the changed files: rl review request ... --recheck-of {last}"
     if check["status"] in ("none", "not_passed"):
-        return (". A costly run on a new core path needs a cross-model code review first; for other runs say why "
+        return (". A costly run on a new core path needs a code review first; for other runs say why "
                 "with --no-review \"<reason>\"")
     return ""
 

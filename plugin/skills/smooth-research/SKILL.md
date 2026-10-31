@@ -35,9 +35,10 @@ reviews, literature); it never runs, polls or cancels experiments for you.
    `docs/plan/original.md` and sealed; it is never edited afterwards).
 2. Register this session: `{{rl}} session start --role coordinator --host {{host}} --host-session-id {{session_id}}
    --model-observed <your model id>`.
-3. Fill `docs/plan/constraints.md` from the plan and the user: resource ceiling, allowed environments,
-   models. Ask the user only about gaps that change the goal or the budget; fill low-risk details yourself
-   and say so.
+3. Fill `docs/plan/constraints.md` from the plan and the user: goal and claims in scope, allowed data and
+   environments, resource ceiling. Model choices go in `smooth-research.yaml` (models: researcher, reviewer
+   and advisor lists); check them with `{{rl}} models`. Ask the user only about gaps that change the goal or
+   the budget; fill low-risk details yourself and say so.
 
 ## From plan to hypotheses
 
@@ -76,13 +77,13 @@ controls) · E2 minimal real model · E3 limited confirmation (pre-fixed compari
 ## Recording runs (researchers, and you for small checks)
 
 1. Code goes in `src/`. Before a costly run on a new core operator, training/eval path, loss mask, data
-   split, adapter injection or checkpoint I/O, get a cross-model code review (skill `research-review`). Smoke
+   split, adapter injection or checkpoint I/O, get a code review (skill `research-review`). Smoke
    tests and deterministic checks may run first. Seeds of an already reviewed spec need no new review.
 2. Register before running: `{{rl}} run register --experiment E-x --request-id <unique> --arm .. --seed ..
    --code-digest "$({{rl}} digest src/ | cut -d' ' -f1)" (or --code-commit <full sha>) --config-digest ..
    --data-revision .. --metric .. --output-spec research/artifacts/<ATT>/..` -> RUN and ATT ids.
    Write `unknown` for facts you do not have; never guess. Its `code review` line, recorded on the attempt,
-   says whether answered cross-model reviews still cover the code this run executes (the commit, else the
+   says whether answered reviews still cover the code this run executes (the commit, else the
    working tree): covered, stale (a reviewed file changed: re-check before a costly run) or not reviewed.
    Nothing is blocked; a run that needs no review says why: `--no-review "smoke test"`.
 3. Run it with your own tools (shell, background jobs, remote or HPC tools). Record facts as you observe

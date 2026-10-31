@@ -1,4 +1,5 @@
-"""Thin host adapters for model calls: Claude Code (`claude -p`), Codex (`codex exec`) and manual submission.
+"""Thin host adapters for model calls: Claude Code (`claude -p`), Codex (`codex exec`), pi (`pi -p`) and manual
+submission.
 
 They run reviewer, advisor and delegated research sessions only; experiments are never executed through them.
 Each call reports the requested model, the observed model when the host exposes it (otherwise unverified),
@@ -20,7 +21,8 @@ from pathlib import Path
 
 from .util import RLError
 
-ENTRY_RE = re.compile(r"^(?P<entry>claude|codex|manual):(?P<model>[^@\s]+)(?:@(?P<effort>[a-z]+))?$")
+ENTRY_RE = re.compile(r"^(?P<entry>claude|codex|pi|manual):(?P<model>[^@\s]+)(?:@(?P<effort>[a-z]+))?$")
+EXECUTABLES = {"claude": "claude", "codex": "codex", "pi": "pi"}
 JSON_BLOCK_RE = re.compile(r"```json[ \t]*\n(.*?)```", re.S)
 
 
@@ -46,7 +48,7 @@ class Entry:
     def parse(cls, text: str) -> "Entry":
         m = ENTRY_RE.match(text.strip())
         if not m:
-            raise RLError("INVALID", f"model entry {text!r} must be <claude|codex|manual>:<model>[@effort]")
+            raise RLError("INVALID", f"model entry {text!r} must be <claude|codex|pi|manual>:<model>[@effort]")
         return cls(m["entry"], m["model"], m["effort"])
 
     @property
@@ -82,7 +84,7 @@ def available(entry: Entry) -> str | None:
     """Why this entry cannot be called here, or None."""
     if entry.entry == "manual":
         return "manual entries are submitted by a person"
-    exe = {"claude": "claude", "codex": "codex"}[entry.entry]
+    exe = EXECUTABLES[entry.entry]
     return None if shutil.which(exe) else f"{exe} CLI is not on PATH"
 
 
@@ -202,12 +204,54 @@ def call_codex(entry: Entry, prompt: str, cwd: Path, read_only: bool, timeout: i
     return result
 
 
+def call_pi(entry: Entry, prompt: str, cwd: Path, read_only: bool, timeout: int,
+            add_dirs: list[str] = (), log: Path | None = None) -> Call:
+    """`pi -p --mode json`: the first line is the session header, then agent events; the answer is the text of
+    the last assistant message, and its model and provider are what pi reports for that message."""
+    session = str(uuid.uuid4())
+    cmd = ["pi", "-p", "--mode", "json", "--model", entry.model, "--session-id", session]
+    if entry.effort:
+        cmd += ["--thinking", entry.effort]
+    if read_only:
+        cmd += ["--tools", "read"]
+    out = _run(cmd, prompt, cwd, timeout)
+    if log:
+        log.write_text(out.stdout + ("\n--- stderr ---\n" + out.stderr if out.stderr else ""), encoding="utf-8")
+    result = Call("pi", entry.model, session_id=session, raw_log=str(log) if log else None)
+    texts, models, errors, cost = [], [], [], 0.0
+    for line in out.stdout.splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        message = event.get("message") or {}
+        if event.get("type") == "session":
+            result.session_id = event.get("id") or session
+        elif event.get("type") == "message_end" and message.get("role") == "assistant":
+            if message.get("stopReason") in ("error", "aborted"):
+                errors.append(str(message.get("errorMessage") or message["stopReason"])[:300])
+            texts.append("".join(c.get("text") or "" for c in message.get("content") or [] if c.get("type") == "text"))
+            models.append(message.get("responseModel") or message.get("model"))
+            result.provider = message.get("provider") or result.provider
+            result.usage = message.get("usage") or result.usage
+            cost += float(((message.get("usage") or {}).get("cost") or {}).get("total") or 0)
+    seen = sorted(set(filter(None, models)))
+    result.text = next((t for t in reversed(texts) if t.strip()), "")
+    result.observed_model = seen[0] if len(seen) == 1 else None
+    result.cost_usd = cost or None
+    result.extra = {"observed_models": seen}
+    result.ok = out.returncode == 0 and not errors and bool(result.text)
+    if not result.ok:
+        result.error = "; ".join(errors) or f"exit {out.returncode}: {(out.stderr or out.stdout).strip()[-300:]}"
+    return result
+
+
 def call(entry: Entry, prompt: str, cwd: Path, read_only: bool = True, timeout: int = 1800,
          add_dirs: list[str] = (), log: Path | None = None) -> Call:
     problem = available(entry)
     if problem:
         return Call(entry.entry, entry.model, error=problem)
-    fn = call_claude if entry.entry == "claude" else call_codex
+    fn = {"claude": call_claude, "codex": call_codex, "pi": call_pi}[entry.entry]
     try:
         return fn(entry, prompt, cwd, read_only, timeout, list(add_dirs), log)
     except RLError as exc:

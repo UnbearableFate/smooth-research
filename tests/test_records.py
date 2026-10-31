@@ -273,28 +273,33 @@ def test_configuration_keys_the_cli_does_not_read_are_reported(project, rl, tmp_
     code, out, _ = rl("status")
     assert code == 0 and "warning" not in out
 
-    # an older project's retired keys and two typos: the commands still run and say what is ignored
-    data["models"]["researcher"] = "inherit"
+    # an older project's forms, a retired section and a typo: the commands still run and say what they read
+    data["models"] = {"researcher": "inherit",
+                      "reviewer": {"relation_to_author": "different_family", "candidates": ["codex:gpt-6-astra"]},
+                      "advisor": {"primary": "claude:claude-fable-5-1@high", "fallback": ["manual:gpt-pro"]}}
     data["artifacts"] = {"content_digest": "blake2b", "keep_raw_evidence": True}
-    data["models"]["reviewer"]["relation_to_autor"] = "any"
     data["contxt"] = {"work_target_tokens": 100}
     cfg.write_text(yaml.safe_dump(data), encoding="utf-8")
     code, out, _ = rl("status")
     assert code == 0 and "H-0001" in out
-    assert "warning: smooth-research.yaml: models.researcher is no longer used" in out
-    assert "artifacts is no longer used" in out
-    assert "unknown key models.reviewer.relation_to_autor" in out and "unknown key contxt" in out
+    assert "warning: smooth-research.yaml: models.researcher has the form used before 2026-10-31" in out
+    assert "models.reviewer has the form used before 2026-10-31; write it as a list of model entries (read now as " \
+           "['codex:gpt-6-astra'])" in out
+    assert "(read now as ['claude:claude-fable-5-1@high'])" in out
+    assert "artifacts is no longer used" in out and "unknown key contxt has no effect" in out
     code, out, _ = rl("--json", "status")
-    assert len(json.loads(out)["warnings"]) == 4
+    assert len(json.loads(out)["warnings"]) == 5
     hook = hooks.session_start("claude", json.dumps({"cwd": str(tmp_path)}))["hookSpecificOutput"]
     assert "- configuration: smooth-research.yaml: unknown key contxt" in hook["additionalContext"]
 
-    # a family rule the CLI does not know turns the filter off, so it is named too
-    del data["models"]["reviewer"]["relation_to_autor"]
-    data["models"]["reviewer"]["relation_to_author"] = "different-family"
+    # an entry that does not parse and an advice limit that is not a count are named too
+    data = {**DEFAULT_CONFIG, "models": {**DEFAULT_CONFIG["models"], "reviewer": ["codex-gpt-6-astra"]},
+            "advice": {"max_rounds": "three"}}
     cfg.write_text(yaml.safe_dump(data), encoding="utf-8")
     code, out, _ = rl("models")
-    assert code == 0 and "relation_to_author is 'different-family'" in out and "turns that filter off" in out
+    assert code == 0 and "models.reviewer: model entry 'codex-gpt-6-astra' must be" in out
+    assert "advice.max_rounds must be a whole number of rounds, not 'three'; using 3" in out
+    assert "codex-gpt-6-astra: invalid" in out and "advice rounds used: 0 of 3" in out
 
     # a configuration that does not load is reported at session start, not mistaken for no project
     cfg.write_text("version: 2\n", encoding="utf-8")

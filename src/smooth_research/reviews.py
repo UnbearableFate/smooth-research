@@ -3,9 +3,12 @@
 Code reviews are keyed by a scope fingerprint (code, configuration with whitelisted keys removed, dependencies
 and the scope text); conclusion reviews by the package built from the records behind a proposed key conclusion.
 Either is reused only while its key is unchanged. A code review also keeps its scope, so registering a run can
-tell whether the reviews still cover the code it executes. The reviewer comes from a different model family than
-the authors; when none is available the ticket stays pending or unavailable — never a fake pass.
-Advice requests are deduplicated by question, evidence version, constraints and advisor configuration.
+tell whether the reviews still cover the code it executes. Reviewers are tried in the configured order whatever
+model wrote the code; the relation to the authors' model family is recorded, not enforced. When no reviewer is
+available the ticket stays pending or unavailable — never a fake pass.
+Advice comes in rounds: every configured advisor gets its own ticket on the same package, and a project has a
+limited number of rounds (advice.max_rounds) unless the user approves more. A round is deduplicated by
+question, evidence version, constraints and advisor configuration.
 """
 
 from __future__ import annotations
@@ -20,6 +23,7 @@ import yaml
 
 from . import adapters, documents
 from .context import advice_pack, _contract
+from .project import advice_limit, model_entries
 from .research import brief
 from .runs import code_review_summary, evidence_attempts
 from .store import Store, Tx
@@ -83,12 +87,8 @@ its cost. End with exactly one ```json block:
 
 
 def _entries(store: Store, kind: str) -> list[adapters.Entry]:
-    models = store.project.config["models"]
-    if kind == "review":
-        raw = models["reviewer"]["candidates"]
-    else:
-        raw = [models["advisor"]["primary"], *models["advisor"].get("fallback", [])]
-    return [adapters.Entry.parse(r) for r in raw]
+    role = "reviewer" if kind == "review" else "advisor"
+    return [adapters.Entry.parse(r) for r in model_entries(store.project.config, role)]
 
 
 def _relation(author_families: set, observed: str | None, requested: str) -> str:
@@ -109,8 +109,7 @@ def _worker_alive(ticket: dict) -> bool:
         return False
 
 
-def start_background(store: Store, ticket_id: str, timeout: int) -> dict:
-    """Run the call in a detached worker process; `rl review show` / `rl advise show` report the outcome."""
+def _spawn(store: Store, ticket_id: str, timeout: int) -> tuple[subprocess.Popen, Path]:
     log = store.project.dir("calls") / f"{ticket_id}.worker.log"
     cmd = [sys.executable, "-m", "smooth_research", "--project", str(store.project.root),
            "review" if ticket_id.startswith("RV") else "advise", "run", ticket_id, "--timeout", str(timeout)]
@@ -121,13 +120,36 @@ def start_background(store: Store, ticket_id: str, timeout: int) -> dict:
         t = tx.require(ticket_id, "Ticket")
         tx.update(ticket_id, {"status": "running", "calls": (t.get("calls") or []) + [
             {"pid": proc.pid, "started_at": now_utc(), "background": True}]})
+    return proc, log
+
+
+def start_background(store: Store, ticket_id: str, timeout: int) -> dict:
+    """Run the call in a detached worker process; `rl review show` / `rl advise show` report the outcome."""
+    proc, log = _spawn(store, ticket_id, timeout)
     return {"id": ticket_id, "pid": proc.pid, "log": store.project.rel(log),
             "summary": f"{ticket_id} running in background (pid {proc.pid}); check with "
                        f"`rl {'review' if ticket_id.startswith('RV') else 'advise'} show {ticket_id}`"}
 
 
+def run_many(store: Store, ticket_ids: list[str], timeout: int, background: bool = False) -> dict:
+    """Each ticket in its own worker process at the same time (the advisors of a round answer independently);
+    without --background, wait for all of them."""
+    started = [(tid, *_spawn(store, tid, timeout)) for tid in ticket_ids]
+    if not background:
+        for _, proc, _ in started:
+            try:
+                proc.wait(timeout=timeout + 60)
+            except subprocess.TimeoutExpired:
+                pass  # the worker records its own timeout; show what is recorded so far
+    with store.read() as tx:
+        tickets = [tx.require(tid, "Ticket") for tid, _, _ in started]
+    lines = [f"{brief(t)}" + (f" (pid {proc.pid}, log {store.project.rel(log)})" if background else "")
+             for t, (_, proc, log) in zip(tickets, started)]
+    return {"tickets": [t["id"] for t in tickets], "summary": "\n".join(lines)}
+
+
 def run_ticket(store: Store, ticket_id: str, timeout: int = 1800, only: str | None = None) -> dict:
-    """Try the configured entries in order (keeping the family rule for reviews); record every attempt."""
+    """Try the ticket's entries in order and record every attempt; the first parseable answer is kept."""
     with store.read() as tx:
         t = tx.require(ticket_id, "Ticket")
         if not t.get("request_ref"):
@@ -278,19 +300,11 @@ def fingerprint(store: Store, files: list[str], configs: list[str], deps: list[s
     return digest_json(detail), detail
 
 
-def _eligible(store: Store, author_models: list[str]) -> list[adapters.Entry]:
-    authors = set(filter(None, (adapters.family(m) for m in author_models)))
-    rule = store.project.config["models"]["reviewer"].get("relation_to_author", "different_family")
-    return [e for e in _entries(store, "review") if rule != "different_family" or e.entry == "manual"
-            or e.family not in authors]
-
-
 def _reuse(tx: Tx, key: str, target_text: str | None, targets: list[str], author_models: list[str],
            subject: str, extra: dict | None = None) -> dict | None:
-    """An answered cross-model review (pass or issues) with the same key answers this request too."""
+    """An answered review (pass or issues) with the same key answers this request too."""
     for old in tx.all("Ticket", dedupe_key=key):
-        if old["kind"] == "review" and old["status"] == "answered" and old.get("verdict") in ("pass", "issues") \
-                and str(old.get("relation", "")).startswith("cross_model"):
+        if old["kind"] == "review" and old["status"] == "answered" and old.get("verdict") in ("pass", "issues"):
             rid = tx.next_id("Ticket", "RV")
             tx.create("Ticket", {**{k: old.get(k) for k in ("question", "request_ref", "answer_ref", "requested_entry",
                                                             "requested_model", "observed_model", "provider",
@@ -313,11 +327,10 @@ def request_review(store: Store, target: str | None, files: list[str], question:
     if not files:
         raise RLError("INVALID", "name the code under review with --files")
     if not author_models:
-        raise RLError("INVALID", "name the model(s) that wrote this code with --author-model; the reviewer must "
-                                 "come from a different family")
+        raise RLError("INVALID", "name the model(s) that wrote this code with --author-model (recorded with the "
+                                 "review)")
     fp, detail = fingerprint(store, files, list(configs), list(deps), list(ignore_keys), scope or question)
-    authors = set(filter(None, (adapters.family(m) for m in author_models)))
-    eligible = _eligible(store, author_models)
+    eligible = _entries(store, "review")
     with store.write() as tx:
         if target:
             tx.require(target)
@@ -331,7 +344,7 @@ def request_review(store: Store, target: str | None, files: list[str], question:
                              "target_id": target, "question": question, "dedupe_key": fp,
                              "candidates": [str(e) for e in eligible], "author_models": list(author_models),
                              "recheck_of": recheck_of, "code_scope": detail,
-                             "error": None if eligible else f"no configured reviewer outside families {sorted(authors)}"})
+                             "error": None if eligible else "no reviewer configured (models.reviewer is empty)"})
         if target:
             tx.link("targets", rid, target)
         contract = ""
@@ -441,7 +454,7 @@ def _code_reader(store: Store, code_ref) -> tuple:
 
 
 def code_coverage(store: Store, experiment: str, code_ref, named: list[str] = (), waived: str | None = None) -> dict:
-    """Do answered cross-model code reviews still cover the code a run of this experiment executes?
+    """Do answered code reviews still cover the code a run of this experiment executes?
 
     Every path a passing review covered must still match, in that code, the version at least one passing
     review saw (configs compared without the keys that review allowed to vary). The result is recorded on the
@@ -455,14 +468,10 @@ def code_coverage(store: Store, experiment: str, code_ref, named: list[str] = ()
         tickets = _code_reviews(tx, experiment, list(named))
     if not tickets:
         return {"status": "none"}
-    passing = [t for t in tickets if t["status"] == "answered" and t.get("verdict") in ("pass", "issues")
-               and str(t.get("relation", "")).startswith("cross_model")]
+    passing = [t for t in tickets if t["status"] == "answered" and t.get("verdict") in ("pass", "issues")]
     others = [t for t in tickets if t not in passing]
     if not passing:
-        return {"status": "not_passed", "open": [
-            f"{t['id']} {t.get('verdict') or t['status']}"
-            + (f" ({t['relation']})" if t.get("relation") and not t["relation"].startswith("cross_model") else "")
-            for t in others]}
+        return {"status": "not_passed", "open": [f"{t['id']} {t.get('verdict') or t['status']}" for t in others]}
     scoped = [t for t in passing if t.get("code_scope")]
     if not scoped:
         return {"status": "unchecked", "reviews": [f"{t['id']} {t['verdict']}" for t in passing],
@@ -513,17 +522,16 @@ def request_conclusion_review(store: Store, targets: list[str], proposal: str, a
     if not (proposal or "").strip():
         raise RLError("INVALID", "state the conclusion you plan to record with --proposal")
     if not author_models:
-        raise RLError("INVALID", "name the model(s) that drew this conclusion with --author-model; the reviewer "
-                                 "must come from a different family")
+        raise RLError("INVALID", "name the model(s) that drew this conclusion with --author-model (recorded with the "
+                                 "review)")
     question = question or CONCLUSION_QUESTION
-    eligible = _eligible(store, author_models)
-    authors = set(filter(None, (adapters.family(m) for m in author_models)))
+    eligible = _entries(store, "review")
     with store.read() as tx:
         prior = brief(tx.require(recheck_of, "Ticket")) if recheck_of else ""
         body = _conclusion_body(tx, store, targets, proposal, question, prior)
     key = digest_json({"subject": "conclusion", "body": body})
     target_text = ", ".join(targets)
-    error = None if eligible else f"no configured reviewer outside families {sorted(authors)}"
+    error = None if eligible else "no reviewer configured (models.reviewer is empty)"
     with store.write() as tx:
         reused = None if recheck_of else _reuse(tx, key, target_text, targets, author_models, "conclusion")
         if reused:
@@ -625,34 +633,63 @@ def _evidence_version(tx: Tx) -> str:
     return digest_json({"evidence": state, "hypotheses": hyps})
 
 
-def prepare_advice(store: Store, question: str, target: str | None = None) -> dict:
+def advice_rounds(tx: Tx) -> list:
+    """Advice rounds that count toward advice.max_rounds: those with an answer or still waiting for one (a round
+    no advisor could answer does not count). Tickets from before rounds existed are one round each."""
+    rounds: dict = {}
+    for t in tx.all("Ticket", kind="advice"):
+        rounds.setdefault(t.get("advice_round") or t["id"], []).append(t["status"])
+    return [r for r, statuses in rounds.items() if set(statuses) & {"answered", "pending", "running"}]
+
+
+def prepare_advice(store: Store, question: str, target: str | None = None, user_approved: str | None = None) -> dict:
+    """One advice round: a package for every configured advisor, each on its own ticket, to be asked at once."""
     constraints = store.project.abs(store.project.config["constraints_ref"])
+    entries = _entries(store, "advice")
+    if not entries:
+        raise RLError("INVALID", "no advisor configured: list model entries under models.advisor")
+    limit = advice_limit(store.project.config)
     with store.read() as tx:
         if target:
             tx.require(target)
         key = digest_json({"question": question.strip(), "target": target, "evidence": _evidence_version(tx),
                            "constraints": digest_file(constraints) if constraints.exists() else None,
-                           "advisor": store.project.config["models"]["advisor"]})
-        for old in tx.all("Ticket", dedupe_key=key):
-            if old["kind"] == "advice":
-                return {"id": old["id"], "duplicate": True,
-                        "summary": f"{old['id']} already asks this with the same evidence ({old['status']}); "
-                                   "send only new data, or wait for new evidence"}
+                           "advisor": [str(e) for e in entries]})
+        same = [t for t in tx.all("Ticket", dedupe_key=key) if t["kind"] == "advice"]
+        if same:
+            ids = [t["id"] for t in same]
+            return {"ids": ids, "duplicate": True,
+                    "summary": f"{', '.join(ids)} already ask this with the same evidence "
+                               f"({', '.join(t['status'] for t in same)}); send only new data, or wait for new evidence"}
     pack = advice_pack(store, target, question)
     with store.write() as tx:
-        aid = tx.next_id("Ticket", "AD")
-        tx.create("Ticket", {"id": aid, "kind": "advice", "status": "pending", "target_id": target,
-                             "question": question, "dedupe_key": key,
-                             "candidates": [str(e) for e in _entries(store, "advice")]})
-        if target:
-            tx.link("targets", aid, target)
-    path = store.project.dir("packages") / f"{aid}.request.md"
+        used = len(advice_rounds(tx))
+        if used >= limit and not (user_approved or "").strip():
+            raise RLError("LIMIT", f"{used} of {limit} advice rounds used (advice.max_rounds); report to the user "
+                                   "why another round is needed, and if they agree pass their approval: "
+                                   "--user-approved \"<what the user said>\"")
+        number = 1 + max([t.get("advice_round") or 0 for t in tx.all("Ticket", kind="advice")], default=0)
+        ids = []
+        for entry in entries:
+            aid = tx.next_id("Ticket", "AD")
+            tx.create("Ticket", {"id": aid, "kind": "advice", "status": "pending", "target_id": target,
+                                 "question": question, "dedupe_key": key, "candidates": [str(entry)],
+                                 "advice_round": number, "user_approved": (user_approved or "").strip() or None})
+            if target:
+                tx.link("targets", aid, target)
+            ids.append(aid)
+    path = store.project.dir("packages") / f"advice-round-{number}.request.md"
     path.write_text(pack["summary"] + "\n\n" + ADVICE_PROTOCOL, encoding="utf-8")
     prep = documents.prepare(store.project, path, "advice_request")
     with store.write() as tx:
         ref = documents.register(tx, prep)
-        tx.update(aid, {"request_ref": ref})
-        tx.event("advice.prepared", aid, question)
-    return {"id": aid, "request_ref": ref, "tokens": pack["tokens"],
-            "summary": f"{aid} package {store.project.rel(path)} (≈{pack['tokens']} tokens); "
-                       f"run: rl advise run {aid} [--background], or submit it manually"}
+        for aid in ids:
+            tx.update(aid, {"request_ref": ref})
+        tx.event("advice.prepared", ids[0], f"round {number} ({len(ids)} advisors)"
+                 + (f"; beyond the limit, approved by the user: {user_approved.strip()}" if used >= limit else "")
+                 + f": {question}")
+    advisors = ", ".join(f"{aid} {entry}" for aid, entry in zip(ids, entries))
+    return {"ids": ids, "round": number, "request_ref": ref, "tokens": pack["tokens"],
+            "summary": f"advice round {number} ({used + 1} of {limit} used): {advisors}; package "
+                       f"{store.project.rel(path)} (≈{pack['tokens']} tokens); ask them all at once: "
+                       f"rl advise run {' '.join(ids)} [--background]"}

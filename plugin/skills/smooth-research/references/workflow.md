@@ -7,8 +7,8 @@ Locations line of `{{rl}} resume`.
 ## A local run, end to end
 
 ```bash
-# 1. register (nothing starts); keep the printed RUN / ATT ids. Its "code review" line says whether a
-#    cross-model review still covers this code; add --no-review "<reason>" when the run needs none
+# 1. register (nothing starts); keep the printed RUN / ATT ids. Its "code review" line says whether an
+#    answered review still covers this code; add --no-review "<reason>" when the run needs none
 {{rl}} run register --experiment E-0001 --request-id E-0001-wd-s0 --arm wd1e-2 --seed 0 \
   --code-digest "$({{rl}} digest src/ | cut -d' ' -f1)" --config-digest unknown \
   --data-revision "synthetic-v1 (generator in src/data.py, n=2000)" --metric "test accuracy" \

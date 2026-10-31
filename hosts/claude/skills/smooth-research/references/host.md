@@ -12,16 +12,16 @@ the absolute path from SKILL.md.
   back, read `rl inbox --role coordinator`, check the outputs and records, then `rl task accept` or
   `rl task reopen` with what to change. Start several at once only for tasks that can proceed
   independently; do not split work that needs constant coordination.
-- Cross-session work (another model family, or long isolated work): `rl delegate T-x --entry
-  codex:<model>@medium --background` starts an independent Codex session with the work pack; its session
-  id and model are recorded. To continue a task that role owns (after a WAIT), delegate it again with the
-  same `--role`.
-- Default reviewer: code written by an Anthropic model is reviewed by the first non-Anthropic candidate in
-  `smooth-research.yaml` (the Codex CLI by default): `rl review request --author-model <model that wrote it>`;
-  your conclusions likewise: `rl review conclusion --author-model <your model id>`. A review by your own
-  subagent is a same-family session review, not cross-model.
-- Advisor: the configured primary (default `claude:claude-fable-5-1@high`) runs as a separate
-  `claude -p` session that sees only the package.
+- Cross-session work (another model, or long isolated work): `rl delegate T-x --background` starts an
+  independent session with the work pack, using the first available entry of models.researcher in
+  `smooth-research.yaml` (`--entry codex:<model>@high` picks one); its session id and model are recorded.
+  To continue a task that role owns (after a WAIT), delegate it again with the same `--role`.
+- Reviewer: the first available entry of models.reviewer (by default the Codex CLI, then Claude):
+  `rl review request --author-model <model that wrote it>`; your conclusions likewise:
+  `rl review conclusion --author-model <your model id>`. The relation to the author's model family is
+  recorded with each answer.
+- Advisors: every entry of models.advisor (by default `codex:gpt-6-astra@max` and
+  `claude:claude-fable-5-1@high`) answers an advice round in its own session that sees only the package.
 - Long runs: start them with Bash `run_in_background` (or `nohup ... &`), record `running` with the PID,
   keep working, and record the end when you have checked the exit status. Do not sleep-poll.
 - Waiting on cluster jobs is yours: a researcher that submitted Miyabi jobs ends with WAIT and reports the

@@ -1,11 +1,12 @@
 ---
 name: research-review
-description: Cross-model review in a Smooth Research project, of code or of a key conclusion. Code - before a costly run on a new core operator, training or evaluation path, loss mask, data split, adapter injection, checkpoint I/O or distributed change, for a final candidate snapshot, or after a merge that touches these; not for new seeds of an already reviewed spec or unrelated edits. Conclusion - before recording a hypothesis as supported or challenged, stopping a route, or recommending a formal experiment.
+description: Independent review by the configured reviewer in a Smooth Research project, of code or of a key conclusion. Code - before a costly run on a new core operator, training or evaluation path, loss mask, data split, adapter injection, checkpoint I/O or distributed change, for a final candidate snapshot, or after a merge that touches these; not for new seeds of an already reviewed spec or unrelated edits. Conclusion - before recording a hypothesis as supported or challenged, stopping a route, or recommending a formal experiment.
 ---
 
 # Research review
 
-A reviewer from a different model family than the author checks one exact scope, read-only. Two subjects:
+The reviewer configured in `smooth-research.yaml` (models.reviewer, the first available entry) checks one
+exact scope in its own session, read-only. Two subjects:
 the code an implementer wrote (requested by whoever wrote it, usually a researcher) and a key conclusion
 the coordinator is about to record (requested by the coordinator). The CLI is the one described in the
 smooth-research skill: {{rl_short}}
@@ -18,9 +19,9 @@ smooth-research skill: {{rl_short}}
    the result wrong?>" --scope "<new path under review, invariants that must hold>"`
    - `--author-model` is the implementer (you, or the researcher that wrote it), not the coordinator.
    - If the scope fingerprint (code, config minus the ignored keys, dependencies, scope text) matches an
-     earlier cross-model review, it is reused automatically and nothing is sent.
-2. Run it: `{{rl}} review run RV-x --background`, then later `{{rl}} review show RV-x`. The first configured
-   candidate from another family is used; failures fall through to the next one and are recorded.
+     earlier answered review, it is reused automatically and nothing is sent.
+2. Run it: `{{rl}} review run RV-x --background`, then later `{{rl}} review show RV-x`. The configured
+   reviewers are tried in order; failures fall through to the next one and are recorded.
    Keep doing independent cheap work meanwhile; do not wait idle.
 3. Read the answer in `reports/reviews/RV-x.md` (default reports directory): verdict pass | issues |
    blocking, findings with location, evidence, impact, fix, verification, plus what was and was not checked.
@@ -28,12 +29,12 @@ smooth-research skill: {{rl_short}}
    `{{rl}} review request ... --recheck-of RV-x`. For a finding you dispute, keep its text, record your
    reasoning (`{{rl}} decide --targets E-x --action modify|continue --rationale .. --based-on RV-x`) and
    ask for one independent re-check if it matters; never re-roll reviewers until something says pass.
-5. If no eligible reviewer can be called, the ticket says `unavailable`. That is not a pass: low-cost
+5. If no configured reviewer can be called, the ticket says `unavailable`. That is not a pass: low-cost
    independent work may continue, but scaled-up runs that depend on the reviewed path wait (a researcher
    blocks its task with `--reason model_unavailable`).
 6. `{{rl}} run register` checks each run against the code reviews of its experiment (and of the experiment
    its code comes from; name others with `--review RV-x`): every reviewed path must still match, in the code
-   the run executes, a version that a passing cross-model review saw (configs without the ignored keys).
+   the run executes, a version that a passing review saw (configs without the ignored keys).
    The result (covered, stale with the changed paths, not reviewed, or `--no-review` with its reason) is
    recorded on the attempt and shown in conclusion review packages and `{{rl}} report`. A review requested
    before scopes were recorded cannot be checked: request it again with the same scope (the answer is reused).
@@ -46,7 +47,7 @@ smooth-research skill: {{rl_short}}
    level and scope>" --author-model <your model id>`. Add the model of a researcher whose interpretation you
    adopt. The package is built from the records: the hypothesis, each linked evidence with its attempts
    and results, the contracts and per-arm numbers, code reviews, earlier decisions and the competing open
-   hypotheses. Unchanged records and wording reuse an earlier cross-model answer.
+   hypotheses. Unchanged records and wording reuse an earlier answer.
 2. `{{rl}} review run RV-x` (or `--background`), then read `reports/reviews/RV-x.md` (default reports
    directory): verdict and findings (overclaim, wrong_level, out_of_scope, unruled_alternative, data_mismatch).
 3. Act on it: weaken the wording, run the missing control, or keep the conclusion with a recorded reason.
@@ -58,9 +59,10 @@ smooth-research skill: {{rl_short}}
 ## Notes
 
 - Deterministic checks (recomputing numbers, manifest checks) belong in scripts, not in model reviews.
-- A review by the same model family in another session (for example your own subagent) is an independent
-  session review, not cross-model. Import such an answer honestly:
+- The relation to the author's model family is recorded on each answer (cross_model,
+  cross_model_unverified, same_family_independent_session, same_family_unverified); it is not a gate. For a
+  review from another family, list such a model first under models.reviewer.
+- An answer obtained elsewhere (another session, a product UI) is imported honestly:
   `{{rl}} review import RV-x --answer <file> --source "<who/where>" --model-observed <model>`.
 - Recorded per ticket: subject (code or conclusion), requested entry, observed model (or unverified),
-  session id, author models, relation (cross_model, cross_model_unverified, same_family_independent_session),
-  cost when reported.
+  session id, author models, relation, cost when reported.

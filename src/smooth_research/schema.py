@@ -120,7 +120,7 @@ ENTITIES: dict[str, Entity] = {e.label: e for e in [
        candidates=F("json"), requested_entry=F(), requested_model=F(), observed_model=F(), provider=F(),
        host_session_id=F(), author_models=F("json"), relation=F(), verdict=F(), summary=F(), usage=F("json"),
        cost_usd=F("float"), error=F(), calls=F("json"), reused_from=F(), recheck_of=F(), answered_at=F(),
-       subject=F(enum="review_subject"), code_scope=F("json")),
+       subject=F(enum="review_subject"), code_scope=F("json"), advice_round=F("int"), user_approved=F()),
     _e("Event", "EVT", width=6, seq=F("int", True), type=F(required=True), entity_id=F(), actor=F(), summary=F()),
     _e("Request", "REQ", op=F(required=True), request_id=F(required=True), digest=F(required=True),
        result=F("json", True)),

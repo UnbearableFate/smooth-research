@@ -365,7 +365,7 @@ research-tree 已有 export_snapshot，但本次未发现完整的 import/restor
 | --- | --- | --- |
 | Coordinator | 持续的逻辑身份；session 可轮换 | 维护问题方向、选择实验、分配工作、处理分歧和投入决定 |
 | Researcher | 可连续承担相关任务；不绑定单一假说 | 实现、测试、运行、分析、必要文献核对 |
-| Reviewer | 按代码/协议变化临时启动 | 对指定快照进行独立跨模型审查 |
+| Reviewer | 按代码/协议变化临时启动 | 对指定快照进行独立审查（模型由配置决定，见 §8.1） |
 | Advisor | 瓶颈或关键路线决策时调用 | 解释失败、提出替代机制与最小区分实验 |
 
 文献检索、框架构建和证据分析是 task kind，不各自建立永久角色。协调者默认不亲自执行：实现与运行交给研究者，自己只做小改动、冒烟检查和读结果，把上下文留给假说、证据和路线决定；只有任务可以独立推进时才同时启动多个研究者。（2026-10-30 调整：原文允许单个 agent 包办整个小研究环，实施时 skill 写成了协调者“通常也执行”；与用户讨论后回到本表的分工，不另设流程与科学分离的常驻角色，见 §8.6 与 §21.3。）
@@ -432,6 +432,8 @@ next_action: "实现预注册的线性读取对照并运行一次冒烟"
 
 记录 requested_model、observed_model、provider、session_id、author_models、review_scope。两个 session 使用同一个模型属于独立 session 复核，不能被标为跨模型；模型实际身份无法核实时标记未核实。
 
+（2026-10-31 按用户决定调整：审查者只由配置决定，`models.reviewer` 按顺序尝试，第一个可用且给出可解析回答的生效；不再按作者的模型族排除候选。与作者的关系仍如实记录，但代码审查的复用、§8.7 的覆盖检查和 `rl decide` 的检查都不以它为条件。需要跨族审查时，把另一族的模型排在列表前面。）
+
 ### 8.2 按变化审查，不按每个 run 审查
 
 默认触发：
@@ -462,7 +464,7 @@ Reviewer 获取方法定义、代码 diff、必要上下文、关键测试和中
 
 ### 8.5 审查不可用与争议
 
-使用预先选择的 fallback 顺序，同时保持跨模型要求。没有合格 reviewer 时，记录 pending；无关的低成本工作仍可继续。依赖该关键审查的扩大实验等待修复或合格审查，不伪称通过。
+使用预先选择的 fallback 顺序（2026-10-31 起只按配置顺序，见 §8.1）。没有可用 reviewer 时，记录 pending 或 unavailable；无关的低成本工作仍可继续。依赖该关键审查的扩大实验等待修复或合格审查，不伪称通过。
 
 合法的反对意见保留原文。修复后仅复核受影响范围；若意见有争议，绑定一次独立复核，保留分歧与 coordinator 的处理理由，不反复重开直到得到 pass。
 
@@ -474,7 +476,7 @@ Reviewer 获取方法定义、代码 diff、必要上下文、关键测试和中
 2. 停止一条路线（假说转为 retired）。
 3. 阶段交付中的 recommend_formal 或 stop。
 
-由协调者发起（`rl review conclusion --target H-x --proposal … --author-model …`），与代码审查共用 RV 工单、候选、跨模型族规则和回答格式。审查包从记录生成：拟记录的结论、假说陈述与范围、每条相关证据及其 attempt、结果与各臂数字、实验契约（含是否在结果后修订）、代码审查、已有决定和其他开放假说。审查者检查证据等级、结论范围、事前设定的比较、工程失败或对照失败是否被当作否证、未排除的竞争解释，以及摘要与记录数字是否一致。审查包内容不变时复用已有的跨模型回答。
+由协调者发起（`rl review conclusion --target H-x --proposal … --author-model …`），与代码审查共用 RV 工单、候选顺序和回答格式。审查包从记录生成：拟记录的结论、假说陈述与范围、每条相关证据及其 attempt、结果与各臂数字、实验契约（含是否在结果后修订）、代码审查、已有决定和其他开放假说。审查者检查证据等级、结论范围、事前设定的比较、工程失败或对照失败是否被当作否证、未排除的竞争解释，以及摘要与记录数字是否一致。审查包内容不变时复用已有的回答。
 
 不强制拦截：没有引用通过（pass 或 issues）的结论审查的关键决定照常记录，但会一直列在 `rl status`、恢复包和 session 开始提示的待处理中，直到用 `rl link D-x based_on RV-x` 补上；unavailable 或 blocking 都不算通过。报告为每个关键决定标出审查状态。
 
@@ -483,8 +485,8 @@ Reviewer 获取方法定义、代码 diff、必要上下文、关键测试和中
 哪个 run 需要代码审查（§8.2）仍由研究者判断，CLI 不判断一个 run 是不是“新核心路径上的高成本 run”。但每次 `rl run register` 都检查已有的代码审查是否仍覆盖这个 run 实际执行的代码，并把结果记在 attempt 上：
 
 - 候选审查：针对该实验、以及它的代码来源（code_from）实验的代码审查，加上 `--review RV-x` 指名的审查。
-- 覆盖的含义：通过（pass 或 issues）的跨模型审查审过的每个路径，在 run 实际执行的代码中都至少与其中一次审查看到的版本一致。RunSpec 给出 commit 时读该 commit 的文件，否则读工作区；配置去掉该审查允许变化的键后再比较。按 §8.5 修复后只复核受影响文件，也因此仍算覆盖。
-- 结果：covered；stale（列出变化的文件和看到旧版本的审查）；not_passed（只有 pending、unavailable、blocking 或同族审查）；none；unchecked（审查没有记录范围，或 commit 不在本仓库）；waived（`--no-review` 附理由，例如冒烟测试）。
+- 覆盖的含义：通过（pass 或 issues）的审查审过的每个路径（2026-10-31 起不再要求跨模型，见 §8.1），在 run 实际执行的代码中都至少与其中一次审查看到的版本一致。RunSpec 给出 commit 时读该 commit 的文件，否则读工作区；配置去掉该审查允许变化的键后再比较。按 §8.5 修复后只复核受影响文件，也因此仍算覆盖。
+- 结果：covered；stale（列出变化的文件和看到旧版本的审查）；not_passed（只有 pending、unavailable 或 blocking 的审查）；none；unchecked（审查没有记录范围，或 commit 不在本仓库）；waived（`--no-review` 附理由，例如冒烟测试）。
 - 为此代码审查工单记录审查范围明细：每个文件、依赖和配置的摘要，忽略键，scope 文字。此前的工单没有这份明细，用相同范围重新请求即可复用原回答并补记。
 
 不拦截。结果出现在 register 的输出、`rl run show`、工作包、结论审查包（每条证据背后各 attempt 的状态）和报告的证据条目中，让缺口在下结论之前可见。它不单独进入待处理，以免冒烟测试反复提示。
@@ -511,6 +513,8 @@ Reviewer 获取方法定义、代码 diff、必要上下文、关键测试和中
 配置 advisor 主入口与已选择的替补入口，启动前核验可用性。API、CLI、宿主子代理与用户通过 GPT 产品手工咨询是不同入口，不假定同名模型的模式、工具、上下文与权限完全相同。
 
 若最强模式仅在交互产品中可用，生成咨询包供用户提交，再导入原始回答及来源。不能假装 CLI 已自动调用那个产品模式。无回复时保留待咨询状态，继续其他独立工作。
+
+（2026-10-31 按用户决定改为多方独立建议：一轮建议里，`models.advisor` 列出的每个模型各有一个工单，同时调用，各自独立回答；默认 `codex:gpt-6-astra@max` 与 `claude:claude-fable-5-1@high`。协调者综合各方建议，决定采纳哪些、怎样修改假说树。每个项目最多 `advice.max_rounds` 轮（默认 3）；用完后要先向用户报告，经用户同意才开新一轮，同意的原话记在工单上。没有任何 advisor 回答的一轮不计数。）
 
 ### 9.3 输入包与输出协议
 
@@ -796,19 +800,18 @@ reports_root: reports
 research_root: research
 
 models:
-  reviewer:
-    relation_to_author: different_family
-    candidates: [codex:gpt-6-astra@medium, claude:claude-opus-5-5@medium]
-  advisor:
-    primary: claude:claude-fable-5-1@high
-    fallback: [codex:gpt-6-astra@high, manual:gpt-pro]
+  researcher: [claude:claude-opus-5-5@high, codex:gpt-6-astra@high]
+  reviewer: [codex:gpt-6-astra@medium, claude:claude-opus-5-5@medium]
+  advisor: [codex:gpt-6-astra@max, claude:claude-fable-5-1@high]
+advice:
+  max_rounds: 3
 
 context:
   work_target_tokens: 4000
   advice_target_tokens: 10000
 ```
 
-（2026-10-31 按实现更新。上面每个键都由 CLI 读取。原稿中的 `models.researcher: inherit` 和 `artifacts` 一节没有代码读取，已经删除。旧配置里的这些键和拼错的键会触发警告。各键的含义见 `docs/configuration.md`。）
+（2026-10-31 按实现更新。上面每个键都由 CLI 读取。原稿中的 `artifacts` 一节没有代码读取，已经删除。模型选择统一写在这里：三个角色各有一个模型列表，researcher 和 reviewer 按顺序使用第一个可用的，advisor 每轮咨询全部可用的。旧写法（`researcher: inherit`、reviewer 的 `candidates`/`relation_to_author`、advisor 的 `primary`/`fallback`）仍能读取，但会给出警告；拼错的键也会警告。各键的含义见 `docs/configuration.md`。）
 
 模型别名由用户环境映射到可用入口；token 目标是待验证示例。配置不包含实验执行 profile、队列、SSH、调度器后端或固定 node·h 预算 schema。用户在约束文档中说明资源范围、允许的环境与成本上限，协调者和执行者遵守；已知用量可导入并与约束对照，但这不是调度预算预留或平台限制的实现。
 
@@ -1149,18 +1152,25 @@ GitHub 链接固定到本次读取的提交；外部产品文档按 2026-10-30 �
 - 消息：任务状态变化自动生成 TASK/RESULT/WAIT/BLOCKED/HANDOFF/CANCEL；另有 NOTE。`rl inbox --ack` 只移动游标，不发回执。
 - 观测投影：同一来源有序号时按序号，否则按 `observed_at`；终态后的查询失败只记为观测问题；终态后更晚的非终态、两个不同终态、比最近观测更早的终态都标记待核对；只有带依据的 `--correction-of` 才能改变已确认终态。
 - 结果：本地路径计算 blake2b 并与报告摘要比较；远程 URI 只登记（“未读取”）；与 RunSpec 不一致的字段保留并标记不可用于预设比较；partial 不覆盖 complete。
-- 模型入口写作 `<claude|codex|manual>:<model>[@effort]`。默认 reviewer 候选 `codex:gpt-6-astra@medium`、`claude:claude-opus-5-5@medium`，按作者模型族自动排除同族；advisor 默认 `claude:claude-fable-5-1@high`，后备 `codex:gpt-6-astra@high`、`manual:gpt-pro`。实际模型：Claude 取 `modelUsage`，Codex 取 rollout 文件中的 `turn_context.model`，取不到则记为未核实。审查/咨询可后台运行（独立 worker 进程），这是宿主适配层的模型调用，不涉及实验执行。
-- 跨 session：`rl delegate T-x --entry <entry>` 用 `codex exec` 或 `claude -p` 启动独立 session，按工作包领取并交付任务，记录线程/会话 ID 与请求/实际模型。同 session：Claude 插件提供 `smooth-research:researcher` 子代理。
+- 模型入口写作 `<claude|codex|pi|manual>:<model>[@effort]`。（2026-10-31 前：reviewer 候选按作者模型族自动排除同族；advisor 只有一个首选和后备。现行规则见本节“模型选择”。）实际模型：Claude 取 `modelUsage`，Codex 取 rollout 文件中的 `turn_context.model`，pi 取 JSON 事件流中助手消息的 `model`/`responseModel`，取不到则记为未核实。审查/咨询可后台运行（独立 worker 进程），这是宿主适配层的模型调用，不涉及实验执行。
+- 跨 session：`rl delegate T-x [--entry <entry>]` 用 `codex exec`、`claude -p` 或 `pi -p` 启动独立 session，按工作包领取并交付任务，记录线程/会话 ID 与请求/实际模型。同 session：Claude 插件提供 `smooth-research:researcher` 子代理。
 - 上下文包的 token 数为标注方法的估算（ASCII 字符/4 + 非 ASCII 字符），超出预算的部分列为按需读取的索引。
 - 执行下放（2026-10-30，见 §7.1）：协调者的 skill 改为“掌握与用户的对话、假说和路线决定，实现和运行交给研究者”；记录运行的规则单列一节，研究者和做小检查的协调者共用。研究者子代理不再限定工具，继承主 session 的工具（含 pi-env-mcp、miyabi-mcp），可以直接在 Miyabi 上执行。等待集群作业归协调者：研究者提交后以 `task wait` 结束并报告监听命令，协调者等到通知后以同一角色重启研究者；`rl delegate` 也能续接同一角色拥有的未完成任务。工作包列出协调者的 session，作业通知发往那里。代码审查由写代码的一方（通常是研究者）发起。
 - 结论审查（2026-10-30，见 §8.6）：新增 `rl review conclusion`。Ticket 新增 `subject`（code / conclusion），Decision 新增 `evidence_status_set`（记下该决定设定的证据状态）；两者都是可选字段，旧库照常读取。
 - 登记时的代码审查覆盖检查（2026-10-30，见 §8.7）：Ticket 新增 `code_scope`（审查范围明细），Attempt 新增 `code_review`（登记时的检查结果）；`rl run register` 新增 `--review`、`--no-review`。都是可选字段，旧库照常读取，旧 attempt 显示为 not checked。
 - 配置（2026-10-31，见 §13.1 和 `docs/configuration.md`）：
   - 删除了没有代码读取的 `models.researcher`、`artifacts.content_digest`、`artifacts.keep_raw_evidence`。
-  - 以下三种情况会给出警告，但不阻止命令：CLI 不认识的键、旧版本写下的上述键、`relation_to_author` 不是 `different_family`。警告出现在每条命令的输出和会话开始的 hook 里。
+  - 以下几种情况会给出警告，但不阻止命令：CLI 不认识的键、旧版本写下的上述键、旧的模型写法或格式不对的模型条目、不是非负整数的 `advice.max_rounds`。警告出现在每条命令的输出和会话开始的 hook 里。
   - 配置文件不能加载时，hook 直接说明错误，不再当成没有项目。
   - 工作包新增 Locations 一行。skill 和 researcher 子代理改为按它放文件，文中路径按默认值书写并注明。
-  - `rl decide` 对结论审查不检查 relation，和 §8.6 不一致；按用户决定，暂不修改。
+  - `rl decide` 对结论审查不检查 relation，和 §8.6 不一致；按用户决定，当时未修改。随后的模型选择调整让 relation 不再作为任何检查的条件，这个不一致随之消失。
+- 模型选择（2026-10-31，用户要求，见 §8.1、§9.2、§13.1）：
+  - 三个角色的模型都写在 `smooth-research.yaml` 的 `models` 里，每个角色一个条目列表；约束文档不再有“模型选择”一项。
+  - researcher：`rl delegate` 不带 `--entry` 时按顺序使用，跳过 `manual` 和未安装的入口；会话失败就换下一个条目，角色名不变，下一个会话接着做同一个任务。
+  - reviewer：按顺序尝试，不再按作者模型族过滤；relation 只记录。
+  - advisor：`rl advise prepare` 开一轮建议，每个条目一个工单，共用一个建议包；`rl advise run AD-x AD-y` 让它们在各自的进程中同时回答。Ticket 新增 `advice_round`、`user_approved`（可选字段，旧库照常读取；旧的建议工单各算一轮）。
+  - 建议轮数：`advice.max_rounds`（默认 3）。用完后 `rl advise prepare` 报 LIMIT，须向用户报告，用 `--user-approved "<用户的原话>"` 才能开新一轮。
+  - 新增 pi 入口：`pi -p --mode json --model <provider>/<model> --session-id <id> [--thinking <effort>]`，只读调用只开放 read 工具；记录 session id、实际模型、provider、用量和费用。
 
 ### 21.4 首版未做
 
@@ -1177,6 +1187,7 @@ GitHub 链接固定到本次读取的提交；外部产品文档按 2026-10-30 �
   - 配置里 CLI 不读取的键给出警告，包括旧版本写下的键和 `relation_to_author` 的未知值；
   - 配置不能加载时，会话开始的提示直接说明错误；
   - 改名后的目录布局用于 init 和工作包。
+- 再增至 61 项（模型选择）：审查者按配置顺序尝试、不看作者模型族；pi 审查者记录会话、模型与费用；一轮建议同时咨询每个 advisor；超出建议轮数须用户同意，未得到回答的一轮不计数；`rl delegate` 按 researcher 列表依次尝试。
 
 ### 21.6 端到端测试结果（2026-10-30）
 

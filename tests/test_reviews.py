@@ -1,4 +1,5 @@
-"""Review and advice tickets through fake host CLIs: family rule, fallbacks, reuse, honesty when unavailable."""
+"""Review and advice tickets through fake host CLIs: configured order, advice rounds, reuse, honesty when
+unavailable."""
 
 import json
 import os
@@ -41,11 +42,28 @@ print(json.dumps({"type": "result", "is_error": False, "result": answer, "sessio
 """
 
 
+FAKE_PI = r"""#!{python}
+import json, os, sys, pathlib
+args = sys.argv[1:]
+sys.stdin.read()
+if os.environ.get("FAKE_ARGS_OUT"):
+    pathlib.Path(os.environ["FAKE_ARGS_OUT"]).write_text(" ".join(args))
+provider, model = args[args.index("--model") + 1].split("/", 1)
+answer = os.environ.get("FAKE_ANSWER", 'Fine.\n```json\n{"verdict": "pass", "findings": [], "checked": ["all"], "unchecked": []}\n```')
+failed = bool(os.environ.get("FAKE_PI_FAIL"))
+print(json.dumps({"type": "session", "id": args[args.index("--session-id") + 1]}))
+print(json.dumps({"type": "message_end", "message": {
+    "role": "assistant", "content": [{"type": "text", "text": "" if failed else answer}], "model": model,
+    "provider": provider, "usage": {"totalTokens": 9, "cost": {"total": 0.01}},
+    "stopReason": "error" if failed else "stop", "errorMessage": "quota exceeded" if failed else None}}))
+"""
+
+
 @pytest.fixture
 def fakes(tmp_path, monkeypatch):
     bindir = tmp_path / "fakebin"
     bindir.mkdir()
-    for name, body in (("codex", FAKE_CODEX), ("claude", FAKE_CLAUDE)):
+    for name, body in (("codex", FAKE_CODEX), ("claude", FAKE_CLAUDE), ("pi", FAKE_PI)):
         path = bindir / name
         path.write_text(body.replace("{python}", os.sys.executable))
         path.chmod(path.stat().st_mode | stat.S_IEXEC)
@@ -71,15 +89,27 @@ def test_family_detection():
     assert adapters.family("gpt-6-astra") == "openai" and adapters.family("o3") == "openai"
     assert adapters.family("mystery-model") is None
     assert adapters.Entry.parse("codex:gpt-6-astra@medium") == adapters.Entry("codex", "gpt-6-astra", "medium")
+    assert adapters.Entry.parse("pi:openai/gpt-6-astra@max").family == "openai"
     with pytest.raises(RLError):
         adapters.Entry.parse("gpt-6-astra")
 
 
-def test_claude_written_code_goes_to_a_codex_reviewer_and_is_reused_while_unchanged(project, fakes, tmp_path):
+def configure(tmp_path, **models):
+    """Rewrite the model lists and open the project again."""
+    from smooth_research.project import find_project
+    from smooth_research.store import Store
+    cfg = tmp_path / "smooth-research.yaml"
+    data = yaml.safe_load(cfg.read_text())
+    data["models"].update(models)
+    cfg.write_text(yaml.safe_dump(data))
+    return Store(find_project())
+
+
+def test_the_first_reviewer_answers_and_is_reused_while_the_code_is_unchanged(project, fakes, tmp_path):
     code(tmp_path)
     rv = request(project)
     with project.read() as tx:
-        assert tx.require(rv["id"])["candidates"] == ["codex:gpt-6-astra@medium"]
+        assert tx.require(rv["id"])["candidates"] == ["codex:gpt-6-astra@medium", "claude:claude-opus-5-5@medium"]
     out = reviews.run_ticket(project, rv["id"])
     assert out["verdict"] == "pass" and out["relation"] == "cross_model"
     with project.read() as tx:
@@ -94,14 +124,37 @@ def test_claude_written_code_goes_to_a_codex_reviewer_and_is_reused_while_unchan
     assert "reused_from" not in fresh and fresh["id"] != rv["id"]
 
 
-def test_codex_written_code_goes_to_a_claude_reviewer(project, fakes, tmp_path, monkeypatch):
-    monkeypatch.setenv("FAKE_ANSWER", '```json\n{"verdict": "issues", "findings": [{"location": "src/model.py:2"}]}\n```')
+PASS = 'Fine.\n```json\n{"verdict": "pass", "findings": [], "checked": ["all"], "unchecked": []}\n```'
+
+
+def test_reviewers_are_tried_in_order_whatever_model_wrote_the_code(project, fakes, tmp_path, monkeypatch):
     code(tmp_path)
     rv = request(project, author="gpt-6-astra")
-    with project.read() as tx:
-        assert tx.require(rv["id"])["candidates"] == ["claude:claude-opus-5-5@medium"]
     out = reviews.run_ticket(project, rv["id"])
+    assert out["verdict"] == "pass" and out["relation"] == "same_family_independent_session"
+    check = reviews.code_coverage(project, "E-0001", {"content_digest": "unknown"})
+    assert check["status"] == "covered" and check["reviews"] == [f"{rv['id']} pass"]  # the relation is not a gate
+    (fakes / "codex").unlink()  # the first reviewer is not installed: the next one answers
+    monkeypatch.setenv("FAKE_ANSWER", PASS)
+    code(tmp_path, body="def f(x):\n    return 3 * x\n")
+    rv2 = request(project, author="gpt-6-astra")
+    out = reviews.run_ticket(project, rv2["id"])
     assert out["relation"] == "cross_model" and "claude-opus-5-5" in out["summary"]
+    with project.read() as tx:
+        assert "codex CLI is not on PATH" in tx.require(rv2["id"])["calls"][0]["error"]
+
+
+def test_a_pi_reviewer_reports_its_session_model_and_cost(project, fakes, tmp_path, monkeypatch):
+    store = configure(tmp_path, reviewer=["pi:openai/gpt-6-astra@high"])
+    monkeypatch.setenv("FAKE_ARGS_OUT", str(tmp_path / "args.txt"))
+    code(tmp_path)
+    rv = request(store)
+    out = reviews.run_ticket(store, rv["id"])
+    assert out["verdict"] == "pass" and out["relation"] == "cross_model"
+    with store.read() as tx:
+        t = tx.require(rv["id"])
+    assert (t["observed_model"], t["provider"], t["cost_usd"]) == ("gpt-6-astra", "openai", 0.01)
+    assert t["host_session_id"] and "--thinking high --tools read" in (tmp_path / "args.txt").read_text()
 
 
 def test_unavailable_reviewer_is_recorded_not_passed(project, tmp_path, monkeypatch):
@@ -115,18 +168,13 @@ def test_unavailable_reviewer_is_recorded_not_passed(project, tmp_path, monkeypa
     assert t["status"] == "unavailable" and not t.get("verdict") and "not on PATH" in t["error"]
 
 
-def test_no_cross_family_candidate_means_unavailable_at_request(project, tmp_path):
-    cfg = project.project.root / "smooth-research.yaml"
-    data = yaml.safe_load(cfg.read_text())
-    data["models"]["reviewer"]["candidates"] = ["claude:claude-opus-5-5"]
-    cfg.write_text(yaml.safe_dump(data))
-    from smooth_research.project import find_project
-    from smooth_research.store import Store
-    store = Store(find_project())
+def test_no_configured_reviewer_means_unavailable_at_request(project, tmp_path):
+    store = configure(tmp_path, reviewer=[])
     code(tmp_path)
     rv = request(store)
     with store.read() as tx:
-        assert tx.require(rv["id"])["status"] == "unavailable"
+        t = tx.require(rv["id"])
+    assert t["status"] == "unavailable" and "models.reviewer is empty" in t["error"]
 
 
 def test_the_prompt_carries_the_package_with_the_code_inline(project, fakes, tmp_path, monkeypatch):
@@ -154,25 +202,55 @@ def test_unparsed_answers_and_same_family_imports_are_labelled_honestly(project,
     assert out["relation"] == "same_family_independent_session" and out["verdict"] == "issues"
 
 
-def test_advice_is_deduplicated_until_the_evidence_changes(project, fakes):
+PROPOSALS = 'Proposals.\n```json\n{"proposals": [{"title": "x"}, {"title": "y"}], "pause_recommended": false}\n```'
+
+
+def test_an_advice_round_asks_every_advisor_on_its_own(project, fakes, monkeypatch):
     first = reviews.prepare_advice(project, "why no gain?", "H-0001")
+    assert first["round"] == 1 and len(first["ids"]) == 2
+    with project.read() as tx:
+        tickets = [tx.require(i) for i in first["ids"]]
+    assert [t["candidates"] for t in tickets] == [["codex:gpt-6-astra@max"], ["claude:claude-fable-5-1@high"]]
+    assert tickets[0]["request_ref"] == tickets[1]["request_ref"]
     assert reviews.prepare_advice(project, "why no gain?", "H-0001")["duplicate"]
-    out = reviews.run_ticket(project, first["id"])
-    assert "2 proposal(s)" in out["summary"]
+    monkeypatch.setenv("FAKE_ANSWER", PROPOSALS)
+    reviews.run_many(project, first["ids"], timeout=60)
+    with project.read() as tx:
+        done = [tx.require(i) for i in first["ids"]]
+    assert all(t["status"] == "answered" and t["summary"] == "2 proposal(s)" for t in done)
+    assert {t["observed_model"] for t in done} == {"gpt-6-astra", "claude-fable-5-1"}
     research.add_evidence(project, "new negative result", "screening", "valid", challenges=["H-0001"])
     second = reviews.prepare_advice(project, "why no gain?", "H-0001")
-    assert second["id"] != first["id"] and not second.get("duplicate")
-    h = research.add_hypothesis(project, "advised route", "a different writer", derived_from=[first["id"]])
+    assert second["round"] == 2 and not second.get("duplicate")
+    h = research.add_hypothesis(project, "advised route", "a different writer", derived_from=[first["ids"][0]])
     assert h["id"] == "H-0002"
 
 
-def test_manual_advisor_waits_for_an_imported_answer(project, tmp_path, monkeypatch):
+def test_advice_rounds_beyond_the_limit_need_the_users_approval(project, monkeypatch):
+    for i in range(2):
+        reviews.prepare_advice(project, f"question {i}")
     monkeypatch.setenv("PATH", "/nonexistent")
-    ad = reviews.prepare_advice(project, "which route?")
-    out = reviews.run_ticket(project, ad["id"])
+    unanswered = reviews.prepare_advice(project, "question 2")
+    for aid in unanswered["ids"]:
+        reviews.run_ticket(project, aid)  # no advisor could answer: the round does not count
+    assert reviews.prepare_advice(project, "question 3")["round"] == 4
+    with pytest.raises(RLError) as exc:
+        reviews.prepare_advice(project, "question 4")
+    assert exc.value.code == "LIMIT" and "3 of 3 advice rounds used" in exc.value.message
+    out = reviews.prepare_advice(project, "question 4", user_approved="user: one more round is fine")
+    assert out["round"] == 5 and "(4 of 3 used)" in out["summary"]
+    with project.read() as tx:
+        assert tx.require(out["ids"][1])["user_approved"] == "user: one more round is fine"
+
+
+def test_manual_advisor_waits_for_an_imported_answer(project, tmp_path, monkeypatch):
+    store = configure(tmp_path, advisor=["manual:gpt-pro"])
+    monkeypatch.setenv("PATH", "/nonexistent")
+    ad = reviews.prepare_advice(store, "which route?")
+    out = reviews.run_ticket(store, ad["ids"][0])
     assert out["status"] == "pending" and "submit" in out["summary"]
     (tmp_path / "gpt.md").write_text('```json\n{"proposals": [], "pause_recommended": true}\n```')
-    done = reviews.import_answer(project, ad["id"], str(tmp_path / "gpt.md"), "gpt-pro", "ChatGPT Pro (manual)")
+    done = reviews.import_answer(store, ad["ids"][0], str(tmp_path / "gpt.md"), "gpt-pro", "ChatGPT Pro (manual)")
     assert "pause recommended" in done["summary"]
 
 
@@ -186,6 +264,20 @@ def test_delegation_records_the_exact_session_and_model(project, fakes, monkeypa
     assert (s["host"], s["model_requested"], s["model_observed"]) == ("codex", "gpt-6-astra", "gpt-6-astra")
     prompt = delegate.prompt_for(project, "T-0001", "researcher")
     assert "task claim T-0001" in prompt and "Work pack for T-0001" in prompt
+
+
+def test_delegation_tries_the_researcher_entries_in_order(project, fakes, tmp_path, monkeypatch):
+    store = configure(tmp_path, researcher=["manual:someone", "pi:openai/gpt-6-astra@high", "codex:gpt-6-astra@high"])
+    monkeypatch.setenv("FAKE_ANSWER", "claimed and delivered")
+    monkeypatch.setenv("FAKE_PI_FAIL", "1")
+    tasks.create_task(store, "implement", "implement", ["E-0001"], to_role="researcher")
+    out = delegate.delegate(store, "T-0001")
+    assert out["ok"] and out["entry"] == "codex:gpt-6-astra@high"
+    assert "manual:someone: a manual entry cannot run a task session" in out["summary"]
+    assert "pi:openai/gpt-6-astra@high: quota exceeded" in out["summary"]
+    with store.read() as tx:
+        sessions = [(s["host"], s["model_requested"]) for s in tx.all("Session")]
+    assert sessions == [("pi", "openai/gpt-6-astra"), ("codex", "gpt-6-astra")]
 
 
 def evidence(project, accs=(0.8, 0.9)):
@@ -209,7 +301,7 @@ def test_a_key_conclusion_is_checked_against_the_records_behind_it(project, fake
     rv = reviews.request_conclusion_review(project, ["H-0001"], claim, ["claude-opus-5-5"])
     with project.read() as tx:
         t = tx.require(rv["id"])
-    assert t["subject"] == "conclusion" and t["candidates"] == ["codex:gpt-6-astra@medium"]
+    assert t["subject"] == "conclusion" and t["candidates"][0] == "codex:gpt-6-astra@medium"
     out = reviews.run_ticket(project, rv["id"])
     assert out["verdict"] == "pass" and out["relation"] == "cross_model"
     prompt = (tmp_path / "prompt.txt").read_text()

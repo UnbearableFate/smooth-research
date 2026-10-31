@@ -2,7 +2,7 @@
   "name": "smooth-research",
   "displayName": "Smooth Research",
   "version": "0.1.0",
-  "description": "Plan-driven ML research with an evidence record: testable hypotheses, compact experiment contracts, platform-independent run records, cross-model review, bottleneck advice and literature, kept in an embedded LatticeDB graph through one CLI.",
+  "description": "Plan-driven ML research with an evidence record: testable hypotheses, compact experiment contracts, platform-independent run records, independent reviews, advice from several models and literature, kept in an embedded LatticeDB graph through one CLI.",
   "author": {"name": "unbearablefate"},
   "keywords": ["ml-research", "experiments", "evidence", "research-records"]
 }

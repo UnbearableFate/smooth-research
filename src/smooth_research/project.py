@@ -9,6 +9,7 @@ from pathlib import Path
 
 import yaml
 
+from .adapters import Entry
 from .util import RLError
 
 CONFIG_NAME = "smooth-research.yaml"
@@ -16,8 +17,9 @@ ENV_PROJECT = "SMOOTH_RESEARCH_PROJECT"
 
 # Project layout: experiment code in src/, human-facing documents in docs/, reports in reports/, and machine
 # records (database, sealed objects, packages, call logs, run artifacts) in research/.
-# Model entries are "<entry>:<model>[@effort]"; entry is claude, codex or manual (a person submits the package).
-# Every key here is read by the CLI; docs/configuration.md explains each one.
+# Model entries are "<entry>:<model>[@effort]"; entry is claude, codex, pi or manual (a person submits the
+# package). Researchers and reviewers use the first available entry of their list; every available advisor is
+# asked, each on its own. Every key here is read by the CLI; docs/configuration.md explains each one.
 DEFAULT_CONFIG: dict = {
     "version": 1,
     "plan": "docs/plan/original.md",
@@ -27,22 +29,17 @@ DEFAULT_CONFIG: dict = {
     "reports_root": "reports",
     "research_root": "research",
     "models": {
-        "reviewer": {
-            "relation_to_author": "different_family",
-            "candidates": ["codex:gpt-6-astra@medium", "claude:claude-opus-5-5@medium"],
-        },
-        "advisor": {
-            "primary": "claude:claude-fable-5-1@high",
-            "fallback": ["codex:gpt-6-astra@high", "manual:gpt-pro"],
-        },
+        "researcher": ["claude:claude-opus-5-5@high", "codex:gpt-6-astra@high"],
+        "reviewer": ["codex:gpt-6-astra@medium", "claude:claude-opus-5-5@medium"],
+        "advisor": ["codex:gpt-6-astra@max", "claude:claude-fable-5-1@high"],
     },
+    "advice": {"max_rounds": 3},
     "context": {"work_target_tokens": 4000, "advice_target_tokens": 10000},
 }
+MODEL_ROLES = ("researcher", "reviewer", "advisor")
 
 # Keys that earlier versions wrote into the configuration although nothing read them.
 RETIRED_KEYS = {
-    "models.researcher": "the host picks a researcher subagent's model, by default the session's; "
-                         "`rl delegate` takes --entry",
     "artifacts": "digests are always blake2b and raw artifacts are always kept",
 }
 
@@ -123,8 +120,9 @@ class Project:
 
 
 def config_warnings(config: dict) -> list[str]:
-    """Keys of a loaded configuration that the CLI does not read (a typo or a retired key), and a reviewer
-    family rule it does not know. Neither stops a command."""
+    """Keys of a loaded configuration that the CLI does not read (a typo or a retired key), model lists in an
+    older form or with an entry that does not parse, and an advice limit that is not a count. None stops a
+    command."""
     out = []
 
     def walk(given: dict, default: dict, prefix: str) -> None:
@@ -139,12 +137,45 @@ def config_warnings(config: dict) -> list[str]:
 
     walk(config, DEFAULT_CONFIG, "")
     models = config.get("models")
-    reviewer = models.get("reviewer") if isinstance(models, dict) else None
-    rule = reviewer.get("relation_to_author", "different_family") if isinstance(reviewer, dict) else None
-    if rule not in (None, "different_family"):
-        out.append(f"{CONFIG_NAME}: models.reviewer.relation_to_author is {rule!r}; only different_family keeps "
-                   "reviewers of the author's model family out, any other value turns that filter off")
+    for role in MODEL_ROLES if isinstance(models, dict) else ():
+        if isinstance(models.get(role), dict) or models.get(role) == "inherit":
+            out.append(f"{CONFIG_NAME}: models.{role} has the form used before 2026-10-31; write it as a list of "
+                       f"model entries (read now as {model_entries(config, role)})")
+        for text in model_entries(config, role):
+            try:
+                Entry.parse(text)
+            except RLError as exc:
+                out.append(f"{CONFIG_NAME}: models.{role}: {exc.message}")
+    rounds = (config.get("advice") or {}).get("max_rounds") if isinstance(config.get("advice"), dict) else None
+    if not _count(rounds):
+        out.append(f"{CONFIG_NAME}: advice.max_rounds must be a whole number of rounds, not {rounds!r}; using "
+                   f"{DEFAULT_CONFIG['advice']['max_rounds']}")
     return out
+
+
+def _count(value) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
+def model_entries(config: dict, role: str) -> list[str]:
+    """A role's model entries in order. Forms written before 2026-10-31 are still read: reviewer
+    {candidates, relation_to_author} gives its candidates, advisor {primary, fallback} its primary, and
+    researcher "inherit" the default list."""
+    models = config.get("models")
+    value = models.get(role) if isinstance(models, dict) else None
+    if value is None or value == "inherit":
+        return list(DEFAULT_CONFIG["models"][role])
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        return [str(v) for v in value.get("candidates") or [value.get("primary")] if v]
+    return [str(v) for v in value]
+
+
+def advice_limit(config: dict) -> int:
+    advice = config.get("advice")
+    value = advice.get("max_rounds") if isinstance(advice, dict) else None
+    return value if _count(value) else DEFAULT_CONFIG["advice"]["max_rounds"]
 
 
 def load_config(root: Path) -> dict:
@@ -178,6 +209,7 @@ def write_default_config(root: Path) -> Path:
     path = root / CONFIG_NAME
     if not path.exists():
         text = ("# Smooth Research configuration. Resource limits and scope live in the constraints document.\n"
-                "# Model entries: <entry>:<model>[@effort]; entry is claude, codex or manual.\n")
+                "# Model entries: <entry>:<model>[@effort]; entry is claude, codex, pi or manual. Researchers and\n"
+                "# reviewers use the first available entry of their list; every available advisor is asked.\n")
         path.write_text(text + yaml.safe_dump(DEFAULT_CONFIG, sort_keys=False, allow_unicode=True), encoding="utf-8")
     return path

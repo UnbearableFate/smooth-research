@@ -9,14 +9,15 @@
 ### 加载规则
 
 - `version` 必须是 `1`，否则命令报错。
-- 文件里的值和默认值深度合并：字典逐键覆盖，列表整体替换。比如只写一个 `candidates`，默认的两个候选就都没了。
+- 文件里的值和默认值深度合并：字典逐键覆盖，列表整体替换。比如 `models.reviewer` 只写一个条目，默认的两个就都没了。
 - 不认识的键不会让命令失败，但每条命令都会给出警告：
   - 普通输出末尾的 `warning:` 行；
   - `--json` 结果里的 `warnings`；
   - 会话开始时的 hook 提示。
-- 下面两种情况也会警告：
+- 下面几种情况也会警告：
   - 旧版本写进配置、但从来没有代码读取的键（见本节最后）；
-  - `relation_to_author` 不是 `different_family`。
+  - 模型列表还是 2026-10-31 以前的写法（见本节最后），或者有条目格式不对；
+  - `advice.max_rounds` 不是非负整数，这时按 3 计算。
 - 配置文件不能加载时（YAML 写错或 `version` 不对），每条命令都报错。会话开始的 hook 也会直接说明这个错误，不会当成"没有项目"。
 
 ### 目录和文件
@@ -37,34 +38,39 @@
 
 ### 模型
 
-模型条目的格式是 `<入口>:<模型>[@effort]`：
+三个角色各有一个模型列表，每一项是一个模型条目，格式是 `<入口>:<模型>[@effort]`：
 
 - **`claude`**：用 `claude -p` 调用。审查和建议是只读会话，只开放 Read、Grep、Glob 三个工具。
 - **`codex`**：用 `codex exec` 调用。审查和建议在 read-only 沙箱里运行。
+- **`pi`**：用 `pi -p --mode json` 调用。模型写成 `<provider>/<模型>`，比如 `pi:openai/gpt-6-astra@high`。审查和建议只开放 read 工具。
 - **`manual`**：不自动调用。CLI 给出请求包的路径，由人提交给模型，再用 `rl review import` 或 `rl advise import` 导入回答。
-- **`@effort`**：传给 Claude 的 `--effort`，或 Codex 的 `model_reasoning_effort`。
-- **模型家族**：按模型名判断。`claude`、`opus`、`sonnet`、`haiku`、`fable` 属于 anthropic；`gpt`、`o1`–`o9`、`codex`、`chatgpt` 开头的属于 openai。从名字判断不了时，按入口推断。
+- **`@effort`**：传给 Claude 的 `--effort`、Codex 的 `model_reasoning_effort`，或 pi 的 `--thinking`。
+- **模型家族**：按模型名判断。`claude`、`opus`、`sonnet`、`haiku`、`fable` 属于 anthropic；`gpt`、`o1`–`o9`、`codex`、`chatgpt` 开头的属于 openai。pi 的模型名前面的 provider 不参与判断。从名字判断不了时，按入口推断。
 
-| 键 | 默认值 | 含义 |
+| 键 | 默认值 | 怎样使用 |
 |---|---|---|
-| `models.reviewer.candidates` | `codex:gpt-6-astra@medium`、`claude:claude-opus-5-5@medium` | 代码审查和结论审查的候选，按顺序尝试 |
-| `models.reviewer.relation_to_author` | `different_family` | 排除和作者同一家族的候选（`manual` 条目不受影响）。只认 `different_family`：写成其他任何值都会关闭这个过滤，CLI 会给出警告 |
-| `models.advisor.primary` | `claude:claude-fable-5-1@high` | `rl advise` 首先尝试的模型 |
-| `models.advisor.fallback` | `codex:gpt-6-astra@high`、`manual:gpt-pro` | 首选失败后依次尝试 |
-
-研究者用的模型不在这里配置：
-
-- Claude 的 researcher 子代理定义里没有指定模型，由 Claude Code 决定，默认继承协调者会话的模型；
-- `rl delegate` 每次都要用 `--entry` 指定模型。
+| `models.researcher` | `claude:claude-opus-5-5@high`、`codex:gpt-6-astra@high` | `rl delegate` 不带 `--entry` 时按顺序使用。跳过 `manual` 和没有安装的入口。会话失败就换下一个，角色名不变，下一个会话接着做同一个任务 |
+| `models.reviewer` | `codex:gpt-6-astra@medium`、`claude:claude-opus-5-5@medium` | 代码审查和结论审查按顺序尝试，第一个给出可解析回答的生效 |
+| `models.advisor` | `codex:gpt-6-astra@max`、`claude:claude-fable-5-1@high` | 一轮建议里每个条目有自己的工单。`rl advise run` 同时调用它们，每个独立回答 |
 
 几条容易忽略的行为：
 
-- **按顺序尝试。** 第一个给出可解析回答的候选生效。调用失败，或者回答里没有可解析的结果块，就试下一个。
-- **遇到 `manual` 就停。** 工单变成 pending，等人提交回答，排在它后面的候选不会被尝试。所以 `manual` 要放在最后。
-- **候选列表在建工单时写入。** `rl review request` 和 `rl advise prepare` 建工单时就把候选固定下来，之后改配置不影响已经建好的工单。要换模型，用 `rl review run RV-x --entry <条目>`。`--entry` 直接替换候选列表，不做家族过滤，但回答的 relation 仍按实际模型记录。
-- **同家族的回答不算跨模型。** 同家族的回答记为 `same_family_independent_session`。代码审查的复用和 `rl run register` 的覆盖检查都不承认它；`rl decide` 的检查目前承认，见第 6 节。
-- **advisor 配置参与建议请求的去重。** 改了 advisor 配置后，同一个问题不会再被判为重复请求。
-- **`rl models` 只检查命令行工具。** 它列出所有候选，检查 `claude` 和 `codex` 命令在不在 PATH 上，不验证模型本身。实际使用的模型在第一次调用时记录。
+- **审查者只由配置决定。** CLI 不再按作者的模型家族排除候选。回答和作者的关系（relation）仍按实际模型记录：`cross_model`、`cross_model_unverified`、`same_family_independent_session` 或 `same_family_unverified`。代码审查的复用、`rl run register` 的覆盖检查和 `rl decide` 的检查都不看 relation。要跨家族审查，把另一家族的模型排在列表前面。
+- **按顺序尝试。** 调用失败，或者回答里没有可解析的结果块，就试下一个。
+- **审查遇到 `manual` 就停。** 工单变成 pending，等人提交回答，排在它后面的候选不会被尝试。所以 `manual` 要放在最后。
+- **候选列表在建工单时写入。** `rl review request` 和 `rl advise prepare` 建工单时就把候选固定下来，之后改配置不影响已经建好的工单。要换模型，用 `rl review run RV-x --entry <条目>`。
+- **advisor 配置参与建议请求的去重。** 改了 advisor 列表后，同一个问题不会再被判为重复请求。
+- **`rl models` 只检查命令行工具。** 它列出三个角色的条目，检查 `claude`、`codex`、`pi` 命令在不在 PATH 上，不验证模型本身；它还给出已经用了几轮建议。实际使用的模型在第一次调用时记录。
+
+### 建议轮数
+
+| 键 | 默认值 | 含义 |
+|---|---|---|
+| `advice.max_rounds` | `3` | 每个项目最多几轮建议。一次 `rl advise prepare` 开一轮 |
+
+- **怎样计数。** 一轮里只要有一个工单已经回答、还在等待或正在运行，这一轮就计数。所有 advisor 都调用失败或不可用的一轮不计数。
+- **用完以后。** `rl advise prepare` 报 LIMIT。协调者先向用户说明为什么还需要建议。用户同意后，用 `--user-approved "<用户的原话>"` 开新一轮。这句话记在工单和事件日志里。
+- **重复的请求不占轮数。** 同一个问题、同样的证据会返回已有的工单。
 
 ### 上下文包
 
@@ -78,31 +84,32 @@
 - **`--budget` 可以单次覆盖目标。**
 - **审查请求包不用这两个目标。** 它有自己写死的上限，见第 5 节。
 
-### 旧项目里的废弃键
+### 旧版本的写法
 
-2026-10-31 以前生成的配置文件里还有下面三个键，但没有任何代码读取它们。现在它们会触发警告，删掉即可：
+2026-10-31 以前生成的配置文件可能有下面的写法。CLI 仍然读得懂，但每条命令都会警告，按最后一栏改写即可：
 
-| 键 | 实际情况 |
-|---|---|
-| `models.researcher: inherit` | researcher 子代理的模型由宿主决定，默认是会话的模型；`rl delegate` 用 `--entry` 指定模型 |
-| `artifacts.content_digest: blake2b` | 摘要算法写死为 blake2b |
-| `artifacts.keep_raw_evidence: true` | CLI 从不删除原始产物 |
+| 旧写法 | 现在怎样读 | 改成 |
+|---|---|---|
+| `models.researcher: inherit` | 默认的 researcher 列表 | 模型条目的列表 |
+| `models.reviewer: {candidates: [...], relation_to_author: different_family}` | 只读 `candidates`，`relation_to_author` 不再起作用 | `models.reviewer: [...]` |
+| `models.advisor: {primary: X, fallback: [...]}` | 只读 `primary` | `models.advisor: [...]`，列出每一轮都要咨询的模型 |
+| `artifacts.content_digest: blake2b`、`artifacts.keep_raw_evidence: true` | 不读：摘要算法写死为 blake2b，CLI 从不删除原始产物 | 删掉 |
 
 ## 2. 约束文档 `docs/plan/constraints.md`
 
-`rl init` 生成一个模板，有五项要填：
+`rl init` 生成一个模板，有四项要填：
 
 - 研究目标和结论范围；
-- 允许的数据、模型和环境；
+- 允许的数据和环境；
 - 资源上限（每个实验、每批、总量）；
-- 模型选择和替代；
 - 需要用户先决定的动作。
+
+模型选择不在这里：它写在 `smooth-research.yaml` 的 `models` 里，由 CLI 读取。
 
 这份文档的作用：
 
 - **CLI 不解析、不执行它。** 资源预算、允许的集群这类限制只写在这里。`smooth-research.yaml` 不放执行 profile、队列或预算（设计文档 §13.1）。
 - **各请求包怎样引用它。** 工作包只给出它的路径，提醒 agent 遵守。建议请求包会附上它的前 3000 个字符。它的摘要还参与建议请求的去重。
-- **"模型选择"一项只是记录。** 这里写谁选了什么、为什么。实际调用哪个模型由 `smooth-research.yaml` 决定，两边要手动保持一致。
 
 ## 3. 环境变量
 
@@ -118,10 +125,11 @@
 - **全局选项：** `--project`、`--json`（输出完整 JSON）、`--actor`（写进事件日志的名字）。`--project` 和 `--json` 也可以写在子命令后面。
 - **单次覆盖：**
   - `--budget`：`rl context` 和 `rl resume` 的 token 目标；
-  - `--entry`：`rl review run` 和 `rl advise run` 只用这一个模型；
+  - `--entry`：`rl review run`、`rl advise run`（只能给一个工单）和 `rl delegate` 只用这一个模型；
   - `--timeout`：模型调用超时，审查和建议默认 1800 秒，`rl delegate` 默认 3600 秒；
   - `--background`：在后台进程运行。
-- **`rl delegate --entry` 必须写。** 配置文件里没有它的默认值。
+- **一轮建议一起运行。** `rl advise run AD-x AD-y ...` 给每个工单开一个进程，同时运行。
+- **超出建议轮数：** `rl advise prepare --user-approved "<用户的原话>"`，见第 1 节。
 
 ## 5. 写死的常量（不能配置）
 
@@ -131,11 +139,3 @@
 | `INLINE_TOTAL_CHARS` | 240,000 字符 | 审查请求包内联文件的总上限（`reviews.py`） |
 | `LOCK_TIMEOUT_S` | 60 秒 | 写入等待写锁的上限，超时报 LOCKED（`store.py`） |
 | `STALE_AFTER_H` | 6 小时 | 未结束的 attempt 超过这么久没有新观察，描述里会加一句 "stale?" 提示（`runs.py`） |
-
-## 6. 已知的不一致（暂不修改）
-
-`rl decide` 检查关键结论时，只看结论审查的 verdict（`pass` 或 `issues`），不看 relation。
-
-- **默认配置下不会出现。** 建工单时已经排除了同家族候选，所以结论审查默认都是跨模型的。
-- **两种情况下会出现：** 用 `--entry` 指定同家族模型，或者关闭了 `relation_to_author` 过滤。这时同家族的结论审查也能通过 `rl decide` 的检查，而同样情况下的代码审查不算覆盖。
-- **和设计不一致。** 设计文档 §8.6 要求结论审查也必须跨模型。按用户决定，这一处暂不修改。
