@@ -37,9 +37,9 @@ evidence, decisions, reviews, literature); it never runs, polls or cancels exper
    --model-observed <your model id>`.
 3. Fill `docs/constraints.md` from the plan and the user: what only the user may change (goal and claims in
    scope, data and environments, resource ceiling, actions that need their decision), changed later only with
-   their consent. Model choices go in `smooth-research.yaml` (models: researcher, reviewer and advisor lists);
-   check them with `{{rl}} models`. Ask the user only about gaps that change the goal or the budget; fill
-   low-risk details yourself and say so.
+   their consent. `smooth-research.yaml` holds the model lists (`{{rl}} models`) and the compute resources
+   (`compute`: hosts, ssh or pi-env-mcp, job MCP or skill, remote workspace, git or archive; `{{rl}} compute`).
+   Ask the user only about gaps that change goal, budget or resources; fill low-risk details yourself and say so.
 
 ## From plan to hypotheses
 
@@ -99,18 +99,18 @@ Without herdr, use the headless forms in host.md.
    tests and deterministic checks may run first. Seeds of an already reviewed spec need no new review.
 2. Register before running: `{{rl}} run register --experiment E-x --request-id <unique> --arm .. --seed ..
    --code-digest "$({{rl}} digest src/ | cut -d' ' -f1)" (or --code-commit <full sha>) --config-digest ..
-   --data-revision .. --metric .. --output-spec research/artifacts/<ATT>/..` -> RUN and ATT ids.
+   --data-revision .. --metric .. --output-spec .. --resource <where it runs>` -> RUN and ATT ids.
    Write `unknown` for facts you do not have; never guess. Its `code review` line, recorded on the attempt,
    says whether answered reviews still cover the code this run executes (the commit, else the
    working tree): covered, stale (a reviewed file changed: re-check before a costly run) or not reviewed.
    Nothing is blocked; a run that needs no review says why: `--no-review "smoke test"`.
 3. Run it with your own tools (shell, background jobs, remote or HPC tools). Record facts as you observe
    them: `{{rl}} run record --attempt ATT --source <tool> --state running|ended [--outcome success|failed|cancelled]
-   --exec-namespace host:<hostname> --exec-id <pid or job id> --source-ref <log>`. On a cluster (Miyabi:
-   pi-env-mcp and miyabi-mcp) run only from a staged snapshot of the registered commit, submit with the
-   attempt id as the request key, record the ledger export (its `export_command` output) with
-   `{{rl}} run record --observation @file`, and wait for its notification instead of polling; recipe in
-   workflow.md.
+   --exec-namespace host:<hostname> --exec-id <pid or job id> --source-ref <log>`. A remote run (registered
+   with `--code-commit`) executes a read-only snapshot of that commit: `{{rl}} compute steps --attempt ATT`
+   prints how to stage it, start it and fetch the results; you run them. On Miyabi submit with miyabi-mcp,
+   the attempt id as the request key, record its ledger export with `{{rl}} run record --observation @file`
+   and wait for its notification instead of polling; recipe in workflow.md.
 4. `{{rl}} run import-result --attempt ATT --request-id <unique> --manifest @<manifest.json>`; optionally
    `{{rl}} run usage ...` with measured time, unless the executor's export already carried it. Unreported
    usage is not zero.

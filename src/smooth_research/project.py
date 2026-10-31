@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import json
 import os
+import re
 import shlex
 from dataclasses import dataclass
 from pathlib import Path
@@ -38,6 +39,8 @@ UNREAD = "_unread"  # in a loaded configuration: why the file could not be read
 # (coordinator_host_left_percent on the coordinator's own host); its researchers and reviewers then hand over to
 # another entry of their role, and advisors keep the rest (usage.py).
 # manuscript.latex is the command that builds the manuscript (the paper draft) as a PDF (null: Markdown).
+# compute: where experiments run (this machine, remote hosts, clusters), how the agent reaches each one and how
+# the code of a commit gets there; rl connects to none of them (compute.py). Budgets stay in docs/constraints.md.
 # Every key here is read by the CLI; docs/configuration.md explains each one.
 DEFAULT_CONFIG: dict = {
     "version": 1,
@@ -51,18 +54,24 @@ DEFAULT_CONFIG: dict = {
     "usage": {"switch_left_percent": 10, "coordinator_host_left_percent": 20},
     "context": {"work_target_tokens": 4000, "advice_target_tokens": 10000},
     "manuscript": {"latex": None},
+    "compute": {"default": "local", "resources": {"local": {"kind": "local"}}},
 }
 MODEL_ROLES = ("researcher", "reviewer", "advisor")
+# Mappings the file replaces as a whole instead of merging into the defaults: compute.resources names the user's
+# own resources (a project without the default local one leaves it out), and their keys are not the defaults'.
+WHOLE = ("compute.resources",)
 
 RESEARCH_DIRS = ("state", "documents/objects", "packages", "mailbox", "snapshots", "literature", "calls",
                  "artifacts", "experiments", "tasks", "notes", "reviews", "advice", "reports")
 DOCS_DIRS = ("explanations",)
 
 
-def _merge(base: dict, override: dict) -> dict:
+def _merge(base: dict, override: dict, prefix: str = "") -> dict:
     out = copy.deepcopy(base)
     for key, value in (override or {}).items():
-        out[key] = _merge(out[key], value) if isinstance(value, dict) and isinstance(out.get(key), dict) else value
+        path = f"{prefix}{key}"
+        merge = isinstance(value, dict) and isinstance(out.get(key), dict) and path not in WHOLE
+        out[key] = _merge(out[key], value, path + ".") if merge else copy.deepcopy(value)
     return out
 
 
@@ -177,7 +186,7 @@ def config_warnings(config: dict) -> list[str]:
             elif isinstance(default[key], dict) and not isinstance(value, dict):
                 out.append(f"{CONFIG_NAME}: {path} must hold keys like the default, not {value!r}; its settings are "
                            "at their defaults")
-            elif isinstance(value, dict) and isinstance(default[key], dict):
+            elif isinstance(value, dict) and isinstance(default[key], dict) and path not in WHOLE:
                 walk(value, default[key], path + ".")
 
     walk(config, DEFAULT_CONFIG, "")
@@ -223,7 +232,7 @@ def config_warnings(config: dict) -> list[str]:
     if latex is not None and not latex_command(config):
         out.append(f"{CONFIG_NAME}: manuscript.latex must be a build command such as 'latexmk -pdf "
                    f"-interaction=nonstopmode', or null for a Markdown draft, not {latex!r}; writing Markdown")
-    return out
+    return out + [f"{CONFIG_NAME}: {text}" for text in compute_resources(config)[1]]
 
 
 def _count(value) -> bool:
@@ -317,6 +326,134 @@ def usage_percent(config: dict, key: str) -> float:
 
 def _percent(value) -> bool:
     return _minutes(value) and value <= 100
+
+
+RESOURCE_KEYS = ("kind", "host", "connect", "jobs", "workspace", "code", "git_remote", "git_url", "notes")
+RESOURCE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+
+
+@dataclass(frozen=True)
+class Resource:
+    """One entry of compute.resources. local: this machine, code from the caller's checkout. remote: a host the
+    agent reaches with ssh or pi-env-mcp (host is the ssh alias, or pi-env-mcp's host name); jobs say what starts
+    the work there (shell: a background process; mcp:<server>, e.g. miyabi-mcp; skill:<name>); workspace is the
+    absolute remote directory that holds repo.git, snapshots/<commit>/ and runs/<attempt>/; code says how a commit
+    gets there (git: pushed to git_remote and fetched by the host from git_url; archive: git archive, uploaded)."""
+    name: str
+    kind: str
+    host: str | None = None
+    connect: str = "ssh"
+    server: str | None = None
+    jobs: str = "shell"
+    workspace: str | None = None
+    code: str = "git"
+    git_remote: str = "origin"
+    git_url: str | None = None
+    notes: str | None = None
+
+    @property
+    def remote(self) -> bool:
+        return self.kind == "remote"
+
+    def describe(self) -> str:
+        """One line: where it is, how it is reached, what starts jobs and how the code gets there."""
+        if not self.remote:
+            text = f"{self.name}: this machine, code from your checkout · jobs {self.jobs}"
+        else:
+            via = f"pi-env-mcp (server {self.server or 'pi-env-mcp'})" if self.connect == "pi-env-mcp" else "ssh"
+            code = (f"git (push to {self.git_remote}; the host clones {self.git_url or 'the same URL'})"
+                    if self.code == "git" else "archive (git archive, uploaded)")
+            text = (f"{self.name}: host {self.host} via {via} · jobs {self.jobs} · workspace {self.workspace} · "
+                    f"code {code}")
+        return text + (f" · notes: {self.notes}" if self.notes else "")
+
+    def record(self) -> dict:
+        """What an attempt keeps of the resource it was registered for."""
+        keys = ("kind", "jobs") if not self.remote else ("kind", "host", "connect", "server", "jobs", "workspace",
+                                                          "code")
+        return {"name": self.name, **{k: getattr(self, k) for k in keys if getattr(self, k) is not None}}
+
+
+def _resource(name: str, value, out: list[str]) -> Resource | None:
+    where = f"compute.resources.{name}"
+    if not RESOURCE_NAME.match(name):
+        out.append(f"{where}: a resource name is letters, digits, '.', '_' or '-'; it is skipped")
+        return None
+    if not isinstance(value, dict):
+        out.append(f"{where} must hold keys (kind, host, connect, jobs, workspace, code), not {value!r}; it is "
+                   "skipped")
+        return None
+    for key in value:
+        if key not in RESOURCE_KEYS:
+            out.append(f"unknown key {where}.{key} has no effect (a typo?); a resource takes "
+                       f"{', '.join(RESOURCE_KEYS)}")
+    text = {k: (str(v).strip() if v is not None else None) for k, v in value.items() if k in RESOURCE_KEYS}
+    kind = text.get("kind") or ("remote" if text.get("host") else "local")
+    if kind not in ("local", "remote"):
+        out.append(f"{where}.kind must be local or remote, not {value.get('kind')!r}; it is skipped")
+        return None
+    jobs = text.get("jobs") or "shell"
+    if not (jobs == "shell" or re.match(r"^(mcp|skill):\S+$", jobs)):
+        out.append(f"{where}.jobs must be shell, mcp:<server> or skill:<name>, not {value.get('jobs')!r}; using "
+                   "shell")
+        jobs = "shell"
+    if kind == "local":
+        ignored = [k for k in ("host", "connect", "workspace", "code", "git_remote", "git_url") if k in value]
+        if ignored:
+            out.append(f"{where}: {', '.join(ignored)} {'has' if len(ignored) == 1 else 'have'} no effect on a local "
+                       "resource (code runs from the caller's checkout, outputs go to research/artifacts/)")
+        return Resource(name, "local", jobs=jobs, notes=text.get("notes"))
+    host, workspace = text.get("host"), text.get("workspace")
+    if not host or not workspace:
+        missing = " and ".join(k for k, v in (("host", host), ("workspace", workspace)) if not v)
+        out.append(f"{where}: a remote resource needs {missing}; it is skipped")
+        return None
+    if not workspace.startswith("/"):
+        out.append(f"{where}.workspace must be an absolute remote path (relative ones follow the remote shell's "
+                   f"cd), not {workspace!r}; it is skipped")
+        return None
+    connect, _, server = (text.get("connect") or "ssh").partition(":")
+    if connect not in ("ssh", "pi-env-mcp") or (connect == "ssh" and server):
+        out.append(f"{where}.connect must be ssh, pi-env-mcp or pi-env-mcp:<MCP server name>, not "
+                   f"{value.get('connect')!r}; using ssh")
+        connect, server = "ssh", ""
+    code = text.get("code") or "git"
+    if code not in ("git", "archive"):
+        out.append(f"{where}.code must be git or archive, not {value.get('code')!r}; using git")
+        code = "git"
+    return Resource(name, "remote", host, connect, server or None, jobs, workspace.rstrip("/") or "/", code,
+                    text.get("git_remote") or "origin", text.get("git_url"), text.get("notes"))
+
+
+def compute_resources(config: dict) -> tuple[dict[str, Resource], list[str]]:
+    """The usable compute resources by name, and what is wrong with the others (each warning says what is used
+    instead). Without a usable compute.resources mapping this machine is the only resource."""
+    out: list[str] = []
+    compute = config.get("compute")
+    value = compute.get("resources") if isinstance(compute, dict) else None
+    if not isinstance(value, dict) or not value:
+        if value is not None and isinstance(compute, dict):
+            out.append(f"compute.resources must map resource names to their settings, not {value!r}; using this "
+                       "machine only (local)")
+        value = DEFAULT_CONFIG["compute"]["resources"]
+    found = {}
+    for name, item in value.items():
+        res = _resource(str(name), item, out)
+        if res:
+            found[res.name] = res
+    default = compute.get("default") if isinstance(compute, dict) else None
+    if found and default is not None and str(default) not in found:
+        out.append(f"compute.default {default!r} is not a usable resource; using {next(iter(found))}")
+    return found, out
+
+
+def compute_default(config: dict) -> str | None:
+    """The resource experiments run on unless a task or the coordinator says otherwise (compute.default, else the
+    first usable resource)."""
+    found, _ = compute_resources(config)
+    compute = config.get("compute")
+    default = str(compute.get("default")) if isinstance(compute, dict) and compute.get("default") else None
+    return default if default in found else next(iter(found), None)
 
 
 def advice_limit(config: dict) -> int:
@@ -438,6 +575,15 @@ def write_default_config(root: Path) -> Path:
                 "# researchers and reviewers hand over to the next model entry (more is kept on the coordinator's\n"
                 "# host); advisors keep the rest. rl usage shows the windows.\n"
                 "# manuscript.latex: the command that builds the manuscript (rl manuscript) as a PDF, e.g.\n"
-                "# latexmk -pdf -interaction=nonstopmode (null: a Markdown draft, docs/manuscript.md).\n")
+                "# latexmk -pdf -interaction=nonstopmode (null: a Markdown draft, docs/manuscript.md).\n"
+                "# compute: where experiments run (default: the resource used unless a task says otherwise).\n"
+                "# rl connects to none of them; rl compute checks them, rl compute steps prints how to stage a\n"
+                "# commit there. A remote resource, for example:\n"
+                "#   miyabi:\n"
+                "#     host: miyabi-g                  # ssh alias, or pi-env-mcp's host name\n"
+                "#     connect: pi-env-mcp:miyabi-g    # ssh, or pi-env-mcp:<MCP server name>\n"
+                "#     jobs: mcp:miyabi-pbs            # shell, mcp:<server> or skill:<name>\n"
+                "#     workspace: /work/<group>/<user>/<project>   # absolute; miyabi-mcp's --project-dir\n"
+                "#     code: git                       # git (push, the host fetches) or archive (upload)\n")
         path.write_text(text + yaml.safe_dump(DEFAULT_CONFIG, sort_keys=False, allow_unicode=True), encoding="utf-8")
     return path

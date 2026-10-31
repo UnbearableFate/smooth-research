@@ -55,10 +55,11 @@ def prompt_for(store: Store, task_id: str, role: str, session: dict | None = Non
         artifacts = store.project.research_root / "artifacts"
         checkout = f"""
 Your checkout is {session['cwd']}: a git worktree of the project on branch {session.get('branch')}, made from the
-branch of the main checkout. Write and commit the code there; do not merge, rebase or push (the coordinator
-merges the branch after it accepts the task). `{rl}` records into the project at {store.project.root} from
-here. Write run outputs under {artifacts}/<attempt>/ (absolute paths, so they outlive the worktree) and
-register runs with `--code-commit <the commit they run>`.
+branch of the main checkout. Write and commit the code there; do not merge or rebase (the coordinator merges
+the branch after it accepts the task). Push only this branch, only when `{rl} compute steps` says a remote
+resource needs it, and never force-push: recorded runs name its commits. `{rl}` records into the project at
+{store.project.root} from here. Write local run outputs under {artifacts}/<attempt>/ (absolute paths, so they
+outlive the worktree) and register runs with `--code-commit <the commit they run>`.
 """
     if session:
         review = f"""get a code review: `{rl} review request --target <E-x> --files ..
@@ -88,7 +89,8 @@ task.
    checkout). Register every experiment run before executing it (`{rl} run register ...`), record
    what you observed (`{rl} run record ...`), import results (`{rl} run import-result ...`) and add evidence
    with an honest level (`{rl} evidence add ...`). Never invent results, versions or model identities; unknown
-   stays unknown.
+   stays unknown. Run on the compute resources of the work pack: register with `--resource <name>`, then
+   `{rl} compute steps --attempt <ATT>` prints how to stage the commit there, run it and fetch the results.
 3. Before a costly run on a new core path (operator, training or evaluation path, loss mask, data split, adapter
    injection, checkpoint I/O), {review}
    `{rl} run register` prints whether the reviews still cover the code the run executes; on stale, re-check

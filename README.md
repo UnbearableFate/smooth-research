@@ -6,7 +6,10 @@ an honest, recoverable record of runs, results, evidence and decisions until a f
 a pause or a stop is justified. Design: `design/ml-research-agent-design-2026-10-30 (1).md`.
 
 The plugin records; it never submits, polls, retries or cancels experiments. Local shells, remote tools,
-containers and HPC skills (for example miyabi-toolbox) stay independent.
+containers and HPC skills (for example miyabi-toolbox) stay independent. Where experiments run is configured
+in the project (`compute`: this machine, remote hosts and clusters, reached with ssh or pi-env-mcp, jobs started
+by a shell, an MCP server such as miyabi-mcp or a skill); `rl compute steps` prints how to stage a commit there
+(git push and fetch, or an archive) as a read-only snapshot, and the agent runs those steps with its own tools.
 
 ## Repository layout
 
@@ -71,7 +74,7 @@ The first time, the CLI environment is built once from the bundled, locked packa
 
 ```
 smooth-research.yaml     configuration (model lists per role, advice rounds, agent sessions, context targets,
-                         the manuscript's LaTeX command)
+                         the manuscript's LaTeX command, compute resources)
 src/                     experiment code
 docs/                    only what people read: plan.md (imported, sealed), constraints.md,
                          research-graph.html (rl view), the manuscript (rl manuscript: manuscript.md, or
@@ -86,7 +89,8 @@ The layout is fixed. Every configuration key, environment variable and command-l
 
 Typical loop: `rl init --plan plan.md` -> `rl session start --role coordinator ...` ->
 `rl hypothesis add` -> `rl experiment add` -> code in `src/` -> `rl review request/run` for new core
-paths -> `rl run register` -> run with your own tool -> `rl run record` -> `rl run import-result` ->
+paths -> `rl run register --resource ..` -> `rl compute steps` -> run with your own tool -> `rl run record` ->
+`rl run import-result` ->
 `rl evidence add` -> `rl decide` -> `rl report` -> `rl manuscript`. `rl resume` rebuilds the working context in a new
 session; `rl export` / `rl restore` back up and restore the records. See
 `plugin/skills/smooth-research/references/workflow.md` for formats.

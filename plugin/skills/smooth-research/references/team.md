@@ -65,6 +65,11 @@ notes (`src/`, `research/notes/`) are committed on the branch; records always go
 `research/`, from any worktree; run outputs go under the absolute `research/artifacts/<attempt>/` path, so they
 outlive the worktree.
 
+For a remote resource with `code: git` the researcher pushes its own task branch, so the host can fetch the
+commit it registered (`{{rl}} compute steps --attempt ATT` says when); nobody force-pushes a branch whose
+commits runs name. The host runs a read-only snapshot of that commit, so merging the branch later changes
+nothing there. Pushing the merged main is yours to decide with the user.
+
 ## Reviews
 
 A code review requested from a researcher session reaches you as a NOTE: assign a reviewer

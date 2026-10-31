@@ -10,7 +10,7 @@
 
 配置里的任何问题都不会让命令失败。CLI 用能用的值继续运行，并给出警告，说明它实际用了什么。
 
-- 文件里的值和默认值深度合并：字典逐键覆盖，列表整体替换。比如 `models.reviewer` 只写一个条目，默认的两个就都没了。
+- 文件里的值和默认值深度合并：字典逐键覆盖，列表整体替换。比如 `models.reviewer` 只写一个条目，默认的两个就都没了。`compute.resources` 例外：它整体替换，文件里没写 `local` 时就没有默认的本机资源。
 - 警告出现在三个地方：
   - 普通输出末尾的 `warning:` 行；命令失败时，警告和错误一起打印，它们可能正好说明失败的原因；
   - `--json` 结果里的 `warnings`；
@@ -26,7 +26,8 @@
   - `usage.switch_left_percent`、`usage.coordinator_host_left_percent` 不是 0 到 100 的数：用默认值 10 和 20；
   - `agents.args.<宿主>` 不是参数列表：用默认参数（写成一个字符串时，按 shell 的规则拆开，不警告）；
   - `context` 的 token 目标不是正整数：用默认值；
-  - `manuscript.latex` 不是一条命令：写 Markdown 草稿。
+  - `manuscript.latex` 不是一条命令：写 Markdown 草稿；
+  - 计算资源有问题（见下面的“计算资源”）：不认识的键没有作用；`connect`、`jobs`、`code` 的值不认识时分别按 `ssh`、`shell`、`git` 计算；远程资源缺 `host` 或 `workspace`、`workspace` 不是绝对路径、名字含有不允许的字符时，这个资源不能用；`compute.default` 不是能用的资源时，用第一个能用的。
 
 ### 目录（固定）
 
@@ -152,20 +153,59 @@ Claude Code 和 Codex 一般用订阅，有 5 小时和每周两个窗口。某�
 - **中文和日文。** 默认的导言区在 pdflatex 下用 T1 编码和 Latin Modern 字体，在 xelatex 和 lualatex 下用 fontspec，都不带 CJK 字体。正文是中文或日文时，用 xelatex 或 lualatex 编译，并在导言区加载 xeCJK 或 luatexja。
 - **从 Markdown 换到 LaTeX。** 已有的 `docs/manuscript.md` 不会被转换，正文要自己搬过去。
 
+### 计算资源
+
+`compute` 一节写实验在哪里跑：本机，以及远程主机或集群。每个资源写清楚怎样连上去、用什么启动作业、远程的工作目录，以及代码怎样过去。rl 不连接任何资源，不复制文件，也不启动作业：它只读配置，检查本地能看到的东西，打印步骤，由 agent 用 Bash、ssh、pi-env-mcp 和提交作业的 MCP 或 skill 执行。预算和队列限制不写在这里，写在约束文档里（第 2 节）。
+
+```yaml
+compute:
+  default: miyabi
+  resources:
+    local:
+      kind: local
+    miyabi:
+      host: miyabi-g
+      connect: pi-env-mcp:miyabi-g
+      jobs: mcp:miyabi-pbs
+      workspace: /work/xg24i002/x10041/my-project
+      code: git
+```
+
+| 键 | 默认值 | 含义 |
+|---|---|---|
+| `compute.default` | `local` | 任务和协调者没有另外指定时用哪个资源。只写进工作包作为提示；`rl run register` 不写 `--resource` 时不记录资源，不按默认值猜 |
+| `compute.resources` | `{local: {kind: local}}` | 资源名到设置的映射。名字只能用字母、数字、`.`、`_`、`-`。整体替换默认值 |
+| `<资源>.kind` | 有 `host` 时是 `remote`，否则是 `local` | `local`：本机，代码就在调用者的 checkout 里，输出在 `research/artifacts/<attempt>/`，下面除 `jobs` 和 `notes` 以外的键对它都没有作用。`remote`：远程主机 |
+| `<资源>.host` | 无，远程资源必填 | 远程连接用的主机名：`connect: ssh` 时是 ssh 别名，用 pi-env-mcp 时是 pi-env-mcp 里的主机名 |
+| `<资源>.connect` | `ssh` | `ssh`，或 `pi-env-mcp`，或 `pi-env-mcp:<MCP 服务名>`（agent 看到的工具前缀，比如 `miyabi-g`） |
+| `<资源>.jobs` | `shell` | 用什么启动作业：`shell`（远程后台进程），`mcp:<服务名>`（比如 miyabi-mcp），或 `skill:<名字>`（比如 `skill:miyabi-pbs-cmd`） |
+| `<资源>.workspace` | 无，远程资源必填 | 远程的绝对路径。下面有 `repo.git`（code 为 git 时的 bare clone）、`snapshots/<commit>/`（只读的代码快照）、`runs/<attempt>/`（每个 attempt 的输出）。用 miyabi-mcp 时必须等于它的 `--project-dir`。一个研究项目一个，不和别的项目共用 |
+| `<资源>.code` | `git` | 代码怎样过去。`git`：推送分支到 `git_remote`，主机从 `git_url` fetch 后取出那个 commit。`archive`：本地 `git archive`，经 ssh 直接传过去，或写成文件后用 pi-env-mcp 上传 |
+| `<资源>.git_remote` | `origin` | 本地推送用的 git remote |
+| `<资源>.git_url` | 本地 `git_remote` 的 URL | 主机 clone 用的 URL。主机上要有读这个仓库的权限，比如 deploy key 或 token；它用的 URL 和本地不一样时写在这里 |
+| `<资源>.notes` | 无 | 给 agent 看的说明，比如“环境在登录节点用 uv 建” |
+
+- **远程只跑快照。** 远程的 run 只执行一个完整 commit 的只读快照 `<workspace>/snapshots/<commit>/`。哪个分支、哪个 worktree 上的提交都可以，分支之后再动也不影响已经排队的作业。同一个 commit 只同步一次，重复执行步骤是安全的。RunSpec 本来就只接受完整的 commit id，不接受分支名。
+- **`rl compute` 只检查本地。** 它列出各资源，检查 `ssh` 在不在 PATH 上、git remote 在不在，加 `--commit` 时还看这个 commit 是否已经推送（按最后一次 push 或 fetch，不访问网络）。pi-env-mcp、MCP 服务和 skill 是 agent 的工具，由 agent 自己检查。
+- **`rl compute steps` 给出一次运行的全部步骤。** 带 `--attempt` 时用 attempt 记录的资源和 RunSpec 里的 commit；不带时用 `--commit`，再不带就用 checkout 的 HEAD。步骤依次是：推送分支（code 为 git，已经推送时说明），在主机上 fetch 并取出那个 commit 的脚本（code 为 archive 时是打包、传输、解开），启动方式和要设的环境变量（`SR_ATTEMPT_ID`、`SR_SPEC_DIGEST`），以及取回 `manifest.json` 和 `rl run import-result`。connect 为 ssh 时给出能直接在 Bash 里运行的命令，为 pi-env-mcp 时写明用哪个工具、哪个服务和主机。attempt 的 RunSpec 只有内容摘要、没有 commit 时，它说明远程的 run 要用 `--code-commit` 登记，而不是改用 HEAD。
+- **`--resource` 把资源记到 attempt 上。** `rl run register ... --resource <名字>` 记下资源的设置和计划中的位置（远程的快照目录和 `runs/<attempt>/`），`rl run show` 显示 `on <名字>`。名字不在配置里时报 NOT_FOUND。资源名属于请求的一部分：同一个 `--request-id` 换了资源会报 CONFLICT。资源不属于 RunSpec，同一个 RunSpec 可以在不同资源上各跑一个 attempt。
+- **researcher 推送自己的任务分支。** code 为 git 时，researcher 在需要时推送自己 worktree 的任务分支 `sr/<名字>/<任务>`，从不强推：记录过的 run 指向这些 commit。合并后的 main 要不要推送，由协调者和用户决定。
+- **工作包和恢复包带上资源列表。** researcher 和接手的会话不用读约束文档就知道去哪里跑。
+
 ## 2. 约束文档 `docs/constraints.md`
 
 `rl init` 生成一个模板，有四项要填：
 
 - 研究目标和结论范围；
-- 允许的数据和环境；
+- 允许的数据，以及哪些计算资源可以用于什么；
 - 资源上限（每个实验、每批、总量）；
 - 需要用户先决定的动作。
 
-模型选择不在这里：它写在 `smooth-research.yaml` 的 `models` 里，由 CLI 读取。
+模型选择和计算资源不在这里：它们写在 `smooth-research.yaml` 的 `models` 和 `compute` 里，由 CLI 读取。
 
 这份文档的作用：
 
-- **CLI 不解析、不执行它。** 资源预算、允许的集群这类限制只写在这里。`smooth-research.yaml` 不放执行 profile、队列或预算（设计文档 §13.1）。
+- **CLI 不解析、不执行它。** 资源预算、可用的队列和各资源的使用范围只写在这里。`smooth-research.yaml` 的 `compute` 只写资源在哪里、怎样访问、代码怎样过去，不放预算和队列限制（设计文档 §13.1）。
 - **各请求包怎样引用它。** 工作包只给出它的路径，提醒 agent 遵守。建议请求包会附上它的前 3000 个字符。它的摘要还参与建议请求的去重。
 
 ## 3. 环境变量
@@ -195,6 +235,7 @@ Claude Code 和 Codex 一般用订阅，有 5 小时和每周两个窗口。某�
 - **agent 会话：** `rl agent open [名字] --role researcher|reviewer|advisor [--task T-x | --ticket RV-x/AD-x] [--entry ..] [--no-worktree] [--base ..]`，以及 `assign`、`tell`、`reset --compact|--clear`、`close [--remove-worktree]`、`switch <名字> [--entry ..] [--now]`（换一个模型继续这个会话的工作，见第 1 节“订阅额度”；`--now` 连还在工作的会话也换）、`brief`、`list [--all]`、`dialog <名字>`（会话现在显示的对话框和选项）、`answer <名字> <选项编号或文字> --reason ..`（协调者回答对话框）。
 - **订阅额度：** `rl usage` 显示各宿主的窗口；`rl usage statusline` 是 Claude Code 的状态栏命令，从标准输入读状态栏的 JSON，任何输入都不会让它失败。
 - **论文草稿：** `rl manuscript [--title ..]` 写或刷新草稿，`--title` 只用于新建的草稿，见第 1 节"论文草稿"。
+- **计算资源：** `rl compute [--commit <sha>]` 列出资源和本地检查；`rl compute steps [<资源>] [--attempt ATT] [--commit <sha>]` 给出同步、运行和取回结果的步骤；`rl run register ... --resource <资源>` 把资源记到 attempt 上。见第 1 节“计算资源”。
 - **监视程序：** `rl agent check` 立刻查看一轮；`rl agent watch --start` 在单独的 tab 里启动（已经在运行就不重复启动），`--stop` 停止并关掉它的 tab；`--every <分钟>` 改间隔，不写就用 `agents.watch_minutes`。不带 `--start` 或 `--stop` 时在当前终端前台运行。
 
 ## 5. 写死的常量（不能配置）

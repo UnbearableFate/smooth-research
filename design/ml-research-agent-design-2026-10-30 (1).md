@@ -669,7 +669,7 @@ WAIT 保存 attempt IDs、最后可信观测、外部引用和下一步。外部
 
 miyabi-toolbox 当前没有本设计的 RunSpec/Observation/Result 数据契约，因此不能声称已有直接兼容。首版由执行者把实际工具输出整理成最少的记录输入；将来只有在重复联用确有负担时，才考虑在外部工具一侧提供独立的记录导出助手。该助手仍不进入 Smooth Research 的实验执行控制范围。
 
-本地、远程和容器场景使用同样流程：登记逻辑运行与 prepared Attempt，执行者用自己的工具实际运行，再登记外部引用、观测和结果。无需安装 Miyabi 工具即可使用研究插件。
+本地、远程和容器场景使用同样流程：登记逻辑运行与 prepared Attempt，执行者用自己的工具实际运行，再登记外部引用、观测和结果。无需安装 Miyabi 工具即可使用研究插件。远程资源写在配置的 `compute` 里；`rl compute steps` 给出把一个 commit 同步成远程只读快照、启动和取回结果的步骤，由执行者用自己的工具执行（§21.18）。
 
 ---
 
@@ -829,11 +829,17 @@ context:
   advice_target_tokens: 10000
 manuscript:
   latex: null
+compute:
+  default: local
+  resources:
+    local: {kind: local}
+    # miyabi: {host: miyabi-g, connect: pi-env-mcp:miyabi-g, jobs: mcp:miyabi-pbs,
+    #          workspace: /work/<group>/<user>/<project>, code: git}
 ```
 
-（2026-10-31 按实现更新。上面每个键都由 CLI 读取。原稿中的 `artifacts` 一节没有代码读取，已经删除。模型选择统一写在这里：三个角色各有一个模型列表，researcher 和 reviewer 按顺序使用第一个可用的，advisor 每轮咨询全部可用的。旧写法（`researcher: inherit`、reviewer 的 `candidates`/`relation_to_author`、advisor 的 `primary`/`fallback`）仍能读取，但会给出警告；拼错的键也会警告。配置里的问题都不会让命令失败，见 §21.11。各键的含义见 `docs/configuration.md`。2026-10-31 按用户要求，目录改为固定的 `src/`、`docs/`、`research/`，`plan`、`constraints_ref`、`code_root`、`docs_root`、`reports_root`、`research_root` 不再配置，旧配置里的这些键会给出警告，见 §21.10；新增 `manuscript.latex`。新增 `usage` 一节：订阅窗口只剩多少时交给下一个模型，见 §21.17。）
+（2026-10-31 按实现更新。上面每个键都由 CLI 读取。原稿中的 `artifacts` 一节没有代码读取，已经删除。模型选择统一写在这里：三个角色各有一个模型列表，researcher 和 reviewer 按顺序使用第一个可用的，advisor 每轮咨询全部可用的。旧写法（`researcher: inherit`、reviewer 的 `candidates`/`relation_to_author`、advisor 的 `primary`/`fallback`）仍能读取，但会给出警告；拼错的键也会警告。配置里的问题都不会让命令失败，见 §21.11。各键的含义见 `docs/configuration.md`。2026-10-31 按用户要求，目录改为固定的 `src/`、`docs/`、`research/`，`plan`、`constraints_ref`、`code_root`、`docs_root`、`reports_root`、`research_root` 不再配置，旧配置里的这些键会给出警告，见 §21.10；新增 `manuscript.latex`。新增 `usage` 一节：订阅窗口只剩多少时交给下一个模型，见 §21.17。2026-10-31 按用户要求新增 `compute` 一节：计算资源在哪里、怎样访问、代码怎样过去，见 §21.18。）
 
-模型别名由用户环境映射到可用入口；token 目标是待验证示例。配置不包含实验执行 profile、队列、SSH、调度器后端或固定 node·h 预算 schema。用户在约束文档中说明资源范围、允许的环境与成本上限，协调者和执行者遵守；已知用量可导入并与约束对照，但这不是调度预算预留或平台限制的实现。
+模型别名由用户环境映射到可用入口；token 目标是待验证示例。配置不包含队列、调度器参数或固定 node·h 预算 schema。`compute` 只写每个计算资源怎样访问（主机、ssh 或 pi-env-mcp、提交作业的 MCP 或 skill、远程工作目录、代码经 git 还是打包过去），CLI 据此检查本地状态、打印步骤，不连接、不提交（§21.18）。用户在约束文档中说明资源的使用范围、队列与成本上限，协调者和执行者遵守；已知用量可导入并与约束对照，但这不是调度预算预留或平台限制的实现。
 
 站点用户、组、路径、队列和传输方式由现有执行工具管理。模型凭据由已有宿主或环境凭据机制提供。
 
@@ -1561,3 +1567,34 @@ GitHub 链接固定到本次读取的提交；外部产品文档按 2026-10-30 �
 **不做的**：不自动切换（用户要求由协调者运行）；额度恢复后不自动换回，新会话自然又用排第一的条目；不读 pi 的额度；不修改用户的全局配置（`~/.codex/config.toml`、`~/.claude/settings.json`）。
 
 测试：117 项通过（新增 10 项，见 21.5）。路由的修复在旧代码上失败（复查没有交给替换后的同名会话）。ruff 关键规则集通过。
+
+### 21.18 计算资源与本地/远程代码同步（2026-10-31）
+
+用户的要求：配置里缺了计算资源这一块。用户要能配置用本机和/或某个远程资源；远程资源写明访问计算资源的 MCP（这里是 miyabi-mcp）或 skill，用 pi-env-mcp 还是纯 ssh 连接，远程主机名和对应的 workspace；agent 要能经 GitHub 和 ssh/pi-env-mcp 同步，让远程主机（比如 Miyabi）正确执行某个分支、某个 worktree 上的代码。用户确认的两点：rl 只给出步骤并记录，不自己执行 ssh 或 git push（与“插件只记录”一致，pi-env-mcp 是 MCP 工具，rl 本来也调用不了）；预算和上限留在约束文档。
+
+这推翻了 §13.1 原来“配置不包含 SSH”的说法：资源的访问方式进入配置，预算、队列限制仍然不进。pi-env-mcp 保持通用，不加项目映射和同步。
+
+**配置**（`compute`）
+
+| 键 | 含义 |
+| --- | --- |
+| `default` | 任务没有另外指定时用哪个资源；只作为工作包里的提示，登记 run 时不按它猜 |
+| `resources.<名字>` | `kind`（local / remote）、`host`（ssh 别名或 pi-env-mcp 的主机名）、`connect`（`ssh`、`pi-env-mcp[:<服务名>]`）、`jobs`（`shell`、`mcp:<服务名>`、`skill:<名字>`）、`workspace`（远程绝对路径）、`code`（`git` 或 `archive`）、`git_remote`、`git_url`、`notes`。`resources` 整体替换默认值（只有 `local`），不深度合并 |
+
+有问题的条目照旧只警告：值不认识的按默认计算，缺 `host`/`workspace` 或路径不是绝对路径的资源不能用。
+
+**同步**：远程只运行完整 commit 的只读快照 `<workspace>/snapshots/<commit>/`。`code: git` 时 researcher 推送自己的任务分支，主机在 `<workspace>/repo.git`（bare clone）里 fetch 所有分支，确认 commit 存在，`git archive` 解到临时目录，改名后 `chmod -R a-w`。`code: archive` 时本地 `git archive`：ssh 下直接经管道传过去解开，pi-env-mcp 下写成文件、`upload`、再解开。快照按 commit 存放，已经存在就跳过，所以步骤可以重复执行；分支之后再动也不影响排队中的作业。这沿用了原来 Miyabi 流程里“PBS 在作业开始时才读代码，所以快照不能变”的约束，只是把来源从“只有打包上传”扩展到 GitHub。
+
+**CLI**
+
+| 部分 | 内容 |
+| --- | --- |
+| `project.py` | `Resource`、`compute_resources`、`compute_default`；警告并入 `config_warnings` |
+| `compute.py`（新） | `rl compute`：列出资源，检查本地能看到的（`ssh` 在不在 PATH 上、git remote、commit 所在分支、是否已推送：按最后一次 push 或 fetch，不访问网络）。`rl compute steps [<资源>] [--attempt ATT] [--commit]`：推送、主机上的同步脚本、启动方式（含 `SR_ATTEMPT_ID`、`SR_SPEC_DIGEST`）、取回 `manifest.json` 和 `import-result`。ssh 下是能直接运行的命令；pi-env-mcp 下写明工具、服务和主机 |
+| `rl run register --resource` | attempt 新增 `resource` 字段：资源设置和计划中的位置（快照目录、`runs/<attempt>/`）。资源名并入请求的去重摘要（不带 `--resource` 时摘要不变）。资源不属于 RunSpec。远程资源而 RunSpec 没有 commit 时给出提示，`steps` 也不会改用 HEAD |
+| 工作包、恢复包 | 新增“Compute resources”一节 |
+| researcher 的 git 规则 | 原来“不合并、不 rebase、不推送”改为：不合并、不 rebase；只在远程资源需要时推送自己的任务分支，从不强推 |
+
+**不做的**：rl 不连接、不推送、不上传、不提交作业；不检查 pi-env-mcp、MCP 服务和 skill 是否可用（那是 agent 的工具）；不管理远程 Python 环境和数据；不把预算写进配置。
+
+测试：126 项通过（新增 9 项，`tests/test_compute.py`）。git 和 archive 两种同步的步骤在测试里真的执行：用本地 bare 仓库代替 GitHub、本地目录代替远程 workspace，检查快照是 worktree 分支上那个 commit 的内容、只读、重复执行不出错，分支之后再提交也不影响快照。

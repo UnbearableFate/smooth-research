@@ -104,7 +104,7 @@ ENTITIES: dict[str, Entity] = {e.label: e for e in [
        execution_state=F(required=True, enum="execution_state"), outcome=F(required=True, enum="outcome"),
        result_status=F(required=True, enum="result_status"), last_trusted_state=F(), last_trusted_at=F(),
        last_observed_at=F(), last_record_id=F(), last_source=F(), last_sequence=F("int"), closed_at=F(),
-       needs_check=F("bool"), issues=F("json"), code_review=F("json")),
+       needs_check=F("bool"), issues=F("json"), code_review=F("json"), resource=F("json")),
     _e("ExecRef", "X", kind=F(required=True, enum="exec_kind"), executor_namespace=F(required=True),
        opaque_id=F(required=True), locator=F()),
     _e("Observation", "OBS", attempt_id=F(required=True), source=F(required=True), observed_at=F(required=True),

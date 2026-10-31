@@ -33,30 +33,51 @@ fact was observed earlier). A crash is `--state ended --outcome failed`; a lost 
 --run RUN-0001 --request-id <new>`. A changed config or code is a new run. `--review RV-x` adds a code review
 that targets something other than E-0001 (or the experiment its code comes from) to the coverage check.
 
-## A remote or HPC run (Miyabi: pi-env-mcp and miyabi-mcp)
+## Compute resources and remote runs
 
-pi-env-mcp moves files and runs remote commands; miyabi-mcp submits, queries, cancels and waits for PBS
-jobs and exports observations; `{{rl}}` only records. Submit and cancel only through miyabi-mcp: a `qsub` run
-through pi-env-mcp bypasses its ledger and its limits. The remote root is the miyabi-mcp project directory
-(its `--project-dir`, by default `/work/<group>/<user>/<project>`), one per research project and never
-shared: request keys are unique only inside it. Write it in `docs/constraints.md`, and pass absolute
-remote paths: relative ones follow the remote shell's `cd`. Remote layout: `.miyabi-mcp/` (miyabi-mcp's
-ledger and PBS logs; do not edit), `snapshots/<commit>/` read-only code, the Python environment built on the
-login node of the target system, `runs/<ATT>/` one directory per attempt.
+`compute` in `smooth-research.yaml` names where experiments run; `{{rl}} compute` lists the resources and
+checks what it can see locally (ssh, the git remote, whether a commit is pushed as of the last push or fetch):
 
-1. Commit the code (sources only: no `__pycache__`, outputs or data) and register with
-   `--code-commit <full sha>`; add `--json` to get the full `spec_digest`. The code review check then
-   reads the files of that commit, not the working tree.
-2. Stage the commit once, never edit it afterwards (PBS reads the code when the job starts, not when it is
-   submitted): `git archive --format=tar -o research/artifacts/snapshots/<sha>.tar <sha> src configs`, upload
-   that one file with pi-env-mcp to `<root>/snapshots/<sha>.tar`, then in pi-env-mcp bash:
-   `mkdir <root>/snapshots/<sha> && tar -xf <root>/snapshots/<sha>.tar -C <root>/snapshots/<sha> && chmod -R a-w <root>/snapshots/<sha>`.
-3. The job script is part of the snapshot, runs code from it and writes only to `<root>/runs/$SR_ATTEMPT_ID/`,
+```yaml
+compute:
+  default: miyabi                    # used unless a task or the coordinator says otherwise
+  resources:
+    local: {kind: local}             # this machine: code from your checkout, outputs in research/artifacts/<ATT>/
+    miyabi:
+      host: miyabi-g                 # the ssh alias, or pi-env-mcp's host name
+      connect: pi-env-mcp:miyabi-g   # ssh, or pi-env-mcp:<MCP server name>
+      jobs: mcp:miyabi-pbs           # shell (a background process), mcp:<server> or skill:<name>
+      workspace: /work/<group>/<user>/<project>   # absolute; for miyabi-mcp its --project-dir
+      code: git                      # git: push, the host fetches (git_remote: origin, git_url: <URL there>)
+                                     # archive: git archive, uploaded
+```
+
+A remote run executes one commit, staged once as the read-only snapshot `<workspace>/snapshots/<commit>/`:
+the branch or worktree it came from does not matter, and a branch that moves on cannot change a queued job.
+Workspace layout: `repo.git` (a bare clone the host fetches into, code: git), `snapshots/<commit>/`,
+`runs/<ATT>/` (one directory per attempt), and for miyabi-mcp `.miyabi-mcp/` (its ledger and PBS logs; do not
+edit). One workspace per research project, never shared: request keys are unique only inside it.
+
+1. Commit the code (sources only: no `__pycache__`, outputs or data), then register with `--code-commit
+   <full sha> --resource <name>`. The code review check reads the files of that commit, not the working tree.
+2. `{{rl}} compute steps --attempt ATT` prints the steps for that attempt's commit and resource: push your task
+   branch (code: git; the host needs read access to the repository: a deploy key or token there), then one
+   script for the host that fetches the commit into `repo.git` and extracts it read-only; or (code: archive)
+   `git archive` streamed over ssh, or written locally and uploaded with pi-env-mcp, then extracted. Run them
+   with Bash, ssh or the pi-env-mcp tools as printed; each is safe to repeat. rl runs none of it.
+
+The rest of this section is Miyabi with miyabi-mcp (`jobs: mcp:<its server>`): it submits, queries, cancels and
+waits for PBS jobs and exports observations; pi-env-mcp moves files and runs remote commands; `{{rl}}` only
+records. Submit and cancel only through miyabi-mcp: a `qsub` run through pi-env-mcp bypasses its ledger and
+its limits. Pass absolute remote paths: relative ones follow the remote shell's `cd`. The Python environment
+is built on the login node of the target system, outside the snapshot.
+
+3. The job script is part of the snapshot, runs code from it and writes only to `<workspace>/runs/$SR_ATTEMPT_ID/`,
    ending with a `manifest.json` (format below) that carries `spec_digest` and artifact digests written as
    `blake2b:<hex>` (Python: `hashlib.blake2b(data, digest_size=32)`).
 4. Submit with miyabi-mcp `job_submit`: dry run first (show the plan when the user wants to confirm
-   submissions), then submit with `script: <root>/snapshots/<sha>/<job script>`, `workdir:
-   <root>/snapshots/<sha>` (both read-only, so miyabi-mcp's check that the code cannot change passes), `name:
+   submissions), then submit with `script: <workspace>/snapshots/<sha>/<job script>`, `workdir:
+   <workspace>/snapshots/<sha>` (both read-only, so miyabi-mcp's check that the code cannot change passes), `name:
    "<ATT>"`, `request_key: "sr:<ATT>"`, `client_ref: "<ATT>"`, `env: {SR_ATTEMPT_ID, SR_SPEC_DIGEST}`,
    `labels: {code_commit: <sha>}` and, for jobs you will analyse together
    (the seeds of a comparison), one notification: `notify: {name: "<E>-<batch>", expected: <number of jobs>,
@@ -75,11 +96,13 @@ login node of the target system, `runs/<ATT>/` one directory per attempt.
    (start the listener again to wait for the rest) or the batch summary. The coordinator acknowledges it with
    `notify_ack(id, ack_token)` from the message and starts the researcher again with the same role and the
    message; the researcher exports and records (step 5). Jobs of a few minutes can use `job_wait` instead.
-7. After the end (PBS exit 0 is not application success): download `<root>/runs/<ATT>/manifest.json` and the
-   small files it lists into `research/artifacts/<ATT>/`; list checkpoints and other large files as
-   `{"uri": "miyabi:<absolute path>"}` (recorded as not read). Then `{{rl}} run import-result`.
+7. After the end (PBS exit 0 is not application success): download `<workspace>/runs/<ATT>/manifest.json` and
+   the small files it lists into `research/artifacts/<ATT>/` (`{{rl}} compute steps --attempt ATT` prints the
+   transfer); list checkpoints and other large files as `{"uri": "<resource>:<absolute path>"}` (recorded as not
+   read). Then `{{rl}} run import-result`.
 
-Without miyabi-mcp, submit with the miyabi skills through pi-env-mcp `bash` and record by hand:
+Without miyabi-mcp (`jobs: skill:miyabi-pbs-cmd`), submit with the miyabi skills through pi-env-mcp `bash`, from the
+snapshot, and record by hand:
 `{{rl}} run record --attempt ATT --source "qstat -H -f" --state ended --outcome success --raw-state "F Exit_status=0"
 --exec-kind hpc_job --exec-namespace miyabi-pbs --exec-id <full job id>`, plus `{{rl}} run usage
 --accounting-ref miyabi-pbs:<job id> ...` from `resources_used.walltime` x nodes.

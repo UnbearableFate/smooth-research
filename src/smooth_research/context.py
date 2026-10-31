@@ -6,7 +6,7 @@ rest is listed as an index to read on demand. Nothing here queries external syst
 
 from __future__ import annotations
 
-from . import documents
+from . import compute, documents
 from .project import context_target
 from .research import CONTRACT_FIELDS, attention, brief, contract_front
 from .runs import describe_attempt
@@ -124,6 +124,7 @@ def work_pack(store: Store, task_id: str, budget: int | None = None) -> dict:
         papers = [p for h in hyps.values() for p in _papers_for(tx, h["id"])]
         if papers:
             sections.append(("Literature", "\n".join(papers)))
+        sections.append(("Compute resources (smooth-research.yaml)", compute.pack_text(store.project)))
         sections.append(("Constraints", f"see {store.project.rel(store.project.constraints_path)} (user-set scope "
                                         "and resource limits; follow them, the plugin does not enforce them)"))
     return _assemble(f"# Work pack for {task_id}\n", sections, budget)
@@ -197,6 +198,7 @@ def resume_pack(store: Store, role: str | None = None, budget: int | None = None
     if role:
         sections.append((f"Inbox for {role}", f"{len(unread)} unread message(s): rl inbox --role {role}"))
     sections.append(("Locations", locations(store)))
+    sections.append(("Compute resources (smooth-research.yaml)", compute.pack_text(store.project)))
     return _assemble("# Resume pack (records only: nothing was queried, restarted or retried)\n", sections, budget)
 
 

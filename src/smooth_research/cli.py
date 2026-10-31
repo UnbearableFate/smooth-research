@@ -11,8 +11,8 @@ import json
 import sys
 from pathlib import Path
 
-from . import (adapters, agents, context, delegate, hooks, literature, manuscript, messages, research, reviews,
-               runs, snapshot, tasks, usage, view, watch)
+from . import (adapters, agents, compute, context, delegate, hooks, literature, manuscript, messages, research,
+               reviews, runs, snapshot, tasks, usage, view, watch)
 from .project import advice_limit, find_project, model_entries
 from .schema import ENUMS, LINKABLE, PAPER_ASSESSMENTS
 from .store import Store
@@ -238,7 +238,7 @@ def cmd_run(args):
         spec = load_json_arg(args.spec) or {}
         spec.update(_spec_from_flags(args))
         return runs.register(store, args.experiment, spec, args.request_id, args.run, _list(args.review),
-                             args.no_review)
+                             args.no_review, args.resource)
     if a == "record":
         items = load_json_records(args.observation) if args.observation else [{}]
         flags = {"record_id": args.record_id, "attempt_id": args.attempt, "source": args.source,
@@ -417,6 +417,16 @@ def cmd_models(args):
     return {"summary": "\n".join(lines) + "\n(callable = the CLI exists; the model itself is verified on first use)"}
 
 
+def cmd_compute(args):
+    store = _store(args)
+    if args.action == "steps":
+        return compute.steps(store, args.resource, args.commit, args.attempt)
+    if args.resource or args.attempt:
+        raise RLError("INVALID", "rl compute lists every resource; a resource or --attempt goes with "
+                                 "`rl compute steps`")
+    return compute.show(store, args.commit)
+
+
 def cmd_hook(args):
     return hooks.session_start(args.host, sys.stdin.read() if not sys.stdin.isatty() else "")
 
@@ -469,6 +479,14 @@ def build_parser() -> argparse.ArgumentParser:
     sp = add("digest", cmd_digest, "blake2b digests of files or directories (for RunSpecs and manifests)")
     sp.add_argument("paths", nargs="+")
     add("models", cmd_models, "configured reviewer and advisor entries and whether their CLIs exist")
+    sp = add("compute", cmd_compute, "compute resources (compute in smooth-research.yaml) with local checks; "
+                                     "steps: how to stage a commit there, run it and fetch the results (rl "
+                                     "connects to, copies to and starts nothing)")
+    sp.add_argument("action", nargs="?", choices=["show", "steps"], default="show")
+    sp.add_argument("resource", nargs="?", help="a resource name (steps; default: the attempt's, else "
+                                                 "compute.default)")
+    sp.add_argument("--commit", help="full commit id (default: the attempt's, else HEAD of your checkout)")
+    sp.add_argument("--attempt", help="an attempt: its resource, commit and output directory")
     sp = add("usage", cmd_usage, "the Claude and Codex subscription windows, and the hosts that are low (their "
                                  "researchers and reviewers hand over to another model)")
     sp.add_argument("action", nargs="?", choices=["show", "statusline"], default="show",
@@ -650,6 +668,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--output-spec")
     s.add_argument("--resume-from")
     s.add_argument("--param", action="append", help="k=v (JSON values allowed)")
+    s.add_argument("--resource", help="the compute resource this attempt runs on (compute.resources); kept with "
+                                      "its planned code and output locations")
     g = s.add_mutually_exclusive_group()
     g.add_argument("--review", action="append", help="code review (RV-x) to check besides the experiment's own")
     g.add_argument("--no-review", metavar="REASON", help="why this run needs no code review (e.g. smoke test)")

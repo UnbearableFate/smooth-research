@@ -7,10 +7,10 @@ experiments with their own tools and hand the facts to register / record / impor
 
 from __future__ import annotations
 
-import re
 from datetime import datetime, timezone
 from pathlib import Path
 
+from . import compute
 from .project import Project
 from .research import brief, prepare_contract, recheck_dependents, seal_contract
 from .schema import ENUMS
@@ -25,7 +25,7 @@ SPEC_REQUIRED = (("arm",), ("code_ref",), ("config_digest", "config_ref"), ("dat
                  ("metric_spec_ref", "metric"), ("output_spec",))
 COMPARED = ("config_digest", "config_ref", "data_revision", "model_revision", "metric_spec_ref", "metric",
             "environment_ref")
-FULL_COMMIT = re.compile(r"^[0-9a-f]{40}([0-9a-f]{24})?$")
+FULL_COMMIT = compute.FULL_COMMIT
 OBS_FIELDS = {"record_id", "attempt_id", "source", "observed_at", "occurred_at", "source_sequence", "execution_state",
               "outcome", "raw_state", "source_ref", "execution_ref", "usage", "correction_of", "note"}
 STALE_AFTER_H = 6.0
@@ -57,9 +57,13 @@ def normalize_spec(spec: dict) -> dict:
 
 
 def register(store: Store, experiment: str, spec: dict, request_id: str, run_id: str | None = None,
-             reviews: list[str] = (), no_review: str | None = None) -> dict:
+             reviews: list[str] = (), no_review: str | None = None, resource: str | None = None) -> dict:
+    """resource names the compute resource the attempt is for (compute.resources); the attempt keeps it with the
+    planned code and output locations there. Without it nothing is recorded about where the attempt runs."""
     spec = normalize_spec(dict(spec))
-    payload = digest_json({"experiment": experiment, "spec": spec, "run": run_id})
+    res = compute.resource(store.project, resource) if resource else None
+    request = {"experiment": experiment, "spec": spec, "run": run_id}
+    payload = digest_json({**request, "resource": res.name} if res else request)
     # a new run is a formal reference: seal the contract (an attempt of a run uses the run's sealed revision)
     prep = None if run_id else prepare_contract(store, experiment)
     check = code_coverage(store, experiment, spec["code_ref"], list(reviews), no_review)
@@ -89,11 +93,14 @@ def register(store: Store, experiment: str, spec: dict, request_id: str, run_id:
                               "request_id": request_id, "spec": full, "spec_digest": spec_digest, "attempt_count": 1})
             tx.link("of_experiment", run_id, experiment)
         attempt = f"ATT-{run_id.split('-')[1]}-{index}"
+        commit = spec["code_ref"].get("commit") if isinstance(spec["code_ref"], dict) else None
+        placed = {**res.record(), **compute.locations(store.project, res, commit, attempt)} if res else None
         tx.create("Attempt", {"id": attempt, "run_id": run_id, "index": index, "request_id": request_id,
                               "execution_state": "prepared", "outcome": "unknown", "result_status": "absent",
-                              "issues": [], "code_review": check})
+                              "issues": [], "code_review": check, "resource": placed})
         tx.link("of_run", attempt, run_id)
-        result = {"run": run_id, "attempt": attempt, "spec_digest": spec_digest, "code_review": check}
+        result = {"run": run_id, "attempt": attempt, "spec_digest": spec_digest, "code_review": check,
+                  "resource": placed}
         tx.remember("run.register", request_id, payload, result)
         tx.event("run.register", attempt, f"{run_id} attempt {index} prepared")
     unknown = sorted(k for k, v in spec.items() if v == "unknown")
@@ -101,7 +108,19 @@ def register(store: Store, experiment: str, spec: dict, request_id: str, run_id:
     return {**result, "summary": f"{run_id} {attempt} prepared (spec {short(spec_digest)})"
                                  + (f"; unknown: {', '.join(unknown)}" if unknown else "")
                                  + ". Nothing was started: run it with your own tool, then `rl run record`."
-                                 + f"\ncode review{source}: {code_review_note(check)}{_review_hint(check)}"}
+                                 + f"\ncode review{source}: {code_review_note(check)}{_review_hint(check)}"
+                                 + (_placement_note(res, placed, attempt) if res else "")}
+
+
+def _placement_note(res, placed: dict, attempt: str) -> str:
+    if not res.remote:
+        return f"\nresource {res.name}: outputs in {placed['run_dir']}/"
+    text = (f"\nresource {res.name} ({res.host}): code {placed['project']} · outputs {placed['run_dir']}/; how to "
+            f"stage, run and fetch: rl compute steps --attempt {attempt}")
+    if "<commit>" in placed["snapshot"]:
+        text += ("\n  this RunSpec names no commit, so its code cannot be staged by commit: register the run with "
+                 "--code-commit <full id>")
+    return text
 
 
 def _review_hint(check: dict) -> str:
@@ -499,13 +518,15 @@ def _age_h(stamp: str | None) -> float | None:
 
 def describe_attempt(tx: Tx, att: dict) -> str:
     refs = [tx.require(e["id"]) for e in tx.out(att["id"], "bound_to")]
+    on = f" on {att['resource']['name']}" if att.get("resource") else ""
     ref_text = ", ".join(f"{r['kind']} {r['executor_namespace']}/{r['opaque_id']}" for r in refs) or "no external ref yet"
     age = _age_h(att.get("last_observed_at"))
     fresh = "never observed" if age is None else f"last observed {age:.1f}h ago" + (
         " (stale? refresh with your execution tool)" if age > STALE_AFTER_H and att["execution_state"] != "ended" else "")
     trusted = (f"; last trusted {att['last_trusted_state']} at {att['last_trusted_at']}"
                if att.get("last_trusted_state") and att["execution_state"] == "unknown" else "")
-    return f"{brief(att)} {ref_text}; {fresh}{trusted}; code review: {code_review_note(att['code_review'], tx)}"
+    return (f"{brief(att)}{on} {ref_text}; {fresh}{trusted}; code review: "
+            f"{code_review_note(att['code_review'], tx)}")
 
 
 def show(store: Store, entity_id: str | None = None, active: bool = False) -> dict:
