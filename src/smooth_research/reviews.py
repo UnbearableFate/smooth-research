@@ -26,7 +26,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from . import adapters, documents, messages
+from . import adapters, documents, messages, usage
 from .agents import assign
 from .context import advice_pack, contract_summary
 from .herdr import caller_role
@@ -170,10 +170,14 @@ def _round(tx: Tx, recheck_of: str | None, new_round: str | None) -> dict:
 
 def _route(store: Store, rid: str, recheck_of: str | None, requester: str | None) -> str:
     """Who takes a new review: the reviewer session that answered the review it re-checks, while that session
-    is open; otherwise, when a live session asked for it, the coordinator is asked to assign a reviewer."""
+    (or one of the same name that replaced it, as rl agent switch does) is open; otherwise, when a live session
+    asked for it, the coordinator is asked to assign a reviewer."""
     with store.read() as tx:
         prev = tx.require(recheck_of, "Ticket") if recheck_of else {}
         session = tx.get(prev.get("answered_by") or prev.get("assigned_session") or "", "Session") if prev else None
+        if session and session["status"] != "active":
+            session = next((x for x in tx.all("Session", status="active") if x["role_id"] == session["role_id"]
+                            and x.get("role_kind") == "reviewer"), None)
     if session and session["status"] == "active" and session.get("herdr_agent"):
         return "; " + assign(store, session["role_id"], ticket=rid)["summary"]
     if not requester or requester == "coordinator":
@@ -244,8 +248,9 @@ def run_many(store: Store, ticket_ids: list[str], timeout: int, background: bool
 
 
 def run_ticket(store: Store, ticket_id: str, timeout: int = 1800, only: str | None = None) -> dict:
-    """Try the ticket's entries in order and record every attempt; the first parseable answer is kept. The process
-    claims the ticket first, so a second run does not call the models again while this one works."""
+    """Try the ticket's entries in order and record every attempt; the first parseable answer is kept (a reviewer
+    on a host whose subscription is low is skipped, unless named). The process claims the ticket first, so a
+    second run does not call the models again while this one works."""
     chosen = [adapters.Entry.parse(only)] if only else None
     with store.write() as tx:
         t = tx.require(ticket_id, "Ticket")
@@ -272,11 +277,17 @@ def run_ticket(store: Store, ticket_id: str, timeout: int = 1800, only: str | No
               "anything. If you cannot read something you need, say so (for a review: under 'unchecked'). "
               "Answer in the requested format.\n\n" + request_path.read_text(encoding="utf-8"))
     outside = [checkout] if checkout and Path(checkout).resolve() != store.project.root.resolve() else []
+    # a reviewer on a host whose subscription is low is not called; advisors keep the rest of the window
+    low = usage.low_hosts(store) if t["kind"] == "review" and not chosen else {}
     manual, answered = None, 0
     for entry in candidates:
         if entry.entry == "manual":
             manual = entry
             break
+        if entry.entry in low:
+            calls.append({"entry": str(entry), "ok": False, "error": f"not called: {low[entry.entry]['reason']}",
+                          "finished_at": now_utc()})
+            continue
         log = store.project.dir("calls") / f"{ticket_id}.{entry.entry}.{len(calls) + 1}.log"
         res = adapters.call(entry, prompt, store.project.root, read_only=True, timeout=timeout, add_dirs=outside,
                             log=log, web=t["kind"] == "advice")

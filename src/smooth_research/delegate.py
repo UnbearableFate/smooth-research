@@ -10,7 +10,7 @@ import os
 import subprocess
 import sys
 
-from . import adapters
+from . import adapters, usage
 from .context import work_pack
 from .project import usable_entries
 from .store import Store
@@ -108,13 +108,15 @@ task.
 def delegate(store: Store, task_id: str, entry_text: str | None = None, role: str = "researcher",
              timeout: int = 3600) -> dict:
     """Run the task in an independent session: the given entry, or the models.researcher entries in order (an
-    entry that is not installed, or whose session fails, passes the task to the next one under the same role)."""
+    entry that is not installed, is on a host whose subscription is low, or whose session fails, passes the task
+    to the next one under the same role)."""
     if entry_text:
         entries = [adapters.Entry.parse(entry_text)]
         if entries[0].entry == "manual":
             raise RLError("INVALID", "a manual entry cannot run a task session")
     else:
         entries = usable_entries(store.project.config, "researcher")
+    low = {} if entry_text else usage.low_hosts(store)
     with store.read() as tx:
         task = tx.require(task_id, "Task")
     own = task.get("owner_role") == role and task["state"] in ("active", "waiting", "blocked")
@@ -123,7 +125,8 @@ def delegate(store: Store, task_id: str, entry_text: str | None = None, role: st
                                   f"ready task, or an unfinished one owned by --role {role}, can be delegated")
     tried, out = [], None
     for entry in entries:
-        problem = "a manual entry cannot run a task session" if entry.entry == "manual" else adapters.available(entry)
+        problem = ("a manual entry cannot run a task session" if entry.entry == "manual"
+                   else low[entry.entry]["reason"] if entry.entry in low else adapters.available(entry))
         if problem:
             tried.append(f"{entry}: {problem}")
             continue

@@ -12,6 +12,24 @@ Each role takes the first available entry of its list in `smooth-research.yaml` 
 explicitly. `agents.args.<host>` holds the extra command-line arguments each host gets (for Claude Code the
 default is `--permission-mode auto`); rl adds no sandbox, approval or permission-bypass flags of its own.
 
+## Subscription usage
+
+Claude Code and Codex usually run on subscriptions with a 5-hour and a weekly window. `{{rl}} usage` shows what
+is left of each window and how old the reading is. Codex logs its windows itself; Claude Code reports them
+through rl's status line, which the sessions rl starts run, and so does your own Claude Code session through the
+project's `.claude/settings.local.json` (`{{rl}} session start` adds it, unless you have a status line of your
+own). A host is low when a window has 10% or less left, or 20% or less on your own host, which you keep using
+(`usage.switch_left_percent`, `usage.coordinator_host_left_percent`). You keep your model. On a low host:
+
+- new researcher and reviewer sessions, `{{rl}} delegate` and `{{rl}} review run` take the next entry of their
+  role (`--entry` still uses the entry you name);
+- the watcher, which looks every 5 minutes, tells its researchers to commit and hand their task over
+  (`{{rl}} task handoff`), its reviewers to stop, and you once;
+- when a session is idle (a researcher's HANDOFF has reached you), `{{rl}} agent switch <name>` closes it, keeps
+  its worktree, and opens one of the same name on the next entry with the same assignment; the new session
+  reads the handoff in its brief. `--entry` picks the entry; `--now` also switches a session that still works;
+- advisors keep their model: the rest of the window is left for them.
+
 ## Open, assign, reuse, close
 
 | Step | Command |
@@ -24,6 +42,7 @@ default is `--permission-mode auto`); rl adds no sandbox, approval or permission
 | Reuse for related work | `{{rl}} agent reset <name> --compact` (keeps a summary) |
 | Reuse for unrelated work | `{{rl}} agent reset <name> --clear` (a fresh conversation) |
 | Close | `{{rl}} agent close <name>` (`--remove-worktree` once its branch is merged) |
+| Continue on another model | `{{rl}} agent switch <name>` (the same name, worktree and assignment) |
 | Open sessions | `{{rl}} agent list` (`--all` includes closed ones) |
 
 A session reads its work from `{{rl}} agent brief <name>`; the assignment prompt only names it. A session
@@ -110,6 +129,7 @@ minutes (default 20) it looks at each open session:
 | Idle, assignment unfinished, waiting for nothing | reminds it to continue (at most twice per assignment), then reports it to you |
 | Waiting: task recorded as waiting or blocked, a review it asked for, runs of its experiments queued or running, a message without an answer | leaves it alone |
 | At a dialog | answers only the trust question for the session's own folder; reports any other dialog to you once |
+| A researcher or reviewer on a low host (checked every 5 minutes) | tells it to finish and you to switch it; does not remind it to continue or start it again on that host |
 
 What it did or found reaches you as one NOTE from `watch` per round. When you are idle with messages unread
 for a whole round, it reminds you once. End sessions with `{{rl}} agent close`: a session closed any other way

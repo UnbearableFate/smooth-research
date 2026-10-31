@@ -178,6 +178,8 @@ def test_a_researcher_works_in_its_own_worktree_with_a_branch_per_task(project, 
     args = start[start.index("--") + 1:]
     assert args[:2] == ["--model", "claude-opus-5-5"] and args[args.index("--effort") + 1] == "high"
     assert args[-2:] == ["--permission-mode", "auto"]  # agents.args.claude; no other permission flag is added
+    status = json.loads(args[args.index("--settings") + 1])["statusLine"]  # it reports Claude's usage to rl
+    assert status == {"type": "command", "command": "rl usage statusline"}
     prompt = next(c for c in log if c[:2] == ["agent", "prompt"])
     assert prompt[2] == "researcher-1" and "agent brief researcher-1" in prompt[3]
 
@@ -248,7 +250,8 @@ def test_reviewer_and_advisor_sessions_answer_and_talk_through_messages(project,
     opened = agents.open_session(project, "reviewer", ticket=rv["id"])
     assert (opened["name"], opened["entry"]) == ("reviewer-1", "codex:gpt-6-astra@medium")
     start = [c for c in calls(herdr_log) if c[:2] == ["agent", "start"]][-1]
-    assert start[start.index("--") + 1:] == ["-m", "gpt-6-astra", "-c", 'model_reasoning_effort="medium"']
+    assert start[start.index("--") + 1:] == ["-m", "gpt-6-astra", "-c", 'model_reasoning_effort="medium"',
+                                             "-c", "notice.hide_rate_limit_model_nudge=true"]  # no model dialog
     text = agents.brief(project, "reviewer-1")["summary"]
     assert "review 1 of at most 2" in text and "requested by researcher-1" in text
     assert f"rl review answer {rv['id']}" in text and "read-only" in text

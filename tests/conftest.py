@@ -17,6 +17,16 @@ def outside_herdr(monkeypatch):
         monkeypatch.delenv(key, raising=False)
 
 
+@pytest.fixture(autouse=True)
+def own_homes(tmp_path_factory, monkeypatch):
+    """Tests read no real subscription usage and no real Claude settings: rl's data directory, Codex's home and
+    Claude's configuration directory are empty ones of their own."""
+    base = tmp_path_factory.mktemp("homes")
+    for key in ("SMOOTH_RESEARCH_HOME", "CODEX_HOME", "CLAUDE_CONFIG_DIR"):
+        monkeypatch.setenv(key, str(base / key.lower()))
+    return base
+
+
 @pytest.fixture
 def project(tmp_path, monkeypatch):
     """An initialized project with one hypothesis and one experiment; cwd is the project root."""

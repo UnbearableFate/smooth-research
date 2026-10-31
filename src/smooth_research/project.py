@@ -34,6 +34,9 @@ UNREAD = "_unread"  # in a loaded configuration: why the file could not be read
 # asked, each on its own. agents.args are extra launch arguments for the sessions `rl agent open` starts in
 # herdr tabs (no sandbox or approval flags are added otherwise: each CLI's own settings apply);
 # agents.watch_minutes is the time between the watcher's rounds over those sessions (0 turns it off).
+# usage: a Claude or Codex subscription is low when a 5-hour or weekly window has switch_left_percent or less left
+# (coordinator_host_left_percent on the coordinator's own host); its researchers and reviewers then hand over to
+# another entry of their role, and advisors keep the rest (usage.py).
 # manuscript.latex is the command that builds the manuscript (the paper draft) as a PDF (null: Markdown).
 # Every key here is read by the CLI; docs/configuration.md explains each one.
 DEFAULT_CONFIG: dict = {
@@ -45,6 +48,7 @@ DEFAULT_CONFIG: dict = {
     },
     "advice": {"max_rounds": 3},
     "agents": {"args": {"claude": ["--permission-mode", "auto"], "codex": [], "pi": []}, "watch_minutes": 20},
+    "usage": {"switch_left_percent": 10, "coordinator_host_left_percent": 20},
     "context": {"work_target_tokens": 4000, "advice_target_tokens": 10000},
     "manuscript": {"latex": None},
 }
@@ -202,6 +206,12 @@ def config_warnings(config: dict) -> list[str]:
         if value is not None and not isinstance(value, (str, list)):
             out.append(f"{CONFIG_NAME}: agents.args.{host} must be a list of arguments, not {value!r}; using "
                        f"{agent_args(config, host)}")
+    usage = config.get("usage")
+    for key in DEFAULT_CONFIG["usage"]:
+        value = usage.get(key) if isinstance(usage, dict) else None
+        if value is not None and not _percent(value):
+            out.append(f"{CONFIG_NAME}: usage.{key} must be a percentage from 0 to 100, not {value!r}; using "
+                       f"{DEFAULT_CONFIG['usage'][key]}")
     context = config.get("context")
     for key in DEFAULT_CONFIG["context"]:
         value = context.get(key) if isinstance(context, dict) else None
@@ -295,6 +305,18 @@ def latex_command(config: dict) -> list[str] | None:
 
 def _minutes(value) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0
+
+
+def usage_percent(config: dict, key: str) -> float:
+    """Percent left in a subscription window at which a host's sessions hand over: usage.switch_left_percent, or
+    usage.coordinator_host_left_percent on the coordinator's own host."""
+    usage = config.get("usage")
+    value = usage.get(key) if isinstance(usage, dict) else None
+    return float(value) if _percent(value) else float(DEFAULT_CONFIG["usage"][key])
+
+
+def _percent(value) -> bool:
+    return _minutes(value) and value <= 100
 
 
 def advice_limit(config: dict) -> int:
@@ -412,6 +434,9 @@ def write_default_config(root: Path) -> Path:
                 "# reviewers use the first available entry of their list; every available advisor is asked.\n"
                 "# agents.args: extra launch arguments for sessions opened in herdr tabs (rl agent open);\n"
                 "# agents.watch_minutes: minutes between the watcher's rounds over those sessions (0: off).\n"
+                "# usage: when a Claude or Codex 5-hour or weekly window has this percent left or less, its\n"
+                "# researchers and reviewers hand over to the next model entry (more is kept on the coordinator's\n"
+                "# host); advisors keep the rest. rl usage shows the windows.\n"
                 "# manuscript.latex: the command that builds the manuscript (rl manuscript) as a PDF, e.g.\n"
                 "# latexmk -pdf -interaction=nonstopmode (null: a Markdown draft, docs/manuscript.md).\n")
         path.write_text(text + yaml.safe_dump(DEFAULT_CONFIG, sort_keys=False, allow_unicode=True), encoding="utf-8")

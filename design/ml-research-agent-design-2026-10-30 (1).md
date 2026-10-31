@@ -820,6 +820,9 @@ advice:
 agents:
   args: {claude: [--permission-mode, auto], codex: [], pi: []}
   watch_minutes: 20
+usage:
+  switch_left_percent: 10
+  coordinator_host_left_percent: 20
 
 context:
   work_target_tokens: 4000
@@ -828,7 +831,7 @@ manuscript:
   latex: null
 ```
 
-（2026-10-31 按实现更新。上面每个键都由 CLI 读取。原稿中的 `artifacts` 一节没有代码读取，已经删除。模型选择统一写在这里：三个角色各有一个模型列表，researcher 和 reviewer 按顺序使用第一个可用的，advisor 每轮咨询全部可用的。旧写法（`researcher: inherit`、reviewer 的 `candidates`/`relation_to_author`、advisor 的 `primary`/`fallback`）仍能读取，但会给出警告；拼错的键也会警告。配置里的问题都不会让命令失败，见 §21.11。各键的含义见 `docs/configuration.md`。2026-10-31 按用户要求，目录改为固定的 `src/`、`docs/`、`research/`，`plan`、`constraints_ref`、`code_root`、`docs_root`、`reports_root`、`research_root` 不再配置，旧配置里的这些键会给出警告，见 §21.10；新增 `manuscript.latex`。）
+（2026-10-31 按实现更新。上面每个键都由 CLI 读取。原稿中的 `artifacts` 一节没有代码读取，已经删除。模型选择统一写在这里：三个角色各有一个模型列表，researcher 和 reviewer 按顺序使用第一个可用的，advisor 每轮咨询全部可用的。旧写法（`researcher: inherit`、reviewer 的 `candidates`/`relation_to_author`、advisor 的 `primary`/`fallback`）仍能读取，但会给出警告；拼错的键也会警告。配置里的问题都不会让命令失败，见 §21.11。各键的含义见 `docs/configuration.md`。2026-10-31 按用户要求，目录改为固定的 `src/`、`docs/`、`research/`，`plan`、`constraints_ref`、`code_root`、`docs_root`、`reports_root`、`research_root` 不再配置，旧配置里的这些键会给出警告，见 §21.10；新增 `manuscript.latex`。新增 `usage` 一节：订阅窗口只剩多少时交给下一个模型，见 §21.17。）
 
 模型别名由用户环境映射到可用入口；token 目标是待验证示例。配置不包含实验执行 profile、队列、SSH、调度器后端或固定 node·h 预算 schema。用户在约束文档中说明资源范围、允许的环境与成本上限，协调者和执行者遵守；已知用量可导入并与约束对照，但这不是调度预算预留或平台限制的实现。
 
@@ -1228,6 +1231,7 @@ GitHub 链接固定到本次读取的提交；外部产品文档按 2026-10-30 �
 - 删除旧格式兼容代码后为 97 项：删去只测旧格式的一项（21.14）。
 - 再增至 101 项：装了真实的 claude、codex、pi、herdr 时，检查 rl 给它们的参数仍在各自的帮助里（每个宿主一项，没装的跳过；21.14）。
 - 再增至 107 项（第二次全项目审查后的修复，见 21.15）：导入不能替换已回答的审查；新的文献链接带来新的建议轮；后台运行保留 `--entry`；请求包封存失败时不留工单；三种文献关系的重复链接（参数化，多出两项）。已有测试里加了：复查本轮第一份审查也受上限，导入可以修订建议的回答，用量的第三次修订，`register --run` 不留对象文件。
+- 再增至 117 项（订阅额度与换模型，见 21.17）：Codex 读数取最后写入的日志里的最后一条；Claude 状态栏保存读数、任何输入都不失败；阈值（协调者所在宿主为 20%）、窗口重置和配置警告；新会话避开额度低的宿主而 advisor 不避开；headless 审查和 delegate 跳过、建议不跳过；监视程序通知一次、不提醒继续、不在该宿主重启；没送达的通知下一次再送；`rl agent switch` 换 researcher（同一 worktree，读到交接说明）和 reviewer（复查交给替换后的同名会话）；协调者的 Claude 会话通过项目设置报告额度。已有测试里加了：Claude 会话带状态栏，Codex 会话不弹换模型的对话框。
 - 此前增至 84 项：配置里的问题不让命令失败（未知版本、不是键值对的一节、格式不对的模型条目被跳过、不是列表的模型列表、字符串形式和错误类型的 `agents.args`；文件解析不了时沿用上次读到的设置，会话开始的提示照常给出）。
 
 ### 21.6 端到端测试结果（2026-10-30）
@@ -1530,3 +1534,30 @@ GitHub 链接固定到本次读取的提交；外部产品文档按 2026-10-30 �
 没有另建一份“当前计划”文档：它会和记录重复并逐渐不一致。要看当前计划，用 `rl status`、研究图页面和阶段报告。能灵活调整的是路线，不是已封存的比较：实验合同在第一次运行后封存，看到结果后再改的比较仍记为探索性。
 
 测试：建议包里不再出现计划原文（加在原有的建议测试里），107 项通过。
+
+### 21.17 订阅额度低时换模型（2026-10-31）
+
+用户的要求：各角色的候选模型列表里排第一的通常是 GPT 或 Claude 的模型，一般用订阅。Codex 或 Claude 的 5 小时窗口或每周窗口只剩 10%（与协调者同一宿主时为 20%）时，协调者不换自己的模型，而是通知其他 agent 结束工作，再让排第二的模型接手。用户确认的三点：Claude 的额度用 rl 的状态栏命令来读；切换由协调者运行 `rl agent switch`，监视程序只发通知；advisor 不变，“留了 10% 就是给 advisor 用的”。
+
+**额度从哪里读**（实测于 Codex 0.166.0、Claude Code 2.1.316）
+
+| 宿主 | 来源 | 内容 |
+| --- | --- | --- |
+| Codex | `$CODEX_HOME/sessions/YYYY/MM/DD/rollout-*.jsonl` 里 `payload.type == "token_count"` 的事件 | `rate_limits.primary`/`secondary`：`used_percent`、`window_minutes`（300 为 5 小时，10080 为一周）、`resets_at`（epoch 秒）。本机的账户只显示每周窗口。跨过午夜的会话继续写在开始那天的目录里，所以按修改时间取最后写入的日志，从末尾往前找第一条带窗口的记录（`rate_limits` 为 null 的跳过） |
+| Claude Code | 只有状态栏命令的输入 JSON 里有；会话记录里没有 | `rate_limits.five_hour`/`seven_day`：`used_percentage`（0–100）、`resets_at`（epoch 秒）。网关用户另有 `spend_limit`，不用 |
+| pi | 无 | 不算额度低 |
+
+**实现**
+
+| 部分 | 内容 |
+| --- | --- |
+| `usage.py`（新） | 读两个宿主的读数；重置时间已过的窗口按没用过算。某个窗口的剩余 ≤ 阈值时宿主算作额度低：协调者会话所在的宿主用 `usage.coordinator_host_left_percent`（20），其他用 `usage.switch_left_percent`（10）。“同族”按宿主（订阅）判断，不按模型名。`rl usage` 显示各宿主的窗口、读数时间、阈值和其上的会话 |
+| 状态栏 | `rl usage statusline` 从标准输入读 JSON，把读数原子地写进 `$SMOOTH_RESEARCH_HOME/usage/claude.json`（读数不变时一分钟写一次），输出“模型 · 5h N% left · week M% left”，任何输入都不失败（启动约 0.14 秒）。`rl agent open` 启动的 Claude 会话加 `--settings '{"statusLine": ...}'`。协调者的 Claude 会话：`rl session start --role coordinator --host claude` 在项目的 `.claude/settings.local.json` 加同一个状态栏（第一次写时加 `.claude/.gitignore`）；用户在全局或项目设置里已有自己的状态栏时不动它。每次注册时写，插件更新后路径也跟着更新 |
+| Codex 的对话框 | 额度快用完时 Codex 弹出 “Approaching rate limits”（换更便宜的模型？Switch / Keep current model / Keep current model (never show again)）。这是模态对话框，会让会话停在 blocked。CLI 启动的 Codex 会话加 `-c notice.hide_rate_limit_model_nudge=true`（键名在 0.166.0 的二进制里，属于 `Notice` 结构） |
+| 选条目 | `rl agent open`（researcher、reviewer）、`rl delegate`、`rl review run` 跳过额度低的宿主上的条目，原因写进错误信息或工单的 calls；显式 `--entry` 照用；advisor 和建议调用不跳过 |
+| 监视程序 | 两轮之间每 5 分钟（`USAGE_MINUTES`）看一次额度；整轮仍按 `agents.watch_minutes`，到期就做，不漂移。额度低的宿主上：researcher 收到“在安全处停下、在分支上提交、写交接说明、`rl task handoff`、结束这一轮”；reviewer 收到“不交答案，马上停下”。每个窗口一次（键为宿主、窗口和重置时间），没送达（例如停在对话框）时下一次再送；协调者只收一条 NOTE，列出 `rl agent switch <名字>`。这些会话不被提醒继续；agent 退出了也不在该宿主上重启，改为让协调者换模型。advisor 不收通知 |
+| `rl agent switch <名字> [--entry E] [--now]` | 只有协调者能用，advisor 拒绝。会话还在工作时拒绝，除非 `--now`。新条目取角色列表（reviewer 取工单的候选）里第一个不是原条目、不在额度低的宿主上、可用的条目；在关掉旧会话之前选好。关掉旧会话（保留 worktree，记下原因），等 herdr 释放名字，再用同一个名字、同一个 worktree、同一个未完成的任务或工单开新会话。新会话的 brief 里有交接说明（工作包本来就附上 handoff）。新会话没开成时，报错里给出重开的命令。复查（`--recheck-of`）原来按会话 id 找答过的审查者，现在那个会话结束时交给同名的活会话 |
+
+**不做的**：不自动切换（用户要求由协调者运行）；额度恢复后不自动换回，新会话自然又用排第一的条目；不读 pi 的额度；不修改用户的全局配置（`~/.codex/config.toml`、`~/.claude/settings.json`）。
+
+测试：117 项通过（新增 10 项，见 21.5）。路由的修复在旧代码上失败（复查没有交给替换后的同名会话）。ruff 关键规则集通过。

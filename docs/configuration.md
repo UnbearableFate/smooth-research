@@ -23,6 +23,7 @@
   - 模型列表不是列表（一个字符串当作只有一个条目的列表）：用默认列表；某个条目格式不对：跳过这一条，用列表里其余的条目；
   - `advice.max_rounds` 不是非负整数：按 3 计算；
   - `agents.watch_minutes` 不是分钟数：按 20 分钟计算；
+  - `usage.switch_left_percent`、`usage.coordinator_host_left_percent` 不是 0 到 100 的数：用默认值 10 和 20；
   - `agents.args.<宿主>` 不是参数列表：用默认参数（写成一个字符串时，按 shell 的规则拆开，不警告）；
   - `context` 的 token 目标不是正整数：用默认值；
   - `manuscript.latex` 不是一条命令：写 Markdown 草稿。
@@ -77,9 +78,9 @@
 | `agents.args.pi` | `[]` | 追加给交互式 pi 会话的参数 |
 | `agents.watch_minutes` | `20` | 监视程序每隔几分钟查看一次各个会话；`0` 表示关闭 |
 
-- **CLI 自己加的参数只有模型、effort、会话 id 和名字。**
-  - Claude：`--model`、`--effort`、`--session-id`、`-n`；reviewer 另加 `--disallowedTools Edit,Write,NotebookEdit`。
-  - Codex：`-m`、`-c model_reasoning_effort="<effort>"`；advisor 另加 `--search`。
+- **CLI 自己加的参数只有模型、effort、会话 id、名字和订阅额度的两项。**
+  - Claude：`--model`、`--effort`、`--session-id`、`-n`，以及运行 `rl usage statusline` 的状态栏（`--settings`，见下面的“订阅额度”）；reviewer 另加 `--disallowedTools Edit,Write,NotebookEdit`。
+  - Codex：`-m`、`-c model_reasoning_effort="<effort>"`，以及 `-c notice.hide_rate_limit_model_nudge=true`（见“订阅额度”）；advisor 另加 `--search`。
   - pi：`--model`、`--thinking`、`--session-id`、`--name`。
   - 不加任何绕过沙箱、审批或权限的参数。
 - **researcher 的 worktree。** 每个 researcher 会话一个 git worktree，在 `<项目目录>/../<项目名>-worktrees/<会话名>`。每个任务一个分支 `sr/<会话名>/<任务>`，从主 checkout 当前的分支建（`--base` 可以改）。项目必须是至少有一次提交的 git 仓库，否则用 `--no-worktree`。研究记录总是写进主项目的 `research/`。
@@ -89,10 +90,32 @@
   - agent 退出了，或者 tab 被关掉了：在原来的目录里重新启动，开一个新对话，从 `rl agent brief` 读回任务。一小时最多重启 3 次；
   - 空闲、任务没做完、又没在等什么：提醒它继续。同一项任务最多提醒 2 次，之后报告协调者；
   - 正常的暂停不唤醒：任务记为 waiting（`rl task wait`，比如等集群作业）或 blocked；在等自己申请的审查；任务所测实验的 run 还处于 queued 或 running；发出的消息还没有回复（发给协调者的，以协调者还没读为准）；
-  - 停在对话框：只回答该会话自己目录的信任问题，其他对话框报告一次。
+  - 停在对话框：只回答该会话自己目录的信任问题，其他对话框报告一次；
+  - 订阅额度低的宿主上的 researcher 和 reviewer：通知它结束工作、通知协调者换模型；不提醒它继续，也不在这个宿主上重启（见下面的“订阅额度”，额度每 5 分钟看一次）。
 
   每轮的发现汇成一条来自 `watch` 的 NOTE 发给协调者。协调者空闲、又有消息一整轮没读时，提醒一次。没有打开的会话时，监视程序自己退出。正常结束一个会话要用 `rl agent close`；用别的方式关掉的会话算作意外停止，会被重新启动。
 - **审查轮次。** 每轮最多两次审查（第一次加一次复查），是写死的常量，见第 5 节。
+
+### 订阅额度
+
+Claude Code 和 Codex 一般用订阅，有 5 小时和每周两个窗口。某个窗口剩得太少时，这个宿主上的 researcher 和 reviewer 把工作交给角色列表里的下一个模型。
+
+| 键 | 默认值 | 含义 |
+|---|---|---|
+| `usage.switch_left_percent` | `10` | 某个窗口只剩这么多（百分比）或更少时，这个宿主算作额度低 |
+| `usage.coordinator_host_left_percent` | `20` | 协调者自己所在的宿主用这个阈值，因为协调者还要接着用它 |
+
+- **额度从哪里读。** `rl usage` 显示每个宿主的窗口、还剩多少、读数是多久以前的、阈值和它上面的会话。
+  - Codex 自己把窗口写进会话日志（`$CODEX_HOME/sessions/**/rollout-*.jsonl` 里的 `token_count` 事件）。CLI 读最后写入的那个日志里的最后一条。
+  - Claude Code 只把额度交给状态栏命令。`rl agent open` 启动的 Claude 会话的状态栏运行 `rl usage statusline`：它把最新读数存进 `$SMOOTH_RESEARCH_HOME/usage/claude.json`，并显示模型和各窗口还剩多少。
+  - 协调者用 Claude Code 时，`rl session start --role coordinator --host claude` 在项目的 `.claude/settings.local.json` 里加上同一个状态栏（第一次写时同时写 `.claude/.gitignore`）。用户自己已经设了状态栏（在 `$CLAUDE_CONFIG_DIR/settings.json`，默认 `~/.claude/settings.json`，或者项目的 `.claude/settings.json`、`.claude/settings.local.json`）时不动它，只给出提示。
+  - 读数只有这台机器上这个宿主最后一次调用那么新。重置时间已经过了的窗口，按没用过计算。pi 不报告窗口。
+- **额度低时。** 协调者不换自己的模型。
+  - 新开的 researcher 和 reviewer 会话、`rl delegate`、`rl review run` 跳过额度低的宿主上的条目，用角色列表里的下一个。审查跳过的条目记在工单的 `calls` 里。`--entry` 指定的条目照常使用。
+  - 监视程序在两轮之间每 5 分钟看一次额度。额度低的宿主上的 researcher 收到通知：在安全的地方停下，在任务分支上提交，写交接说明，运行 `rl task handoff`，然后结束这一轮。reviewer 收到通知：不交答案，马上停下。每个窗口只通知一次（没送达时下一次再送）。协调者收到一条 NOTE。这些会话不会被提醒继续；它们的 agent 退出了，也不在这个宿主上重启。
+  - 会话空闲以后（researcher 的 HANDOFF 已经到了），协调者运行 `rl agent switch <名字>`。它关掉这个会话但保留 worktree，在下一个不在额度低的宿主上的条目上开一个同名的新会话，带上同一个任务或工单；新会话从 brief 里读到交接说明。reviewer 从工单的候选条目里选。之后的复查（`--recheck-of`）交给替换后的同名会话。
+  - advisor 不换模型，也不收通知：留下的额度给 advisor 用。
+- **Codex 不弹换模型的对话框。** 额度快用完时，Codex 会弹出 "Approaching rate limits" 对话框，问要不要换一个更便宜的模型。CLI 启动的 Codex 会话加了 `-c notice.hide_rate_limit_model_nudge=true`，不弹这个对话框，交接由 CLI 来做。协调者自己的 Codex 会话不受这个参数影响：在对话框里选 "Keep current model (never show again)"，或者在 `~/.codex/config.toml` 里写 `[notice]` 和 `hide_rate_limit_model_nudge = true`。
 
 ### 建议轮数
 
@@ -150,12 +173,13 @@
 | 变量 | 含义 |
 |---|---|
 | `SMOOTH_RESEARCH_PROJECT` | 项目目录。查找顺序：先看 `--project`，再看这个变量，最后从当前目录往上找 `smooth-research.yaml` |
-| `SMOOTH_RESEARCH_HOME` | 插件 CLI 环境的安装位置。设了 `XDG_DATA_HOME` 时默认为 `$XDG_DATA_HOME/smooth-research`，否则为 `~/.local/share/smooth-research`。`rl setup` 在这里建 `env-<build-id>` |
+| `SMOOTH_RESEARCH_HOME` | 插件 CLI 环境的安装位置。设了 `XDG_DATA_HOME` 时默认为 `$XDG_DATA_HOME/smooth-research`，否则为 `~/.local/share/smooth-research`。`rl setup` 在这里建 `env-<build-id>`；Claude 的额度读数存在这里的 `usage/claude.json` |
 | `SMOOTH_RESEARCH_RL` | `bin/rl` 启动器自动把它设成自己的绝对路径，让 hook 提示、delegate 子会话和 agent 会话调用同一个 CLI。一般不用手动设 |
 | `SMOOTH_RESEARCH_CHECKOUT` | `rl agent open` 给 researcher 会话设成它的 worktree。代码路径、代码审查的指纹和 `rl run register` 的代码检查都按这个 checkout 读；研究记录仍写进 `SMOOTH_RESEARCH_PROJECT` 指向的项目。不设时从当前目录判断：在项目的 linked worktree 里就用这个 worktree |
 | `SMOOTH_RESEARCH_SESSION`、`SMOOTH_RESEARCH_ROLE` | `rl agent open` 给每个会话设成它的会话记录（S-x）和会话名（如 `reviewer-1`）。设了 `SMOOTH_RESEARCH_ROLE` 的会话不能批准审查轮次（`rl review approve`），发消息时默认以这个名字发送 |
 | `HERDR_ENV`、`HERDR_PANE_ID` | herdr 设置，CLI 只读。`HERDR_ENV=1` 时才能开 agent 会话、发通知；协调者 `rl session start` 时记下 `HERDR_PANE_ID`，通知发到这个 pane |
-| `CODEX_HOME` | 默认 `~/.codex`。CLI 从其中的 `sessions/` 读 Codex 实际使用的模型。如果其中的 `config.toml` 设了 `sandbox_mode = "danger-full-access"`，`rl delegate` 启动的可写 Codex 会话也用这个模式，否则用 `workspace-write` |
+| `CODEX_HOME` | 默认 `~/.codex`。CLI 从其中的 `sessions/` 读 Codex 实际使用的模型和订阅额度。如果其中的 `config.toml` 设了 `sandbox_mode = "danger-full-access"`，`rl delegate` 启动的可写 Codex 会话也用这个模式，否则用 `workspace-write` |
+| `CLAUDE_CONFIG_DIR` | 默认 `~/.claude`。`rl session start --role coordinator --host claude` 看其中的 `settings.json` 里有没有用户自己的状态栏 |
 
 ## 4. 命令行选项
 
@@ -168,7 +192,8 @@
 - **一轮建议一起运行。** `rl advise run AD-x AD-y ...` 给每个工单开一个进程，同时运行。
 - **超出建议轮数：** `rl advise prepare --user-approved "<用户的原话>"`，见第 1 节。
 - **审查轮次：** `rl review request ... --recheck-of RV-x` 是同一轮的第二次审查；第三次报 LIMIT，要开新一轮写 `--new-round "<原因>"`。`rl review approve RV-x --rationale ..` 由协调者批准还有中等以上问题的一轮。
-- **agent 会话：** `rl agent open [名字] --role researcher|reviewer|advisor [--task T-x | --ticket RV-x/AD-x] [--entry ..] [--no-worktree] [--base ..]`，以及 `assign`、`tell`、`reset --compact|--clear`、`close [--remove-worktree]`、`brief`、`list [--all]`、`dialog <名字>`（会话现在显示的对话框和选项）、`answer <名字> <选项编号或文字> --reason ..`（协调者回答对话框）。
+- **agent 会话：** `rl agent open [名字] --role researcher|reviewer|advisor [--task T-x | --ticket RV-x/AD-x] [--entry ..] [--no-worktree] [--base ..]`，以及 `assign`、`tell`、`reset --compact|--clear`、`close [--remove-worktree]`、`switch <名字> [--entry ..] [--now]`（换一个模型继续这个会话的工作，见第 1 节“订阅额度”；`--now` 连还在工作的会话也换）、`brief`、`list [--all]`、`dialog <名字>`（会话现在显示的对话框和选项）、`answer <名字> <选项编号或文字> --reason ..`（协调者回答对话框）。
+- **订阅额度：** `rl usage` 显示各宿主的窗口；`rl usage statusline` 是 Claude Code 的状态栏命令，从标准输入读状态栏的 JSON，任何输入都不会让它失败。
 - **论文草稿：** `rl manuscript [--title ..]` 写或刷新草稿，`--title` 只用于新建的草稿，见第 1 节"论文草稿"。
 - **监视程序：** `rl agent check` 立刻查看一轮；`rl agent watch --start` 在单独的 tab 里启动（已经在运行就不重复启动），`--stop` 停止并关掉它的 tab；`--every <分钟>` 改间隔，不写就用 `agents.watch_minutes`。不带 `--start` 或 `--stop` 时在当前终端前台运行。
 
@@ -183,3 +208,4 @@
 | `MAX_RESTARTS` | 一小时 3 次 | 监视程序一小时内最多重启同一个会话几次，再退出就交给协调者（`watch.py`） |
 | `BUILD_TIMEOUT` | 300 秒 | `rl manuscript` 运行一次 LaTeX 编译命令的上限（`manuscript.py`） |
 | `MAX_REMINDERS` | 2 次 | 同一项任务，监视程序最多提醒几次；之后，或者提醒后会话毫无反应，就报告协调者（`watch.py`） |
+| `USAGE_MINUTES` | 5 分钟 | 监视程序在两轮之间看订阅额度的间隔；`agents.watch_minutes` 更短时按它（`watch.py`） |

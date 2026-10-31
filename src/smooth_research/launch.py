@@ -8,13 +8,14 @@ answer). rl agent open and the watcher's restart start agents the same way.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import time
 import uuid
 from pathlib import Path
 
-from . import adapters, herdr
+from . import adapters, herdr, usage
 from .delegate import rl_command
 from .herdr import ENV_ROLE, ENV_SESSION
 from .project import ENV_CHECKOUT, ENV_PROJECT, agent_args
@@ -31,13 +32,17 @@ SELECTED = ("❯", "›", "▶", ">")
 
 def launch_args(store: Store, entry: adapters.Entry, kind: str, name: str, host_session: str | None) -> list[str]:
     """The agent's own command-line arguments: model, effort, session id and name; tools by role (reviewers do
-    not get file edit tools, Codex advisors get web search); then agents.args.<host> from the configuration."""
+    not get file edit tools, Codex advisors get web search); the subscription usage (usage.py): Claude Code
+    reports it through rl's status line, and Codex does not offer a cheaper model in a dialog when it runs low
+    (rl hands the work over instead); then agents.args.<host> from the configuration."""
     if entry.entry == "claude":
         args = ["--model", entry.model, "--session-id", host_session, "-n", name]
         args += ["--effort", entry.effort] if entry.effort else []
         args += ["--disallowedTools", "Edit,Write,NotebookEdit"] if kind == "reviewer" else []
+        args += ["--settings", json.dumps({"statusLine": usage.statusline_setting(rl_command())})]
     elif entry.entry == "codex":
         args = ["-m", entry.model] + (["-c", f'model_reasoning_effort="{entry.effort}"'] if entry.effort else [])
+        args += ["-c", "notice.hide_rate_limit_model_nudge=true"]
         args += ["--search"] if kind == "advisor" else []
     else:
         args = ["--model", entry.model, "--session-id", host_session, "--name", name]

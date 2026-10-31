@@ -18,7 +18,7 @@ import re
 import time
 from pathlib import Path
 
-from . import adapters, herdr, messages, watch, worktrees
+from . import adapters, herdr, messages, usage, watch, worktrees
 from .delegate import SUBAGENTS, WAITING, prompt_for, rl_command
 from .herdr import caller_role
 from .launch import SELECTED, excerpt, option_line, select, start_agent
@@ -60,22 +60,30 @@ def _free_name(store: Store, kind: str) -> str:
     return f"{kind}-{n}"
 
 
-def _choose_entry(store: Store, kind: str, entry_text: str | None, ticket: dict | None) -> adapters.Entry:
+def _choose_entry(store: Store, kind: str, entry_text: str | None, ticket: dict | None,
+                  instead_of: str | None = None) -> adapters.Entry:
+    """The entry named, else the first one of the ticket or of models.<kind> that can run a session here: a
+    researcher or reviewer not on a host whose subscription is low (advisors keep the rest), nor on the entry
+    it replaces."""
     if entry_text:
         entries = [adapters.Entry.parse(entry_text)]
     elif ticket and ticket.get("candidates"):
         entries = [adapters.Entry.parse(text) for text in ticket["candidates"]]
     else:
         entries = usable_entries(store.project.config, kind)
+    low = usage.low_hosts(store) if kind != "advisor" and not entry_text else {}
     tried = []
     for entry in entries:
         problem = ("a manual entry is answered by a person, not a session" if entry.entry == "manual"
+                   else "the entry it replaces" if str(entry) == instead_of
+                   else low[entry.entry]["reason"] if entry.entry in low
                    else adapters.available(entry))
         if not problem:
             return entry
         tried.append(f"{entry}: {problem}")
     raise RLError("UNAVAILABLE", f"no {kind} entry can run a session here: "
-                                 + ("; ".join(tried) or f"models.{kind} lists none that parses"))
+                                 + ("; ".join(tried) or f"models.{kind} lists none that parses")
+                                 + ("; name one with --entry to use it anyway" if low else ""))
 
 
 def open_session(store: Store, kind: str, name: str | None = None, entry_text: str | None = None,
@@ -266,20 +274,26 @@ def reset(store: Store, name: str, mode: str) -> dict:
                                       + (" (a new host conversation: its id is not known)" if mode == "clear" else "")}
 
 
+def _close_tab(s: dict) -> list[str]:
+    """Close the session's herdr tab and the agent in it; notes on what was left."""
+    if not s.get("herdr_tab"):
+        return []
+    try:
+        tab = herdr.get("tab", s["herdr_tab"])
+        if tab and tab.get("label") not in (None, s["role_id"]):  # herdr restarted and gave the id to another tab
+            return [f"tab {s['herdr_tab']} is now {tab.get('label')!r}, not this session's: left open"]
+        if tab:
+            herdr.call("tab", "close", s["herdr_tab"], timeout=30)
+    except RLError as exc:
+        return [f"tab {s['herdr_tab']}: {exc.message}"]
+    return []
+
+
 def close(store: Store, name: str, remove_worktree: bool = False) -> dict:
     """End the session: close its herdr tab (the agent with it) and record the end. Its worktree stays unless
     asked, and is removed only when clean; branches are kept."""
     s = _session(store, name)
-    notes = []
-    if s.get("herdr_tab"):
-        try:
-            tab = herdr.get("tab", s["herdr_tab"])
-            if tab and tab.get("label") not in (None, name):  # herdr restarted and gave the id to another tab
-                notes.append(f"tab {s['herdr_tab']} is now {tab.get('label')!r}, not this session's: left open")
-            elif tab:
-                herdr.call("tab", "close", s["herdr_tab"], timeout=30)
-        except RLError as exc:
-            notes.append(f"tab {s['herdr_tab']}: {exc.message}")
+    notes = _close_tab(s)
     _end(store, s["id"], f"{name} closed")
     if s.get("branch"):
         notes.append(branch_status(store, s["branch"]))
@@ -295,6 +309,54 @@ def close(store: Store, name: str, remove_worktree: bool = False) -> dict:
         stopped = watch.stop(store)
         notes += [stopped["summary"]] if stopped["stopped"] else []
     return {"id": s["id"], "summary": f"{s['id']} {name} closed" + "".join(f"\n  {n}" for n in notes)}
+
+
+def switch(store: Store, name: str, entry_text: str | None = None, now: bool = False, timeout: int = 90) -> dict:
+    """Continue a researcher's or reviewer's work on another model, usually because its host's subscription is
+    low (usage.py): close the session, keeping its worktree, and open one of the same name on the next entry of
+    its role (of the ticket, for a reviewer) on a host that is not low, with the same open assignment. A
+    researcher hands its task over first (the watcher tells it to); the new session reads the handoff in its
+    brief. Advisors keep their model: the rest of a low window is theirs."""
+    if caller_role() not in (None, "coordinator"):
+        raise RLError("INVALID", f"switching a session's model is the coordinator's decision, not {caller_role()}'s: "
+                                 "tell the coordinator (rl agent tell coordinator \"..\")")
+    problem = herdr.problem()
+    if problem:
+        raise RLError("UNAVAILABLE", f"switching a session needs herdr: {problem}")
+    s = _session(store, name)
+    kind = s["role_kind"]
+    if kind == "advisor":
+        raise RLError("INVALID", f"{name} is an advisor: advisors keep their model (the rest of a low subscription "
+                                 "window is left for them)")
+    state = herdr.status(s["herdr_agent"]) if s.get("herdr_agent") else "gone"
+    if state == "working" and not now:
+        raise RLError("CONFLICT", f"{name} is still working (a session on a low host is told to finish and hand "
+                                  f"over); switch it when it is idle, or with --now to stop it mid-turn")
+    with store.read() as tx:
+        x = tx.get(s["assignment"]) if s.get("assignment") else None
+    task = x["id"] if x and kind == "researcher" and x.get("state") in ("ready", "active", "waiting", "blocked") \
+        else None
+    ticket = x if x and kind == "reviewer" and x.get("status") in ("pending", "running", "failed", "unavailable") \
+        else None
+    entry = _choose_entry(store, kind, entry_text, ticket, instead_of=s["entry"])
+    low = usage.low_hosts(store).get(s["host"])
+    why = low["reason"] if low else "the coordinator's choice"
+    notes = _close_tab(s)
+    _end(store, s["id"], f"{name} switched from {s['entry']} to {entry}: {why}")
+    deadline = time.monotonic() + 15  # herdr frees the agent's name when the agent has exited
+    while s.get("herdr_agent") and herdr.status(s["herdr_agent"]) not in ("gone", "not checked") \
+            and time.monotonic() < deadline:
+        time.sleep(0.5)
+    try:
+        opened = open_session(store, kind, name, str(entry), task, ticket["id"] if ticket else None,
+                              worktree=bool(s.get("worktree")), timeout=timeout)
+    except RLError as exc:
+        again = (f"rl agent open {name} --role {kind} --entry {entry}" + (f" --task {task}" if task else "")
+                 + (f" --ticket {ticket['id']}" if ticket else ""))
+        raise RLError(exc.code, f"{name} ({s['entry']}) was closed, but the new session did not open: {exc.message}. "
+                                f"Open it again: {again}") from None
+    head = f"{name}: {s['entry']} -> {entry} ({why}); {s['id']} closed" + "".join(f"; {n}" for n in notes)
+    return {**opened, "replaced": s["id"], "summary": head + "\n" + opened["summary"]}
 
 
 def list_sessions(store: Store, include_all: bool = False) -> dict:

@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 from . import (adapters, agents, context, delegate, hooks, literature, manuscript, messages, research, reviews,
-               runs, snapshot, tasks, view, watch)
+               runs, snapshot, tasks, usage, view, watch)
 from .project import advice_limit, find_project, model_entries
 from .schema import ENUMS, LINKABLE, PAPER_ASSESSMENTS
 from .store import Store
@@ -98,8 +98,12 @@ def cmd_link(args):
 def cmd_session(args):
     store = _store(args)
     if args.action == "start":
-        return tasks.start_session(store, args.role, args.host, args.host_session_id, args.model,
-                                   args.model_observed, args.effort, args.worktree)
+        out = tasks.start_session(store, args.role, args.host, args.host_session_id, args.model,
+                                  args.model_observed, args.effort, args.worktree)
+        if args.role == "coordinator" and args.host == "claude":  # its status line reports Claude's usage
+            note = usage.install_statusline(store.project.root, delegate.rl_command())
+            out["summary"] += f"\nClaude usage: {note}" if note else ""
+        return out
     return tasks.end_session(store, args.id)
 
 
@@ -367,6 +371,8 @@ def cmd_agent(args):
         return agents.dialog(store, args.name)
     if a == "answer":
         return agents.answer(store, args.name, args.option, args.reason)
+    if a == "switch":
+        return agents.switch(store, args.name, args.entry, args.now, args.timeout)
     if a == "check":
         return watch.check(store)
     if a == "watch":
@@ -376,6 +382,16 @@ def cmd_agent(args):
             return watch.start(store, args.every)
         return watch.run(store, args.every, args.own_tab)
     return agents.list_sessions(store, args.all)
+
+
+def cmd_usage(args):
+    if args.action == "statusline":  # Claude Code's status line: no project needed, and it never fails
+        try:
+            raw = "" if sys.stdin.isatty() else sys.stdin.read()
+        except (OSError, ValueError):
+            raw = ""
+        return {"summary": usage.statusline(raw)}
+    return usage.show(_store(args))
 
 
 def cmd_models(args):
@@ -453,6 +469,10 @@ def build_parser() -> argparse.ArgumentParser:
     sp = add("digest", cmd_digest, "blake2b digests of files or directories (for RunSpecs and manifests)")
     sp.add_argument("paths", nargs="+")
     add("models", cmd_models, "configured reviewer and advisor entries and whether their CLIs exist")
+    sp = add("usage", cmd_usage, "the Claude and Codex subscription windows, and the hosts that are low (their "
+                                 "researchers and reviewers hand over to another model)")
+    sp.add_argument("action", nargs="?", choices=["show", "statusline"], default="show",
+                    help="statusline: Claude Code's status line command (reads its input on stdin)")
     sp = add("link", cmd_link, "relate two records: " + ", ".join(LINKABLE))
     sp.add_argument("source")
     sp.add_argument("relation", choices=LINKABLE)
@@ -757,8 +777,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--digest")
     ss.add_parser("list")
 
-    sp = add("agent", cmd_agent, "agent sessions in herdr tabs: open, assign, tell, reset, close, list, brief, "
-                                 "dialog, answer, check, watch")
+    sp = add("agent", cmd_agent, "agent sessions in herdr tabs: open, assign, tell, reset, close, switch, list, "
+                                 "brief, dialog, answer, check, watch")
     ss = sp.add_subparsers(dest="action", required=True)
     s = ss.add_parser("open", help="open a researcher, reviewer or advisor session in a new herdr tab")
     s.add_argument("name", nargs="?", help="session name, e.g. researcher-1 (default: <role>-<n>)")
@@ -787,6 +807,13 @@ def build_parser() -> argparse.ArgumentParser:
     s = ss.add_parser("close", help="close the session and its herdr tab")
     s.add_argument("name")
     s.add_argument("--remove-worktree", action="store_true", help="also remove its worktree when it is clean")
+    s = ss.add_parser("switch", help="continue a researcher's or reviewer's work on another model (its host's "
+                                     "subscription is low): close it and open one of the same name on the next entry")
+    s.add_argument("name")
+    s.add_argument("--entry", help="<claude|codex|pi>:<model>[@effort] (default: the next entry of its role that is "
+                                   "not on a low host)")
+    s.add_argument("--now", action="store_true", help="also while it works (it stops mid-turn)")
+    s.add_argument("--timeout", type=int, default=90, help="seconds to wait for the new agent to start")
     s = ss.add_parser("brief", help="what the session does now (read by the session itself)")
     s.add_argument("name", nargs="?")
     s = ss.add_parser("list")

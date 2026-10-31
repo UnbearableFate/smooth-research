@@ -36,8 +36,11 @@ permission and dialogs from the sessions also go to the coordinator, which decid
 the user only what only the user can decide. A watcher in its own tab
 looks at the sessions every 20 minutes (`agents.watch_minutes`): it starts an agent that exited again and
 reminds an idle session whose assignment is unfinished, and leaves recorded waits alone (a task waiting on
-cluster jobs, a pending review, a run still running). Without herdr, the same roles run headless
-(`rl delegate`, `rl review run`, `rl advise run`).
+cluster jobs, a pending review, a run still running). When a Claude Code or Codex subscription window is
+nearly used up (`rl usage`; 10% left, or 20% on the coordinator's own host), the researchers and reviewers on
+that host hand their work over and the coordinator continues it on the next model of their list
+(`rl agent switch`); the coordinator and the advisors keep their models. Without herdr, the same roles run
+headless (`rl delegate`, `rl review run`, `rl advise run`).
 
 ## Build and install
 

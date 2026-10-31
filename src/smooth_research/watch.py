@@ -14,6 +14,10 @@ coordinator should resolve (a review without a reviewer) goes to it when it is s
 coordinator gets one recorded note for a round that changed or found something, and one reminder for messages it
 has left unread for a whole round while idle. The watcher runs in its own herdr tab (sr-watch): rl agent open
 starts it, and it stops when no session is open.
+Between rounds it looks at the subscription usage every few minutes (usage.py). A researcher or reviewer on a
+host that is low is told once per window to finish (a researcher commits and hands its task over, a reviewer
+stops), and the coordinator to switch it to another model when it is idle (rl agent switch); it is not reminded
+to continue or started again on that host. Advisors are left alone: the rest of the window is theirs.
 """
 
 from __future__ import annotations
@@ -24,7 +28,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import herdr, messages
+from . import herdr, messages, usage
 from .delegate import rl_command
 from .launch import answer_trust, start_agent
 from .project import ENV_PROJECT, watch_minutes
@@ -37,23 +41,31 @@ MAX_REMINDERS = 2  # per assignment
 OPEN_TICKET = ("pending", "running")
 IN_PROGRESS = ("queued", "running")
 NOT_USER = "(from the watcher, not from the user)"
+USAGE_MINUTES = 5  # how often the subscription usage is looked at between rounds
 
 
-def check(store: Store) -> dict:
+def check(store: Store, usage_only: bool = False) -> dict:
     """One round: the state of every open session, recovering what it can. What the coordinator should know goes
-    to it as one recorded note (with a notice)."""
+    to it as one recorded note (with a notice). usage_only (between rounds): only tell the researchers and
+    reviewers on a host that became low to finish."""
     problem = herdr.problem()
     if problem:
         raise RLError("UNAVAILABLE", f"the watcher needs herdr: {problem}")
     with store.read() as tx:
         sessions = sorted((s for s in tx.all("Session", status="active") if s.get("herdr_agent")),
                           key=lambda s: s["id"])
+    low = usage.low_hosts(store)
     lines, news = [], []
     for s in sessions:
+        short = low.get(s["host"]) if s.get("role_kind") in ("researcher", "reviewer") else None
+        if usage_only and not short:
+            continue
         try:
-            line, tell = _round(store, s)
+            line, tell = _wrap_up(store, s, short) if usage_only else _round(store, s, short)
         except RLError as exc:
             line, tell = f"{s['role_id']}: not checked ({exc.message})", False
+        if usage_only and not tell:
+            continue
         lines.append(line)
         news += [line] if tell else []
     note = told = None
@@ -62,17 +74,23 @@ def check(store: Store) -> dict:
             msg = messages.record(tx, "NOTE", "watch", "coordinator", text="watch round: " + " | ".join(news))
         told = messages.notify(store, msg)
         note = msg["id"]
-    reminder = _coordinator(store, quiet=bool(told))
-    head = f"{now_utc()} watch round: {len(sessions)} session(s)" + (f"; {note} to the coordinator" if note else "")
+    reminder = None if usage_only else _coordinator(store, quiet=bool(told))
+    head = (f"{now_utc()} watch {'usage check' if usage_only else 'round'}: {len(sessions)} session(s)"
+            + (f"; {note} to the coordinator" if note else ""))
+    summary = "\n".join([head, *(f"  {x}" for x in lines), *([f"  {reminder}"] if reminder else [])])
     return {"sessions": len(sessions), "news": news, "note": note, "reminder": reminder,
-            "summary": "\n".join([head, *(f"  {x}" for x in lines), *([f"  {reminder}"] if reminder else [])])}
+            "summary": "" if usage_only and not lines else summary}
 
 
-def _round(store: Store, s: dict) -> tuple[str, bool]:
-    """One session: a line for the report, and whether the coordinator should hear it."""
+def _round(store: Store, s: dict, low: dict | None = None) -> tuple[str, bool]:
+    """One session: a line for the report, and whether the coordinator should hear it. low: why the session's
+    host is low, for a researcher or reviewer."""
     name, what = s["role_id"], s.get("assignment")
     info = herdr.agent(s["herdr_agent"])
     if info is None:
+        if low:  # not started again on a host that is nearly used up
+            return (f"{name}: its agent exited, and {low['reason']}: not started again there; continue its work "
+                    f"on another model: rl agent switch {name}"), _once(store, s, "usage_gone", low["key"])
         return _restart(store, s)
     state, seq = info.get("agent_status") or "unknown", info.get("state_change_seq")
     if state == "blocked":
@@ -80,6 +98,8 @@ def _round(store: Store, s: dict) -> tuple[str, bool]:
         if why is None:
             return f"{name}: answered the trust question for its folder", True
         return why, _once(store, s, "blocked", seq)
+    if low:
+        return _wrap_up(store, s, low)
     if state not in ("idle", "done"):  # working, or a state herdr cannot tell
         return f"{name}: {state}" + (f" on {what}" if what else ""), False
     state = "idle"  # herdr's done is an idle agent whose last turn nobody has looked at yet
@@ -107,6 +127,44 @@ def _round(store: Store, s: dict) -> tuple[str, bool]:
     _remember(store, s, ("session.reminded", s["id"], f"{name}: {desc}"), assignment=what, reminders=count + 1,
               seq=seq)
     return f"{name}: was {state} with {desc}; reminded it to continue" + (f" (not delivered: {problem})" if problem else ""), True
+
+
+def _wrap_up(store: Store, s: dict, low: dict) -> tuple[str, bool]:
+    """A researcher or reviewer on a host whose subscription is low: told to finish so that another model takes
+    its work over (once per window, and again at the next look while the notice cannot be delivered); the
+    coordinator hears it once and switches the session when it is idle."""
+    name, what, key = s["role_id"], s.get("assignment"), low["key"]
+    text, told = _finish(store, s), (s.get("watch") or {}).get("told") or {}
+    problem = None
+    if text and told.get("usage_agent") != key:
+        problem = herdr.prompt(s["herdr_agent"], f"[smooth-research watch] {name}: {low['reason']}, so another "
+                                                 f"model continues your work. {text} {NOT_USER}")
+        if not problem:
+            _remember(store, s, ("session.told_to_finish", s["id"], f"{name}: {low['reason']}"),
+                      told={**told, "usage_agent": key})
+    state = ("nothing open to finish" if not text else f"not yet told to finish {what} ({problem})" if problem
+             else f"told to finish {what}")
+    return (f"{name} ({s['entry']}): {low['reason']}; {state}; when it is idle: rl agent switch {name}",
+            _once(store, s, "usage", key))
+
+
+def _finish(store: Store, s: dict) -> str | None:
+    """What a researcher or reviewer does before another model takes its work over; None when nothing is open."""
+    name, what, rl = s["role_id"], s.get("assignment"), rl_command()
+    with store.read() as tx:
+        x = tx.get(what) if what else None
+    if not x:
+        return None
+    if s["role_kind"] == "researcher" and x.get("owner_role") == name \
+            and x["state"] not in ("delivered", "accepted", "stopped"):
+        return (f"Stop at a safe point now: commit your work on your branch, write a handoff note (what is done, "
+                f"what is next, what to check first) and hand the task over: `{rl} task handoff {what} --role "
+                f"{name} --doc <note>`. Then end your turn.")
+    if s["role_kind"] == "researcher" and x.get("state") == "ready":
+        return f"Do not claim {what}: end your turn."
+    if s["role_kind"] == "reviewer" and x.get("status") in OPEN_TICKET:
+        return f"Stop now without answering {what} and end your turn."
+    return None
 
 
 def assignment_state(store: Store, s: dict) -> tuple[bool, str, list[str]]:
@@ -338,22 +396,27 @@ def run(store: Store, every: float | None = None, own_tab: bool = False) -> dict
     if problem:
         raise RLError("UNAVAILABLE", f"the watcher needs herdr: {problem}")
     here = os.environ.get("HERDR_TAB_ID")
-    print(f"{now_utc()} watching the agent sessions of {store.project.root}: a round every {every:g} min", flush=True)
+    print(f"{now_utc()} watching the agent sessions of {store.project.root}: a round every {every:g} min, the "
+          f"subscription usage every {min(every, USAGE_MINUTES):g} min", flush=True)
     end = "no agent session is open"
+    due = time.monotonic() + every * 60
     while True:
-        time.sleep(every * 60)
+        time.sleep(max(0.0, min(USAGE_MINUTES * 60, due - time.monotonic())))  # the usage, or the round when due
         if own_tab:
             with store.read() as tx:
                 registered = tx.meta().get("watch_tab")
             if registered != here:
                 end = f"the watcher in tab {registered} took over" if registered else "the watcher was stopped"
                 break
+        whole = time.monotonic() >= due - 1
+        due = time.monotonic() + every * 60 if whole else due
         try:
-            out = check(store)
+            out = check(store, usage_only=not whole)
         except RLError as exc:
-            print(f"{now_utc()} watch round failed: {exc.message}", flush=True)
+            print(f"{now_utc()} watch {'round' if whole else 'usage check'} failed: {exc.message}", flush=True)
             continue
-        print(out["summary"], flush=True)
+        if out["summary"]:
+            print(out["summary"], flush=True)
         if own_tab:
             with store.write() as tx:
                 tx.set_meta(watch_beat=now_utc(), **({"watch_tab": None, "watch_pane": None} if not out["sessions"] else {}))
