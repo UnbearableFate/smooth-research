@@ -7,7 +7,8 @@ session) at <project>/../<project>-worktrees/<name>, on a new branch per task ma
 checkout; the coordinator merges accepted branches. Sessions talk through recorded messages; a live recipient
 gets a one-line notice. After an assignment the coordinator resets a session for reuse (compact or clear) or
 closes it with its tab. A host's question whether to trust the folder rl opened the session in is answered for
-the coordinator; every other dialog is left for the user. Without herdr the headless commands remain: rl
+the coordinator; the sessions' other dialogs, questions and requests for permission go to the coordinator, which
+decides what it can judge (rl agent dialog, rl agent answer). Without herdr the headless commands remain: rl
 delegate, rl review run, rl advise run.
 """
 
@@ -270,22 +271,20 @@ def open_session(store: Store, kind: str, name: str | None = None, entry_text: s
 
 def _answer_trust(name: str, host: str, folder: Path, timeout: int) -> str | None:
     """Answer the host's question whether to trust the folder rl opened the session in, as the coordinator's
-    choice. None once the agent is ready; otherwise why it still waits (any other dialog is left for the user)."""
-    ask = f"look at it with `herdr agent read {name}` and ask the user before answering it"
+    choice. None once the agent is ready; otherwise why it still waits (any other dialog is the coordinator's
+    to decide)."""
+    ask = (f"decide it: `rl agent dialog {name}` shows it, `rl agent answer {name} \"<option>\" --reason ..` "
+           "answers it (only what only the user can decide goes to the user)")
     question, accept = TRUST_QUESTIONS.get(host, (None, None))
     try:
         screen = herdr.read(name)
         if not question or question not in screen:
-            return f"{name} waits at a dialog: {ask}"
+            return f"{name} waits at a dialog ({_excerpt(screen)}): {ask}"
         if not _names(screen, folder):
             return f"{name} waits at a folder trust question that does not name {folder}: {ask}"
-        for _ in range(4):  # move the selection to the option that trusts the folder, then confirm it
-            if next((x for x in screen.splitlines() if accept in x), "").lstrip().startswith(SELECTED):
-                break
-            herdr.keys(name, "down")
-            screen = herdr.read(name)
-        else:
-            return f"{name} waits at the folder trust question for {folder}; rl could not select '{accept}': {ask}"
+        problem = _select(name, accept, screen)
+        if problem:
+            return f"{name} waits at the folder trust question for {folder}; {problem}: {ask}"
         herdr.keys(name, "enter")
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
@@ -300,6 +299,88 @@ def _answer_trust(name: str, host: str, folder: Path, timeout: int) -> str | Non
         return f"{name} trusted {folder} but was not ready within {timeout}s: {ask}"
     except RLError as exc:
         return f"{name} waits at a dialog ({exc.message}): {ask}"
+
+
+def _option_line(screen: str, option: str) -> str | None:
+    """The line of a dialog's option: given as its number, or as the start of its text (else any line holding it)."""
+    lines = screen.splitlines()
+    if option.strip().isdigit():
+        pattern = re.compile(rf"^\s*(?:[{''.join(SELECTED)}]\s*)?{option.strip()}[.)]\s")
+        return next((x for x in lines if pattern.match(x)), None)
+    want = " ".join(option.split()).casefold()
+    bare = [(x, re.sub(rf"^\s*(?:[{''.join(SELECTED)}]\s*)?(?:\d+[.)]\s*)?", "", x).casefold()) for x in lines]
+    return next((x for x, b in bare if b.startswith(want)), None) or next((x for x, b in bare if want in b), None)
+
+
+def _select(target: str, option: str, screen: str) -> str | None:
+    """Move a dialog's selection to the option (down, then up), reading the screen after every key; None once it
+    is selected, else why not."""
+    if _option_line(screen, option) is None:
+        return f"no option '{option}' on the screen of {target}"
+    for key in ["down"] * 6 + ["up"] * 12:
+        if (_option_line(screen, option) or "").lstrip().startswith(SELECTED):
+            return None
+        herdr.keys(target, key)
+        screen = herdr.read(target)
+    return f"rl could not select '{option}'"
+
+
+def _excerpt(screen: str, lines: int = 12, chars: int = 600) -> str:
+    """The bottom of a screen, where a dialog sits, as one line."""
+    shown = " / ".join(" ".join(x.split()) for x in screen.splitlines() if x.strip())
+    return ("…" + shown[-chars:]) if len(shown) > chars else shown or "an empty screen"
+
+
+def dialog(store: Store, name: str) -> dict:
+    """What a session's agent shows now, for the coordinator to judge a dialog or a question in it."""
+    s = _session(store, name)
+    state = herdr.status(s["herdr_agent"])
+    screen = herdr.read(s["herdr_agent"])
+    shown = [x.rstrip() for x in screen.splitlines() if x.strip()][-40:]
+    head = f"{name} is {state}" + (" at a dialog" if state == "blocked" else "")
+    return {"name": name, "state": state, "screen": screen,
+            "summary": head + (":\n" + "\n".join(shown) if shown else " (nothing on its screen)")
+                       + (f"\nanswer it: rl agent answer {name} \"<option text or number>\" --reason \"<why>\""
+                          if state == "blocked" else "")}
+
+
+def answer(store: Store, name: str, option: str, reason: str, timeout: int = 30) -> dict:
+    """The coordinator's answer to a dialog in a session: select the option, confirm it, record why. A session left
+    idle with its assignment unfinished is then told to go on."""
+    if caller_role():
+        raise RLError("INVALID", f"answering a session's dialog is the coordinator's decision, not {caller_role()}'s: "
+                                 f"tell the coordinator (rl agent tell coordinator \"..\")")
+    if not (reason or "").strip():
+        raise RLError("INVALID", "--reason: why you chose this option (it is recorded)")
+    s = _session(store, name)
+    target = s["herdr_agent"]
+    state = herdr.status(target)
+    if state != "blocked":
+        raise RLError("CONFLICT", f"{name} is {state}, not at a dialog; `rl agent dialog {name}` shows its screen")
+    screen = herdr.read(target)
+    problem = _select(target, option, screen)
+    if problem:
+        raise RLError("NOT_FOUND", f"{name}: {problem}; `rl agent dialog {name}` shows the options")
+    chosen = " ".join((_option_line(herdr.read(target), option) or option).split()).lstrip("".join(SELECTED) + " ")
+    herdr.keys(target, "enter")
+    deadline = time.monotonic() + timeout
+    while (state := herdr.status(target)) == "blocked" and time.monotonic() < deadline:
+        if _option_line(herdr.read(target), option) is None:  # another dialog followed
+            break
+        time.sleep(0.5)
+    with store.write() as tx:
+        tx.event("session.answered", s["id"], f"{name}: chose '{chosen}' at '{_excerpt(screen, chars=200)}': {reason}")
+    summary = f"{name}: chose '{chosen}' ({reason}); now {state}"
+    if state == "blocked":
+        summary += f"; it waits at a dialog again: `rl agent dialog {name}`"
+    elif state in ("idle", "done") and s.get("assignment"):
+        from .watch import _assignment  # the watcher uses this module
+        stopped, desc, _ = _assignment(store, s)
+        if stopped:
+            told = herdr.prompt(target, f"[smooth-research] {name}: your assignment is {s['assignment']}. Run "
+                                        f"`{rl_command()} agent brief {name}` and follow it.")
+            summary += f"; {desc}: " + (f"not told ({told})" if told else "told to read its brief")
+    return {"id": s["id"], "chosen": chosen, "state": state, "summary": summary}
 
 
 def _names(screen: str, folder: Path) -> bool:

@@ -359,6 +359,10 @@ def cmd_agent(args):
         return agents.close(store, args.name, args.remove_worktree)
     if a == "brief":
         return agents.brief(store, args.name)
+    if a == "dialog":
+        return agents.dialog(store, args.name)
+    if a == "answer":
+        return agents.answer(store, args.name, args.option, args.reason)
     if a == "check":
         return watch.check(store)
     if a == "watch":
@@ -748,7 +752,7 @@ def build_parser() -> argparse.ArgumentParser:
     ss.add_parser("list")
 
     sp = add("agent", cmd_agent, "agent sessions in herdr tabs: open, assign, tell, reset, close, list, brief, "
-                                 "check, watch")
+                                 "dialog, answer, check, watch")
     ss = sp.add_subparsers(dest="action", required=True)
     s = ss.add_parser("open", help="open a researcher, reviewer or advisor session in a new herdr tab")
     s.add_argument("name", nargs="?", help="session name, e.g. researcher-1 (default: <role>-<n>)")
@@ -781,6 +785,13 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("name", nargs="?")
     s = ss.add_parser("list")
     s.add_argument("--all", action="store_true", help="closed sessions too")
+    s = ss.add_parser("dialog", help="what a session's agent shows now: a dialog with its options, or a question")
+    s.add_argument("name")
+    s = ss.add_parser("answer", help="the coordinator answers a dialog in a session: select the option, confirm it, "
+                                     "record why")
+    s.add_argument("name")
+    s.add_argument("option", help="the option's number or the start of its text, as `rl agent dialog` shows it")
+    s.add_argument("--reason", required=True, help="why this option (recorded)")
     ss.add_parser("check", help="one watcher round now: restart agents that exited, remind idle sessions of an "
                                 "unfinished assignment, report the rest to the coordinator")
     s = ss.add_parser("watch", help="the watcher: a round every agents.watch_minutes over the open sessions (rl "

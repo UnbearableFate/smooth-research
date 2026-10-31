@@ -30,6 +30,8 @@ DIALOGS = {  # the options (the first one selected at the start) and the screen
     "codex": (["Trust and continue", "Open restricted"], "  Trust this folder?\n  {cwd}\n  Codex can read, edit and run "
               "files here.\n{options}"),
     "mcp": (["Use this MCP server", "Continue without it"], " New MCP server found in .mcp.json: codegraph\n{options}"),
+    "approval": (["1. Yes", "2. Yes, and don't ask again for rm commands", "3. No, and tell Claude what to do differently"],
+                 " Bash command\n   rm -rf build/\n Do you want to proceed?\n{options}"),
 }
 
 def done(result=None, error=None, text=None):
@@ -278,13 +280,13 @@ def test_reviewer_and_advisor_sessions_answer_and_talk_through_messages(project,
     assert agents.list_sessions(project)["summary"].startswith(f"{opened['id']} reviewer-1 [reviewer, idle]")
 
 
-def test_a_session_waiting_at_another_dialog_is_reported_not_answered(project, herdr_log, monkeypatch):
-    for n, (dialog, said) in enumerate((("mcp", "waits at a dialog: look at it"),
+def test_a_session_waiting_at_another_dialog_is_left_to_the_coordinator(project, herdr_log, monkeypatch):
+    for n, (dialog, said) in enumerate((("mcp", "waits at a dialog (New MCP server found"),
                                         ("claude-other", "a folder trust question that does not name")), 1):
         monkeypatch.setenv("FAKE_HERDR_BLOCKED", dialog)
         task = tasks.create_task(project, "implement", "implement", ["E-0001"], to_role="researcher")["id"]
         out = agents.open_session(project, "researcher", f"researcher-{n}", task=task, worktree=False)
-        assert said in out["summary"] and "ask the user before answering it" in out["summary"]
+        assert said in out["summary"] and 'rl agent answer researcher-' in out["summary"]
         with project.read() as tx:
             s = tx.require(out["id"])
         assert s["status"] == "active" and s["assignment"] == task
@@ -306,6 +308,47 @@ def test_the_trust_question_for_the_folder_rl_opened_the_session_in_is_answered(
     assert any(c[:2] == ["agent", "prompt"] and "agent brief researcher-1" in c[3] for c in log)
     with project.read() as tx:
         assert any(e["type"] == "session.trusted" for e in tx.all("Event"))
+
+
+def test_the_coordinator_answers_a_dialog_in_a_session_and_records_why(project, herdr_log, tmp_path, monkeypatch):
+    (tmp_path / "src/model.py").write_text("def f(x):\n    return x\n")
+    rv = reviews.request_review(project, "E-0001", ["src/model.py"], "right?", ["claude-opus-5-5"], scope="op")
+    monkeypatch.setenv("FAKE_HERDR_BLOCKED", "mcp")
+    opened = agents.open_session(project, "reviewer", ticket=rv["id"])
+    assert "New MCP server found in .mcp.json" in opened["summary"]  # what it asks, for the coordinator to judge
+    shown = agents.dialog(project, "reviewer-1")["summary"]
+    assert shown.startswith("reviewer-1 is blocked at a dialog:") and "Continue without it" in shown
+    with pytest.raises(RLError) as exc:
+        agents.answer(project, "reviewer-1", "Continue without it", "")
+    assert exc.value.code == "INVALID"
+    monkeypatch.setenv("SMOOTH_RESEARCH_ROLE", "researcher-1")
+    with pytest.raises(RLError) as exc:
+        agents.answer(project, "reviewer-1", "Continue without it", "not needed")
+    assert "the coordinator's decision, not researcher-1's" in exc.value.message
+    monkeypatch.delenv("SMOOTH_RESEARCH_ROLE")
+
+    out = agents.answer(project, "reviewer-1", "continue without", "a review reads the package; no MCP server needed")
+    assert out["chosen"] == "Continue without it" and out["state"] == "idle"
+    assert f"{rv['id']} pending: told to read its brief" in out["summary"]  # it never got its assignment
+    log = calls(herdr_log)
+    assert [c[3:] for c in log if c[:2] == ["agent", "send-keys"]] == [["down"], ["enter"]]
+    assert log[-1][:3] == ["agent", "prompt", "reviewer-1"] and "agent brief reviewer-1" in log[-1][3]
+    with project.read() as tx:
+        why = [e["summary"] for e in tx.all("Event") if e["type"] == "session.answered"]
+    assert why == ["reviewer-1: chose 'Continue without it' at '"
+                   + agents._excerpt(" New MCP server found in .mcp.json: codegraph\n ❯ Use this MCP server\n"
+                                     "   Continue without it", chars=200)
+                   + "': a review reads the package; no MCP server needed"]
+    with pytest.raises(RLError) as exc:
+        agents.answer(project, "reviewer-1", "1", "again")
+    assert exc.value.code == "CONFLICT"  # not at a dialog now
+
+    fake_state = herdr_log.parent / "state.json"
+    state = json.loads(fake_state.read_text())
+    state["dialog"]["reviewer-1"] = {"kind": "approval", "sel": 0, "cwd": ""}
+    fake_state.write_text(json.dumps(state))
+    out = agents.answer(project, "reviewer-1", "3", "a reviewer does not delete build outputs")
+    assert out["chosen"].startswith("3. No, and tell Claude") and out["state"] == "idle"
 
 
 def test_sessions_need_herdr_but_messages_do_not(project, monkeypatch):

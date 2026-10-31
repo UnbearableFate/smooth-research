@@ -10,8 +10,9 @@ the absolute path from SKILL.md.
   opened with `rl agent open` ([team.md](team.md)). They get the arguments in `agents.args.<host>` of
   `smooth-research.yaml` (for Claude Code `--permission-mode auto` by default) and no permission-bypass flags.
   Claude Code asks whether to trust a new worktree's folder; `rl agent open` answers that question for the
-  folder it opened the session in. Any other dialog is reported, not answered: ask the user. A watcher tab
-  restarts sessions that stopped unexpectedly (team.md). The bullets below are the forms without herdr.
+  folder it opened the session in. Other dialogs and the sessions' questions are yours to decide (`rl agent
+  dialog`, `rl agent answer`); only what only the user can decide goes to the user. A watcher tab restarts
+  sessions that stopped unexpectedly (team.md). The bullets below are the forms without herdr.
 - Researchers: for each implementation or run task, start the native subagent `smooth-research:researcher`
   (Agent tool) with the task id and a role name such as `researcher-1`. Give a short brief; it reads its own
   work pack and has your tools, including MCP servers such as pi-env-mcp and miyabi-mcp. When it reports

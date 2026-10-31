@@ -155,7 +155,8 @@ def test_a_dialog_is_reported_once_and_a_trust_question_for_its_folder_is_answer
     agents.open_session(project, "reviewer")
     fake(herdr_log, lambda st: st["dialog"].update({"reviewer-1": {"kind": "mcp", "sel": 0, "cwd": ""}}))
     first = watch.check(project)
-    assert "reviewer-1 waits at a dialog: look at it" in first["summary"] and first["note"]
+    assert "reviewer-1 waits at a dialog (New MCP server found" in first["summary"] and first["note"]
+    assert 'rl agent answer reviewer-1 "<option>"' in first["summary"]
     assert not watch.check(project)["note"]
     assert not [c for c in calls(herdr_log) if c[:2] == ["agent", "send-keys"]]
     fake(herdr_log, lambda st: st["dialog"].update({"reviewer-1": {"kind": "codex", "sel": 0, "cwd": str(tmp_path)}}))

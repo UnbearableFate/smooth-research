@@ -9,8 +9,8 @@ runs of the task's experiments still queued or running, and a message the sessio
 the coordinator: one it has not read). A gone agent is started again in its folder, in a new conversation that
 reads its assignment from the records (rl agent brief); an idle one is reminded to continue, at most twice per
 assignment. A session that keeps exiting or does not react to a reminder, and a dialog other than the trust
-question for the session's own folder, go to the coordinator, which asks the user where the user decides; a wait
-the coordinator should resolve (a review without a reviewer) goes to it when it is still there a round later. The
+question for the session's own folder, go to the coordinator, which decides what it can judge; a wait the
+coordinator should resolve (a review without a reviewer) goes to it when it is still there a round later. The
 coordinator gets one recorded note for a round that changed or found something, and one reminder for messages it
 has left unread for a whole round while idle. The watcher runs in its own herdr tab (sr-watch): rl agent open
 starts it, and it stops when no session is open.
@@ -103,7 +103,9 @@ def _round(store: Store, s: dict) -> tuple[str, bool]:
     problem = herdr.prompt(s["herdr_agent"], f"[smooth-research watch] {name}: you stopped while {desc}. Continue it "
                                              f"(`{rl} agent brief {name}`). If you wait for something, record it and "
                                              f"end your turn: a run you started as running (`{rl} run record`), cluster "
-                                             f"jobs with `{rl} task wait`, a blocker with `{rl} task block`. {NOT_USER}")
+                                             f"jobs with `{rl} task wait`, a blocker with `{rl} task block`. A question "
+                                             f"or a request for permission goes to the coordinator (`{rl} agent tell "
+                                             f"coordinator`), not to the user. {NOT_USER}")
     _remember(store, s, ("session.reminded", s["id"], f"{name}: {desc}"), assignment=what, reminders=count + 1,
               seq=seq)
     return f"{name}: was {state} with {desc}; reminded it to continue" + (f" (not delivered: {problem})" if problem else ""), True

@@ -62,8 +62,8 @@ def prompt(target: str, text: str, wait_ms: int | None = None) -> str | None:
         if code == "agent_prompt_stalled":
             return None  # submitted; a slash command shows no working state
         if code == "agent_blocked":
-            return f"{target} waits at a dialog (an approval or a question); look at it with `herdr agent read " \
-                   f"{target}` and ask the user before answering it"
+            return f"{target} waits at a dialog (an approval or a question), so nothing was typed; the coordinator " \
+                   f"decides it (`rl agent dialog {target}`)"
         return exc.message
 
 

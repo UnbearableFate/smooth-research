@@ -384,6 +384,8 @@ research-tree 已有 export_snapshot，但本次未发现完整的 import/restor
 
 （2026-10-31 实施：跨 session 的默认方式是 herdr。每个 researcher 会话有自己的 git worktree，位于 `<项目>/../<项目名>-worktrees/<会话名>`，每个任务一个分支 `sr/<会话名>/<任务>`，由协调者合并。记录的消息照旧进 inbox；收件人有活动会话时，再用 `herdr agent prompt` 送一行通知，并注明来自其他会话、不是用户。不在 herdr 里时，原生子代理、`rl delegate`、`rl review run`、`rl advise run` 照旧可用。见 §21.9。）
 
+（2026-10-31 按用户要求：各角色的询问、许可请求和会话里的对话框都交给协调者，协调者能判断的直接判断并回答，只有协调者不能判断的才问用户。见 §21.9“询问与许可”。）
+
 （2026-10-31 按用户要求增加监视程序：协调者打开会话后，`sr-watch` tab 每 20 分钟查看一轮。意外退出的会话在原目录重启，空闲而任务没做完的会话收到提醒；记录里看得出在等待的会话不唤醒。CLI 替协调者回答 worktree 的信任问题，其他对话框仍交给用户。见 §21.9。）
 
 ### 7.3 文档消息的最小信封
@@ -1215,6 +1217,7 @@ GitHub 链接固定到本次读取的提交；外部产品文档按 2026-10-30 �
   - 正常的暂停不唤醒（waiting、等审查、run 还在运行、等回复），没有 reviewer 的审查只报告一次；
   - 对话框只报告一次；协调者有消息一整轮没读时提醒一次；
   - 被取代的监视程序退出，过期的被替换；ID 被别的 tab 占用时不关、不复用。
+- 再增至 79 项：协调者回答会话里的对话框，按选项文字或编号选择并记下理由；角色会话不能回答；会话不在对话框时报错；回答后把还没送达的任务告诉会话。
 
 ### 21.6 端到端测试结果（2026-10-30）
 
@@ -1308,7 +1311,8 @@ GitHub 链接固定到本次读取的提交；外部产品文档按 2026-10-30 �
 | --- | --- | --- |
 | 开会话 | `rl agent open [名字] --role researcher\|reviewer\|advisor [--task T-x\|--ticket RV-x/AD-x]`。先 `herdr tab create --no-focus`，环境变量带上项目、会话、角色和 checkout；再 `herdr agent start`。模型取角色列表里第一个可用的条目；工单有候选时用工单的 | 角色会话看得见、接得过来；分配只经过 CLI |
 | 会话参数 | CLI 只加模型、effort、会话 id 和名字。Claude reviewer 禁用 Edit、Write、NotebookEdit；Codex advisor 加 `--search`。其余参数写在 `agents.args.<host>` 里，Claude 默认 `--permission-mode auto` | 实施时试过用 `danger-full-access` 加 `-a never` 启动 Codex，被 auto 模式的安全检查拒绝。所以 CLI 不加任何绕过沙箱或审批的参数，由用户在配置里决定 |
-| 信任文件夹 | `agent start` 返回 `agent_not_ready` 时，CLI 读会话的屏幕。如果是宿主的信任问题，而且问的正是 CLI 开会话的目录，就替协调者选“信任”：Claude Code 默认选中“No, exit”，所以先按 down 再按 enter；Codex 直接 enter。然后记 `session.trusted` 事件。其他对话框只报告，由协调者问用户，包括审查 hooks、启用 MCP、审批，以及问的是别的目录的信任问题 | 最初只报告、不回答。用户随后说明：只有最初的协调者会话由用户决定信任，其他会话都在 CLI 建的 git worktree 里，应由协调者直接选择信任 |
+| 信任文件夹 | `agent start` 返回 `agent_not_ready` 时，CLI 读会话的屏幕。如果是宿主的信任问题，而且问的正是 CLI 开会话的目录，就替协调者选“信任”：Claude Code 默认选中“No, exit”，所以先按 down 再按 enter；Codex 直接 enter。然后记 `session.trusted` 事件。其他对话框交给协调者判断，见下一行 | 最初只报告、不回答。用户随后说明：只有最初的协调者会话由用户决定信任，其他会话都在 CLI 建的 git worktree 里，应由协调者直接选择信任 |
+| 询问与许可 | 各角色的询问和许可请求（`rl agent tell coordinator`）以及会话里的其他对话框（审查 hooks、启用 MCP、审批、问别的目录的信任问题）都交给协调者。能判断的由协调者直接回答：问题用 `rl agent tell`；对话框用 `rl agent dialog` 查看、`rl agent answer` 选项并记下理由（`session.answered`），之后若会话空闲而任务没做完，再告诉它去读 brief。记录不足以判断时选稳妥的选项。只有协调者不能判断的才问用户：超出范围、预算或约束文件留给用户的动作，超过 `advice.max_rounds` 的建议轮，用户的账户与凭据，项目以外不可撤销的操作。角色会话不能回答对话框 | 用户要求：其他角色的询问、征求许可，协调者能判断的都由协调者判断并给许可，不要转给用户 |
 | 监视程序 | `rl agent open` 同时在 `sr-watch` tab 里启动 `rl agent watch`，每 `agents.watch_minutes` 分钟（默认 20）查看一轮。agent 不在了就在原目录重启，开新对话，从 brief 读回任务，一小时最多 3 次。空闲而任务没做完、又没在等什么，就提醒它继续，同一任务最多 2 次，之后报告协调者。停在对话框时只回答本目录的信任问题，其他对话框报告一次。每轮的发现汇成一条来自 `watch` 的 NOTE。协调者空闲、又有消息一整轮没读时，提醒一次。没有会话时监视程序自己退出，`rl agent close` 关掉最后一个会话时也停止它 | 用户要求：协调者每隔 20 分钟查看各会话的状态，恢复预期之外的停止 |
 | 正常的暂停 | 监视程序不唤醒在等待的会话：任务记为 waiting（`rl task wait`）或 blocked；在等自己申请的审查；任务所测实验的 attempt 处于 queued 或 running；最后一条消息是自己发出、还没有回复（发给协调者的，以协调者还没读为准）。提醒的话里也写明：等待时把它记下来再结束这一轮 | 用户提醒：等待 run 结束这类正常的暂停不应被监视程序唤醒 |
 | tab 的归属 | 关闭或复用 tab 和 pane 之前，核对 tab 的标签：会话的 tab 标签是会话名，监视程序的是 `sr-watch`。标签不符就不关，重启时另开新 tab | herdr 重启后 ID 会重新编号，记下的 ID 可能已经指向用户自己的 tab |

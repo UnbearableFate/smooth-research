@@ -31,7 +31,9 @@ tabs (`rl agent open`, see `src/smooth_research/agents.py`). Each researcher ses
 worktree at `<project>/../<project>-worktrees/<name>`, on one branch per task, and the coordinator merges
 accepted branches with a merge commit. Sessions exchange recorded messages; a live recipient also gets a
 one-line notice. A review round holds two reviews; findings of medium or higher severity left after the
-second go to the coordinator, who approves them with a reason or returns the work. A watcher in its own tab
+second go to the coordinator, who approves them with a reason or returns the work. Questions, requests for
+permission and dialogs from the sessions also go to the coordinator, which decides what it can judge and asks
+the user only what only the user can decide. A watcher in its own tab
 looks at the sessions every 20 minutes (`agents.watch_minutes`): it starts an agent that exited again and
 reminds an idle session whose assignment is unfinished, and leaves recorded waits alone (a task waiting on
 cluster jobs, a pending review, a run still running). Without herdr, the same roles run headless

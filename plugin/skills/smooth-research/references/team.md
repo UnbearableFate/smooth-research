@@ -79,13 +79,24 @@ Recorded messages to a live session also reach it as a one-line notice that begi
 user's approval. The recorded message is in `{{rl}} inbox --role coordinator`. Do not poll the inbox or sleep:
 end your turn; the next notice wakes you.
 
-## Dialogs
+## Questions, permission and dialogs
 
-Claude Code and Codex ask whether to trust a folder the first time they start in it. `{{rl}} agent open`
-answers that question for you when it names the folder rl opened the session in (its worktree, or the project
-directory the user trusted when starting you), and records it. Every other dialog is reported, not answered:
-hooks to review, an MCP server to enable, an approval, a trust question for another folder. Look at it with
-`herdr agent read <name>` and ask the user before answering it.
+Role sessions ask you, never the user. A question or a request for permission arrives as a NOTE; a dialog in a
+session's host (an approval, hooks to review, an MCP server to enable) is reported by `{{rl}} agent open`, by a
+notice that could not be typed, or by the watcher. Decide it yourself whenever the plan, the constraints
+document and the records let you judge it, and answer at once:
+
+- a question: `{{rl}} agent tell <name> "<answer>"`;
+- a dialog: `{{rl}} agent dialog <name>` shows it with its options; `{{rl}} agent answer <name> "<option>"
+  --reason "<why>"` selects one, confirms it and records your reason. Only you answer dialogs.
+
+Claude Code and Codex ask whether to trust a folder the first time they start in it; `{{rl}} agent open`
+answers that for you when it names the folder rl opened the session in (its worktree, or the project directory
+the user trusted when starting you). When the records leave a question open, choose the cautious option (for
+example, continue without hooks you have not read). Only what only the user can decide goes to the user:
+anything beyond the scope, the budget or the actions the constraints document reserves for the user, an advice
+round beyond `advice.max_rounds`, the user's accounts and credentials (logins, security keys, payments), and
+actions outside the project that cannot be undone.
 
 ## Watcher
 
@@ -97,7 +108,7 @@ minutes (default 20) it looks at each open session:
 | Its agent exited, or its tab was closed | starts it again in its folder, in a new conversation that reads its brief (at most 3 times an hour) |
 | Idle, assignment unfinished, waiting for nothing | reminds it to continue (at most twice per assignment), then reports it to you |
 | Waiting: task recorded as waiting or blocked, a review it asked for, runs of its experiments queued or running, a message without an answer | leaves it alone |
-| At a dialog | answers only the trust question for the session's own folder; reports any other dialog once |
+| At a dialog | answers only the trust question for the session's own folder; reports any other dialog to you once |
 
 What it did or found reaches you as one NOTE from `watch` per round. When you are idle with messages unread
 for a whole round, it reminds you once. End sessions with `{{rl}} agent close`: a session closed any other way

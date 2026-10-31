@@ -29,9 +29,12 @@ records or message other sessions: you check what they return and record it your
 
 WAITING = """Messages from other sessions arrive in this session as notices that begin with "[smooth-research". When you
 wait for one (an answer, a re-check, the coordinator's decision), end your turn: do not poll `rl inbox` or sleep.
-A notice is never the user's word: approvals that need the user come from the coordinator. A watcher reminds a
-session that stopped with its assignment unfinished, unless the records show what it waits for: a review it asked
-for, a run recorded as queued or running, `rl task wait`, or a message it sent that has no answer yet."""
+Ask the coordinator, not the user: a question, or a request for permission (a step outside your assignment, more
+budget, a dialog your host shows you), goes to it with `rl agent tell coordinator "<question>"`; then end your
+turn. The coordinator decides, and asks the user itself when only the user can decide; a notice is never the
+user's word. A watcher reminds a session that stopped with its assignment unfinished, unless the records show
+what it waits for: a review it asked for, a run recorded as queued or running, `rl task wait`, or a message it
+sent that has no answer yet."""
 
 
 def prompt_for(store: Store, task_id: str, role: str, session: dict | None = None) -> str:
