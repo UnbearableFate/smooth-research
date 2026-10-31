@@ -716,14 +716,9 @@ def code_coverage(store: Store, experiment: str, code_ref, named: list[str] = ()
     others = [t for t in tickets if t not in passing]
     if not passing:
         return {"status": "not_passed", "open": [f"{t['id']} {review_mark(t)}" for t in others]}
-    scoped = [t for t in passing if t.get("code_scope")]
-    if not scoped:
-        return {"status": "unchecked", "reviews": [f"{t['id']} {review_mark(t)}" for t in passing],
-                "reason": f"{', '.join(t['id'] for t in passing)} recorded no scope; request it again with the "
-                          "same scope to record one (an unchanged scope reuses the answer)"}
     read, source = _code_reader(store, code_ref)
     if read is None:
-        return {"status": "unchecked", "reviews": [f"{t['id']} {review_mark(t)}" for t in scoped], "reason": source}
+        return {"status": "unchecked", "reviews": [f"{t['id']} {review_mark(t)}" for t in passing], "reason": source}
 
     def current(path: str, kind: str, ignored: list[str]) -> str | None:
         data = read(path)
@@ -734,19 +729,19 @@ def code_coverage(store: Store, experiment: str, code_ref, named: list[str] = ()
     seen: dict[str, list[str]] = {}  # path -> passing reviews that saw the version this run executes
     older: dict[str, list[str]] = {}  # path -> passing reviews that saw another version
     try:
-        for t in scoped:
+        for t in passing:
             scope = t["code_scope"]
             for kind in ("files", "deps", "configs"):
                 for path, digest in (scope.get(kind) or {}).items():
                     now = current(path, kind, scope.get("ignored_keys") or [])
                     (seen if now == digest else older).setdefault(path, []).append(t["id"])
     except (OSError, subprocess.SubprocessError) as exc:
-        return {"status": "unchecked", "reviews": [f"{t['id']} {review_mark(t)}" for t in scoped],
+        return {"status": "unchecked", "reviews": [f"{t['id']} {review_mark(t)}" for t in passing],
                 "reason": f"could not read the {source}: {exc}"}
     changed = {p: ids for p, ids in sorted(older.items()) if p not in seen}
     used = {i for ids in seen.values() for i in ids}
     out = {"status": "stale" if changed else "covered", "source": source,
-           "reviews": [f"{t['id']} {review_mark(t)}" for t in scoped if t["id"] in used]}
+           "reviews": [f"{t['id']} {review_mark(t)}" for t in passing if t["id"] in used]}
     if changed:
         out["changed"] = changed
     pending = [f"{t['id']} {t['status']}" for t in others if t["status"] in ("pending", "running")]
@@ -883,10 +878,10 @@ def _evidence_version(tx: Tx) -> str:
 
 def advice_rounds(tx: Tx) -> list:
     """Advice rounds that count toward advice.max_rounds: those with an answer or still waiting for one (a round
-    no advisor could answer does not count). Tickets from before rounds existed are one round each."""
+    no advisor could answer does not count)."""
     rounds: dict = {}
     for t in tx.all("Ticket", kind="advice"):
-        rounds.setdefault(t.get("advice_round") or t["id"], []).append(t["status"])
+        rounds.setdefault(t["advice_round"], []).append(t["status"])
     return [r for r, statuses in rounds.items() if set(statuses) & {"answered", "pending", "running"}]
 
 
@@ -916,7 +911,7 @@ def prepare_advice(store: Store, question: str, target: str | None = None, user_
             raise RLError("LIMIT", f"{used} of {limit} advice rounds used (advice.max_rounds); report to the user "
                                    "why another round is needed, and if they agree pass their approval: "
                                    "--user-approved \"<what the user said>\"")
-        number = 1 + max([t.get("advice_round") or 0 for t in tx.all("Ticket", kind="advice")], default=0)
+        number = 1 + max([t["advice_round"] for t in tx.all("Ticket", kind="advice")], default=0)
         ids = []
         for entry in entries:
             aid = tx.next_id("Ticket", "AD")

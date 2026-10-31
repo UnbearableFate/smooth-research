@@ -507,13 +507,6 @@ def test_a_run_records_whether_code_reviews_still_cover_its_code(project, fakes,
                             code_from="E-0001", intervention="wd", comparator="no wd", metric="acc", scope="toy",
                             outcome_actions="a", budget="b", stop="c")
     assert check(6, "E-0002")[0]["status"] == "covered"
-    with project.write() as tx:  # reviews requested before scopes were recorded
-        for rid in (rv, fixed):
-            tx.update(rid, {"code_scope": None})
-    old = check(7)[0]
-    assert old["status"] == "unchecked" and "recorded no scope" in old["reason"]
-    assert request(project)["reused_from"] == fixed  # same scope: the answer is reused and the scope recorded
-    assert check(8)[0]["status"] == "covered"
     code_, out, _ = rl("run", "register", "--experiment", "E-0001", "--request-id", "cov9", "--spec",
                        json.dumps({**SPEC, "seed": 9}), "--no-review", "smoke test")
     assert code_ == 0 and "code review: not needed: smoke test" in out

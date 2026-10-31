@@ -113,11 +113,9 @@ def _review_hint(check: dict) -> str:
     return ""
 
 
-def code_review_note(check: dict | None, tx: Tx | None = None) -> str:
+def code_review_note(check: dict, tx: Tx | None = None) -> str:
     """The code review check recorded when an attempt was registered, in one line. With tx it also names the
     reviews that did not pass then and that the coordinator has approved since (the recorded check stays)."""
-    if not check:
-        return "not checked"  # registered before the check existed
     status = check["status"]
     if status == "waived":
         text = f"not needed: {check['reason']}"
@@ -164,7 +162,7 @@ def code_review_summary(tx: Tx, attempts: list[dict]) -> str:
     """Attempts grouped by the code review check recorded at their registration."""
     groups: dict[str, list[str]] = {}
     for att in attempts:
-        groups.setdefault(code_review_note(att.get("code_review"), tx), []).append(att["id"])
+        groups.setdefault(code_review_note(att["code_review"], tx), []).append(att["id"])
     return "; ".join(f"{', '.join(ids)} {note}" for note, ids in groups.items())
 
 
@@ -506,8 +504,7 @@ def describe_attempt(tx: Tx, att: dict) -> str:
         " (stale? refresh with your execution tool)" if age > STALE_AFTER_H and att["execution_state"] != "ended" else "")
     trusted = (f"; last trusted {att['last_trusted_state']} at {att['last_trusted_at']}"
                if att.get("last_trusted_state") and att["execution_state"] == "unknown" else "")
-    review = f"; code review: {code_review_note(att['code_review'], tx)}" if att.get("code_review") else ""
-    return f"{brief(att)} {ref_text}; {fresh}{trusted}{review}"
+    return f"{brief(att)} {ref_text}; {fresh}{trusted}; code review: {code_review_note(att['code_review'], tx)}"
 
 
 def show(store: Store, entity_id: str | None = None, active: bool = False) -> dict:

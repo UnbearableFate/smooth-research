@@ -25,8 +25,6 @@ ENV_CHECKOUT = "SMOOTH_RESEARCH_CHECKOUT"
 # stage reports).
 CODE_DIR, DOCS_DIR, RESEARCH_DIR = "src", "docs", "research"
 PLAN_PATH, CONSTRAINTS_PATH = "docs/plan.md", "docs/constraints.md"
-# Where projects made before 2026-10-31 keep them; read while the new file is absent.
-EARLIER_PLAN, EARLIER_CONSTRAINTS = "docs/plan/original.md", "docs/plan/constraints.md"
 # The settings read the last time the configuration file parsed: used while it does not.
 LAST_READ = "research/state/config.last-read.json"
 UNREAD = "_unread"  # in a loaded configuration: why the file could not be read
@@ -51,22 +49,6 @@ DEFAULT_CONFIG: dict = {
     "manuscript": {"latex": None},
 }
 MODEL_ROLES = ("researcher", "reviewer", "advisor")
-
-# Keys that earlier versions wrote into the configuration, and why nothing reads them now.
-RETIRED_KEYS = {
-    "artifacts": "digests are always blake2b and raw artifacts are always kept",
-    "plan": f"the imported plan is {PLAN_PATH}; an earlier project's {EARLIER_PLAN} is still read",
-    "constraints_ref": f"the constraints document is {CONSTRAINTS_PATH}; an earlier project's {EARLIER_CONSTRAINTS} "
-                       "is still read",
-    "code_root": f"experiment code is in {CODE_DIR}/",
-    "docs_root": f"documents for people are in {DOCS_DIR}/",
-    "reports_root": f"review and advice answers and stage reports are in {RESEARCH_DIR}/, the research graph page "
-                    f"in {DOCS_DIR}/",
-    "research_root": f"the records are in {RESEARCH_DIR}/",
-}
-
-# Directory keys of earlier versions and the fixed directory that replaced each.
-MOVED_DIRS = {"code_root": CODE_DIR, "docs_root": DOCS_DIR, "research_root": RESEARCH_DIR}
 
 RESEARCH_DIRS = ("state", "documents/objects", "packages", "mailbox", "snapshots", "literature", "calls",
                  "artifacts", "experiments", "tasks", "notes", "reviews", "advice", "reports")
@@ -137,16 +119,11 @@ class Project:
     @property
     def plan_path(self) -> Path:
         """The imported plan, sealed at import."""
-        return self._kept(PLAN_PATH, EARLIER_PLAN)
+        return self.root / PLAN_PATH
 
     @property
     def constraints_path(self) -> Path:
-        return self._kept(CONSTRAINTS_PATH, EARLIER_CONSTRAINTS)
-
-    def _kept(self, path: str, earlier: str) -> Path:
-        """path, or where a project made before 2026-10-31 keeps the file while path does not exist."""
-        new, old = self.root / path, self.root / earlier
-        return old if old.is_file() and not new.exists() else new
+        return self.root / CONSTRAINTS_PATH
 
     def dir(self, name: str, area: str = "research") -> Path:
         """A subdirectory of research/ (records and the agents' working documents) or docs/ (for people)."""
@@ -179,9 +156,9 @@ class Project:
 
 def config_warnings(config: dict) -> list[str]:
     """What in a loaded configuration the CLI does not read or reads differently from what it says: a file that
-    does not parse, an unknown version, a typo or a retired key, a section that is not a mapping, model lists in
-    an older form or with entries that do not parse, and values that are not usable. None stops a command; each
-    says what is used instead."""
+    does not parse, an unknown version, an unknown key, a section that is not a mapping, model lists that are not
+    lists or hold entries that do not parse, and values that are not usable. None stops a command; each says what
+    is used instead."""
     out = [f"{CONFIG_NAME}: {config[UNREAD]}"] if config.get(UNREAD) else []
     if config.get("version") != 1:
         out.append(f"{CONFIG_NAME}: version {config.get('version')!r} is not known; read as version 1")
@@ -191,12 +168,7 @@ def config_warnings(config: dict) -> list[str]:
             path = prefix + str(key)
             if str(key).startswith("_"):
                 continue
-            if path in RETIRED_KEYS:
-                moved = MOVED_DIRS.get(path)
-                hint = (f"; move what is in {value}/ to {moved}/" if moved and value is not None
-                        and Path(str(value)) != Path(moved) else "")
-                out.append(f"{CONFIG_NAME}: {path} is no longer used ({RETIRED_KEYS[path]}){hint}; delete it")
-            elif key not in default:
+            if key not in default:
                 out.append(f"{CONFIG_NAME}: unknown key {path} has no effect (a typo?)")
             elif isinstance(default[key], dict) and not isinstance(value, dict):
                 out.append(f"{CONFIG_NAME}: {path} must hold keys like the default, not {value!r}; its settings are "
@@ -208,10 +180,7 @@ def config_warnings(config: dict) -> list[str]:
     models = config.get("models")
     for role in MODEL_ROLES if isinstance(models, dict) else ():
         value = models.get(role)
-        if isinstance(value, dict) or value == "inherit":
-            out.append(f"{CONFIG_NAME}: models.{role} has the form used before 2026-10-31; write it as a list of "
-                       f"model entries (read now as {model_entries(config, role)})")
-        elif not isinstance(value, (str, list)):
+        if not isinstance(value, (str, list)):
             out.append(f"{CONFIG_NAME}: models.{role} must be a list of model entries, not {value!r}; using the "
                        f"defaults {model_entries(config, role)}")
         for text in model_entries(config, role):
@@ -252,17 +221,12 @@ def _count(value) -> bool:
 
 
 def model_entries(config: dict, role: str) -> list[str]:
-    """A role's model entries in order. Forms written before 2026-10-31 are still read: reviewer
-    {candidates, relation_to_author} gives its candidates, advisor {primary, fallback} its primary, and
-    researcher "inherit" the default list. Anything else that is not a list gives the default list."""
+    """A role's model entries in order: a list, or one entry written as a string. Anything else gives the
+    default list."""
     models = config.get("models")
     value = models.get(role) if isinstance(models, dict) else None
-    if isinstance(value, str) and value != "inherit":
+    if isinstance(value, str):
         return [value]
-    if isinstance(value, dict):
-        items = value.get("candidates") or [value.get("primary")]
-        items = [items] if isinstance(items, str) else items if isinstance(items, list) else []
-        return [str(v) for v in items if v]
     if isinstance(value, list):
         return [str(v) for v in value]
     return list(DEFAULT_CONFIG["models"][role])

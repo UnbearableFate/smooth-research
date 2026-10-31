@@ -19,9 +19,8 @@
   - **文件解析不了**（YAML 写错，或者顶层不是键值对）：沿用上一次成功读取的设置，直到文件改好。这份设置由 CLI 自动保存在 `research/state/config.last-read.json`；从没读成功过时用默认值；
   - `version` 不是 `1`：按版本 1 读取；
   - 不认识的键（拼错了？）：没有作用；
-  - 旧版本写进配置、现在不再读取的键，包括以前的目录键（见本节最后）；
   - 某一节（如 `models`、`context`）不是键值对：这一节全用默认值；
-  - 模型列表还是 2026-10-31 以前的写法（见本节最后）：照旧读取；不是列表：用默认列表；某个条目格式不对：跳过这一条，用列表里其余的条目；
+  - 模型列表不是列表（一个字符串当作只有一个条目的列表）：用默认列表；某个条目格式不对：跳过这一条，用列表里其余的条目；
   - `advice.max_rounds` 不是非负整数：按 3 计算；
   - `agents.watch_minutes` 不是分钟数：按 20 分钟计算；
   - `agents.args.<宿主>` 不是参数列表：用默认参数（写成一个字符串时，按 shell 的规则拆开，不警告）；
@@ -30,7 +29,7 @@
 
 ### 目录（固定）
 
-目录不能配置，所有项目都一样（2026-10-31 起）。路径都相对于项目根目录。
+目录不能配置，所有项目都一样。路径都相对于项目根目录。
 
 | 位置 | 内容 |
 |---|---|
@@ -39,7 +38,6 @@
 | `research/` | 其余的一切。agent 的工作文档：`experiments/`（实验契约）、`tasks/`（任务说明和交接笔记）、`notes/`（researcher 的笔记，写在它自己的 checkout 里，随分支合并）、`reviews/` 和 `advice/`（审查和建议的回答）、`reports/`（`rl report` 的阶段报告）。机器记录：数据库 `state/research.lattice` 和写锁、封存的文档 `documents/objects/`、请求包 `packages/`、模型调用日志 `calls/`、run 产物 `artifacts/<attempt>/` 等。init 写的 `.gitignore` 让 `state/`、`calls/`、`artifacts/` 不进 git |
 
 - **导入的计划不能换。** 再导入不同的计划会报 CONFLICT。判断依据是已经封存的计划，和文件现在在哪里无关。计划的变化要记成假设修订和决定。
-- **旧项目。** 2026-10-31 以前生成的项目把计划和约束放在 `docs/plan/original.md` 和 `docs/plan/constraints.md`。新位置没有文件时，CLI 继续读旧位置。旧项目的 `reports/` 目录留在原处，里面回答的封存副本在 `research/documents/objects/`；新的回答写进 `research/reviews/` 和 `research/advice/`。旧配置里的目录键见"旧版本的写法"。
 
 ### 模型
 
@@ -130,19 +128,6 @@
 - **编译。** 命令里没有 `.tex` 参数时，CLI 在末尾加上 `manuscript.tex`。命令的标准输入是空的，超时 300 秒。编译失败时报 BUILD，给出 LaTeX 的错误行和日志路径；命令找不到时报 UNAVAILABLE。两种情况下 `.tex` 都已经写好。`docs/manuscript/.gitignore` 让 `.aux`、`.log` 这类辅助文件不进 git。
 - **中文和日文。** 默认的导言区在 pdflatex 下用 T1 编码和 Latin Modern 字体，在 xelatex 和 lualatex 下用 fontspec，都不带 CJK 字体。正文是中文或日文时，用 xelatex 或 lualatex 编译，并在导言区加载 xeCJK 或 luatexja。
 - **从 Markdown 换到 LaTeX。** 已有的 `docs/manuscript.md` 不会被转换，正文要自己搬过去。
-
-### 旧版本的写法
-
-2026-10-31 以前生成的配置文件可能有下面的写法。命令照常运行，每条命令都会警告，按最后一栏改写即可：
-
-| 旧写法 | 现在怎样读 | 改成 |
-|---|---|---|
-| `models.researcher: inherit` | 默认的 researcher 列表 | 模型条目的列表 |
-| `models.reviewer: {candidates: [...], relation_to_author: different_family}` | 只读 `candidates`，`relation_to_author` 不再起作用 | `models.reviewer: [...]` |
-| `models.advisor: {primary: X, fallback: [...]}` | 只读 `primary` | `models.advisor: [...]`，列出每一轮都要咨询的模型 |
-| `artifacts.content_digest: blake2b`、`artifacts.keep_raw_evidence: true` | 不读：摘要算法写死为 blake2b，CLI 从不删除原始产物 | 删掉 |
-| `plan`、`constraints_ref`、`code_root`、`docs_root`、`reports_root` | 不读：目录固定（见"目录"）。旧位置的计划和约束文档仍然读得到 | 删掉。`code_root` 不是 `src` 时，把代码移到 `src/` |
-| `research_root` | 不读，只警告。记录总在 `research/`；改过名的旧项目在改回之前找不到记录，命令报 NO_PROJECT，同时打印这条警告 | 把记录目录改名为 `research/`，再删掉这个键 |
 
 ## 2. 约束文档 `docs/constraints.md`
 

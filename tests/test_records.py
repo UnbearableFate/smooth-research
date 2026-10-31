@@ -344,22 +344,14 @@ def test_configuration_keys_the_cli_does_not_read_are_reported(project, rl, tmp_
     code, out, _ = rl("status")
     assert code == 0 and "warning" not in out
 
-    # an older project's forms, a retired section and a typo: the commands still run and say what they read
-    data["models"] = {"researcher": "inherit",
-                      "reviewer": {"relation_to_author": "different_family", "candidates": ["codex:gpt-6-astra"]},
-                      "advisor": {"primary": "claude:claude-fable-5-1@high", "fallback": ["manual:gpt-pro"]}}
-    data["artifacts"] = {"content_digest": "blake2b", "keep_raw_evidence": True}
+    # a typo: the commands still run and say what they do not read
     data["contxt"] = {"work_target_tokens": 100}
     cfg.write_text(yaml.safe_dump(data), encoding="utf-8")
     code, out, _ = rl("status")
     assert code == 0 and "H-0001" in out
-    assert "warning: smooth-research.yaml: models.researcher has the form used before 2026-10-31" in out
-    assert "models.reviewer has the form used before 2026-10-31; write it as a list of model entries (read now as " \
-           "['codex:gpt-6-astra'])" in out
-    assert "(read now as ['claude:claude-fable-5-1@high'])" in out
-    assert "artifacts is no longer used" in out and "unknown key contxt has no effect" in out
+    assert "warning: smooth-research.yaml: unknown key contxt has no effect (a typo?)" in out
     code, out, _ = rl("--json", "status")
-    assert len(json.loads(out)["warnings"]) == 5
+    assert len(json.loads(out)["warnings"]) == 1
     hook = hooks.session_start("claude", json.dumps({"cwd": str(tmp_path)}))["hookSpecificOutput"]
     assert "- configuration: smooth-research.yaml: unknown key contxt" in hook["additionalContext"]
 
@@ -405,7 +397,7 @@ def test_nothing_in_the_configuration_stops_a_command(project, rl, tmp_path):
     assert "- configuration: smooth-research.yaml: the file could not be read" in hook and "Use the smooth-research" in hook
 
 
-def test_the_layout_is_fixed_with_documents_for_people_in_docs_and_the_rest_in_research(project, tmp_path):
+def test_the_layout_is_fixed_with_documents_for_people_in_docs_and_the_rest_in_research(project, tmp_path, rl):
     for path in ("docs/plan.md", "docs/constraints.md", "docs/explanations", "research/experiments/E-0001.md",
                  "research/tasks", "research/notes", "research/reviews", "research/advice", "research/reports",
                  "src/.gitignore"):
@@ -419,39 +411,10 @@ def test_the_layout_is_fixed_with_documents_for_people_in_docs_and_the_rest_in_r
     pack = context.work_pack(project, "T-0001")
     assert "## Locations\ncode src/ · for people docs/ (plan, constraints" in pack["summary"]
     assert "see docs/constraints.md" in pack["summary"] and "Locations" not in pack["omitted"]
-
-
-def test_a_project_from_before_the_fixed_layout_keeps_its_files_and_hears_about_its_keys(tmp_path, monkeypatch, rl):
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.delenv("SMOOTH_RESEARCH_PROJECT", raising=False)
-    (tmp_path / "plan.md").write_text("# Plan\nv1\n", encoding="utf-8")
-    research.init_project(tmp_path, "plan.md", "earlier")
-    cfg = tmp_path / "smooth-research.yaml"  # what earlier versions wrote: layout keys, plan and constraints in docs/plan/
-    cfg.write_text(cfg.read_text(encoding="utf-8") + "plan: docs/plan/original.md\nconstraints_ref: "
-                   "docs/plan/constraints.md\ncode_root: src\ndocs_root: docs\nreports_root: reports\n"
-                   "research_root: research/\n", encoding="utf-8")
-    (tmp_path / "docs/plan").mkdir()
-    (tmp_path / "docs/plan.md").rename(tmp_path / "docs/plan/original.md")
-    (tmp_path / "docs/constraints.md").rename(tmp_path / "docs/plan/constraints.md")
-    p = find_project()
-    assert (p.plan_path, p.constraints_path) == (tmp_path / "docs/plan/original.md",
-                                                 tmp_path / "docs/plan/constraints.md")
-    assert len(p.warnings) == 6
-    assert "smooth-research.yaml: code_root is no longer used (experiment code is in src/); delete it" in p.warnings
-    assert any("reports_root is no longer used (review and advice answers and stage reports are in research/" in w
-               for w in p.warnings)
-
     (tmp_path / "plan2.md").write_text("# Plan\nv2\n", encoding="utf-8")
-    code, _, err = rl("init", "--plan", "plan2.md")  # the sealed plan decides, wherever its file is
-    assert code == 3 and "already holds a different imported plan" in err and not (tmp_path / "docs/plan.md").exists()
-
-    cfg.write_text(cfg.read_text(encoding="utf-8").replace("research_root: research/", "research_root: records"),
-                   encoding="utf-8")
-    (tmp_path / "research").rename(tmp_path / "records")  # a renamed records directory: the warning says what to do
-    code, _, err = rl("status")
-    assert code == 1 and "no research database at" in err
-    assert "warning: smooth-research.yaml: research_root is no longer used (the records are in research/); move " \
-           "what is in records/ to research/; delete it" in err
+    code, _, err = rl("init", "--plan", "plan2.md")  # the imported plan is not replaced
+    assert code == 3 and "already holds a different imported plan" in err
+    assert "v2" not in (tmp_path / "docs/plan.md").read_text(encoding="utf-8")
 
 
 def test_report_summarizes_arms_and_lives_in_research_reports(project, tmp_path):

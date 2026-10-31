@@ -498,8 +498,8 @@ Reviewer 获取方法定义、代码 diff、必要上下文、关键测试和中
 
 - 候选审查：针对该实验、以及它的代码来源（code_from）实验的代码审查，加上 `--review RV-x` 指名的审查。
 - 覆盖的含义：通过（pass 或 issues）的审查审过的每个路径（2026-10-31 起不再要求跨模型，见 §8.1），在 run 实际执行的代码中都至少与其中一次审查看到的版本一致。RunSpec 给出 commit 时读该 commit 的文件，否则读工作区；配置去掉该审查允许变化的键后再比较。按 §8.5 修复后只复核受影响文件，也因此仍算覆盖。
-- 结果：covered；stale（列出变化的文件和看到旧版本的审查）；not_passed（只有 pending、unavailable 或 blocking 的审查）；none；unchecked（审查没有记录范围，或 commit 不在本仓库）；waived（`--no-review` 附理由，例如冒烟测试）。
-- 为此代码审查工单记录审查范围明细：每个文件、依赖和配置的摘要，忽略键，scope 文字。此前的工单没有这份明细，用相同范围重新请求即可复用原回答并补记。
+- 结果：covered；stale（列出变化的文件和看到旧版本的审查）；not_passed（只有 pending、unavailable 或 blocking 的审查）；none；unchecked（commit 不在本仓库，或读不到代码）；waived（`--no-review` 附理由，例如冒烟测试）。
+- 为此代码审查工单记录审查范围明细：每个文件、依赖和配置的摘要，忽略键，scope 文字。（此前的工单没有这份明细；已有项目的旧工单在 2026-10-31 一次性迁移，见 21.14。）
 
 不拦截。结果出现在 register 的输出、`rl run show`、工作包、结论审查包（每条证据背后各 attempt 的状态）和报告的证据条目中，让缺口在下结论之前可见。它不单独进入待处理，以免冒烟测试反复提示。
 
@@ -1170,11 +1170,11 @@ GitHub 链接固定到本次读取的提交；外部产品文档按 2026-10-30 �
 - 跨 session：`rl delegate T-x [--entry <entry>]` 用 `codex exec`、`claude -p` 或 `pi -p` 启动独立 session，按工作包领取并交付任务，记录线程/会话 ID 与请求/实际模型。同 session：Claude 插件提供 `smooth-research:researcher` 子代理。
 - 上下文包的 token 数为标注方法的估算（ASCII 字符/4 + 非 ASCII 字符），超出预算的部分列为按需读取的索引。
 - 执行下放（2026-10-30，见 §7.1）：协调者的 skill 改为“掌握与用户的对话、假说和路线决定，实现和运行交给研究者”；记录运行的规则单列一节，研究者和做小检查的协调者共用。研究者子代理不再限定工具，继承主 session 的工具（含 pi-env-mcp、miyabi-mcp），可以直接在 Miyabi 上执行。等待集群作业归协调者：研究者提交后以 `task wait` 结束并报告监听命令，协调者等到通知后以同一角色重启研究者；`rl delegate` 也能续接同一角色拥有的未完成任务。工作包列出协调者的 session，作业通知发往那里。代码审查由写代码的一方（通常是研究者）发起。
-- 结论审查（2026-10-30，见 §8.6）：新增 `rl review conclusion`。Ticket 新增 `subject`（code / conclusion），Decision 新增 `evidence_status_set`（记下该决定设定的证据状态）；两者都是可选字段，旧库照常读取。
-- 登记时的代码审查覆盖检查（2026-10-30，见 §8.7）：Ticket 新增 `code_scope`（审查范围明细），Attempt 新增 `code_review`（登记时的检查结果）；`rl run register` 新增 `--review`、`--no-review`。都是可选字段，旧库照常读取，旧 attempt 显示为 not checked。
+- 结论审查（2026-10-30，见 §8.6）：新增 `rl review conclusion`。Ticket 新增 `subject`（code / conclusion），Decision 新增 `evidence_status_set`（记下该决定设定的证据状态）；两者都是可选字段，旧库照常读取（2026-10-31 起旧库先迁移，见 21.14）。
+- 登记时的代码审查覆盖检查（2026-10-30，见 §8.7）：Ticket 新增 `code_scope`（审查范围明细），Attempt 新增 `code_review`（登记时的检查结果）；`rl run register` 新增 `--review`、`--no-review`。都是可选字段，旧库照常读取，旧 attempt 显示为 not checked（2026-10-31 起旧库先迁移，读旧格式的代码已删除，见 21.14）。
 - 配置（2026-10-31，见 §13.1 和 `docs/configuration.md`）：
   - 删除了没有代码读取的 `models.researcher`、`artifacts.content_digest`、`artifacts.keep_raw_evidence`。
-  - 以下几种情况会给出警告，但不阻止命令：CLI 不认识的键、旧版本写下的上述键、旧的模型写法或格式不对的模型条目、不是非负整数的 `advice.max_rounds`。警告出现在每条命令的输出和会话开始的 hook 里。
+  - 以下几种情况会给出警告，但不阻止命令：CLI 不认识的键、旧版本写下的上述键、旧的模型写法或格式不对的模型条目（2026-10-31 起旧键和旧写法不再特别说明，按不认识的键和不是列表处理，见 21.14）、不是非负整数的 `advice.max_rounds`。警告出现在每条命令的输出和会话开始的 hook 里。
   - 配置文件不能加载时，hook 直接说明错误，不再当成没有项目。（之后按用户要求改为：解析不了时沿用上次读到的设置，只警告，见 §21.11。）
   - 工作包新增 Locations 一行。skill 和 researcher 子代理改为按它放文件，文中路径按默认值书写并注明。（目录固定后，Locations 一行保留，文中不再注明默认值，见 §21.10。）
   - `rl decide` 对结论审查不检查 relation，和 §8.6 不一致；按用户决定，当时未修改。随后的模型选择调整让 relation 不再作为任何检查的条件，这个不一致随之消失。
@@ -1360,8 +1360,8 @@ GitHub 链接固定到本次读取的提交；外部产品文档按 2026-10-30 �
 | 项 | 实施 | 原因 |
 | --- | --- | --- |
 | 固定目录 | `project.py` 的常量 `CODE_DIR`、`DOCS_DIR`、`RESEARCH_DIR`、`PLAN_PATH`、`CONSTRAINTS_PATH`。`Project.dir` 只剩 research 和 docs 两个区域 | 用户要求 |
-| 旧配置 | `plan`、`constraints_ref`、`code_root`、`docs_root`、`reports_root`、`research_root` 进入 `RETIRED_KEYS`，每条命令给出警告，说明东西现在在哪里；目录键的值不是固定目录时，警告里写明把那个目录的内容移过去 | 最初 `research_root` 改过名时直接报错；按用户要求改为只警告，见 §21.11 |
-| 旧文件 | `Project.plan_path`、`constraints_path`：新位置没有文件、旧的默认位置（`docs/plan/original.md`、`docs/plan/constraints.md`）有时，读旧位置 | 旧项目不用搬文件也能继续 |
+| 旧配置 | `plan`、`constraints_ref`、`code_root`、`docs_root`、`reports_root`、`research_root` 进入 `RETIRED_KEYS`，每条命令给出警告，说明东西现在在哪里；目录键的值不是固定目录时，警告里写明把那个目录的内容移过去（2026-10-31 删除，见 21.14） | 最初 `research_root` 改过名时直接报错；按用户要求改为只警告，见 §21.11 |
+| 旧文件 | `Project.plan_path`、`constraints_path`：新位置没有文件、旧的默认位置（`docs/plan/original.md`、`docs/plan/constraints.md`）有时，读旧位置（2026-10-31 删除，见 21.14） | 旧项目不用搬文件也能继续 |
 | 计划不能换 | `rl init --plan` 先比对已封存的计划（meta 里的 `plan_ref`），再比对快照文件 | 原来只比对配置里那个路径的文件；路径变了以后，换一份计划就能绕过检查 |
 | researcher 笔记 | 写在自己 checkout 的 `research/notes/`，随分支合并。工作包的 Locations 和 `rl delegate` 的提示词都改了 | `docs/` 不再放 agent 的工作文档 |
 | 论文草稿 | `rl manuscript`（`manuscript.py`）写 `docs/manuscript.md`：摘要、引言、相关工作、方法、结果、讨论、结论和附录。每节一个 `[write: ...]` 占位，由协调者在阶段结束时写正文。记录事实放在 `<!-- rl:begin X -->` 和 `<!-- rl:end X -->` 之间：假设、文献、契约字段、每个 arm 的结果表、带等级的证据、决定、记录编号。每次运行只刷新这些块，其余文字保留；输出列出还有占位的节 | 正文要人或 agent 来写，事实要和记录一致；分开以后两者都不会被覆盖 |
@@ -1432,3 +1432,19 @@ GitHub 链接固定到本次读取的提交；外部产品文档按 2026-10-30 �
 - 模块结构（Claude F8）：拆出 `scope.py`、`messages.py`，`agents.open_session` 与 `watch._restart` 共用一个启动流程，合并两个 `_contract` 和三处状态摘要。
 - CLI 把意外异常转成 `error[INTERNAL]` 并写错误日志；`--role` 在设了 `SMOOTH_RESEARCH_ROLE` 时默认取它（Claude）。
 - 同一角色名的旧会话的隔离、子进程只接受当前认领者写入的执行身份协议（Codex F3、F4 附带）；`pyproject.toml` 加 ruff 配置；其余测试缺口（后台 worker、宿主 CLI 参数变化、文献 fetch/search、未测的命令、store 失败路径、监视程序分支）。
+
+### 21.14 删除旧格式兼容代码、模块重构与宿主参数检查（2026-10-31）
+
+用户对 21.13 待决定事项的决定：做 1（删除兼容代码）、2（模块重构）和 5 中的宿主 CLI 参数检查测试；3、4 和其余测试缺口不做。
+
+**删除旧格式兼容代码。** 先迁移已有项目，再删代码。本机只有三个项目：`/home/yu/workspace/sr-e2e/` 下的 `wd-noise-claude`、`miyabi-bf16`、`watch-codex`。迁移脚本只用一次，没有放进仓库。迁移前备份了每个项目（不含 `.venv`、`.git`）。
+
+| 项 | 迁移 | 删掉的代码 |
+| --- | --- | --- |
+| 配置 | 删掉 `artifacts`、`plan`、`constraints_ref`、`code_root`、`docs_root`、`reports_root`、`research_root`。`researcher: inherit` 表示默认列表，删掉这个键；reviewer 的 `{candidates}` 写成列表；advisor 的 `{primary, fallback}` 写成 `[primary]`，与 CLI 原来读到的相同 | `RETIRED_KEYS`、`MOVED_DIRS` 和对应的警告；`model_entries` 对旧写法的读取。现在旧键按不认识的键警告，不是列表的模型列表用默认列表 |
+| 计划与约束 | `docs/plan/original.md`、`docs/plan/constraints.md` 移到 `docs/plan.md`、`docs/constraints.md` | `EARLIER_PLAN`、`EARLIER_CONSTRAINTS`、`Project._kept` |
+| 审查工单 | 没有 subject 的设为 code；按保存的回答算出 open severity（RV-0004 为 low，照旧算通过）；代码审查的范围从当时的请求包重建。RV-0004 的包里有文件内容，重建后与记录的指纹一致；其余三张只列了文件名，摘要记为 unknown，这三张本来就不算通过 | `review_passes` 对没有 severity 的回答的特殊规则；`code_coverage` 的“没有记录范围”分支 |
+| 建议工单 | 没有轮次号的按编号各算一轮（三个项目里没有这样的工单） | `advice_rounds` 和轮次编号的旧工单处理 |
+| attempt | 检查之前登记的 attempt 记为 `unchecked: registered before rl checked code reviews` | `code_review_note` 对没有检查结果的处理，以及调用处的判断 |
+
+迁移后三个项目没有警告；status、doctor、review show、resume、graph、run show 正常。在一个副本里登记新 run，覆盖检查用上了重建的范围（报告 `src/e1_run.py` 在 RV-0004 之后改过，与当时的过程一致）。没有动的：旧项目的 `docs/experiments/`、`reports/` 等目录留在原处。记录里写的就是这些路径，代码按记录读取。三个项目的改动没有提交到它们各自的 git 仓库。测试：删去只测旧格式的一项和两段断言；“导入的计划不能换”的检查移到目录测试里。
