@@ -46,9 +46,9 @@
 三个角色各有一个模型列表，每一项是一个模型条目，格式是 `<入口>:<模型>[@effort]`：
 
 - **`claude`**：用 `claude -p` 调用。审查和建议是只读会话，只开放 Read、Grep、Glob 三个工具。
-- **`codex`**：用 `codex exec` 调用。审查和建议在 read-only 沙箱里运行。
+- **`codex`**：用 `codex exec` 调用。审查和建议按你自己的 Codex 配置正常启动，rl 不加沙箱参数，审查者自己读文件。不改文件靠的是提示词里的要求。（以前用 read-only 沙箱，可有的机器跑不了这个沙箱，比如 AppArmor 限制了非特权 user namespace 时 bubblewrap 起不来，Codex 就一个命令也执行不了，读不了文件。）
 - **`pi`**：用 `pi -p --mode json` 调用。模型写成 `<provider>/<模型>`，比如 `pi:openai/gpt-6-astra@high`。审查和建议只开放 read 工具。
-- **`manual`**：不自动调用。CLI 给出请求包的路径，由人提交给模型，再用 `rl review import` 或 `rl advise import` 导入回答。
+- **`manual`**：不自动调用。CLI 给出请求包的路径，由人提交给模型（代码审查要连同包里列出的文件一起提交），再用 `rl review import` 或 `rl advise import` 导入回答。
 - **`@effort`**：传给 Claude 的 `--effort`、Codex 的 `model_reasoning_effort`，或 pi 的 `--thinking`。
 - **headless 和 herdr 会话。** 上面说的 `claude -p`、`codex exec`、`pi -p` 是 headless 调用（`rl delegate`、`rl review run`、`rl advise run`）。协调者在 herdr 里时，`rl agent open` 把同一个条目开成交互会话，放在单独的 tab 里，见下面的“agent 会话”。
 - **模型家族**：先按模型名的最后一段判断：`claude`、`opus`、`sonnet`、`haiku`、`fable` 开头的属于 anthropic，`gpt`、`o1`–`o9`、`codex`、`chatgpt` 开头的属于 openai。deepseek、google（gemini、gemma）、alibaba（qwen、qwq）、moonshot（kimi）、zhipu（glm）、xai（grok）、mistral、meta（llama）也认得。名字判断不了时看 pi 的 provider 前缀（如 `deepseek/`），再不行按入口推断（`claude` 是 anthropic，`codex` 是 openai）。审查者和作者的模型名相同时，不论家族表认不认得，都算同一家族。
@@ -116,7 +116,7 @@
 - **token 数是估算值。** ASCII 字符数除以 4，每个非 ASCII 字符算 1。
 - **超出目标的段落会被省略。** 段落按优先级加入，超出目标的不放进包里，只在包尾的 "Omitted (read on demand)" 列出名字。第一个段落总会保留。
 - **`--budget` 可以单次覆盖目标。**
-- **审查请求包不用这两个目标。** 它有自己写死的上限，见第 5 节。
+- **审查请求包不用这两个目标。** 代码审查包不复制代码，只列出被审文件的路径（在请求者的 checkout 里，可能是 worktree），审查者自己去读。请求时记下这些文件的摘要；回答到达时文件已经变了，这个回答照样记录，但不算数：它不算通过，也不覆盖任何 run，重新审查（`--recheck-of`）顶替它在这一轮里的位置。结论审查包从记录生成。
 
 ### 论文草稿
 
@@ -191,8 +191,6 @@
 
 | 常量 | 值 | 含义 |
 |---|---|---|
-| `INLINE_FILE_CHARS` | 60,000 字符 | 审查请求包内联单个文件的上限，超过的文件只给路径（`reviews.py`） |
-| `INLINE_TOTAL_CHARS` | 240,000 字符 | 审查请求包内联文件的总上限（`reviews.py`） |
 | `LOCK_TIMEOUT_S` | 60 秒 | 写入等待写锁的上限，超时报 LOCKED（`store.py`） |
 | `STALE_AFTER_H` | 6 小时 | 未结束的 attempt 超过这么久没有新观察，描述里会加一句 "stale?" 提示（`runs.py`） |
 | `REVIEWS_PER_ROUND` | 2 | 一轮审查最多几次。第二次后还有中等以上问题，就交给协调者批准或退回（`reviews.py`） |

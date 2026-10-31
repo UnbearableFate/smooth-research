@@ -36,8 +36,6 @@ from .store import Store, Tx
 from .util import RLError, digest_bytes, digest_file, digest_json, now_utc, short
 from .view import _arm_table
 
-INLINE_FILE_CHARS = 60_000
-INLINE_TOTAL_CHARS = 240_000
 REVIEWS_PER_ROUND = 2
 SEVERITIES = ("none", "low", "medium", "high")
 IMPACT_SEVERITY = {"result_error": "high", "invalid_experiment": "high", "overclaim": "high", "data_mismatch": "high",
@@ -154,7 +152,9 @@ def _round(tx: Tx, recheck_of: str | None, new_round: str | None) -> dict:
     prev = tx.require(recheck_of, "Ticket")
     if prev["kind"] != "review":
         raise RLError("INVALID", f"{recheck_of} is not a review")
-    root, index = prev.get("round_of") or prev["id"], (prev.get("round_index") or 1) + 1
+    # an answer given while the files changed does not count: its re-check takes its place in the round
+    root = prev.get("round_of") or prev["id"]
+    index = (prev.get("round_index") or 1) + (0 if prev.get("changed_during_review") else 1)
     if index > REVIEWS_PER_ROUND:
         raise RLError("LIMIT", f"the round that began with {root} already had its {REVIEWS_PER_ROUND} reviews (the "
                                f"last: {recheck_of}). The coordinator approves the remaining findings (`rl review "
@@ -248,21 +248,25 @@ def run_ticket(store: Store, ticket_id: str, timeout: int = 1800, only: str | No
         candidates = [adapters.Entry.parse(only)]
     authors = list(t.get("author_models") or [])
     calls = [c for c in (t.get("calls") or []) if not c.get("background")]
-    # The whole package goes in the prompt: the answer must not depend on the callee's file tools or sandbox.
+    # The package goes in the prompt. A code review's package names the files, which the reviewer reads where
+    # they are (in the requester's checkout, which may be a worktree outside the project).
+    checkout = t.get("code_checkout")
+    holds = ("names the files under review (read them where they are) and gives the answer format" if checkout
+             else "holds what the question needs and the answer format")
     prompt = (f"You are the independent {'reviewer' if t['kind'] == 'review' else 'advisor'} for a research "
-              f"project at {store.project.root}. Everything you need is in the package below; you may read more "
-              "project files if your tools work" + (" and search the web" if t["kind"] == "advice" else "")
-              + ", but do not modify anything. If something you need is missing, "
-              "say so (for a review: under 'unchecked'). Answer in the requested format.\n\n"
-              + request_path.read_text(encoding="utf-8"))
+              f"project at {store.project.root}. The package below {holds}; you may read any other project "
+              "file" + (" and search the web" if t["kind"] == "advice" else "") + ", but do not modify "
+              "anything. If you cannot read something you need, say so (for a review: under 'unchecked'). "
+              "Answer in the requested format.\n\n" + request_path.read_text(encoding="utf-8"))
+    outside = [checkout] if checkout and Path(checkout).resolve() != store.project.root.resolve() else []
     manual, answered = None, 0
     for entry in candidates:
         if entry.entry == "manual":
             manual = entry
             break
         log = store.project.dir("calls") / f"{ticket_id}.{entry.entry}.{len(calls) + 1}.log"
-        res = adapters.call(entry, prompt, store.project.root, read_only=True, timeout=timeout, log=log,
-                            web=t["kind"] == "advice")
+        res = adapters.call(entry, prompt, store.project.root, read_only=True, timeout=timeout, add_dirs=outside,
+                            log=log, web=t["kind"] == "advice")
         if res.ok and not _parsed(t["kind"], res.text):
             answered += 1
             res.ok, res.error = False, ("answer has no parseable result block: "
@@ -279,7 +283,8 @@ def run_ticket(store: Store, ticket_id: str, timeout: int = 1800, only: str | No
         tx.event(f"{t['kind']}.{status}", ticket_id, "no usable automatic answer")
     if manual:
         return {"id": ticket_id, "status": status,
-                "summary": f"{ticket_id}: submit {store.project.rel(request_path)} to {manual.model} yourself (or ask the "
+                "summary": f"{ticket_id}: submit {store.project.rel(request_path)}"
+                           f"{' with the files it names' if checkout else ''} to {manual.model} yourself (or ask the "
                            f"user to), then `rl {t['kind'] if t['kind'] == 'review' else 'advise'} import {ticket_id} "
                            "--answer <file> --model-observed <model> --source <where>`"}
     return {"id": ticket_id, "status": status,
@@ -294,11 +299,34 @@ def _parsed(kind: str, text: str) -> bool:
     return isinstance(data.get("proposals"), list)
 
 
+def _changed_since_request(t: dict) -> list[str]:
+    """The paths of a code review whose content in the requester's checkout differs from the version the
+    request recorded (configs compared without the keys allowed to vary)."""
+    scope, checkout = t.get("code_scope"), t.get("code_checkout")
+    if not scope or not checkout:
+        return []
+    changed = []
+    for kind in ("files", "deps", "configs"):
+        for path, digest in (scope.get(kind) or {}).items():
+            try:
+                data = (Path(checkout) / path).read_bytes()
+            except OSError:
+                changed.append(path)
+                continue
+            now = _config_digest(path, data, scope.get("ignored_keys") or []) if kind == "configs" \
+                else digest_bytes(data)
+            if now != digest:
+                changed.append(path)
+    return changed
+
+
 def _store_answer(store: Store, ticket_id: str, text: str, entry: str, observed: str | None, provider: str | None,
                   session_id: str | None, usage: dict | None, cost: float | None, calls: list, authors: list,
                   answered_by: dict | None = None) -> dict:
     """Record an answer. A review answer records its open severity; the second review of a round that still has
-    a medium or higher finding goes to the coordinator. A revised advice answer keeps the earlier ones."""
+    a medium or higher finding goes to the coordinator. A code review whose files changed after the request may
+    describe another version: it is recorded, but does not count. A revised advice answer keeps the earlier
+    ones."""
     with store.read() as tx:
         t = tx.require(ticket_id, "Ticket")
     folder = "reviews" if t["kind"] == "review" else "advice"
@@ -315,8 +343,9 @@ def _store_answer(store: Store, ticket_id: str, text: str, entry: str, observed:
         verdict = "unparsed"
     relation = _relation(authors, observed, entry.split(":", 1)[-1].split("@")[0]) if t["kind"] == "review" else None
     severity = open_severity(data) if t["kind"] == "review" else None
+    changed = _changed_since_request(t) if t["kind"] == "review" else []
     escalate = (t["kind"] == "review" and (t.get("round_index") or 0) >= REVIEWS_PER_ROUND
-                and severity in ("medium", "high"))
+                and severity in ("medium", "high") and not changed)
     if t["kind"] == "review":
         summary = f"{len(data.get('findings') or [])} finding(s)" + (f", {severity} open" if severity not in ("none", None) else "")
     else:
@@ -333,7 +362,7 @@ def _store_answer(store: Store, ticket_id: str, text: str, entry: str, observed:
                               "summary": summary, "answered_at": now_utc(), "error": None,
                               "open_severity": severity, "escalated": escalate or None,
                               "answered_by": answered_by["id"] if answered_by else None,
-                              "earlier_answers": earlier or None})
+                              "earlier_answers": earlier or None, "changed_during_review": changed or None})
         tx.event(f"{t['kind']}.answered", ticket_id, f"{verdict or ''} {summary} via {entry}"
                  + (f" (revision {len(earlier) + 1})" if earlier else ""))
         if escalate:
@@ -345,11 +374,13 @@ def _store_answer(store: Store, ticket_id: str, text: str, entry: str, observed:
                            f"{ticket_id}: the review round {root} used its {REVIEWS_PER_ROUND} reviews and {severity} "
                            f"finding(s) remain; your decision")
     rel_note = f", {relation}" if relation else ""
-    note = ""
+    note = (f"\n{', '.join(changed)} changed after the request, so the answer may describe another version: it does "
+            f"not count. Request the review again (`--recheck-of {ticket_id}` takes its place in the round)"
+            if changed else "")
     if escalate:
         target = herdr.notify(store, msg)
-        note = (f"\nthe round used its {REVIEWS_PER_ROUND} reviews with {severity} findings open: the coordinator "
-                f"decides ({msg['id']}" + (f", notice sent to {target})" if target else ")"))
+        note += (f"\nthe round used its {REVIEWS_PER_ROUND} reviews with {severity} findings open: the coordinator "
+                 f"decides ({msg['id']}" + (f", notice sent to {target})" if target else ")"))
     return {"id": ticket_id, "answer_ref": ref, "verdict": verdict, "relation": relation, "escalated": escalate,
             "summary": f"{ticket_id} answered by {observed or entry + ' (model unverified)'}{rel_note}: "
                        f"{verdict + ', ' if verdict else ''}{summary}; read {store.project.rel(path)}{note}"}
@@ -427,7 +458,8 @@ def show(store: Store, ticket_id: str | None, kind: str) -> dict:
         lines.append(f"{brief(t)}{alive}")
         for key in ("target_id", "relation", "requested_entry", "observed_model", "host_session_id", "summary",
                     "round_of", "round_index", "round_reason", "requested_by", "assigned_session", "answered_by",
-                    "escalated", "approved", "request_ref", "answer_ref", "earlier_answers", "reused_from", "error",
+                    "escalated", "approved", "changed_during_review", "request_ref", "answer_ref",
+                    "earlier_answers", "reused_from", "error",
                     "cost_usd"):
             if t.get(key) not in (None, ""):
                 lines.append(f"  {key}: {t[key]}")
@@ -525,7 +557,8 @@ def request_review(store: Store, target: str | None, files: list[str], question:
                              "status": "pending" if eligible else "unavailable",
                              "target_id": target, "question": question, "dedupe_key": fp,
                              "candidates": [str(e) for e in eligible], "author_models": list(author_models),
-                             "recheck_of": recheck_of, "code_scope": detail, "round_of": rid, **rounds,
+                             "recheck_of": recheck_of, "code_scope": detail,
+                             "code_checkout": str(store.project.checkout), "round_of": rid, **rounds,
                              "requested_by": caller_role(),
                              "error": None if eligible else "no reviewer configured (models.reviewer is empty)"})
         if target:
@@ -543,7 +576,9 @@ def request_review(store: Store, target: str | None, files: list[str], question:
         tx.update(rid, {"request_ref": ref})
         tx.event("review.requested", rid, f"{target or '-'} fingerprint {short(fp)}")
     note = (f"candidates {', '.join(str(e) for e in eligible)}; run it: rl review run {rid} [--background], or "
-            "in herdr by a reviewer session" if eligible else "no reviewer configured: recorded unavailable (not a pass)")
+            "in herdr by a reviewer session. The reviewer reads the files where they are: leave them unchanged "
+            "until the answer (an answer given while they change does not count)"
+            if eligible else "no reviewer configured: recorded unavailable (not a pass)")
     route = _route(store, rid, recheck_of, caller_role()) if eligible else ""
     return {"id": rid, "request_ref": ref, "fingerprint": fp,
             "summary": f"{rid} {_round_note(store, rid)}{note}{route}"}
@@ -557,6 +592,8 @@ def _round_note(store: Store, rid: str) -> str:
 
 def _review_package(store: Store, rid: str, target: str | None, question: str, scope: str, contract: str,
                     detail: dict, diff_base: str | None, prior: str) -> str:
+    """The question, the method and the paths of the code under review: the reviewer reads the files where they
+    are. The request recorded their digests; the answer counts only while they still match."""
     parts = [f"# Review package {rid}\n",
              f"Independent code review for a research experiment. Question: {question}\n",
              f"Scope: {scope or question}\n"]
@@ -564,36 +601,30 @@ def _review_package(store: Store, rid: str, target: str | None, question: str, s
         parts.append(f"This re-checks only what the earlier review raised, after fixes: {prior}\n")
     if contract:
         parts.append(f"## Method definition\n\n{contract}\n")
-    budget = [INLINE_TOTAL_CHARS]
+    checkout = store.project.checkout
 
-    def inline(paths: list[str]) -> str:
-        """The exact content under review, so the package binds to this snapshot and needs no file tools."""
-        blocks = []
-        for p in paths:
-            text = store.project.src(p).read_text(encoding="utf-8", errors="replace")
-            if len(text) > min(INLINE_FILE_CHARS, budget[0]):
-                blocks.append(f"### {p}\n\n(not inlined: {len(text)} characters; read the file at this path)")
-                continue
-            budget[0] -= len(text)
-            fence = "````" if "```" in text else "```"
-            blocks.append(f"### {p}\n\n{fence}{Path(p).suffix.lstrip('.')}\n{text.rstrip()}\n{fence}")
-        return "\n\n".join(blocks)
+    def listed(paths) -> str:
+        return "\n".join(f"- {checkout / p}" for p in paths)
 
-    parts.append("## Files under review\n\n" + inline(list(detail["files"])))
+    where = "the requester's worktree" if store.project.in_worktree else "the project"
+    parts.append(f"## Files under review\n\nRead them where they are, in {checkout} ({where}); the package does "
+                 "not copy them. Cite findings by path and line.\n\n" + listed(detail["files"]))
     if detail["configs"]:
-        parts.append("\n## Execution configuration\n\n" + inline(list(detail["configs"]))
+        parts.append("\n## Execution configuration\n\n" + listed(detail["configs"])
                      + (f"\n\n(keys allowed to vary without a new review: {', '.join(detail['ignored_keys'])})"
                         if detail["ignored_keys"] else ""))
     if detail["deps"]:
-        parts.append("\n## Key dependencies\n\n" + "\n".join(f"- {p}" for p in detail["deps"]))
+        parts.append("\n## Key dependencies\n\n" + listed(detail["deps"]))
     if diff_base:
         try:
-            diff = subprocess.run(["git", "diff", diff_base, "--", *detail["files"]], cwd=store.project.checkout,
+            diff = subprocess.run(["git", "diff", diff_base, "--", *detail["files"]], cwd=checkout,
                                   capture_output=True, text=True, timeout=30).stdout
         except (OSError, subprocess.SubprocessError):
             diff = ""
         if diff:
-            parts.append(f"\n## Diff against {diff_base}\n\n```diff\n{diff[:40000]}\n```")
+            path = store.project.dir("packages") / f"{rid}.diff"
+            path.write_text(diff, encoding="utf-8")
+            parts.append(f"\n## Diff against {diff_base}\n\n{path}")
     parts.append("\n" + REVIEW_PROTOCOL)
     return "\n".join(parts)
 

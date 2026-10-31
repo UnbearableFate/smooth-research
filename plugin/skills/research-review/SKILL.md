@@ -40,6 +40,9 @@ smooth-research skill: {{rl_short}}
    `{{rl}} review run RV-x --background`, then later `{{rl}} review show RV-x`. The configured reviewers are
    tried in order; failures fall through to the next one and are recorded. Keep doing independent cheap work
    meanwhile; do not wait idle.
+   - The package names the files; the reviewer reads them where they are. Leave them unchanged until the
+     answer: an answer given while they changed is recorded but does not count, and its re-check
+     (`--recheck-of RV-x`) takes its place in the round.
 3. Read the answer in `research/reviews/RV-x.md`: verdict pass | issues |
    blocking, findings with severity, location, evidence, impact, fix, verification, plus what was and was
    not checked.

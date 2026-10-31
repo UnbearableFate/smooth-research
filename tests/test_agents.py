@@ -192,7 +192,7 @@ def test_a_researcher_works_in_its_own_worktree_with_a_branch_per_task(project, 
     assert "the coordinator is asked to assign a reviewer" in rv["summary"] and "notice sent to w1:p99" in rv["summary"]
     with store.read() as tx:
         package = store.project.abs(tx.require(tx.require(rv["id"])["request_ref"])["object_path"]).read_text()
-    assert "return 2 * x" in package  # the worktree's code, not the main checkout's
+    assert f"- {wt / 'src/model.py'}" in package  # the worktree's code, not the main checkout's
     git(wt, "commit", "-qam", "double f")
     assert "notice sent to w1:p99" in tasks.progress(store, "T-0001", "delivered", "researcher-1", "doubled")["summary"]
 

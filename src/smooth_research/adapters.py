@@ -23,7 +23,7 @@ from .util import RLError
 
 ENTRY_RE = re.compile(r"^(?P<entry>claude|codex|pi|manual):(?P<model>[^@\s]+)(?:@(?P<effort>[a-z]+))?$")
 EXECUTABLES = {"claude": "claude", "codex": "codex", "pi": "pi"}
-JSON_BLOCK_RE = re.compile(r"```json[ \t]*\n(.*?)```", re.S)
+JSON_FENCE_RE = re.compile(r"```json[ \t]*\n\s*")
 
 
 FAMILY_NAMES = (("anthropic", r"^(claude|opus|sonnet|haiku|fable)"), ("openai", r"^(gpt|o[1-9]|codex|chatgpt)"),
@@ -179,11 +179,15 @@ def call_codex(entry: Entry, prompt: str, cwd: Path, read_only: bool, timeout: i
     with tempfile.TemporaryDirectory(prefix="rl-codex-") as tmp:
         last = Path(tmp) / "last.txt"
         cmd = ["codex", "exec", "--json", "--skip-git-repo-check", "--model", entry.model, "--cd", str(cwd),
-               "--sandbox", "read-only" if read_only else codex_write_sandbox(), "-c", 'approval_policy="never"',
-               "--output-last-message", str(last)]
+               "-c", 'approval_policy="never"', "--output-last-message", str(last)]
+        # A reviewer or advisor starts the usual way, under the user's own Codex settings: rl adds no sandbox
+        # (a read-only sandbox that cannot run on the host would leave it unable to read a file). Its
+        # instructions keep it read-only.
+        if not read_only:
+            cmd += ["--sandbox", codex_write_sandbox()]
         if entry.effort:
             cmd += ["-c", f'model_reasoning_effort="{entry.effort}"']
-        for d in add_dirs:
+        for d in () if read_only else add_dirs:  # --add-dir would make d writable; a reader needs none
             cmd += ["--add-dir", d]
         out = _run(cmd + ["-"], prompt, cwd, timeout)
         final = last.read_text(encoding="utf-8") if last.exists() else ""
@@ -299,10 +303,12 @@ def call(entry: Entry, prompt: str, cwd: Path, read_only: bool = True, timeout: 
 
 
 def last_json_block(text: str) -> dict | None:
-    blocks = JSON_BLOCK_RE.findall(text or "")
-    for block in reversed(blocks):
+    """The object in the last ```json block that holds one. It is decoded from the opening fence on, so a fence
+    inside one of its strings (a suggested patch) does not end it."""
+    text = text or ""
+    for fence in reversed(list(JSON_FENCE_RE.finditer(text))):
         try:
-            value = json.loads(block)
+            value, _ = json.JSONDecoder().raw_decode(text, fence.end())
         except json.JSONDecodeError:
             continue
         if isinstance(value, dict):

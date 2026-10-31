@@ -556,8 +556,8 @@ The research records CLI is `{rl}`. Your assignment: {rid}, a {t.get('subject') 
 It is review {t.get('round_index') or 1} of at most 2 in the round that began with {t.get('round_of') or rid}.
 It was requested by {counterpart}.{where}{earlier}
 
-1. Read the package: {package}. It holds the question, the scope and the code or records under review, and
-   the answer format.
+1. Read the package: {package}. It holds the question, the scope and the answer format, and either names
+   the files under review (read them where they are) or holds the records under review.
 2. You are read-only: read any file and run checks that change nothing; never edit, commit or delete files
    in the project or a worktree (scratch files only under /tmp). Put problems and suggested patches in your
    answer; {counterpart} makes the changes.

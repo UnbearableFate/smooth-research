@@ -17,6 +17,8 @@ args = sys.argv[1:]
 prompt = sys.stdin.read()
 if os.environ.get("FAKE_PROMPT_OUT"):
     pathlib.Path(os.environ["FAKE_PROMPT_OUT"]).write_text(prompt)
+if os.environ.get("FAKE_ARGS_OUT"):
+    pathlib.Path(os.environ["FAKE_ARGS_OUT"]).write_text(" ".join(args))
 model = args[args.index("--model") + 1]
 out = args[args.index("--output-last-message") + 1]
 thread = str(uuid.uuid4())
@@ -32,9 +34,13 @@ for event in ({"type": "thread.started", "thread_id": thread}, {"type": "item.co
 """
 
 FAKE_CLAUDE = r"""#!{python}
-import json, os, sys
+import json, os, sys, pathlib
 args = sys.argv[1:]
-sys.stdin.read()
+prompt = sys.stdin.read()
+if os.environ.get("FAKE_PROMPT_OUT"):
+    pathlib.Path(os.environ["FAKE_PROMPT_OUT"]).write_text(prompt)
+if os.environ.get("FAKE_ARGS_OUT"):
+    pathlib.Path(os.environ["FAKE_ARGS_OUT"]).write_text(" ".join(args))
 model = args[args.index("--model") + 1]
 answer = os.environ.get("FAKE_ANSWER", 'Proposals.\n```json\n{"proposals": [{"title": "x"}, {"title": "y"}], "pause_recommended": false}\n```')
 print(json.dumps({"type": "result", "is_error": False, "result": answer, "session_id": args[args.index("--session-id") + 1],
@@ -82,6 +88,14 @@ def code(tmp_path, body="def f(x):\n    return x\n", config=None):
 def request(project, author="claude-sonnet-5-5", **kw):
     return reviews.request_review(project, "E-0001", ["src/model.py"], "is the operator right?", [author],
                                   configs=["configs/run.yaml"], ignore_keys=["seed"], scope="new operator", **kw)
+
+
+def test_an_answer_block_may_hold_a_fenced_patch():
+    patch = {"verdict": "issues", "findings": [{"fix": "Patch:\n```\n-    return a\n+    return b\n```"}]}
+    text = f"Earlier draft:\n```json\n{{\"verdict\": \"pass\"}}\n```\nFinal:\n```json\n{json.dumps(patch, indent=1)}\n```\n"
+    assert adapters.last_json_block(text) == patch
+    assert adapters.last_json_block("```json\n{\"verdict\": \"pass\"}\n```\n```json\nnot json\n```") == {"verdict": "pass"}
+    assert adapters.last_json_block("no block {\"verdict\": \"pass\"}") is None
 
 
 def test_family_detection():
@@ -236,13 +250,58 @@ def test_no_configured_reviewer_means_unavailable_at_request(project, tmp_path):
     assert t["status"] == "unavailable" and "models.reviewer is empty" in t["error"]
 
 
-def test_the_prompt_carries_the_package_with_the_code_inline(project, fakes, tmp_path, monkeypatch):
+def test_the_package_names_the_files_and_the_reviewer_reads_them(project, fakes, tmp_path, monkeypatch):
     code(tmp_path, body="def operator(x):\n    return x * 3  # unique-marker\n")
     monkeypatch.setenv("FAKE_PROMPT_OUT", str(tmp_path / "prompt.txt"))
+    monkeypatch.setenv("FAKE_ARGS_OUT", str(tmp_path / "args.txt"))
     rv = request(project)
     reviews.run_ticket(project, rv["id"])
     prompt = (tmp_path / "prompt.txt").read_text()
-    assert "unique-marker" in prompt and "lr: 0.1" in prompt and "Method definition" in prompt
+    assert f"- {tmp_path / 'src/model.py'}" in prompt and f"- {tmp_path / 'configs/run.yaml'}" in prompt
+    assert "unique-marker" not in prompt and "lr: 0.1" not in prompt and "Method definition" in prompt
+    assert "--sandbox" not in (tmp_path / "args.txt").read_text()  # Codex starts under the user's own settings
+
+
+def test_an_answer_given_while_the_files_changed_does_not_count(project, fakes, tmp_path):
+    code(tmp_path)
+    rv = request(project)
+    code(tmp_path, body="def f(x):\n    return x + 1\n")  # edited before the answer arrived
+    out = reviews.run_ticket(project, rv["id"])
+    assert out["verdict"] == "pass" and "src/model.py changed after the request" in out["summary"]
+    with project.read() as tx:
+        t = tx.require(rv["id"])
+    assert t["changed_during_review"] == ["src/model.py"] and not research.review_passes(t)
+    coverage = reviews.code_coverage(project, "E-0001", {"content_digest": "x"})
+    assert coverage["status"] == "not_passed" and "the files changed during the review" in coverage["open"][0]
+    assert request(project)["id"] != rv["id"]  # never reused
+    again = request(project, recheck_of=rv["id"])
+    with project.read() as tx:
+        assert tx.require(again["id"])["round_index"] == 1  # it takes the place of the answer that did not count
+    assert reviews.run_ticket(project, again["id"])["verdict"] == "pass"
+    assert reviews.code_coverage(project, "E-0001", {"content_digest": "x"})["status"] == "covered"
+
+
+def test_a_reviewer_reads_the_files_in_a_worktree_outside_the_project(project, fakes, tmp_path, tmp_path_factory,
+                                                                       monkeypatch):
+    from smooth_research.project import Project
+    from smooth_research.store import Store
+    worktree = tmp_path_factory.mktemp("worktree")
+    (worktree / "src").mkdir()
+    (worktree / "src/model.py").write_text("def f(x):\n    return x\n")
+    store = Store(Project(project.project.root, project.project.config, checkout=worktree), "test")
+    rv = reviews.request_review(store, "E-0001", ["src/model.py"], "is it right?", ["claude-sonnet-5-5"])
+    monkeypatch.setenv("FAKE_PROMPT_OUT", str(tmp_path / "prompt.txt"))
+    monkeypatch.setenv("FAKE_ARGS_OUT", str(tmp_path / "args.txt"))
+    monkeypatch.setenv("FAKE_ANSWER", PASS)
+    assert reviews.run_ticket(project, rv["id"], only="claude:claude-opus-5-5")["verdict"] == "pass"
+    assert f"--add-dir {worktree}" in (tmp_path / "args.txt").read_text()
+    prompt = (tmp_path / "prompt.txt").read_text()
+    assert f"- {worktree / 'src/model.py'}" in prompt and "the requester's worktree" in prompt
+
+    (worktree / "src/model.py").write_text("def f(x):\n    return 2 * x\n")
+    rv2 = reviews.request_review(store, "E-0001", ["src/model.py"], "is it right?", ["claude-sonnet-5-5"])
+    reviews.run_ticket(project, rv2["id"], only="codex:gpt-6-astra")
+    assert "--add-dir" not in (tmp_path / "args.txt").read_text()  # for Codex it would make the folder writable
 
 
 def test_unparsed_answers_and_same_family_imports_are_labelled_honestly(project, fakes, tmp_path, monkeypatch):

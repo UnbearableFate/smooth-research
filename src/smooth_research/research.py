@@ -324,8 +324,9 @@ def conclusion_reviews(tx: Tx, refs: list[str]) -> list[dict]:
 
 def review_passes(t: dict) -> bool:
     """An answered review passes when no finding of medium or higher severity remains, or when the coordinator
-    approved it. Reviews answered before severities were recorded pass on a pass or issues verdict."""
-    if t.get("kind") != "review" or t.get("status") != "answered":
+    approved it. Reviews answered before severities were recorded pass on a pass or issues verdict. A code
+    review whose files changed after the request may describe another version: it never passes."""
+    if t.get("kind") != "review" or t.get("status") != "answered" or t.get("changed_during_review"):
         return False
     if t.get("approved"):
         return True
@@ -339,6 +340,8 @@ def review_mark(t: dict) -> str:
     out = t.get("verdict") or t["status"]
     if t.get("open_severity") not in (None, "none", "low"):
         out += f", {t['open_severity']} open"
+    if t.get("changed_during_review"):
+        out += ", not counted: the files changed during the review"
     return out + (", approved by the coordinator" if t.get("approved") else "")
 
 
