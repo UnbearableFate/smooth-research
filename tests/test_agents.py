@@ -24,7 +24,9 @@ state.setdefault("closed", [])
 state.setdefault("deaf", [])
 with open(os.environ["FAKE_HERDR_LOG"], "a") as log:
     log.write(json.dumps(args) + "\n")
-DIALOGS = {  # the options (the first one selected at the start) and the screen
+# As in the hosts, a key shows on the screen a moment later (here: from the second read on) and the options wrap
+# around. DIALOGS: the options (the first one selected at the start) and the screen.
+DIALOGS = {
     "claude": (["No, exit", "Yes, I trust this folder"], " Accessing workspace:\n\n {cwd}\n\n Quick safety check: "
                "Is this a project you created or one you trust?\n\n{options}\n\n Enter to confirm · Esc to cancel"),
     "codex": (["Trust and continue", "Open restricted"], "  Trust this folder?\n  {cwd}\n  Codex can read, edit and run "
@@ -47,7 +49,8 @@ def screen(name):
     if not d:
         return "> "
     options, text = DIALOGS[d["kind"]]
-    lines = "\n".join((" ❯ " if i == d["sel"] else "   ") + o for i, o in enumerate(options))
+    shown = d.pop("shown", d["sel"])
+    lines = "\n".join((" ❯ " if i == shown else "   ") + o for i, o in enumerate(options))
     return text.replace("{cwd}", d["cwd"]).replace("{options}", lines)
 
 def open_tab(tab):  # the coordinator's tab w1:t99 and the tabs created here, until closed
@@ -96,7 +99,7 @@ if (group, action) == ("agent", "send-keys"):
     for key in args[3:]:
         d = state["dialog"].get(args[2])
         if d and key == "down":
-            d["sel"] = min(d["sel"] + 1, len(DIALOGS[d["kind"]][0]) - 1)
+            d["shown"], d["sel"] = d["sel"], (d["sel"] + 1) % len(DIALOGS[d["kind"]][0])
         elif d and key == "enter":
             del state["dialog"][args[2]]
             if DIALOGS[d["kind"]][0][d["sel"]] == "No, exit":

@@ -133,16 +133,28 @@ def option_line(screen: str, option: str) -> str | None:
 
 
 def select(target: str, option: str, screen: str) -> str | None:
-    """Move a dialog's selection to the option (down, then up), reading the screen after every key; None once it
-    is selected, else why not."""
+    """Move a dialog's selection to the option (down, then up); None once it is selected, else why not. After every
+    key the screen is read until the selection has moved: a key shows a moment after it is sent, and deciding on the
+    screen from before would press one key too many (Claude Code's two trust options wrap around)."""
     if option_line(screen, option) is None:
         return f"no option '{option}' on the screen of {target}"
     for key in ["down"] * 6 + ["up"] * 12:
         if (option_line(screen, option) or "").lstrip().startswith(SELECTED):
             return None
         herdr.keys(target, key)
-        screen = herdr.read(target)
+        screen = _moved(target, screen)
     return f"rl could not select '{option}'"
+
+
+def _moved(target: str, before: str, wait: float = 2.0) -> str:
+    """The screen once its selected line is not the one before the key, or as it is after wait (a key at the end of
+    a list that does not wrap around moves nothing)."""
+    def selected(screen: str) -> str | None:
+        return next((x for x in screen.splitlines() if x.lstrip().startswith(SELECTED)), None)
+    deadline = time.monotonic() + wait
+    while selected(screen := herdr.read(target)) == selected(before) and time.monotonic() < deadline:
+        time.sleep(0.1)
+    return screen
 
 
 def excerpt(screen: str, lines: int = 12, chars: int = 600) -> str:

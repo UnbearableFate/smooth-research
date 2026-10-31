@@ -1474,3 +1474,9 @@ GitHub 链接固定到本次读取的提交；外部产品文档按 2026-10-30 �
 - herdr：rl 用到的子命令和参数列成一张表（`agent start --kind --pane --timeout --`、`agent prompt --wait --timeout`、`tab create --cwd --label --env --no-focus` 等），与 `herdr agent`、`herdr tab`、`herdr pane` 列出的用法对照，并检查 `--kind` 支持 claude、codex、pi。不带子命令的命令组只列出用法，不执行任何操作；不带参数的 `herdr` 会打开界面，测试不运行它。
 - 帮助里没有的不检查：codex `-c` 的配置键、工具名和按键名、herdr 的 JSON 字段和错误码。
 - 本机版本（Claude Code 2.1.316、codex-cli 0.166.0、pi 1.0.4、herdr 0.9.5）4 项都通过。另外用假的帮助输出确认：去掉 claude 的 `--safe-mode`、codex exec 的 `--skip-git-repo-check`、pi 的 `--thinking`、herdr 的 `agent prompt --wait` 和 `--kind codex` 后，对应的一项失败，并指出缺的参数；PATH 里没有这些宿主时 4 项都跳过。
+
+**在真实环境复测时发现的缺陷（不是重构引入的）。** 用真实的 herdr 和 Claude Code 2.1.316 打开会话时，agent 在信任提问处退出了。
+- 原因：这一版把 “No, exit” 放在第一项并默认选中，“Yes, I trust this folder” 在第二项，两项循环滚动。rl 按 down 后马上读屏，读到的还是按键前的画面（约 0.1 秒后才更新），于是又按了一次 down，选择回到 “No, exit”，随后的 Enter 让 Claude Code 退出。在新目录里打开 Claude 会话都会这样，包括每个新的研究者 worktree。
+- 修复：每按一个键，等画面上选中的那一行变了（最多等 2 秒）再判断下一步。`rl agent answer` 用的是同一个函数，也一并修好。
+- 测试：伪造的 herdr 改成与真实宿主一致：按键的效果下一次读屏才显示，选项循环滚动。这样，原来的信任提问测试和回答对话框的测试在修复前的代码上都失败。
+- 修复后在真实环境里复测：打开会话时回答了信任提问，记下了 `session.trusted`；agent 退出后，`rl agent check` 在原来的 pane 里重新启动它，宿主会话 ID 换成了新的。
