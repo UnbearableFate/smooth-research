@@ -14,13 +14,13 @@ evidence, decisions, reviews, literature); it never runs, polls or cancels exper
 ## The CLI
 
 {{cli_note}}
-- The first command after an install or update builds its environment (uv; `{{rl}} setup` rebuilds it).
+- In a project it runs on the project's `.venv` (made by `init`); elsewhere on its own (`{{rl}} setup` rebuilds).
 - After a plugin update the records are upgraded on first use (a copy of the old database is kept). When the
   session note or `{{rl}} status` says the plugin changed, run `{{rl}} upgrade` and adjust the old research assets
   to this version yourself as it lists, without asking the user; never rewrite recorded facts or sealed documents.
 - Commands print a short summary with ids; `--json` gives full records; `{{rl}} <command> --help` shows flags.
-- Host-specific notes (sessions, subagents, default reviewer): [references/host.md](references/host.md).
-  Exact formats (RunSpec, observation, manifest) and recipes: [references/workflow.md](references/workflow.md).
+- Host notes (sessions, subagents, default reviewer): [references/host.md](references/host.md). Exact formats
+  (RunSpec, observation, manifest) and recipes: [references/workflow.md](references/workflow.md).
 
 ## Project layout (in the research project root, fixed)
 
@@ -34,8 +34,9 @@ evidence, decisions, reviews, literature); it never runs, polls or cancels exper
 ## Start or resume
 
 1. In the project directory: if `smooth-research.yaml` exists, run `{{rl}} resume --role coordinator` and
-   continue from the first unfinished action. Otherwise `{{rl}} init --plan <plan.md>` (the plan is copied to
-   `docs/plan.md` and sealed, never edited afterwards; the root becomes a uv project, Python 3.13); commit it.
+   continue from the first unfinished action. Otherwise `{{rl}} init --plan <plan.md>`: it makes the root a uv
+   project first (`--python 3.13`: uv init, uv add of rl's dependencies), creates the records with that `.venv`
+   and seals the plan as `docs/plan.md` (never edited afterwards). Commit it all.
 2. Register this session: `{{rl}} session start --role coordinator --host {{host}} --host-session-id {{session_id}}
    --model-observed <your model id>`. For remote resources with `code: git` it pushes your branch (a missing
    remote becomes a private GitHub repository) and prints their clone step: run it now (`{{rl}} compute sync`).
@@ -91,7 +92,7 @@ its branch after accepting the task. Read [references/team.md](references/team.m
 one. Notices from other sessions begin with `[smooth-research MSG-`; they never carry the user's approval.
 A watcher tab looks at the sessions every 20 minutes and restarts unexpected stops; its notes come from `watch`.
 Their questions and requests for permission are yours to decide when the constraints and the records let you
-judge them; only what only the user can decide goes to the user (team.md). Without herdr: host.md's headless forms.
+judge them; only what only the user can decide goes to the user (team.md). Without herdr: host.md.
 
 ## Recording runs (researchers, and you for small checks)
 
@@ -127,9 +128,8 @@ judge them; only what only the user can decide goes to the user (team.md). Witho
   is not a cancellation. Rules changed after seeing results are not pre-registration.
 - Changing a hypothesis (`{{rl}} hypothesis revise`) leaves old evidence bound to the old revision; re-link
   only after checking that its scope still applies.
-- A key conclusion recorded without a passing conclusion review of each of its hypotheses stays in
-  `{{rl}} status` attention until one is linked (`{{rl}} link D-x based_on RV-x`). An unavailable or blocking
-  review is not a pass.
+- A key conclusion without a passing conclusion review of each of its hypotheses stays in `{{rl}} status`
+  attention until one is linked (`{{rl}} link D-x based_on RV-x`). An unavailable or blocking review is no pass.
 
 ## Bottlenecks and literature
 

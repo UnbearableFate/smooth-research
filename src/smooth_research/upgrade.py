@@ -13,9 +13,12 @@ older shape) the agent adjusts itself; `rl upgrade` lists it and `rl upgrade --n
 from __future__ import annotations
 
 import os
+import platform
 import shutil
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
 from .schema import SCHEMA_VERSION
@@ -63,6 +66,22 @@ MIGRATIONS = [
     Migration(2, "fill in fields that records written before them lack (attempt code review check, advice round)",
               _v2),
 ]
+
+
+def environment(project) -> tuple[str, bool]:
+    """(one line on the Python environment rl runs on, whether it is the project's own <root>/.venv). bin/rl
+    runs rl on the project's environment once rl init has made it; before that, on the plugin's."""
+    from importlib.metadata import PackageNotFoundError, version
+    try:
+        lattice = version("latticedb")
+    except PackageNotFoundError:
+        lattice = "unknown"
+    venv = project.root / ".venv"
+    own = venv.exists() and Path(sys.prefix).resolve() == venv.resolve()
+    where = (f"the project's {project.rel(venv)}" if own else
+             f"{sys.prefix}, not the project's own: rl init in the project root makes one (uv init, uv add of rl's "
+             "dependencies)")
+    return f"environment: Python {platform.python_version()}, latticedb {lattice} on {where}", own
 
 
 def build() -> str:
@@ -217,7 +236,7 @@ def report(store: "Store", note: str | None = None) -> dict:
         if note and note.strip():
             tx.event("project.adjusted", None, f"by build {build()}: {note.strip()}")
     lines = [f"project format: schema {meta.get('schema_version')} (this CLI: {SCHEMA_VERSION}) · plugin build "
-             f"{build()} (last used with {last or 'unknown'})"]
+             f"{build()} (last used with {last or 'unknown'})", environment(project)[0]]
     lines += [f"history: {e['created_at'][:16]} {e['type']}: {e['summary']}" for e in upgrades[-5:]]
     if note and note.strip():
         lines.append(f"recorded: project.adjusted: {note.strip()}")

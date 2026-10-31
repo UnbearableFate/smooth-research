@@ -305,6 +305,10 @@ def test_session_start_creates_a_private_repository_pushes_and_prints_the_clone(
     assert code == 0 and "created" not in out and f"pushed main ({new[:12]})" in out
     assert "uncommitted changes to tracked files are not pushed" in out
     assert len((fake_gh / "calls").read_text().splitlines()) == 1
+    code, out, err = rl("compute", "sync")  # nothing new: said, not recorded again
+    assert code == 0 and f"main ({new[:12]}) is already on origin" in out
+    with store.read() as tx:
+        assert [e["type"] for e in tx.all("Event")].count("compute.push") == 2
 
 
 def test_sync_reports_what_it_cannot_do_and_session_start_goes_on(project, tmp_path, fake_gh, rl):

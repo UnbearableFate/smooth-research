@@ -66,9 +66,13 @@ codex plugin marketplace add <repo path>
 codex plugin add smooth-research@smooth-research
 ```
 
-The CLI environment is built from the bundled, locked package (needs uv), once per plugin version: the
-session-start hook starts the build in the background and the first `rl` command waits for it (`<plugin>/bin/rl
-setup` rebuilds it). Skills in Claude Code call `${CLAUDE_PLUGIN_ROOT}/bin/rl`; in Codex the note prints the
+Inside a research project `rl` runs on the project's own environment: `rl init [--python 3.13]` first makes the
+project directory a uv project (`uv init --no-workspace`), adds rl's dependencies to it (`uv add`, which creates
+`.venv`), and only then creates the records with that environment. rl's code comes from the plugin; the project
+pins the libraries in its `uv.lock`. Outside a project, and in projects made before this, `rl` runs on the plugin's
+own environment, built from the bundled, locked package (needs uv) once per plugin version: the session-start
+hook starts the build in the background and the first `rl` command waits for it (`<plugin>/bin/rl setup` rebuilds
+it). Skills in Claude Code call `${CLAUDE_PLUGIN_ROOT}/bin/rl`; in Codex the note prints the
 absolute path.
 
 A plugin update never stops a running project. The first command that opens an older project upgrades its records
@@ -94,7 +98,7 @@ research/                everything else: experiments/ (contracts), tasks/, note
 The layout is fixed. Every configuration key, environment variable and command-line override is explained in
 [docs/configuration.md](docs/configuration.md) (in Chinese).
 
-Typical loop: `rl init --plan plan.md` (also `uv init`) -> commit -> `rl session start --role coordinator ...`
+Typical loop: `rl init --plan plan.md` (uv init, uv add, then the records) -> commit -> `rl session start --role coordinator ...`
 (pushes for remote `code: git` resources; run the clone step it prints) ->
 `rl hypothesis add` -> `rl experiment add` -> code in `src/` -> `rl review request/run` for new core
 paths -> `rl run register --resource ..` -> `rl compute steps` -> run with your own tool -> `rl run record` ->

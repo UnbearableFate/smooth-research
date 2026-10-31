@@ -1631,7 +1631,7 @@ GitHub 链接固定到本次读取的提交；外部产品文档按 2026-10-30 �
 
 验证：136 项测试通过（新增 10 项，`tests/test_upgrade.py`）。对 sr-e2e 三个项目的副本运行新 CLI：记录从格式 1 升级到 2 并留下备份，`rl upgrade` 列出 `docs/experiments`、`reports` 等旧布局，`--move` 后合同照常封存。从 dist 运行启动器、`SMOOTH_RESEARCH_HOME` 为空：hook 在后台构建，两条同时启动的命令都等它完成，只构建一次。
 
-### 21.20 init 建 uv 项目，会话开始时推送并 clone（2026-10-31）
+### 21.20 记录由项目自己的环境生成；会话开始时推送并 clone（2026-10-31）
 
 用户的要求：先在 demo 上手工走一遍 `uv init . --python=3.13`、`gh` 建 private 仓库并推送、在 Miyabi 上 git clone；走得通就加进插件：`uv init` 放进 `rl init`，push 和 clone 放进 `rl session start`。
 
@@ -1641,12 +1641,23 @@ GitHub 链接固定到本次读取的提交；外部产品文档按 2026-10-30 �
 
 | 部分 | 内容 |
 | --- | --- |
-| `rl init` | 新项目且没有 `pyproject.toml` 时运行 `uv init . --python=<版本> --no-workspace --name <目录名>`（`--python` 默认 3.13，`--no-uv` 跳过）。项目已经在 git 仓库里时 uv 不写 `.gitignore`，rl 补上 uv 的那份或在已有的后面加 `.venv`。uv 缺失或失败不让 init 失败，给出手工命令。`next` 里加“提交新项目” |
+| `rl init [--python 3.13]` | 见下面的“顺序的更正” |
 | `compute.repository` | 新键，默认 `github-private`；`none` 不建仓库。只在有 `code: git` 的远程资源、对应的 git remote 不存在、项目自己就是仓库根目录、没写 `git_url` 时才建 |
 | `rl compute sync [<资源>]`（新） | 建仓库（`gh repo create <目录名> --private --source --remote`，记 `compute.repository` 事件）→ `git push [-u] <remote> <当前分支>`（不强推，记 `compute.push` 事件）→ 每个资源打印 clone/fetch 并检查 commit 的脚本。git 和 gh 都不弹提示（`GIT_TERMINAL_PROMPT=0`、`GH_PROMPT_DISABLED=1`），有超时。所有问题只报告，不抛出 |
 | `rl session start` | 协调者注册后运行 `rl compute sync`（`--no-sync` 跳过）；没有 `code: git` 的远程资源时不输出 |
 | skill、team.md、researcher 提示 | 开始时提交新项目，运行打印的 clone 步骤；researcher 用 `rl compute sync` 推送任务分支；合并后的 main 由协调者再 sync 一次（取代“合并后的 main 要不要推送由用户决定”） |
 
-**不做的**：rl 不在远程主机上执行 clone；不强推；不给已经在更大仓库里的项目建仓库；不在已有项目上补跑 `uv init`。
+**顺序的更正**（同一天，用户指出）：第一版在 Python 的 `init_project` 里先用插件自己的环境建数据库，再跑 `uv init`，而且不安装依赖。用户的要求是数据库由项目自己的 Python 环境生成，顺序与 research-tree 相同。已核对 research-tree：`prepare`（`tools/prepare.sh`，纯 shell）先 `uv init . --no-workspace --python=3.13`（已有 `pyproject.toml` 时跳过），再 `uv add latticedb==0.15.0 jsonschema pyyaml pypdf`；之后 `init` 和所有工具都用项目的 `.venv/bin/python` 运行插件里的脚本（`register.tsx` 的 `runTool`）。现在 smooth-research 也这样：
 
-验证：145 项测试通过（新增 9 项：`tests/test_setup.py` 4 项，`tests/test_compute.py` 5 项）。sync 的测试用假的 `gh`（建本地 bare 仓库）和本地目录代替 GitHub 和 Miyabi，并真的执行打印出来的 clone 脚本。真实环境：在 demo 里用重新构建的插件运行 `rl compute sync`，推送到 GitHub；打印的脚本在 Miyabi 上对已有的 `repo.git` 做了 fetch，在一个临时 workspace 里从头 clone，两次都确认有刚推送的 commit（临时 workspace 已删除）。
+| 部分 | 内容 |
+| --- | --- |
+| `bin/rl init [--python 3.13] [--dir]` | 在 shell 里（不需要 Python）：`--python` 低于插件的 `requires-python` 时拒绝；没有 `pyproject.toml` 时 `uv init . --no-workspace --python --name <目录名>`；补 `.gitignore` 的 `.venv`；`uv add` 插件 `pyproject.toml` 里的依赖（写进项目的 `pyproject.toml`、`uv.lock`，建好 `.venv`），在 `.venv/.smooth-research-deps` 记下依赖列表；然后用项目的 `.venv/bin/python -I` 运行 init，由它建数据库。uv 失败时停下，不生成记录 |
+| 之后的命令 | `bin/rl` 找到项目（`--project`、`$SMOOTH_RESEARCH_PROJECT`、向上找 `smooth-research.yaml`；在 researcher 的 linked worktree 里到主 checkout 找），项目的 `pyproject.toml` 里有 rl 的依赖时就用项目的 `.venv` 运行，代码从插件的 `src/` 加到 `sys.path`（不装进项目）。依赖列表和记下的不同（插件升级）或 `.venv` 不在时先 `uv add`（按项目加锁，一次只做一个）；hook 在后台做，状态栏不等 |
+| 插件自己的环境 | 只给项目外的命令和还没有自己环境的旧项目用（原来的 `env-<build>`）。旧项目在根目录运行 `rl init` 就有了自己的环境，记录不变 |
+| `rl init` 的输出、`project.init` 事件、`rl upgrade` | 写明运行 rl 的环境：Python 版本、latticedb 版本、是不是项目自己的 `.venv` |
+
+`init_project` 不再调用 uv，`--no-uv` 取消。状态栏和 `rl status` 在项目环境上的耗时与原来相同（约 0.14 秒和 0.22 秒）。
+
+**不做的**：rl 不在远程主机上执行 clone；不强推；不给已经在更大仓库里的项目建仓库；不把 rl 自己装进项目环境。
+
+验证：148 项测试通过（新增 12 项：`tests/test_setup.py` 7 项，直接运行 `plugin/bin/rl` 和 uv，覆盖新项目、嵌在别的 uv 项目里的项目、已有 `pyproject.toml`、过低的 Python、插件升级后补依赖、researcher worktree、旧项目；`tests/test_compute.py` 5 项）。sync 的测试用假的 `gh`（建本地 bare 仓库）和本地目录代替 GitHub 和 Miyabi，并真的执行打印出来的 clone 脚本。真实环境：在 demo 里用重新构建的插件运行 `rl compute sync`，推送到 GitHub；打印的脚本在 Miyabi 上对已有的 `repo.git` 做了 fetch，在一个临时 workspace 里从头 clone，两次都确认有刚推送的 commit（临时 workspace 已删除）。

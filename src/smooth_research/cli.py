@@ -45,8 +45,7 @@ def _list(value) -> list[str]:
 
 
 def cmd_init(args):
-    return research.init_project(Path(args.dir or "."), args.plan, args.title,
-                                 python=None if args.no_uv else args.python)
+    return research.init_project(Path(args.dir or "."), args.plan, args.title)
 
 
 def cmd_status(args):
@@ -481,9 +480,9 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--title")
     sp.add_argument("--dir", help="project directory (default: cwd)")
     sp.add_argument("--python", default=research.DEFAULT_PYTHON,
-                    help=f"Python version of the uv project a new project's code becomes (uv init --python; default "
-                         f"{research.DEFAULT_PYTHON}); an existing pyproject.toml is kept")
-    sp.add_argument("--no-uv", action="store_true", help="do not run uv init")
+                    help=f"Python version of the project's environment (default {research.DEFAULT_PYTHON}). The "
+                         "plugin's rl makes it before the records: uv init --python (an existing pyproject.toml is "
+                         "kept), then uv add of rl's dependencies, and runs init on it")
     add("status", cmd_status, "short project status and attention items")
     sp = add("resume", cmd_resume, "resume pack: roles, unfinished tasks and attempts, last observations")
     sp.add_argument("--role")

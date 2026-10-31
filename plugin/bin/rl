@@ -1,63 +1,239 @@
 #!/bin/sh
-# Smooth Research CLI for the host plugins. It runs `rl` from a dedicated environment built with uv from this
-# plugin's pinned Python package, one environment per plugin build. The first command after an install or an
-# update builds it (the session-start hook starts that build in the background; `rl setup` rebuilds it on
-# request), one build at a time; nothing else is installed.
+# Smooth Research CLI for the host plugins.
+#
+# rl runs on the research project's own Python environment, <project>/.venv. `rl init [--python 3.13]` first
+# makes the project directory a uv project (uv init --no-workspace; an existing pyproject.toml is kept), then adds
+# rl's dependencies to it (uv add: the records library and YAML, pinned in the project's uv.lock; this creates
+# .venv), and only then runs init on that environment, which creates the records. Every later command in the
+# project runs there too, so the records are always read and written by the library versions the project pins.
+# rl's own code comes from this plugin (src/) and is never installed into the project. When a plugin update
+# changes rl's dependencies, the first command updates the project's (uv add; commit pyproject.toml and uv.lock).
+#
+# Outside a research project (a session hook elsewhere, the status line) and in a project made before projects
+# had an environment of their own (`rl init` there gives it one), rl runs on the plugin's environment: built
+# with uv from the plugin's pinned package, one per plugin build, by the first command that needs it (the
+# session-start hook starts that in the background; `rl setup` rebuilds it). Builds run one at a time.
 set -eu
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 root=$(dirname -- "$here")
-project=$root
-[ -f "$project/pyproject.toml" ] || project=$(dirname -- "$root")  # source checkout: plugin/ inside the repo
+package=$root
+[ -f "$package/pyproject.toml" ] || package=$(dirname -- "$root")  # source checkout: plugin/ inside the repo
 build=$(cat "$root/.build-id" 2>/dev/null || echo dev)
 home=${SMOOTH_RESEARCH_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/smooth-research}
 env_dir="$home/env-$build"
 SMOOTH_RESEARCH_RL="$here/rl"
 SMOOTH_RESEARCH_BUILD=$build
 export SMOOTH_RESEARCH_RL SMOOTH_RESEARCH_BUILD
+# rl's dependencies (one quoted entry per line of the dependencies list) and lowest Python, from its package
+deps=$(awk '/^dependencies = \[/ { on = 1; next } on && /^\]/ { exit }
+            on && match($0, /"[^"]+"/) { print substr($0, RSTART + 1, RLENGTH - 2) }' "$package/pyproject.toml")
+min_python=$(sed -n 's/^requires-python = ">=\([0-9][0-9.]*\)".*/\1/p' "$package/pyproject.toml")
+default_python=3.13
+# what uv init writes to .gitignore when it creates the git repository itself (it writes none inside one)
+uv_gitignore='# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
 
-ready() { [ -f "$env_dir/.ready" ] && [ -x "$env_dir/bin/rl" ]; }
+# Virtual environments
+.venv
+'
 
-build_env() {  # $1 = force: sync even when the environment is ready
-  if ! command -v uv >/dev/null 2>&1; then
-    echo "smooth-research needs uv to build its CLI environment: https://docs.astral.sh/uv/getting-started/installation/" >&2
-    exit 2
+say() { printf 'smooth-research: %s\n' "$*" >&2; }
+
+need_uv() {
+  command -v uv >/dev/null 2>&1 && return 0
+  say "needs uv to build its Python environments: https://docs.astral.sh/uv/getting-started/installation/"
+  exit 2
+}
+
+option() {  # the value of option $1 (--opt VALUE or --opt=VALUE) among the remaining arguments
+  opt=$1
+  shift
+  while [ "$#" -gt 0 ]; do
+    case $1 in
+      "$opt") [ "$#" -ge 2 ] && { printf '%s\n' "$2"; return 0; }; return 1 ;;
+      "$opt"=*) printf '%s\n' "${1#*=}"; return 0 ;;
+    esac
+    shift
+  done
+  return 1
+}
+
+at_least() {  # version $1 >= version $2 (major.minor)
+  awk -v a="$1" -v b="$2" 'BEGIN { split(a, x, "."); split(b, y, ".")
+    exit !(x[1] + 0 > y[1] + 0 || (x[1] + 0 == y[1] + 0 && x[2] + 0 >= y[2] + 0)) }'
+}
+
+find_project() {  # the research project of this command: --project, $SMOOTH_RESEARCH_PROJECT, else the nearest
+  # directory with smooth-research.yaml above the working directory, looked up in the main checkout when the
+  # working directory is in a linked git worktree (a researcher's)
+  if p=$(option --project "$@"); then (CDPATH= cd -- "$p" 2>/dev/null && pwd -P); return; fi
+  if [ -n "${SMOOTH_RESEARCH_PROJECT-}" ]; then (CDPATH= cd -- "$SMOOTH_RESEARCH_PROJECT" 2>/dev/null && pwd -P); return; fi
+  d=$(pwd -P)
+  g=$d
+  while [ "$g" != / ] && [ ! -e "$g/.git" ]; do g=$(dirname -- "$g"); done
+  if [ -f "$g/.git" ] && common=$(git -C "$g" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) &&
+     [ "$(basename -- "$common")" = .git ] && [ "$(dirname -- "$common")" != "$g" ]; then
+    d="$(dirname -- "$common")${d#"$g"}"
   fi
-  mkdir -p "$home"
-  lock="$env_dir.building"
+  while :; do
+    if [ -f "$d/smooth-research.yaml" ]; then printf '%s\n' "$d"; return 0; fi
+    [ "$d" = / ] && return 1
+    d=$(dirname -- "$d")
+  done
+}
+
+locked() {  # $1 lock directory, $2 readiness check, $3 build, $4 force|auto: one build at a time, then use it
   waited=0
-  until mkdir "$lock" 2>/dev/null; do  # another session is building it: wait, then use it
-    if [ "$1" != force ] && ready; then return 0; fi
+  until mkdir "$1" 2>/dev/null; do  # another rl is building it: wait, then use it
+    if [ "$4" != force ] && $2; then return 0; fi
     if [ "$waited" -ge 600 ]; then
-      echo "smooth-research: $lock has been held for 10 minutes; if no build is running, remove it and retry" >&2
+      say "$1 has been held for 10 minutes; if no build is running, remove it and retry"
       exit 3
     fi
     sleep 1
     waited=$((waited + 1))
   done
-  trap 'rmdir "$lock" 2>/dev/null' EXIT INT TERM
-  if [ "$1" = force ] || ! ready; then
-    echo "smooth-research: building the CLI environment of plugin build $build (once per plugin version)" >&2
-    rm -f "$env_dir/.ready"
-    UV_PROJECT_ENVIRONMENT="$env_dir" uv sync --project "$project" --frozen --no-dev --no-editable --quiet
-    "$env_dir/bin/rl" --help >/dev/null
-    : > "$env_dir/.ready"
-  fi
-  rmdir "$lock" 2>/dev/null || true
+  held=$1
+  trap 'rmdir "$held" 2>/dev/null' EXIT INT TERM
+  if [ "$4" = force ] || ! $2; then $3; fi
+  rmdir "$1" 2>/dev/null || true
   trap - EXIT INT TERM
 }
 
-if [ "${1-}" = "setup" ]; then
-  build_env force
-  echo "smooth-research CLI ready: $here/rl (environment $env_dir)"
-  exit 0
+# -- the plugin's environment ---------------------------------------------------------------------------------
+
+plugin_ready() { [ -f "$env_dir/.ready" ] && [ -x "$env_dir/bin/rl" ]; }
+
+build_plugin() {
+  say "building the CLI environment of plugin build $build (once per plugin version)"
+  rm -f "$env_dir/.ready"
+  UV_PROJECT_ENVIRONMENT="$env_dir" uv sync --project "$package" --frozen --no-dev --no-editable --quiet
+  "$env_dir/bin/rl" --help >/dev/null
+  : > "$env_dir/.ready"
+}
+
+plugin_env() {  # $1 force|auto
+  need_uv
+  mkdir -p "$home"
+  locked "$env_dir.building" plugin_ready build_plugin "$1"
+}
+
+# -- the project's environment (target: the project directory) --------------------------------------------------
+
+target=
+python=$default_python
+
+own_env() {  # the project has an environment of its own: rl's records library is among its dependencies
+  [ -n "$target" ] && [ -f "$target/pyproject.toml" ] && grep -q '"latticedb' "$target/pyproject.toml"
+}
+
+project_ready() {
+  [ -x "$target/.venv/bin/python" ] && [ "$(cat "$target/.venv/.smooth-research-deps" 2>/dev/null)" = "$deps" ]
+}
+
+build_project() {
+  if [ ! -e "$target/pyproject.toml" ]; then
+    name=$(basename -- "$target" | sed 's/[^A-Za-z0-9._-][^A-Za-z0-9._-]*/-/g; s/^[-._]*//; s/[-._]*$//')
+    if ! out=$(cd "$target" && uv init . --no-workspace --python="$python" --name "${name:-research}" --quiet 2>&1)
+    then
+      say "uv init . --no-workspace --python=$python failed in $target: $(printf '%s' "$out" | tail -n 3)"
+      exit 1
+    fi
+    say "made $target a uv project for Python $python (uv init: pyproject.toml, .python-version, src/<package>/)"
+  fi
+  ignore="$target/.gitignore"
+  if [ ! -e "$ignore" ]; then
+    printf '%s' "$uv_gitignore" > "$ignore"
+  elif ! grep -qxE '/?\.venv/?' "$ignore"; then
+    printf '\n# uv environment\n.venv\n' >> "$ignore"
+  fi
+  set -f  # the requirements are words, not patterns
+  # shellcheck disable=SC2086
+  if ! out=$(uv add --project "$target" --quiet $deps 2>&1); then
+    set +f
+    say "uv add $(echo $deps) failed in $target: $(printf '%s' "$out" | tail -n 3)"
+    exit 1
+  fi
+  set +f
+  printf '%s' "$deps" > "$target/.venv/.smooth-research-deps"
+  say "$target/.venv has rl's dependencies $(echo $deps) (uv add): commit pyproject.toml and uv.lock"
+}
+
+project_env() {  # $1 force|auto
+  need_uv
+  mkdir -p "$home/locks"
+  locked "$home/locks/project-$(printf '%s' "$target" | cksum | cut -d' ' -f1)" project_ready build_project "$1"
+}
+
+run_project() {  # rl's code from this plugin on the project's interpreter (-I: nothing from cwd or PYTHON*)
+  exec "$target/.venv/bin/python" -I -c 'import sys
+sys.path.insert(0, sys.argv.pop(1))
+sys.argv[0] = "rl"
+from smooth_research.cli import main
+sys.exit(main())' "$package/src" "$@"
+}
+
+# -- commands ---------------------------------------------------------------------------------------------------
+
+case ${1-} in
+  init)
+    python=$(option --python "$@") || python=$default_python
+    case $python in
+      [0-9]*.[0-9]*) ;;
+      *) say "--python takes a version such as $default_python, not '$python'"; exit 2 ;;
+    esac
+    if ! at_least "$python" "$min_python"; then
+      say "rl needs Python $min_python or newer; --python $python is older"
+      exit 2
+    fi
+    dir=$(option --dir "$@") || dir=.
+    mkdir -p -- "$dir"
+    target=$(CDPATH= cd -- "$dir" && pwd -P)
+    project_env auto  # the environment first: the records are created on it
+    run_project "$@"
+    ;;
+  setup)
+    plugin_env force
+    target=$(find_project "$@") || target=
+    if own_env; then
+      project_env force
+      echo "smooth-research project environment ready: $target/.venv"
+    fi
+    echo "smooth-research CLI ready: $here/rl (plugin environment $env_dir)"
+    exit 0
+    ;;
+esac
+
+target=$(find_project "$@") || target=
+if own_env; then
+  if ! project_ready; then
+    case ${1-} in
+      hook)  # never block or break the host session: update in the background, say so
+        ( project_env auto >/dev/null 2>&1 & ) >/dev/null 2>&1
+        printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"Smooth Research plugin: the Python environment of this project (%s/.venv) is being updated for this plugin version in the background; the first %s command waits for it. Then read the session notes with %s status."}}\n' "$target" "$here/rl" "$here/rl"
+        exit 0
+        ;;
+      usage) [ "${2-}" = statusline ] && exit 0 ;;  # the status line never waits for a build
+    esac
+    project_env auto
+  fi
+  run_project "$@"
 fi
 
-if ! ready; then
-  if [ "${1-}" = "hook" ]; then  # never block or break the host session: build in the background, say so
-    ( build_env auto >/dev/null 2>&1 & ) >/dev/null 2>&1
-    printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"Smooth Research plugin: the CLI environment of this plugin version is being built in the background; the first %s command waits for it (needs uv; %s setup rebuilds it). Then read the session notes with %s status."}}\n' "$here/rl" "$here/rl" "$here/rl"
-    exit 0
-  fi
-  build_env auto
+if ! plugin_ready; then
+  case ${1-} in
+    hook)  # never block or break the host session: build in the background, say so
+      ( plugin_env auto >/dev/null 2>&1 & ) >/dev/null 2>&1
+      printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"Smooth Research plugin: the CLI environment of this plugin version is being built in the background; the first %s command waits for it (needs uv; %s setup rebuilds it). Then read the session notes with %s status."}}\n' "$here/rl" "$here/rl" "$here/rl"
+      exit 0
+      ;;
+    usage) [ "${2-}" = statusline ] && exit 0 ;;
+  esac
+  plugin_env auto
 fi
 exec "$env_dir/bin/rl" "$@"

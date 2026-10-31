@@ -1,74 +1,142 @@
-"""rl init makes a new project's code a uv project (uv init --python <version> --no-workspace)."""
+"""bin/rl runs rl on the research project's own Python environment. rl init makes it first (uv init --python
+<version> --no-workspace, then uv add of rl's dependencies, which creates .venv) and only then creates the records
+on it; later commands run there too. These tests drive the real launcher with uv."""
 
+import os
 import shutil
 import subprocess
 import tomllib
+from pathlib import Path
 
 import pytest
 
 pytestmark = pytest.mark.skipif(shutil.which("uv") is None, reason="uv is not on PATH")
+
+REPO = Path(__file__).resolve().parents[1]
+LAUNCHER = REPO / "plugin" / "bin" / "rl"
+DEPS = tomllib.loads((REPO / "pyproject.toml").read_text())["project"]["dependencies"]
+
+
+@pytest.fixture(autouse=True)
+def plain_env(monkeypatch):
+    monkeypatch.delenv("SMOOTH_RESEARCH_PROJECT", raising=False)
+    for key, value in (("GIT_AUTHOR_NAME", "t"), ("GIT_AUTHOR_EMAIL", "t@example.org"),
+                       ("GIT_COMMITTER_NAME", "t"), ("GIT_COMMITTER_EMAIL", "t@example.org")):
+        monkeypatch.setenv(key, value)
+
+
+def rl(cwd, *args):
+    return subprocess.run([str(LAUNCHER), *map(str, args)], cwd=cwd, capture_output=True, text=True, timeout=600)
 
 
 def git(cwd, *args):
     return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
 
 
-def init(rl, root, *extra):
+def init(root, *extra):
     root.mkdir(parents=True, exist_ok=True)
     (root / "plan.md").write_text("# Plan\nA question.\n", encoding="utf-8")
-    return rl("init", "--plan", root / "plan.md", "--dir", root, *extra)
+    return rl(root, "init", "--plan", "plan.md", *extra)
 
 
-def test_a_new_project_becomes_a_uv_project_with_its_own_git_repository(rl, tmp_path):
+def dependencies(root):
+    return tomllib.loads((root / "pyproject.toml").read_text())["project"]["dependencies"]
+
+
+def test_init_makes_the_project_environment_before_the_records(tmp_path):
     root = tmp_path / "noise-study"
-    code, out, err = init(rl, root)
-    assert code == 0, err
+    done = init(root)
+    assert done.returncode == 0, done.stderr
     meta = tomllib.loads((root / "pyproject.toml").read_text())["project"]
     assert meta["name"] == "noise-study" and meta["requires-python"] == ">=3.13"
+    assert set(DEPS) <= set(dependencies(root)) and (root / "uv.lock").is_file()
     assert (root / ".python-version").read_text().strip() == "3.13"
-    assert (root / "src/noise_study/__init__.py").is_file() and (root / "src/.gitignore").is_file()
+    assert (root / "src/noise_study/__init__.py").is_file() and (root / "research/state/research.lattice").is_file()
+    assert (root / ".venv/.smooth-research-deps").read_text() == "\n".join(DEPS)
     assert (root / ".git").is_dir() and ".venv" in (root / ".gitignore").read_text().split()
-    assert "python: uv project for Python 3.13 (pyproject.toml, .python-version, src/noise_study/)" in out
-    assert "commit the new project in its root" in out
+    assert "made " in done.stderr and "commit pyproject.toml and uv.lock" in done.stderr
+    assert "environment: Python 3.13" in done.stdout and "on the project's .venv" in done.stdout
+    assert "commit the new project in its root" in done.stdout
 
-    code, out, err = init(rl, root)  # an existing project: nothing is initialized again
-    assert code == 0 and "python:" not in out and "commit the new project" not in out
+    for cwd in (root, root / "src"):  # later commands, also from below the root, run on the same environment
+        later = rl(cwd, "upgrade")
+        assert later.returncode == 0 and "on the project's .venv" in later.stdout, later.stderr
+        assert later.stderr == ""  # nothing to build
+    again = rl(root, "init", "--plan", "plan.md")
+    assert again.returncode == 0 and "already initialized" in again.stdout and again.stderr == ""
 
 
-def test_a_project_inside_another_uv_project_stays_out_of_its_workspace(rl, tmp_path):
+def test_a_project_inside_another_uv_project_gets_its_own_environment(tmp_path):
     parent = tmp_path / "tool"
     parent.mkdir()
     (parent / "pyproject.toml").write_text('[project]\nname = "tool"\nversion = "0.1.0"\n', encoding="utf-8")
     git(parent, "init", "-q")
     before = (parent / "pyproject.toml").read_text()
     root = parent / "demos" / "demo-1"
-    code, out, err = init(rl, root, "--python", "3.12")
-    assert code == 0, err
-    assert (parent / "pyproject.toml").read_text() == before  # no [tool.uv.workspace] members added
-    assert tomllib.loads((root / "pyproject.toml").read_text())["project"]["requires-python"] == ">=3.12"
-    # uv runs no git init inside a repository, and writes no .gitignore there: rl writes uv's
+    done = init(root)
+    assert done.returncode == 0, done.stderr
+    assert (parent / "pyproject.toml").read_text() == before  # not made a member of the outer workspace
+    assert (root / ".venv/bin/python").exists() and not (parent / ".venv").exists()
+    # uv runs no git init inside a repository and writes no .gitignore there: rl writes uv's
     assert not (root / ".git").exists() and ".venv" in (root / ".gitignore").read_text().split()
 
 
-def test_an_existing_pyproject_and_gitignore_are_kept(rl, tmp_path):
+def test_an_existing_pyproject_and_gitignore_are_kept_and_extended(tmp_path):
     root = tmp_path / "p"
     root.mkdir()
-    (root / "pyproject.toml").write_text('[project]\nname = "mine"\n', encoding="utf-8")
-    code, out, err = init(rl, root)
-    assert code == 0 and "python: kept the existing pyproject.toml" in out
-    assert (root / "pyproject.toml").read_text() == '[project]\nname = "mine"\n'
-
-    other = tmp_path / "q"
-    other.mkdir()
-    git(other, "init", "-q")
-    (other / ".gitignore").write_text("data/", encoding="utf-8")
-    code, out, err = init(rl, other)
-    assert code == 0, err
-    assert (other / ".gitignore").read_text().splitlines() == ["data/", "", "# uv environment", ".venv"]
+    (root / "pyproject.toml").write_text('[project]\nname = "mine"\nversion = "1.0"\nrequires-python = ">=3.13"\n'
+                                         'dependencies = []\n', encoding="utf-8")
+    git(root, "init", "-q")
+    (root / ".gitignore").write_text("data/", encoding="utf-8")
+    done = init(root)
+    assert done.returncode == 0, done.stderr
+    assert tomllib.loads((root / "pyproject.toml").read_text())["project"]["name"] == "mine"
+    assert set(DEPS) <= set(dependencies(root)) and "made " not in done.stderr
+    assert (root / ".gitignore").read_text().splitlines() == ["data/", "# uv environment", ".venv"]
 
 
-def test_no_uv_skips_it(rl, tmp_path):
+def test_a_python_older_than_rl_needs_is_refused(tmp_path):
+    done = init(tmp_path / "p", "--python", "3.12")
+    assert done.returncode == 2 and "rl needs Python 3.13 or newer" in done.stderr
+    assert not (tmp_path / "p/pyproject.toml").exists() and not (tmp_path / "p/research").exists()
+
+
+def test_new_dependencies_after_a_plugin_update_are_added_on_first_use(tmp_path):
     root = tmp_path / "p"
-    code, out, err = init(rl, root, "--no-uv")
-    assert code == 0 and "python:" not in out
-    assert not (root / "pyproject.toml").exists() and not (root / ".git").exists()
+    assert init(root).returncode == 0
+    stamp = root / ".venv/.smooth-research-deps"
+    stamp.write_text("latticedb==0.14.0", encoding="utf-8")  # what an older plugin needed
+    status = rl(root, "usage", "statusline", "--json")  # the status line never waits for a build
+    assert status.returncode == 0 and status.stdout == "" and stamp.read_text() == "latticedb==0.14.0"
+    done = rl(root, "status")
+    assert done.returncode == 0, done.stderr
+    assert "commit pyproject.toml and uv.lock" in done.stderr and stamp.read_text() == "\n".join(DEPS)
+
+
+def test_a_researcher_worktree_runs_on_the_main_checkouts_environment(tmp_path):
+    root = tmp_path / "p"
+    assert init(root).returncode == 0
+    git(root, "add", ".")
+    git(root, "commit", "-q", "-m", "start")
+    wt = tmp_path / "p-worktrees" / "researcher-1"
+    git(root, "worktree", "add", "-q", "-b", "sr/researcher-1/T-0001", str(wt))
+    done = rl(wt / "src", "upgrade")
+    assert done.returncode == 0, done.stderr
+    assert "on the project's .venv" in done.stdout and done.stderr == ""
+    assert not (wt / ".venv").exists()
+
+
+def test_a_project_made_before_its_own_environment_runs_on_the_plugins_until_rl_init(tmp_path):
+    from smooth_research import research
+    root = tmp_path / "old"
+    root.mkdir()
+    (root / "plan.md").write_text("# Plan\n", encoding="utf-8")
+    research.init_project(root, str(root / "plan.md"), "t")  # an older plugin: no pyproject.toml, no .venv
+    done = rl(root, "upgrade")
+    assert done.returncode == 0, done.stderr
+    assert "not the project's own: rl init in the project root makes one" in done.stdout
+    assert Path(os.environ["SMOOTH_RESEARCH_HOME"], "env-dev", ".ready").exists()  # the plugin's, built once
+    done = rl(root, "init")
+    assert done.returncode == 0 and "already initialized" in done.stdout, done.stderr
+    assert (root / ".venv/bin/python").exists() and set(DEPS) <= set(dependencies(root))
+    assert "on the project's .venv" in rl(root, "upgrade").stdout

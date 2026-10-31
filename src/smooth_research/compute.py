@@ -386,9 +386,12 @@ def sync(store: Store, name: str | None = None) -> dict:
             ok, said = _call(checkout, "git", "push", *([] if upstream else ["-u"]), remote, branch)
             if ok:
                 pushed.append({"remote": remote, "branch": branch, "commit": head, "url": url})
-                lines.append(f"pushed {branch} ({head[:12]}) to {remote} ({url})")
-                with store.write() as tx:
-                    tx.event("compute.push", None, f"{branch} {head[:12]} -> {remote} {url}")
+                if "up-to-date" in said:  # nothing new went out: no event
+                    lines.append(f"{branch} ({head[:12]}) is already on {remote} ({url})")
+                else:
+                    lines.append(f"pushed {branch} ({head[:12]}) to {remote} ({url})")
+                    with store.write() as tx:
+                        tx.event("compute.push", None, f"{branch} {head[:12]} -> {remote} {url}")
             else:
                 problems.append(f"git push {remote} {branch} failed: {said}. Fix it (never force a shared branch), "
                                 "then rl compute sync")

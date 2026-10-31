@@ -35,7 +35,7 @@
 
 | 位置 | 内容 |
 |---|---|
-| `src/` | 实验代码。init 会创建它，并放一个忽略 `__pycache__` 和 `*.pyc` 的 `.gitignore`。新项目里 init 还运行 `uv init . --python=3.13 --no-workspace`（见第 4 节 `rl init`），代码包在 `src/<包名>/`。工作包和 `rl delegate` 的提示词让 agent 把代码放这里，但不强制，审查范围和 RunSpec 可以引用任何路径 |
+| `src/` | 实验代码。init 会创建它，并放一个忽略 `__pycache__` 和 `*.pyc` 的 `.gitignore`。`rl init` 先把项目目录建成 uv 项目（见第 4 节 `rl init`），代码包在 `src/<包名>/`。工作包和 `rl delegate` 的提示词让 agent 把代码放这里，但不强制，审查范围和 RunSpec 可以引用任何路径 |
 | `docs/` | 只放给人读的文档：`plan.md`（`rl init --plan` 导入的原始计划，封存）、`constraints.md`（约束文档，见第 2 节）、`research-graph.html`（`rl view`）、论文草稿（`rl manuscript`，见下面的"论文草稿"）、`explanations/`（用户让 agent 解释某件事时，agent 把说明写在这里） |
 | `research/` | 其余的一切。agent 的工作文档：`experiments/`（实验契约）、`tasks/`（任务说明和交接笔记）、`notes/`（researcher 的笔记，写在它自己的 checkout 里，随分支合并）、`reviews/` 和 `advice/`（审查和建议的回答）、`reports/`（`rl report` 的阶段报告）。机器记录：数据库 `state/research.lattice` 和写锁、封存的文档 `documents/objects/`、请求包 `packages/`、模型调用日志 `calls/`、run 产物 `artifacts/<attempt>/` 等。init 写的 `.gitignore` 让 `state/`、`calls/`、`artifacts/` 不进 git |
 
@@ -220,7 +220,7 @@ compute:
 | 变量 | 含义 |
 |---|---|
 | `SMOOTH_RESEARCH_PROJECT` | 项目目录。查找顺序：先看 `--project`，再看这个变量，最后从当前目录往上找 `smooth-research.yaml` |
-| `SMOOTH_RESEARCH_HOME` | 插件 CLI 环境的安装位置。设了 `XDG_DATA_HOME` 时默认为 `$XDG_DATA_HOME/smooth-research`，否则为 `~/.local/share/smooth-research`。`rl setup` 在这里建 `env-<build-id>`；Claude 的额度读数存在这里的 `usage/claude.json` |
+| `SMOOTH_RESEARCH_HOME` | 插件自己的 CLI 环境的安装位置（项目外的命令和还没有自己环境的旧项目用它；项目内的命令用项目的 `.venv`，见第 6 节）。设了 `XDG_DATA_HOME` 时默认为 `$XDG_DATA_HOME/smooth-research`，否则为 `~/.local/share/smooth-research`。`rl setup` 在这里建 `env-<build-id>`；Claude 的额度读数存在这里的 `usage/claude.json` |
 | `SMOOTH_RESEARCH_RL` | `bin/rl` 启动器自动把它设成自己的绝对路径，让 hook 提示、delegate 子会话和 agent 会话调用同一个 CLI。一般不用手动设 |
 | `SMOOTH_RESEARCH_BUILD` | `bin/rl` 启动器设成插件的 build id（源码里运行时没有，按 `dev` 计算）。项目记下最后一次 `rl upgrade` 时的 build；两者不同时，`rl status`、`rl resume` 和会话开始的提示会说插件变了，要运行 `rl upgrade`。一般不用手动设 |
 | `SMOOTH_RESEARCH_CHECKOUT` | `rl agent open` 给 researcher 会话设成它的 worktree。代码路径、代码审查的指纹和 `rl run register` 的代码检查都按这个 checkout 读；研究记录仍写进 `SMOOTH_RESEARCH_PROJECT` 指向的项目。不设时从当前目录判断：在项目的 linked worktree 里就用这个 worktree |
@@ -244,7 +244,12 @@ compute:
 - **订阅额度：** `rl usage` 显示各宿主的窗口；`rl usage statusline` 是 Claude Code 的状态栏命令，从标准输入读状态栏的 JSON，任何输入都不会让它失败。
 - **论文草稿：** `rl manuscript [--title ..]` 写或刷新草稿，`--title` 只用于新建的草稿，见第 1 节"论文草稿"。
 - **插件升级：** `rl upgrade` 显示项目的记录格式和插件 build、做过的升级、新版本读法不同的地方和可以自己调整的范围；`--note "<改了什么>"` 记下 agent 手工做的调整；`--move <旧> <新>` 移动旧布局里的文件或目录，并在同一个事务里改写记录里的路径。见第 6 节。
-- **`rl init`：** 新项目除了配置、目录和计划，还在项目根目录运行 `uv init . --python=<版本> --no-workspace --name <目录名>`：写 `pyproject.toml`、`.python-version` 和 `src/<包名>/__init__.py`；项目不在任何 git 仓库里时 uv 还会 `git init`。`--no-workspace` 让放在别的 uv 项目里面的研究项目（比如一个仓库里的 demo）保持独立，不被加进那个项目的 workspace。已经有 `pyproject.toml` 时不动它。项目已经在一个 git 仓库里时 uv 不写 `.gitignore`，rl 写 uv 的那份（或者在已有的 `.gitignore` 后面加 `.venv`）。`--python <版本>` 改版本（默认 3.13），`--no-uv` 不运行 uv。uv 不在 PATH 上或失败时，init 照常完成，并给出要手工运行的命令。之后把新项目提交一次，`rl session start` 才有东西可推送。
+- **`rl init [--python 3.13]`：** 记录由项目自己的 Python 环境生成，所以顺序是（与 research-tree 的 prepare + init 相同）：
+  1. 在项目目录运行 `uv init . --no-workspace --python=<版本> --name <目录名>`：写 `pyproject.toml`、`.python-version` 和 `src/<包名>/__init__.py`；项目不在任何 git 仓库里时 uv 还会 `git init`。已经有 `pyproject.toml` 时跳过。`--no-workspace` 让放在别的 uv 项目里面的研究项目（比如一个仓库里的 demo）保持独立，不被加进那个项目的 workspace。
+  2. `uv add` rl 的依赖（`latticedb`、`pyyaml`，取自插件的 `pyproject.toml`）：写进项目的 `pyproject.toml` 和 `uv.lock`，并建好 `.venv`。项目已经在一个 git 仓库里时 uv 不写 `.gitignore`，rl 写 uv 的那份（或者在已有的 `.gitignore` 后面加 `.venv`）。
+  3. 用项目的 `.venv/bin/python` 运行 init：生成配置、目录和数据库，导入计划。init 的输出和 `project.init` 事件写明是哪个环境（Python 版本、latticedb 版本）。
+
+  前两步在 `bin/rl` 启动器里用 shell 完成，不需要 Python。`--python` 低于 rl 要求的版本（3.13）时拒绝。uv 失败时 init 停下，不生成记录。之后把新项目提交一次（包括 `pyproject.toml` 和 `uv.lock`），`rl session start` 才有东西可推送。
 - **计算资源：** `rl compute [--commit <sha>]` 列出资源和本地检查；`rl compute steps [<资源>] [--attempt ATT] [--commit <sha>]` 给出同步、运行和取回结果的步骤；`rl compute sync [<资源>]` 推送当前分支并打印 clone 步骤（见第 1 节“开始时同步”）；`rl session start --no-sync` 跳过它；`rl run register ... --resource <资源>` 把资源记到 attempt 上。见第 1 节“计算资源”。
 - **监视程序：** `rl agent check` 立刻查看一轮；`rl agent watch --start` 在单独的 tab 里启动（已经在运行就不重复启动），`--stop` 停止并关掉它的 tab；`--every <分钟>` 改间隔，不写就用 `agents.watch_minutes`。不带 `--start` 或 `--stop` 时在当前终端前台运行。
 
@@ -265,7 +270,9 @@ compute:
 
 插件升级不会让进行中的研究停下来。
 
-- **CLI 环境。** 每个插件版本有自己的环境（`$SMOOTH_RESEARCH_HOME/env-<build>`）。会话开始的 hook 在后台开始构建，第一条 `rl` 命令等它构建完；几个会话同时启动时只构建一次。`rl setup` 强制重建。需要 uv。
+- **项目的环境。** 研究项目里的 `rl` 命令都在项目自己的 `.venv` 上运行：代码来自插件（`src/`，不装进项目），依赖（`latticedb`、`pyyaml`）是项目 `uv.lock` 锁定的版本。researcher 的 worktree 里也用主 checkout 的 `.venv`。插件升级后 rl 的依赖变了时，项目里第一条命令先 `uv add` 新的依赖（几个命令同时来时只做一次），并提示提交 `pyproject.toml` 和 `uv.lock`；会话开始的 hook 在后台做，状态栏不等它。删掉 `.venv` 也没关系，下一条命令会重建。
+- **插件自己的环境。** 每个插件版本有一个（`$SMOOTH_RESEARCH_HOME/env-<build>`），只给研究项目以外的命令（比如别处的会话 hook、状态栏）和还没有自己环境的旧项目用。会话开始的 hook 在后台开始构建，第一条要用它的命令等它构建完；几个会话同时启动时只构建一次。`rl setup` 强制重建它，在项目里还会更新项目的环境。需要 uv。
+- **旧项目。** 在 `pyproject.toml` 里没有 rl 依赖的项目（这个版本之前建的）照常在插件自己的环境上运行；`rl upgrade` 的 `environment:` 一行会说明。在项目根目录运行 `rl init` 就给它建项目环境（没有 `pyproject.toml` 时先 `uv init`），记录不变。
 - **记录自动升级。** 新版本的 CLI 第一次打开旧项目时，在写锁下先把数据库文件复制到 `research/state/backups/schema-<旧格式>-<时间>/`，再在一个事务里运行旧格式到当前格式之间的全部迁移，记一条 `project.upgrade` 事件。迁移只补充和填写，不删除记录，不改记录下来的事实，不碰封存的文档。做了升级的那条命令会给出一条警告。`rl restore` 也接受旧版本的快照，恢复后同样自动升级。
 - **更新的项目只读。** 项目由更新的插件写过（记录格式比 CLI 新）时，CLI 照常读取，但拒绝写入（UNSUPPORTED），提示更新插件。
 - **`rl upgrade`。** 插件 build 和项目记下的不同时，`rl status`、`rl resume` 和会话开始的提示都会提醒。`rl upgrade` 补建新布局要的目录，列出旧布局放在别处的文件、配置警告、找不到的合同文件和记录问题，并说明 agent 可以自己调整什么；运行后记下当前 build，提醒消失。
