@@ -14,12 +14,15 @@ from .util import RLError
 
 CONFIG_NAME = "smooth-research.yaml"
 ENV_PROJECT = "SMOOTH_RESEARCH_PROJECT"
+ENV_CHECKOUT = "SMOOTH_RESEARCH_CHECKOUT"
 
 # Project layout: experiment code in src/, human-facing documents in docs/, reports in reports/, and machine
 # records (database, sealed objects, packages, call logs, run artifacts) in research/.
 # Model entries are "<entry>:<model>[@effort]"; entry is claude, codex, pi or manual (a person submits the
 # package). Researchers and reviewers use the first available entry of their list; every available advisor is
-# asked, each on its own. Every key here is read by the CLI; docs/configuration.md explains each one.
+# asked, each on its own. agents.args are extra launch arguments for the sessions `rl agent open` starts in
+# herdr tabs (no sandbox or approval flags are added otherwise: each CLI's own settings apply). Every key here
+# is read by the CLI; docs/configuration.md explains each one.
 DEFAULT_CONFIG: dict = {
     "version": 1,
     "plan": "docs/plan/original.md",
@@ -34,6 +37,7 @@ DEFAULT_CONFIG: dict = {
         "advisor": ["codex:gpt-6-astra@max", "claude:claude-fable-5-1@high"],
     },
     "advice": {"max_rounds": 3},
+    "agents": {"args": {"claude": ["--permission-mode", "auto"], "codex": [], "pi": []}},
     "context": {"work_target_tokens": 4000, "advice_target_tokens": 10000},
 }
 MODEL_ROLES = ("researcher", "reviewer", "advisor")
@@ -58,12 +62,22 @@ def _merge(base: dict, override: dict) -> dict:
 
 @dataclass
 class Project:
+    """root holds the records and the configuration. checkout is the git checkout whose code the caller works
+    on: the root itself, or a researcher's worktree of the same repository."""
     root: Path
     config: dict
+    checkout: Path | None = None
+
+    def __post_init__(self) -> None:
+        self.checkout = self.checkout or self.root
 
     @property
     def warnings(self) -> list[str]:
         return config_warnings(self.config)
+
+    @property
+    def in_worktree(self) -> bool:
+        return self.checkout != self.root
 
     @property
     def research_root(self) -> Path:
@@ -90,6 +104,13 @@ class Project:
         return self.root / self.config["code_root"]
 
     @property
+    def worktrees_dir(self) -> Path:
+        """Researcher worktrees: <project>/../<project>-worktrees/ (beside the repository when the project is a
+        directory inside it)."""
+        top = repo_top(self.root) or self.root
+        return top.parent / f"{top.name}-worktrees"
+
+    @property
     def docs_root(self) -> Path:
         return self.root / self.config["docs_root"]
 
@@ -105,18 +126,26 @@ class Project:
         return path
 
     def rel(self, path: Path | str) -> str:
-        """Project-relative path when inside the project, else absolute."""
+        """Relative to the project, or to the caller's checkout when the path is there, else absolute."""
         p = Path(path)
         p = p if p.is_absolute() else (Path.cwd() / p)
         p = Path(os.path.normpath(p))
-        try:
-            return str(p.relative_to(self.root))
-        except ValueError:
-            return str(p)
+        for base in (self.root, self.checkout):
+            try:
+                return str(p.relative_to(base))
+            except ValueError:
+                continue
+        return str(p)
 
     def abs(self, path: str) -> Path:
+        """A record path (research/, reports/, the plan and contracts): relative to the project."""
         p = Path(path)
         return p if p.is_absolute() else self.root / p
+
+    def src(self, path: str) -> Path:
+        """A path the caller names (code under review, a file to seal): relative to the caller's checkout."""
+        p = Path(path)
+        return p if p.is_absolute() else self.checkout / p
 
 
 def config_warnings(config: dict) -> list[str]:
@@ -189,18 +218,75 @@ def load_config(root: Path) -> dict:
     return _merge(DEFAULT_CONFIG, data)
 
 
+def repo_top(path: Path) -> Path | None:
+    """The top of the git checkout that contains path, read from the files (no git process)."""
+    for top in (path, *path.parents):
+        if (top / ".git").exists():
+            return top
+    return None
+
+
+def linked_worktree(path: Path) -> tuple[Path, Path] | None:
+    """(top of this checkout, top of the main checkout) when path is inside a linked git worktree."""
+    top = repo_top(path)
+    dotgit = top / ".git" if top else None
+    if not dotgit or not dotgit.is_file():
+        return None
+    try:
+        text = dotgit.read_text(encoding="utf-8").strip()
+        gitdir = Path(text.removeprefix("gitdir:").strip())
+        gitdir = gitdir if gitdir.is_absolute() else (top / gitdir).resolve()
+        common = (gitdir / (gitdir / "commondir").read_text(encoding="utf-8").strip()).resolve()
+    except OSError:
+        return None  # a submodule, or not a worktree git made
+    return (top, common.parent) if common.name == ".git" else None
+
+
+def _in_main(candidate: Path) -> tuple[Path, Path] | None:
+    """(project in the main checkout, candidate) when candidate lies in a linked worktree of that project."""
+    linked = linked_worktree(candidate)
+    if not linked:
+        return None
+    top, main_top = linked
+    root = main_top / candidate.relative_to(top)
+    return (root, candidate) if (root / CONFIG_NAME).is_file() else None
+
+
+def _checkout(root: Path, here: Path) -> Path:
+    if os.environ.get(ENV_CHECKOUT):
+        return Path(os.environ[ENV_CHECKOUT]).expanduser().resolve()
+    linked = linked_worktree(here)
+    if linked and repo_top(root) == linked[1]:
+        return linked[0] / root.relative_to(linked[1])
+    return root
+
+
 def find_project(explicit: str | None = None, start: Path | None = None) -> Project:
-    """--project, then $SMOOTH_RESEARCH_PROJECT, then the nearest directory above cwd with smooth-research.yaml."""
+    """--project, then $SMOOTH_RESEARCH_PROJECT, then the nearest directory above cwd with smooth-research.yaml.
+    In a linked git worktree of the project (a researcher's), the project is the one in the main checkout and
+    the worktree is the caller's checkout."""
+    here = (start or Path.cwd()).resolve()
     chosen = explicit or os.environ.get(ENV_PROJECT)
     if chosen:
         root = Path(chosen).expanduser().resolve()
         if not (root / CONFIG_NAME).is_file():
             raise RLError("NO_PROJECT", f"{root} has no {CONFIG_NAME}; run `rl init` there first")
-        return Project(root, load_config(root))
-    here = (start or Path.cwd()).resolve()
+        return Project(root, load_config(root), _checkout(root, here))
     for candidate in (here, *here.parents):
         if (candidate / CONFIG_NAME).is_file():
+            main = _in_main(candidate)
+            if main:
+                return Project(main[0], load_config(main[0]), main[1])
             return Project(candidate, load_config(candidate))
+    linked = linked_worktree(here)
+    if linked:  # the configuration is not committed, so the worktree has no copy of it
+        top, main_top = linked
+        for candidate in (here, *here.parents):
+            root = main_top / candidate.relative_to(top)
+            if (root / CONFIG_NAME).is_file():
+                return Project(root, load_config(root), candidate)
+            if candidate == top:
+                break
     raise RLError("NO_PROJECT", f"no {CONFIG_NAME} in {here} or its parents; run `rl init --plan <plan.md>` "
                                 "in the research project directory")
 
@@ -210,6 +296,7 @@ def write_default_config(root: Path) -> Path:
     if not path.exists():
         text = ("# Smooth Research configuration. Resource limits and scope live in the constraints document.\n"
                 "# Model entries: <entry>:<model>[@effort]; entry is claude, codex, pi or manual. Researchers and\n"
-                "# reviewers use the first available entry of their list; every available advisor is asked.\n")
+                "# reviewers use the first available entry of their list; every available advisor is asked.\n"
+                "# agents.args: extra launch arguments for sessions opened in herdr tabs (rl agent open).\n")
         path.write_text(text + yaml.safe_dump(DEFAULT_CONFIG, sort_keys=False, allow_unicode=True), encoding="utf-8")
     return path

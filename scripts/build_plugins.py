@@ -105,7 +105,8 @@ def assemble(target: str, destination: Path, repo: Path, version: str) -> dict:
         digests[dest] = blake(data)
     for required in ("bin/rl", "skills/smooth-research/SKILL.md", "skills/research-review/SKILL.md",
                      "skills/research-advise/SKILL.md", "skills/smooth-research/references/host.md",
-                     "skills/smooth-research/references/workflow.md", HOSTS[target], "hooks/hooks.json",
+                     "skills/smooth-research/references/workflow.md", "skills/smooth-research/references/team.md",
+                     HOSTS[target], "hooks/hooks.json",
                      "pyproject.toml", "uv.lock", "src/smooth_research/cli.py"):
         if required not in digests:
             raise ValueError(f"{target} build is missing {required}")

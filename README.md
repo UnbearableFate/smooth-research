@@ -12,7 +12,7 @@ containers and HPC skills (for example miyabi-toolbox) stay independent.
 
 | Path | Role |
 | --- | --- |
-| `src/smooth_research/` | Shared Python core and the `rl` CLI: LatticeDB store, sealed documents, graph, tasks and sessions, run records, context packs, review/advice tickets, literature, snapshots, views |
+| `src/smooth_research/` | Shared Python core and the `rl` CLI: LatticeDB store, sealed documents, graph, tasks and sessions, run records, context packs, review/advice tickets, agent sessions in herdr, literature, snapshots, views |
 | `plugin/` | Shared, host-independent plugin content: `bin/rl` (environment bootstrap + launcher) and three skills (`smooth-research`, `research-review`, `research-advise`) |
 | `hosts/claude/` | Claude Code adapter: `.claude-plugin/plugin.json`, SessionStart hook, `researcher` subagent, host notes, placeholder values |
 | `hosts/codex/` | Codex adapter: `.codex-plugin/plugin.json`, SessionStart hook, host notes, placeholder values |
@@ -24,6 +24,15 @@ Model calls for reviews, advice and delegated sessions go through `src/smooth_re
 model, the observed model (or "unverified"), the exact session id, usage and cost are recorded with each
 ticket. Which models are called is set in the project's `smooth-research.yaml`: researchers and reviewers
 use the first available entry of their list, and every listed advisor answers each advice round on its own.
+
+When the coordinator runs inside herdr, a terminal multiplexer for coding agents (`HERDR_ENV=1`),
+researchers, reviewers and advisors are interactive Claude Code, Codex or pi sessions in their own herdr
+tabs (`rl agent open`, see `src/smooth_research/agents.py`). Each researcher session works in its own git
+worktree at `<project>/../<project>-worktrees/<name>`, on one branch per task, and the coordinator merges
+accepted branches with a merge commit. Sessions exchange recorded messages; a live recipient also gets a
+one-line notice. A review round holds two reviews; findings of medium or higher severity left after the
+second go to the coordinator, who approves them with a reason or returns the work. Without herdr, the same
+roles run headless (`rl delegate`, `rl review run`, `rl advise run`).
 
 ## Build and install
 

@@ -41,7 +41,8 @@ def _git_commit(path: Path) -> str | None:
 
 
 def prepare(project: Project, path: str | Path, doc_type: str) -> Prepared:
-    source = project.abs(str(path))
+    """Seal a file: a relative path is the caller's (resolved in its checkout); records pass absolute paths."""
+    source = project.src(str(path))
     if not source.is_file():
         raise RLError("NOT_FOUND", f"document not found: {path}")
     data = source.read_bytes()

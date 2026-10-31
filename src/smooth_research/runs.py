@@ -113,8 +113,9 @@ def _review_hint(check: dict) -> str:
     return ""
 
 
-def code_review_note(check: dict | None) -> str:
-    """The code review check recorded when an attempt was registered, in one line."""
+def code_review_note(check: dict | None, tx: Tx | None = None) -> str:
+    """The code review check recorded when an attempt was registered, in one line. With tx it also names the
+    reviews that did not pass then and that the coordinator has approved since (the recorded check stays)."""
     if not check:
         return "not checked"  # registered before the check existed
     status = check["status"]
@@ -133,7 +134,15 @@ def code_review_note(check: dict | None) -> str:
         text = "not reviewed"
     if status in ("covered", "stale") and check.get("open"):
         text += f" ({', '.join(check['open'])})"
+    if tx is not None and (later := _approved_since(tx, check)):
+        text += f"; approved by the coordinator since: {', '.join(later)}"
     return text
+
+
+def _approved_since(tx: Tx, check: dict) -> list[str]:
+    marks = [*check.get("open", []), *check.get("reviews", [])]
+    ids = [m.split()[0] for m in marks if "approved" not in m]
+    return [i for i in ids if (t := tx.get(i, "Ticket")) and t.get("approved")]
 
 
 def evidence_attempts(tx: Tx, ev_id: str) -> list[dict]:
@@ -151,11 +160,11 @@ def evidence_attempts(tx: Tx, ev_id: str) -> list[dict]:
     return [tx.require(a) for a in ids]
 
 
-def code_review_summary(attempts: list[dict]) -> str:
+def code_review_summary(tx: Tx, attempts: list[dict]) -> str:
     """Attempts grouped by the code review check recorded at their registration."""
     groups: dict[str, list[str]] = {}
     for att in attempts:
-        groups.setdefault(code_review_note(att.get("code_review")), []).append(att["id"])
+        groups.setdefault(code_review_note(att.get("code_review"), tx), []).append(att["id"])
     return "; ".join(f"{', '.join(ids)} {note}" for note, ids in groups.items())
 
 
@@ -489,7 +498,7 @@ def describe_attempt(tx: Tx, att: dict) -> str:
         " (stale? refresh with your execution tool)" if age > STALE_AFTER_H and att["execution_state"] != "ended" else "")
     trusted = (f"; last trusted {att['last_trusted_state']} at {att['last_trusted_at']}"
                if att.get("last_trusted_state") and att["execution_state"] == "unknown" else "")
-    review = f"; code review: {code_review_note(att['code_review'])}" if att.get("code_review") else ""
+    review = f"; code review: {code_review_note(att['code_review'], tx)}" if att.get("code_review") else ""
     return f"{brief(att)} {ref_text}; {fresh}{trusted}{review}"
 
 

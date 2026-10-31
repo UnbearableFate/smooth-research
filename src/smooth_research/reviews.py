@@ -6,9 +6,14 @@ Either is reused only while its key is unchanged. A code review also keeps its s
 tell whether the reviews still cover the code it executes. Reviewers are tried in the configured order whatever
 model wrote the code; the relation to the authors' model family is recorded, not enforced. When no reviewer is
 available the ticket stays pending or unavailable — never a fake pass.
+A review round holds at most two reviews: the first and one re-check after fixes. A review passes when no
+finding of medium or higher severity remains; when such findings remain after the second, the round goes to
+the coordinator, who approves it or returns the work (a further review then starts a new round, with the
+coordinator's reason). Answers come from a headless call (rl review run), a live reviewer session in a herdr
+tab (rl review answer), or an import.
 Advice comes in rounds: every configured advisor gets its own ticket on the same package, and a project has a
 limited number of rounds (advice.max_rounds) unless the user approves more. A round is deduplicated by
-question, evidence version, constraints and advisor configuration.
+question, evidence version, constraints and advisor configuration. A live advisor may revise its answer.
 """
 
 from __future__ import annotations
@@ -21,10 +26,11 @@ from pathlib import Path
 
 import yaml
 
-from . import adapters, documents
+from . import adapters, documents, herdr
 from .context import advice_pack, _contract
+from .herdr import caller_role
 from .project import advice_limit, model_entries
-from .research import brief
+from .research import brief, review_mark, review_passes
 from .runs import code_review_summary, evidence_attempts
 from .store import Store, Tx
 from .util import RLError, digest_bytes, digest_file, digest_json, now_utc, short
@@ -32,17 +38,26 @@ from .view import _arm_table
 
 INLINE_FILE_CHARS = 60_000
 INLINE_TOTAL_CHARS = 240_000
+REVIEWS_PER_ROUND = 2
+SEVERITIES = ("none", "low", "medium", "high")
+IMPACT_SEVERITY = {"result_error": "high", "invalid_experiment": "high", "overclaim": "high", "data_mismatch": "high",
+                   "resource_waste": "medium", "wrong_level": "medium", "out_of_scope": "medium",
+                   "unruled_alternative": "medium", "nonblocking": "low"}
 
 REVIEW_PROTOCOL = """## What to return
 
 Review the code against the method definition. For each problem give: location (file:line), the evidence
 that reproduces or demonstrates it, its impact (result_error | invalid_experiment | resource_waste |
-nonblocking), the minimal fix, and how to verify the fix. State what you checked and what you did not.
-Do not restate the package. End with exactly one ```json block:
+nonblocking), its severity, the minimal fix (a suggested patch is welcome; you do not edit files yourself),
+and how to verify the fix. Severity: high = the result would be wrong or the experiment invalid; medium =
+likely to distort the result or waste much of the budget, to be fixed or explicitly accepted; low = worth
+fixing, does not change the conclusion. State what you checked and what you did not. Do not restate the
+package. End with exactly one ```json block:
 
 ```json
 {"verdict": "pass | issues | blocking",
- "findings": [{"location": "", "evidence": "", "impact": "", "fix": "", "verify": ""}],
+ "findings": [{"location": "", "evidence": "", "impact": "", "severity": "high | medium | low", "fix": "",
+               "verify": ""}],
  "checked": [""], "unchecked": [""]}
 ```
 """
@@ -56,29 +71,44 @@ confirmation rest on a comparison fixed before the results (contract revisions);
 failed controls counted as refutations, or one cheap failure generalized; which competing explanations are
 not ruled out; do the summaries match the recorded numbers. For each problem give: location (record id), the
 evidence, its impact (overclaim | wrong_level | out_of_scope | unruled_alternative | data_mismatch |
-nonblocking), the minimal fix (a weaker wording, a missing control, a re-run) and how to verify it. State what
-you checked and what you did not. Do not restate the package. End with exactly one ```json block:
+nonblocking), its severity, the minimal fix (a weaker wording, a missing control, a re-run) and how to verify
+it. Severity: high = the conclusion is not supported as stated; medium = it needs a weaker wording, a narrower
+scope or a missing control before it is recorded; low = a wording or presentation point. State what you
+checked and what you did not. Do not restate the package. End with exactly one ```json block:
 
 ```json
 {"verdict": "pass | issues | blocking",
- "findings": [{"location": "", "evidence": "", "impact": "", "fix": "", "verify": ""}],
+ "findings": [{"location": "", "evidence": "", "impact": "", "severity": "high | medium | low", "fix": "",
+               "verify": ""}],
  "checked": [""], "unchecked": [""]}
 ```
 """
 
 ADVICE_PROTOCOL = """## What to return
 
-You are the advisor for a research bottleneck. Read the evidence critically; the coordinator's
-interpretation may be wrong. Return at most three proposals that differ in mechanism. For each one give:
-(1) which unexplained observation it explains, (2) the key difference from routes already tried,
-(3) a distinguishing prediction and the controls it needs, (4) the cheapest test and its expected cost,
-(5) the result that would make us drop it. Pausing is an acceptable recommendation when no route is worth
-its cost. End with exactly one ```json block:
+You are one of the advisors of this research project. Other advisors answer the same package on their own,
+and the coordinator weighs the answers together. Read the evidence critically: the coordinator's
+interpretation may be wrong.
+
+1. Assess the state: what the evidence supports, at which level and in which scope, and what it does not.
+2. Explore the related research broadly (search the web and the literature if your tools allow). Name each
+   source with a locator (arXiv id, DOI or URL and section), and say whether you checked the claim yourself.
+3. Name the bottleneck: what keeps the project from its next decision.
+4. Propose at most three improvements that differ in mechanism. For each one give: (1) which unexplained
+   observation it explains, (2) the key difference from routes already tried, (3) a distinguishing prediction
+   and the controls it needs, (4) the cheapest test and its expected cost, (5) the result that would make us
+   drop it.
+5. Recommend continuing (with your proposals), pausing, or stopping this line of work, and say why. Pausing or
+   stopping is a valid recommendation when no route is worth its cost.
+
+End with exactly one ```json block:
 
 ```json
-{"proposals": [{"title": "", "explains": "", "difference": "", "prediction": "", "controls": "",
+{"assessment": "", "bottleneck": "",
+ "related_work": [{"title": "", "locator": "", "relevance": "", "checked": false}],
+ "proposals": [{"title": "", "explains": "", "difference": "", "prediction": "", "controls": "",
                 "cheapest_test": "", "expected_cost": "", "stop_if": ""}],
- "pause_recommended": false}
+ "recommendation": "continue | pause | stop", "pause_recommended": false}
 ```
 """
 
@@ -91,11 +121,68 @@ def _entries(store: Store, kind: str) -> list[adapters.Entry]:
     return [adapters.Entry.parse(r) for r in model_entries(store.project.config, role)]
 
 
-def _relation(author_families: set, observed: str | None, requested: str) -> str:
+def _relation(author_models: list[str], observed: str | None, requested: str) -> str:
+    """How the answering model relates to the models that wrote the code or drew the conclusion; the same model
+    name is the same family even when the family table does not know it."""
+    families = {adapters.family(m) for m in author_models} - {None}
+    names = {m.lower().rsplit("/", 1)[-1] for m in author_models if m}
+    if (observed or requested).lower().rsplit("/", 1)[-1] in names:
+        return "same_family_independent_session" if observed else "same_family_unverified"
     fam = adapters.family(observed) if observed else None
     if fam is None:
-        return "cross_model_unverified" if adapters.family(requested) not in author_families else "same_family_unverified"
-    return "cross_model" if fam not in author_families else "same_family_independent_session"
+        return "cross_model_unverified" if adapters.family(requested) not in families else "same_family_unverified"
+    return "cross_model" if fam not in families else "same_family_independent_session"
+
+
+def open_severity(data: dict) -> str:
+    """The highest severity among an answer's findings. A finding without one takes it from its impact, else
+    counts as medium; a blocking verdict counts as high."""
+    worst = "high" if data.get("verdict") == "blocking" else "none"
+    for finding in data.get("findings") or []:
+        finding = finding if isinstance(finding, dict) else {}
+        sev = str(finding.get("severity") or "").strip().lower()
+        if sev not in SEVERITIES[1:]:
+            sev = IMPACT_SEVERITY.get(str(finding.get("impact") or "").strip().lower(), "medium")
+        worst = max(worst, sev, key=SEVERITIES.index)
+    return worst
+
+
+def _round(tx: Tx, recheck_of: str | None, new_round: str | None) -> dict:
+    """Round fields of a new review. A re-check continues the round of the review it re-checks; a round holds
+    at most two reviews, and a further one starts a new round with a stated reason."""
+    if not recheck_of or (new_round or "").strip():
+        return {"round_index": 1, "round_reason": (new_round or "").strip() or None}
+    prev = tx.require(recheck_of, "Ticket")
+    if prev["kind"] != "review":
+        raise RLError("INVALID", f"{recheck_of} is not a review")
+    root, index = prev.get("round_of") or prev["id"], (prev.get("round_index") or 1) + 1
+    if index > REVIEWS_PER_ROUND:
+        raise RLError("LIMIT", f"the round that began with {root} already had its {REVIEWS_PER_ROUND} reviews (the "
+                               f"last: {recheck_of}). The coordinator approves the remaining findings (`rl review "
+                               f"approve {recheck_of} --rationale ..`) or returns the work; a further review starts a "
+                               f"new round with the coordinator's reason: `--recheck-of {recheck_of} --new-round "
+                               "\"<reason>\"`")
+    return {"round_of": root, "round_index": index}
+
+
+def _route(store: Store, rid: str, recheck_of: str | None, requester: str | None) -> str:
+    """Who takes a new review: the reviewer session that answered the review it re-checks, while that session
+    is open; otherwise, when a live session asked for it, the coordinator is asked to assign a reviewer."""
+    with store.read() as tx:
+        prev = tx.require(recheck_of, "Ticket") if recheck_of else {}
+        session = tx.get(prev.get("answered_by") or prev.get("assigned_session") or "", "Session") if prev else None
+    if session and session["status"] == "active" and session.get("herdr_agent"):
+        from .agents import assign
+        return "; " + assign(store, session["role_id"], ticket=rid)["summary"]
+    if not requester or requester == "coordinator":
+        return ""
+    from .tasks import _message
+    with store.write() as tx:
+        msg = _message(tx, "NOTE", requester, "coordinator", None,
+                       f"assign a reviewer: rl agent open --role reviewer --ticket {rid}, or rl agent assign <reviewer> "
+                       f"--ticket {rid}", [], f"{rid} needs a reviewer ({brief(tx.require(rid))})")
+    target = herdr.notify(store, msg)
+    return f"; the coordinator is asked to assign a reviewer ({msg['id']}" + (f", notice sent to {target})" if target else ")")
 
 
 def _worker_alive(ticket: dict) -> bool:
@@ -160,12 +247,13 @@ def run_ticket(store: Store, ticket_id: str, timeout: int = 1800, only: str | No
     candidates = [adapters.Entry.parse(c) for c in (t.get("candidates") or [])]
     if only:
         candidates = [adapters.Entry.parse(only)]
-    authors = set(filter(None, (adapters.family(m) for m in (t.get("author_models") or []))))
+    authors = list(t.get("author_models") or [])
     calls = [c for c in (t.get("calls") or []) if not c.get("background")]
     # The whole package goes in the prompt: the answer must not depend on the callee's file tools or sandbox.
     prompt = (f"You are the independent {'reviewer' if t['kind'] == 'review' else 'advisor'} for a research "
               f"project at {store.project.root}. Everything you need is in the package below; you may read more "
-              "project files if your tools work, but do not modify anything. If something you need is missing, "
+              "project files if your tools work" + (" and search the web" if t["kind"] == "advice" else "")
+              + ", but do not modify anything. If something you need is missing, "
               "say so (for a review: under 'unchecked'). Answer in the requested format.\n\n"
               + request_path.read_text(encoding="utf-8"))
     manual, answered = None, 0
@@ -174,7 +262,8 @@ def run_ticket(store: Store, ticket_id: str, timeout: int = 1800, only: str | No
             manual = entry
             break
         log = store.project.dir("calls") / f"{ticket_id}.{entry.entry}.{len(calls) + 1}.log"
-        res = adapters.call(entry, prompt, store.project.root, read_only=True, timeout=timeout, log=log)
+        res = adapters.call(entry, prompt, store.project.root, read_only=True, timeout=timeout, log=log,
+                            web=t["kind"] == "advice")
         if res.ok and not _parsed(t["kind"], res.text):
             answered += 1
             res.ok, res.error = False, ("answer has no parseable result block: "
@@ -207,11 +296,16 @@ def _parsed(kind: str, text: str) -> bool:
 
 
 def _store_answer(store: Store, ticket_id: str, text: str, entry: str, observed: str | None, provider: str | None,
-                  session_id: str | None, usage: dict | None, cost: float | None, calls: list, authors: set) -> dict:
+                  session_id: str | None, usage: dict | None, cost: float | None, calls: list, authors: list,
+                  answered_by: dict | None = None) -> dict:
+    """Record an answer. A review answer records its open severity; the second review of a round that still has
+    a medium or higher finding goes to the coordinator. A revised advice answer keeps the earlier ones."""
     with store.read() as tx:
         t = tx.require(ticket_id, "Ticket")
     folder = "reviews" if t["kind"] == "review" else "advice"
-    path = store.project.dir(folder, "reports") / f"{ticket_id}.md"
+    earlier = list(t.get("earlier_answers") or []) + ([t["answer_ref"]] if t.get("answer_ref") else [])
+    path = store.project.dir(folder, "reports") / (f"{ticket_id}.md" if not earlier else
+                                                   f"{ticket_id}.revision-{len(earlier) + 1}.md")
     header = (f"<!-- {ticket_id} answer · entry {entry} · observed model {observed or 'unverified'} · "
               f"session {session_id or 'unknown'} · received {now_utc()} -->\n\n")
     path.write_text(header + text, encoding="utf-8")
@@ -221,20 +315,45 @@ def _store_answer(store: Store, ticket_id: str, text: str, entry: str, observed:
     if t["kind"] == "review" and verdict not in ("pass", "issues", "blocking"):
         verdict = "unparsed"
     relation = _relation(authors, observed, entry.split(":", 1)[-1].split("@")[0]) if t["kind"] == "review" else None
-    summary = (f"{len(data.get('findings') or [])} finding(s)" if t["kind"] == "review"
-               else f"{len(data.get('proposals') or [])} proposal(s)" + (", pause recommended" if data.get("pause_recommended") else ""))
+    severity = open_severity(data) if t["kind"] == "review" else None
+    escalate = (t["kind"] == "review" and (t.get("round_index") or 0) >= REVIEWS_PER_ROUND
+                and severity in ("medium", "high"))
+    if t["kind"] == "review":
+        summary = f"{len(data.get('findings') or [])} finding(s)" + (f", {severity} open" if severity not in ("none", None) else "")
+    else:
+        rec = data.get("recommendation") or ("pause" if data.get("pause_recommended") else None)
+        summary = f"{len(data.get('proposals') or [])} proposal(s)" + (f", recommends {rec}" if rec else "")
+        summary += ", pause recommended" if data.get("pause_recommended") and rec != "pause" else ""
+    msg = None
     with store.write() as tx:
         ref = documents.register(tx, prep)
         tx.update(ticket_id, {"status": "answered", "answer_ref": ref, "verdict": verdict, "relation": relation,
                               "requested_entry": entry, "observed_model": observed, "provider": provider,
                               "host_session_id": session_id, "usage": usage,
                               "cost_usd": float(cost) if cost is not None else None, "calls": calls,
-                              "summary": summary, "answered_at": now_utc(), "error": None})
-        tx.event(f"{t['kind']}.answered", ticket_id, f"{verdict or ''} {summary} via {entry}")
+                              "summary": summary, "answered_at": now_utc(), "error": None,
+                              "open_severity": severity, "escalated": escalate or None,
+                              "answered_by": answered_by["id"] if answered_by else None,
+                              "earlier_answers": earlier or None})
+        tx.event(f"{t['kind']}.answered", ticket_id, f"{verdict or ''} {summary} via {entry}"
+                 + (f" (revision {len(earlier) + 1})" if earlier else ""))
+        if escalate:
+            from .tasks import _message
+            root = t.get("round_of") or ticket_id
+            msg = _message(tx, "NOTE", answered_by["role_id"] if answered_by else "reviewer", "coordinator", None,
+                           f"approve it (rl review approve {ticket_id} --rationale ..) or return the work to "
+                           f"{t.get('requested_by') or 'its author'}", [],
+                           f"{ticket_id}: the review round {root} used its {REVIEWS_PER_ROUND} reviews and {severity} "
+                           f"finding(s) remain; your decision")
     rel_note = f", {relation}" if relation else ""
-    return {"id": ticket_id, "answer_ref": ref, "verdict": verdict, "relation": relation,
+    note = ""
+    if escalate:
+        target = herdr.notify(store, msg)
+        note = (f"\nthe round used its {REVIEWS_PER_ROUND} reviews with {severity} findings open: the coordinator "
+                f"decides ({msg['id']}" + (f", notice sent to {target})" if target else ")"))
+    return {"id": ticket_id, "answer_ref": ref, "verdict": verdict, "relation": relation, "escalated": escalate,
             "summary": f"{ticket_id} answered by {observed or entry + ' (model unverified)'}{rel_note}: "
-                       f"{verdict + ', ' if verdict else ''}{summary}; read {store.project.rel(path)}"}
+                       f"{verdict + ', ' if verdict else ''}{summary}; read {store.project.rel(path)}{note}"}
 
 
 def import_answer(store: Store, ticket_id: str, answer: str, model_observed: str | None, source: str,
@@ -242,11 +361,62 @@ def import_answer(store: Store, ticket_id: str, answer: str, model_observed: str
     """Import an answer obtained outside the adapters (a person in a product UI, another tool)."""
     with store.read() as tx:
         t = tx.require(ticket_id, "Ticket")
-    text = Path(answer).read_text(encoding="utf-8")
-    authors = set(filter(None, (adapters.family(m) for m in (t.get("author_models") or []))))
+    text = store.project.src(answer).read_text(encoding="utf-8")
+    authors = list(t.get("author_models") or [])
     calls = (t.get("calls") or []) + [{"entry": f"manual:{source}", "imported_at": now_utc()}]
     return _store_answer(store, ticket_id, text, f"manual:{source}", model_observed, provider, session_id,
                          None, None, calls, authors)
+
+
+def answer_live(store: Store, ticket_id: str, answer: str, session_name: str | None = None) -> dict:
+    """The answer of a reviewer or advisor session that `rl agent open` started; an advisor may revise its own."""
+    name = session_name or caller_role()
+    with store.read() as tx:
+        t = tx.require(ticket_id, "Ticket")
+        found = [s for s in tx.all("Session", status="active") if s["role_id"] == name and s.get("role_kind")] if name else []
+    if not found:
+        raise RLError("INVALID", "answer from the reviewer or advisor session that `rl agent open` started (name it "
+                                 "with --session); an answer obtained elsewhere is imported: rl review|advise import")
+    s = found[-1]
+    want = "reviewer" if t["kind"] == "review" else "advisor"
+    if s["role_kind"] != want:
+        raise RLError("INVALID", f"{ticket_id} is a {t['kind']} ticket; {s['role_id']} is a {s['role_kind']}")
+    if t["status"] == "answered" and t["kind"] == "review":
+        raise RLError("CONFLICT", f"{ticket_id} is already answered; a further review is a re-check: "
+                                  f"rl review request .. --recheck-of {ticket_id}")
+    if t["status"] == "answered" and t.get("answered_by") != s["id"]:
+        raise RLError("CONFLICT", f"{ticket_id} was answered by another session; only that advisor revises it")
+    text = store.project.src(answer).read_text(encoding="utf-8")
+    if not _parsed(t["kind"], text):
+        raise RLError("INVALID", "the answer has no parseable result block: end it with the JSON block of the "
+                                 "package's answer format")
+    observed, provider = adapters.session_model(s["host"], s.get("host_session_id"))
+    entry = s.get("entry") or f"{s['host']}:{s.get('model_requested')}"
+    authors = list(t.get("author_models") or [])
+    calls = (t.get("calls") or []) + [{"entry": entry, "session": s["id"], "answered_at": now_utc()}]
+    return _store_answer(store, ticket_id, text, entry, observed or s.get("model_observed"), provider,
+                         s.get("host_session_id"), None, None, calls, authors, answered_by=s)
+
+
+def approve(store: Store, ticket_id: str, rationale: str) -> dict:
+    """The coordinator accepts a review's remaining findings, with its reason; the review then passes."""
+    if not (rationale or "").strip():
+        raise RLError("INVALID", "say why the remaining findings are accepted: --rationale")
+    if caller_role():
+        raise RLError("INVALID", f"approving a review is the coordinator's decision, not {caller_role()}'s")
+    with store.write() as tx:
+        t = tx.require(ticket_id, "Ticket")
+        if t["kind"] != "review" or t["status"] != "answered":
+            raise RLError("INVALID", f"{ticket_id} is not an answered review")
+        tx.update(ticket_id, {"approved": rationale.strip(), "approved_at": now_utc()})
+        tx.event("review.approved", ticket_id, rationale.strip())
+        from .tasks import _message
+        msg = _message(tx, "NOTE", "coordinator", t["requested_by"], None, None, [],
+                       f"{ticket_id} approved by the coordinator: {rationale.strip()}") \
+            if t.get("requested_by") not in (None, "coordinator") else None
+    target = herdr.notify(store, msg) if msg else None
+    return {"id": ticket_id, "summary": f"{ticket_id} approved: {rationale.strip()} ({review_mark({**t, 'approved': 1})})"
+                                        + (f"; notice sent to {target}" if target else "")}
 
 
 def show(store: Store, ticket_id: str | None, kind: str) -> dict:
@@ -257,7 +427,9 @@ def show(store: Store, ticket_id: str | None, kind: str) -> dict:
         alive = " (worker not running: run again)" if t["status"] == "running" and not _worker_alive(t) else ""
         lines.append(f"{brief(t)}{alive}")
         for key in ("target_id", "relation", "requested_entry", "observed_model", "host_session_id", "summary",
-                    "request_ref", "answer_ref", "reused_from", "error", "cost_usd"):
+                    "round_of", "round_index", "round_reason", "requested_by", "assigned_session", "answered_by",
+                    "escalated", "approved", "request_ref", "answer_ref", "earlier_answers", "reused_from", "error",
+                    "cost_usd"):
             if t.get(key) not in (None, ""):
                 lines.append(f"  {key}: {t[key]}")
     return {"tickets": tickets, "summary": "\n".join(lines) or f"no {kind} tickets"}
@@ -285,31 +457,41 @@ def _config_digest(path: str, data: bytes, ignore_keys: list[str]) -> str:
 def fingerprint(store: Store, files: list[str], configs: list[str], deps: list[str], ignore_keys: list[str],
                 scope: str) -> tuple[str, dict]:
     def digest(p: str) -> str:
-        path = store.project.abs(p)
+        path = store.project.src(p)
         if not path.is_file():
             raise RLError("NOT_FOUND", f"review scope file not found: {p}")
         return digest_file(path)
 
-    detail = {"files": {store.project.rel(store.project.abs(f)): digest(f) for f in sorted(files)},
-              "deps": {store.project.rel(store.project.abs(d)): digest(d) for d in sorted(deps)},
+    def rel(p: str) -> str:  # recorded relative to the checkout: the same path names the file after a merge
+        return _checkout_rel(store, store.project.src(p))
+
+    detail = {"files": {rel(f): digest(f) for f in sorted(files)},
+              "deps": {rel(d): digest(d) for d in sorted(deps)},
               "configs": {}, "ignored_keys": sorted(ignore_keys), "scope": scope.strip()}
     for c in sorted(configs):
-        path = store.project.abs(c)
+        path = store.project.src(c)
         digest(c)
-        detail["configs"][store.project.rel(path)] = _config_digest(c, path.read_bytes(), ignore_keys)
+        detail["configs"][rel(c)] = _config_digest(c, path.read_bytes(), ignore_keys)
     return digest_json(detail), detail
+
+
+def _checkout_rel(store: Store, path: Path) -> str:
+    try:
+        return str(path.resolve().relative_to(store.project.checkout))
+    except ValueError:
+        return store.project.rel(path)
 
 
 def _reuse(tx: Tx, key: str, target_text: str | None, targets: list[str], author_models: list[str],
            subject: str, extra: dict | None = None) -> dict | None:
     """An answered review (pass or issues) with the same key answers this request too."""
     for old in tx.all("Ticket", dedupe_key=key):
-        if old["kind"] == "review" and old["status"] == "answered" and old.get("verdict") in ("pass", "issues"):
+        if old["kind"] == "review" and review_passes(old):
             rid = tx.next_id("Ticket", "RV")
             tx.create("Ticket", {**{k: old.get(k) for k in ("question", "request_ref", "answer_ref", "requested_entry",
                                                             "requested_model", "observed_model", "provider",
                                                             "host_session_id", "relation", "verdict", "summary",
-                                                            "answered_at")},
+                                                            "answered_at", "open_severity", "approved")},
                                  "id": rid, "kind": "review", "subject": subject, "status": "answered",
                                  "target_id": target_text, "dedupe_key": key, "author_models": list(author_models),
                                  "reused_from": old.get("reused_from") or old["id"], **(extra or {})})
@@ -317,13 +499,13 @@ def _reuse(tx: Tx, key: str, target_text: str | None, targets: list[str], author
                 tx.link("targets", rid, t)
             tx.event("review.reused", rid, f"{subject} key {short(key)} unchanged since {old['id']}")
             return {"id": rid, "reused_from": old["id"], "verdict": old.get("verdict"),
-                    "summary": f"{rid} reuses {old['id']} ({old.get('verdict')}): {subject} unchanged"}
+                    "summary": f"{rid} reuses {old['id']} ({review_mark(old)}): {subject} unchanged"}
     return None
 
 
 def request_review(store: Store, target: str | None, files: list[str], question: str, author_models: list[str],
                    configs: list[str] = (), deps: list[str] = (), ignore_keys: list[str] = (), scope: str = "",
-                   diff_base: str | None = None, recheck_of: str | None = None) -> dict:
+                   diff_base: str | None = None, recheck_of: str | None = None, new_round: str | None = None) -> dict:
     if not files:
         raise RLError("INVALID", "name the code under review with --files")
     if not author_models:
@@ -339,11 +521,13 @@ def request_review(store: Store, target: str | None, files: list[str], question:
         if reused:
             return reused
         rid = tx.next_id("Ticket", "RV")
+        rounds = _round(tx, recheck_of, new_round)
         tx.create("Ticket", {"id": rid, "kind": "review", "subject": "code",
                              "status": "pending" if eligible else "unavailable",
                              "target_id": target, "question": question, "dedupe_key": fp,
                              "candidates": [str(e) for e in eligible], "author_models": list(author_models),
-                             "recheck_of": recheck_of, "code_scope": detail,
+                             "recheck_of": recheck_of, "code_scope": detail, "round_of": rid, **rounds,
+                             "requested_by": caller_role(),
                              "error": None if eligible else "no reviewer configured (models.reviewer is empty)"})
         if target:
             tx.link("targets", rid, target)
@@ -359,9 +543,17 @@ def request_review(store: Store, target: str | None, files: list[str], question:
         ref = documents.register(tx, prep)
         tx.update(rid, {"request_ref": ref})
         tx.event("review.requested", rid, f"{target or '-'} fingerprint {short(fp)}")
-    note = (f"candidates {', '.join(str(e) for e in eligible)}; run it: rl review run {rid} [--background]"
-            if eligible else "no eligible reviewer configured: recorded unavailable (not a pass)")
-    return {"id": rid, "request_ref": ref, "fingerprint": fp, "summary": f"{rid} {note}"}
+    note = (f"candidates {', '.join(str(e) for e in eligible)}; run it: rl review run {rid} [--background], or "
+            "in herdr by a reviewer session" if eligible else "no reviewer configured: recorded unavailable (not a pass)")
+    route = _route(store, rid, recheck_of, caller_role()) if eligible else ""
+    return {"id": rid, "request_ref": ref, "fingerprint": fp,
+            "summary": f"{rid} {_round_note(store, rid)}{note}{route}"}
+
+
+def _round_note(store: Store, rid: str) -> str:
+    with store.read() as tx:
+        t = tx.require(rid, "Ticket")
+    return f"(review {t.get('round_index') or 1} of {REVIEWS_PER_ROUND} in round {t.get('round_of') or rid}) "
 
 
 def _review_package(store: Store, rid: str, target: str | None, question: str, scope: str, contract: str,
@@ -379,7 +571,7 @@ def _review_package(store: Store, rid: str, target: str | None, question: str, s
         """The exact content under review, so the package binds to this snapshot and needs no file tools."""
         blocks = []
         for p in paths:
-            text = store.project.abs(p).read_text(encoding="utf-8", errors="replace")
+            text = store.project.src(p).read_text(encoding="utf-8", errors="replace")
             if len(text) > min(INLINE_FILE_CHARS, budget[0]):
                 blocks.append(f"### {p}\n\n(not inlined: {len(text)} characters; read the file at this path)")
                 continue
@@ -397,7 +589,7 @@ def _review_package(store: Store, rid: str, target: str | None, question: str, s
         parts.append("\n## Key dependencies\n\n" + "\n".join(f"- {p}" for p in detail["deps"]))
     if diff_base:
         try:
-            diff = subprocess.run(["git", "diff", diff_base, "--", *detail["files"]], cwd=store.project.root,
+            diff = subprocess.run(["git", "diff", diff_base, "--", *detail["files"]], cwd=store.project.checkout,
                                   capture_output=True, text=True, timeout=30).stdout
         except (OSError, subprocess.SubprocessError):
             diff = ""
@@ -433,12 +625,12 @@ def _code_reader(store: Store, code_ref) -> tuple:
     commit = code_ref.get("commit") if isinstance(code_ref, dict) else None
     if not commit:
         def read_tree(p: str) -> bytes | None:
-            path = store.project.abs(p)
+            path = store.project.src(p)
             return path.read_bytes() if path.is_file() else None
-        return read_tree, "working tree"
+        return read_tree, "working tree" + (f" of {store.project.checkout}" if store.project.in_worktree else "")
 
-    def git(*args: str) -> subprocess.CompletedProcess:
-        return subprocess.run(["git", *args], cwd=store.project.root, capture_output=True, timeout=30)
+    def git(*args: str) -> subprocess.CompletedProcess:  # worktrees share the repository's commits
+        return subprocess.run(["git", *args], cwd=store.project.checkout, capture_output=True, timeout=30)
 
     try:
         found = git("cat-file", "-e", f"{commit}^{{commit}}").returncode == 0
@@ -468,18 +660,18 @@ def code_coverage(store: Store, experiment: str, code_ref, named: list[str] = ()
         tickets = _code_reviews(tx, experiment, list(named))
     if not tickets:
         return {"status": "none"}
-    passing = [t for t in tickets if t["status"] == "answered" and t.get("verdict") in ("pass", "issues")]
+    passing = [t for t in tickets if review_passes(t)]
     others = [t for t in tickets if t not in passing]
     if not passing:
-        return {"status": "not_passed", "open": [f"{t['id']} {t.get('verdict') or t['status']}" for t in others]}
+        return {"status": "not_passed", "open": [f"{t['id']} {review_mark(t)}" for t in others]}
     scoped = [t for t in passing if t.get("code_scope")]
     if not scoped:
-        return {"status": "unchecked", "reviews": [f"{t['id']} {t['verdict']}" for t in passing],
+        return {"status": "unchecked", "reviews": [f"{t['id']} {review_mark(t)}" for t in passing],
                 "reason": f"{', '.join(t['id'] for t in passing)} recorded no scope; request it again with the "
                           "same scope to record one (an unchanged scope reuses the answer)"}
     read, source = _code_reader(store, code_ref)
     if read is None:
-        return {"status": "unchecked", "reviews": [f"{t['id']} {t['verdict']}" for t in scoped], "reason": source}
+        return {"status": "unchecked", "reviews": [f"{t['id']} {review_mark(t)}" for t in scoped], "reason": source}
 
     def current(path: str, kind: str, ignored: list[str]) -> str | None:
         data = read(path)
@@ -497,12 +689,12 @@ def code_coverage(store: Store, experiment: str, code_ref, named: list[str] = ()
                     now = current(path, kind, scope.get("ignored_keys") or [])
                     (seen if now == digest else older).setdefault(path, []).append(t["id"])
     except (OSError, subprocess.SubprocessError) as exc:
-        return {"status": "unchecked", "reviews": [f"{t['id']} {t['verdict']}" for t in scoped],
+        return {"status": "unchecked", "reviews": [f"{t['id']} {review_mark(t)}" for t in scoped],
                 "reason": f"could not read the {source}: {exc}"}
     changed = {p: ids for p, ids in sorted(older.items()) if p not in seen}
     used = {i for ids in seen.values() for i in ids}
     out = {"status": "stale" if changed else "covered", "source": source,
-           "reviews": [f"{t['id']} {t['verdict']}" for t in scoped if t["id"] in used]}
+           "reviews": [f"{t['id']} {review_mark(t)}" for t in scoped if t["id"] in used]}
     if changed:
         out["changed"] = changed
     pending = [f"{t['id']} {t['status']}" for t in others if t["status"] in ("pending", "running")]
@@ -515,7 +707,8 @@ CONCLUSION_QUESTION = "Do the records support this conclusion, at this evidence 
 
 
 def request_conclusion_review(store: Store, targets: list[str], proposal: str, author_models: list[str],
-                              question: str | None = None, recheck_of: str | None = None) -> dict:
+                              question: str | None = None, recheck_of: str | None = None,
+                              new_round: str | None = None) -> dict:
     """A read-only check of a key conclusion before it is recorded, built from the records behind it."""
     if not targets:
         raise RLError("INVALID", "name the hypotheses the conclusion is about with --target")
@@ -537,10 +730,12 @@ def request_conclusion_review(store: Store, targets: list[str], proposal: str, a
         if reused:
             return reused
         rid = tx.next_id("Ticket", "RV")
+        rounds = _round(tx, recheck_of, new_round)
         tx.create("Ticket", {"id": rid, "kind": "review", "subject": "conclusion",
                              "status": "pending" if eligible else "unavailable", "target_id": target_text,
                              "question": question, "dedupe_key": key, "candidates": [str(e) for e in eligible],
-                             "author_models": list(author_models), "recheck_of": recheck_of, "error": error})
+                             "author_models": list(author_models), "recheck_of": recheck_of, "error": error,
+                             "round_of": rid, **rounds, "requested_by": caller_role()})
         for t in targets:
             tx.link("targets", rid, t)
     path = store.project.dir("packages") / f"{rid}.request.md"
@@ -550,10 +745,11 @@ def request_conclusion_review(store: Store, targets: list[str], proposal: str, a
         ref = documents.register(tx, prep)
         tx.update(rid, {"request_ref": ref})
         tx.event("review.requested", rid, f"conclusion on {target_text} key {short(key)}")
-    note = (f"candidates {', '.join(str(e) for e in eligible)}; run it: rl review run {rid} [--background], then "
-            f"cite it: rl decide ... --based-on {rid}"
-            if eligible else "no eligible reviewer configured: recorded unavailable (not a pass)")
-    return {"id": rid, "request_ref": ref, "summary": f"{rid} {note}"}
+    note = (f"candidates {', '.join(str(e) for e in eligible)}; run it: rl review run {rid} [--background] (or "
+            f"assign it to a reviewer session in herdr), then cite it: rl decide ... --based-on {rid}"
+            if eligible else "no reviewer configured: recorded unavailable (not a pass)")
+    route = _route(store, rid, recheck_of, caller_role()) if eligible else ""
+    return {"id": rid, "request_ref": ref, "summary": f"{rid} {_round_note(store, rid)}{note}{route}"}
 
 
 def _result_line(res: dict) -> str:
@@ -600,7 +796,7 @@ def _conclusion_body(tx: Tx, store: Store, targets: list[str], proposal: str, qu
                     lines.append(f"- attempt {brief(att)} arm {spec.get('arm')} seed {spec.get('seed')}")
                 elif e["rel"] == "from_result":
                     lines.append(_result_line(tx.require(e["id"])))
-            if code := code_review_summary(evidence_attempts(tx, ev["id"])):
+            if code := code_review_summary(tx, evidence_attempts(tx, ev["id"])):
                 lines.append(f"- code review at registration: {code}")
         for e in tx.inc(hid, "tests"):
             experiments.setdefault(e["id"], tx.require(e["id"]))

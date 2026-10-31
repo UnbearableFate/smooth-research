@@ -196,7 +196,7 @@ def add_experiment(store: Store, title: str, question: str, hypotheses: list[str
 def prepare_contract(store: Store, eid: str) -> documents.Prepared:
     with store.read() as tx:
         exp = tx.require(eid, "Experiment")
-    return documents.prepare(store.project, exp["contract_path"], "experiment_contract")
+    return documents.prepare(store.project, store.project.abs(exp["contract_path"]), "experiment_contract")
 
 
 def seal_contract(tx: Tx, eid: str, prep: documents.Prepared, project: Project) -> str:
@@ -317,13 +317,33 @@ def conclusion_reviews(tx: Tx, refs: list[str]) -> list[dict]:
     return [t for t in tickets if t.get("subject") == "conclusion"]
 
 
+def review_passes(t: dict) -> bool:
+    """An answered review passes when no finding of medium or higher severity remains, or when the coordinator
+    approved it. Reviews answered before severities were recorded pass on a pass or issues verdict."""
+    if t.get("kind") != "review" or t.get("status") != "answered":
+        return False
+    if t.get("approved"):
+        return True
+    if t.get("open_severity") is None:
+        return t.get("verdict") in ("pass", "issues")
+    return t.get("verdict") in ("pass", "issues") and t["open_severity"] in ("none", "low")
+
+
+def review_mark(t: dict) -> str:
+    """A review's outcome in a few words: verdict, open severity, approval."""
+    out = t.get("verdict") or t["status"]
+    if t.get("open_severity") not in (None, "none", "low"):
+        out += f", {t['open_severity']} open"
+    return out + (", approved by the coordinator" if t.get("approved") else "")
+
+
 def review_gap(reviews: list[dict]) -> str | None:
-    """Why a key conclusion has no passing independent check, or None when a cited review answered pass/issues."""
-    if any(t["status"] == "answered" and t.get("verdict") in ("pass", "issues") for t in reviews):
+    """Why a key conclusion has no passing independent check, or None when a cited review passes."""
+    if any(review_passes(t) for t in reviews):
         return None
     if reviews:
         last = reviews[-1]
-        return f"conclusion review {last['id']} is {last.get('verdict') or last['status']}, not a pass"
+        return f"conclusion review {last['id']} is {review_mark(last)}, not a pass"
     return "no conclusion review"
 
 
@@ -423,7 +443,7 @@ def _brief(rec: dict) -> str:
         return f"{rec['id']} [{ident}, {rec['metadata_status']}] {rec['title']}"
     if label == "Ticket":
         kind = f"{rec['kind']}:{rec['subject']}" if rec.get("subject") == "conclusion" else rec["kind"]
-        verdict = f"/{rec['verdict']}" if rec.get("verdict") else ""
+        verdict = f"/{review_mark(rec)}" if rec.get("verdict") else ""
         return f"{rec['id']} [{kind}/{rec['status']}{verdict}] {rec.get('question') or rec.get('target_id') or ''}"
     if label == "Attempt":
         return (f"{rec['id']} [{rec['execution_state']}/{rec['outcome']}/result:{rec['result_status']}"
@@ -479,6 +499,11 @@ def attention(tx: Tx) -> list[str]:
     for e in tx.all("Experiment"):
         if e.get("revised_after_results"):
             items.append(f"{e['id']} contract revised after results: later comparisons are exploratory")
+    for t in tx.all("Ticket", kind="review"):
+        if t.get("escalated") and not t.get("approved"):
+            items.append(f"{t['id']} review round {t.get('round_of') or t['id']} used its two reviews with "
+                         f"{t.get('open_severity')} findings open: the coordinator approves it (rl review approve "
+                         f"{t['id']} --rationale ..) or returns the work")
     standing: dict[str, dict] = {}  # hypothesis -> the latest decision stating a key conclusion on it
     for d in tx.all("Decision"):
         for hid in key_hypotheses(tx, d):

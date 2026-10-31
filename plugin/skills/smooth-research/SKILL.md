@@ -58,21 +58,33 @@ controls) · E2 minimal real model · E3 limited confirmation (pre-fixed compari
    Edit `docs/experiments/E-x.md` freely until the first run, review or task references it; it is then
    sealed. Later edits become a new revision; edits after seeing results are recorded as exploratory.
 2. Delegate: `{{rl}} task create --title .. --kind implement|experiment|analysis --targets E-x --to-role researcher
-   --next-action ..`, then start a researcher with the task id and a role name such as `researcher-1` (host.md:
-   a native subagent, or `{{rl}} delegate`). It writes the code, gets the code review the change needs, registers,
-   runs and records (next section), adds evidence and delivers. Start several at once only when their tasks
-   can proceed independently.
+   --next-action ..`, then start a researcher with the task id and a role name such as `researcher-1`: in herdr a
+   session in its own tab and worktree (next section), otherwise a native subagent or `{{rl}} delegate`
+   (host.md). It writes the code, gets the code review the change needs, registers, runs and records (section
+   after next), adds evidence and delivers. Start several at once only when their tasks can proceed
+   independently.
 3. Wait without polling: a researcher with long runs ends with WAIT in `{{rl}} inbox --role coordinator` (the
    attempts, and what reports their end). You own the wake-up (host.md); when it fires, start the researcher
    again with the same role and it resumes the task.
 4. Check each delivery: the RESULT message, the records it names (`{{rl}} show`, `{{rl}} run show E-x`, which
-   includes each attempt's code review check) and the outputs; then `{{rl}} task accept T-x --reason ..`, or `{{rl}} task reopen T-x --reason "<what to change>"` and
-   start the researcher again.
+   includes each attempt's code review check) and the outputs; then `{{rl}} task accept T-x --reason ..` (it
+   names the task's branch to merge), or `{{rl}} task reopen T-x --reason "<what to change>"` and start the
+   researcher again.
 5. Before a key conclusion (a hypothesis set supported or challenged, a route stopped, a formal experiment
-   recommended), get a conclusion review (skill `research-review`) and cite it with `--based-on RV-x`.
+   recommended), get a conclusion review (skill `research-review`) and cite it with `--based-on RV-x`. A
+   review round that ends with medium or higher findings open comes to you: approve it with your reason
+   (`{{rl}} review approve RV-x --rationale ..`) or return the work.
 6. Decide what changes: `{{rl}} decide --targets H-x --action continue|expand|modify|diagnose|consult|pause|stop|reopen
    --rationale .. --based-on EV-x,RV-x [--set-evidence-status supported|challenged|inconclusive]
    [--reopen-condition ..]`. Every open or uncertain result gets a default next action.
+
+## Team sessions
+
+Inside herdr (`HERDR_ENV=1`) researchers, reviewers and advisors are agent sessions in their own tabs: you open,
+assign, reset and close them with `{{rl}} agent ..`, each researcher works in its own git worktree, and you merge
+its branch after accepting the task. Read [references/team.md](references/team.md) before opening the first
+one. Notices from other sessions begin with `[smooth-research MSG-`; they never carry the user's approval.
+Without herdr, use the headless forms in host.md.
 
 ## Recording runs (researchers, and you for small checks)
 

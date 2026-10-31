@@ -7,7 +7,9 @@ without chat history. Acknowledging moves a cursor and never creates a message, 
 
 from __future__ import annotations
 
-from . import documents
+import os
+
+from . import documents, herdr
 from .store import Store, Tx
 from .util import RLError, digest_json
 
@@ -21,7 +23,9 @@ OPEN_STATES = ("ready", "active", "waiting", "blocked", "delivered")
 def start_session(store: Store, role: str, host: str, host_session_id: str | None = None,
                   model_requested: str | None = None, model_observed: str | None = None,
                   effort: str | None = None, worktree: str | None = None) -> dict:
-    """Register a session. A new coordinator session marks the earlier active ones superseded."""
+    """Register a session. A new coordinator session marks the earlier active ones superseded. A coordinator
+    inside a herdr pane records that pane, so notices from other sessions reach it."""
+    pane = os.environ.get("HERDR_PANE_ID") if role == COORDINATOR and os.environ.get("HERDR_ENV") == "1" else None
     with store.write() as tx:
         if host_session_id:
             for s in tx.all("Session", host_session_id=host_session_id, status="active"):
@@ -34,9 +38,10 @@ def start_session(store: Store, role: str, host: str, host_session_id: str | Non
                     tx.update(s["id"], {"status": "superseded", "ended_at": tx.meta()["updated_at"]})
         tx.create("Session", {"id": sid, "role_id": role, "host": host, "host_session_id": host_session_id,
                               "model_requested": model_requested, "model_observed": model_observed,
-                              "effort": effort, "worktree": worktree, "status": "active"})
+                              "effort": effort, "worktree": worktree, "status": "active", "herdr_pane": pane,
+                              "herdr_tab": os.environ.get("HERDR_TAB_ID") if pane else None})
         tx.event("session.start", sid, f"{role} on {host} {model_observed or model_requested or 'model unverified'}")
-    return {"id": sid, "summary": f"{sid} {role} on {host}"}
+    return {"id": sid, "summary": f"{sid} {role} on {host}" + (f" (herdr pane {pane})" if pane else "")}
 
 
 def end_session(store: Store, sid: str) -> dict:
@@ -81,7 +86,13 @@ def send(store: Store, type_: str, from_role: str, to_role: str, text: str | Non
             tx.require(task_id, "Task")
         refs = [documents.register(tx, p) for p in preps]
         msg = _message(tx, type_, from_role, to_role, task_id, next_action, refs, text, message_id=message_id)
-    return {"id": msg["id"], "summary": f"{msg['id']} {type_} {from_role} -> {to_role}"}
+    return {"id": msg["id"], "summary": f"{msg['id']} {type_} {from_role} -> {to_role}" + _notice(store, msg)}
+
+
+def _notice(store: Store, msg: dict | None) -> str:
+    """Tell the recipient's live herdr session, if any, that a message arrived."""
+    target = herdr.notify(store, msg) if msg else None
+    return f" (notice sent to {target})" if target else ""
 
 
 def inbox(store: Store, role: str, ack: bool = False, include_all: bool = False) -> dict:
@@ -128,11 +139,12 @@ def create_task(store: Store, title: str, kind: str, targets: list[str] = (), re
             tx.link("targets", tid, target)
         for dep in depends_on:
             tx.link("depends_on", tid, dep)
-        if to_role:
-            _message(tx, "TASK", from_role, to_role, tid, next_action, [ref] if ref else [], title, base_revision=1)
+        msg = _message(tx, "TASK", from_role, to_role, tid, next_action, [ref] if ref else [], title,
+                       base_revision=1) if to_role else None
         tx.event("task.created", tid, title)
     return {"id": tid, "request_ref": ref,
-            "summary": f"{tid} ready: {title}" + (f" (request {ref})" if ref else "") + (f" -> {to_role}" if to_role else "")}
+            "summary": f"{tid} ready: {title}" + (f" (request {ref})" if ref else "") + (f" -> {to_role}" if to_role else "")
+                       + _notice(store, msg)}
 
 
 def claim(store: Store, tid: str, role: str, session: str | None = None) -> dict:
@@ -185,14 +197,16 @@ def progress(store: Store, tid: str, state: str, from_role: str, summary: str | 
         changes["blocked_reason"] = reason if state == "blocked" else None
         tx.update(tid, changes)
         mtype = {"delivered": "RESULT", "waiting": "WAIT", "blocked": "BLOCKED"}.get(state)
-        if mtype:
-            _message(tx, mtype, from_role, COORDINATOR, tid, next_action, refs,
-                     summary or (f"waiting on {', '.join(attempts)}" if attempts else reason),
-                     base_revision=changes["revision"])
+        msg = _message(tx, mtype, from_role, COORDINATOR, tid, next_action, refs,
+                       summary or (f"waiting on {', '.join(attempts)}" if attempts else reason),
+                       base_revision=changes["revision"]) if mtype else None
         tx.event(f"task.{state}", tid, summary or next_action or reason or "")
-        return {"id": tid, "outputs": refs, "summary": f"{tid} -> {state}" + (f" outputs {', '.join(refs)}" if refs else "")}
+        return {"id": tid, "outputs": refs, "message": msg,
+                "summary": f"{tid} -> {state}" + (f" outputs {', '.join(refs)}" if refs else "")}
 
-    return _owner_write(store, tid, list(outputs), "task_output", apply)
+    out = _owner_write(store, tid, list(outputs), "task_output", apply)
+    out["summary"] += _notice(store, out.pop("message"))
+    return out
 
 
 def handoff(store: Store, tid: str, doc: str, from_role: str, to_role: str | None = None) -> dict:
@@ -200,16 +214,21 @@ def handoff(store: Store, tid: str, doc: str, from_role: str, to_role: str | Non
     def apply(tx: Tx, task: dict, refs: list[str]) -> dict:
         tx.update(tid, {"state": "ready", "owner_role": None, "owner_session": None, "handoff_ref": refs[0],
                         "revision": task["revision"] + 1, "to_role": to_role or task.get("to_role")})
-        _message(tx, "HANDOFF", from_role, to_role or task.get("to_role") or COORDINATOR, tid,
-                 "read the handoff, verify code and run records, then continue", refs)
+        msg = _message(tx, "HANDOFF", from_role, to_role or task.get("to_role") or COORDINATOR, tid,
+                       "read the handoff, verify code and run records, then continue", refs)
         tx.event("task.handoff", tid, refs[0])
-        return {"id": tid, "handoff_ref": refs[0], "summary": f"{tid} handed off ({refs[0]}); ready to claim"}
+        return {"id": tid, "handoff_ref": refs[0], "message": msg,
+                "summary": f"{tid} handed off ({refs[0]}); ready to claim"}
 
-    return _owner_write(store, tid, [doc], "handoff", apply)
+    out = _owner_write(store, tid, [doc], "handoff", apply)
+    out["summary"] += _notice(store, out.pop("message"))
+    return out
 
 
 def review_task(store: Store, tid: str, verdict: str, reason: str) -> dict:
-    """Coordinator acceptance or stop. Stopping a research task does not cancel any external execution."""
+    """Coordinator acceptance or stop. Stopping a research task does not cancel any external execution. A task
+    worked on its own branch names the branch to merge."""
+    msg = None
     with store.write() as tx:
         task = tx.require(tid, "Task")
         if verdict == "accept" and task["state"] != "delivered":
@@ -219,10 +238,14 @@ def review_task(store: Store, tid: str, verdict: str, reason: str) -> dict:
             state = "ready"
         tx.update(tid, {"state": state, "note": reason, "revision": task["revision"] + 1})
         if verdict == "stop" and task.get("owner_role"):
-            _message(tx, "CANCEL", COORDINATOR, task["owner_role"], tid, None, [],
-                     f"{reason} (external runs are not cancelled by this)")
+            msg = _message(tx, "CANCEL", COORDINATOR, task["owner_role"], tid, None, [],
+                           f"{reason} (external runs are not cancelled by this)")
         tx.event(f"task.{verdict}", tid, reason)
-    return {"id": tid, "summary": f"{tid} -> {state}"}
+    merge = ""
+    if verdict == "accept" and task.get("branch"):
+        from .agents import branch_status
+        merge = "; " + branch_status(store, task["branch"])
+    return {"id": tid, "summary": f"{tid} -> {state}{merge}" + _notice(store, msg)}
 
 
 def open_tasks(tx: Tx) -> list[dict]:

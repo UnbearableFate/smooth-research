@@ -7,6 +7,12 @@ directories above the smooth-research SKILL.md). Write the absolute path in each
   `rl resume` yourself and take the thread id from your environment if you know it, else omit it.
 - Session: register with `--host codex --host-session-id <thread id>`; use your exact model id (for
   example `gpt-6-astra`) for `--model-observed` and `--author-model`.
+- Inside herdr (`HERDR_ENV=1`): researchers, reviewers and advisors are agent sessions in their own tabs,
+  opened with `rl agent open` ([team.md](team.md)). A Codex session gets `-m <model>`,
+  `-c model_reasoning_effort=..` for an `@effort`, `--search` when it is an advisor, and the arguments in
+  `agents.args.codex` of `smooth-research.yaml`; rl adds no sandbox or approval flags (set them there if you
+  want them). A session that starts at a dialog is reported, not answered: ask the user. The bullets below are
+  the forms without herdr.
 - Researchers: for each implementation or run task, use a Codex subagent if they are enabled, or
   `rl delegate T-x --background` for an independent session with the first available entry of
   models.researcher in `smooth-research.yaml` (`--entry codex:<model>@high` or `--entry claude:<model>` picks
@@ -20,6 +26,7 @@ directories above the smooth-research SKILL.md). Write the absolute path in each
   recorded with each answer; list another family first for reviews from outside your own.
 - Advisors: every entry of models.advisor (by default `codex:gpt-6-astra@max` and
   `claude:claude-fable-5-1@high`) answers an advice round in its own session that sees only the package.
+- Your own subagents run on a lower tier than you: a smaller OpenAI model, or your model at a lower effort.
 - Long runs: start them in the background (`nohup ... &` and record the PID), keep working, record the end
   after checking the exit status. Do not sleep-poll.
 - Miyabi jobs (miyabi-mcp): waiting is the coordinator's. Whoever submits gives `notify` a `deliver` the

@@ -22,8 +22,9 @@ decisions; you own the execution of this task.
 4. Before a costly run on a new core path (operator, training or evaluation path, loss mask, data split,
    adapter injection, checkpoint I/O, distributed change), get a code review from the configured reviewer:
    `rl review request ... --author-model <your model id>`, then `rl review run RV-x` (rules: the
-   research-review skill). Fix real
-   problems. If no reviewer is available, do not scale up: block with `--reason model_unavailable`.
+   research-review skill). Fix real problems and re-check once with `--recheck-of RV-x`: a round holds two
+   reviews, and if medium or higher findings remain after the second, the coordinator decides; say so in
+   your delivery. If no reviewer is available, do not scale up: block with `--reason model_unavailable`.
    `rl run register` prints whether the reviews still cover the code the run executes; on `stale`, re-check
    the changed files before scaling up. A run that needs no review: `--no-review "<reason>"`.
 5. Long external runs (cluster jobs): once they are submitted and recorded, `rl task wait <task id> --role

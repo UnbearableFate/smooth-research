@@ -8,7 +8,7 @@ from __future__ import annotations
 import html
 from datetime import datetime, timezone
 
-from .research import brief, conclusion_reviews, key_hypotheses, review_gap
+from .research import brief, conclusion_reviews, key_hypotheses, review_gap, review_mark
 from .runs import code_review_summary, describe_attempt, evidence_attempts, usage_summary
 from .store import Store, Tx
 
@@ -174,7 +174,7 @@ def report(store: Store, out: str | None = None, title: str | None = None) -> di
         for ev in evidence:
             rel = ", ".join(f"{e['rel']} {e['id']}@{e.get('revision')}" for e in tx.out(ev["id"])
                             if e["rel"] in ("supports", "challenges"))
-            code = code_review_summary(evidence_attempts(tx, ev["id"]))
+            code = code_review_summary(tx, evidence_attempts(tx, ev["id"]))
             ev_lines.append(f"- {ev['id']} [{ev['evidence_level']}, {ev['validity']}] {ev['summary']}"
                             + (f" ({rel})" if rel else "") + (f"; scope: {ev['scope']}" if ev.get("scope") else "")
                             + (f" [code review: {code}]" if code else ""))
@@ -185,7 +185,7 @@ def report(store: Store, out: str | None = None, title: str | None = None) -> di
                 revs = conclusion_reviews(tx, [e["id"] for e in tx.out(d["id"], "based_on")])
                 gap = review_gap(revs)
                 checks[d["id"]] = gap or "conclusion review " + ", ".join(
-                    f"{t['id']} {t['verdict']}" + (f" ({t['relation']})" if t.get("relation") else "")
+                    f"{t['id']} {review_mark(t)}" + (f" ({t['relation']})" if t.get("relation") else "")
                     for t in revs if t["status"] == "answered")
     lines = [f"# {title or 'Research report'}: {meta.get('title', '')}",
              f"\nGenerated {datetime.now(timezone.utc).isoformat(timespec='seconds')} from the research records "

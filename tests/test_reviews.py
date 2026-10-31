@@ -90,6 +90,9 @@ def test_family_detection():
     assert adapters.family("mystery-model") is None
     assert adapters.Entry.parse("codex:gpt-6-astra@medium") == adapters.Entry("codex", "gpt-6-astra", "medium")
     assert adapters.Entry.parse("pi:openai/gpt-6-astra@max").family == "openai"
+    assert adapters.family("deepseek/deepseek-flash") == "deepseek" and adapters.family("openrouter/google/gemini-3") == "google"
+    assert reviews._relation(["mystery-1"], "mystery-1", "pi:x/mystery-1") == "same_family_independent_session"
+    assert reviews._relation(["deepseek/deepseek-flash"], None, "deepseek-flash") == "same_family_unverified"
     with pytest.raises(RLError):
         adapters.Entry.parse("gpt-6-astra")
 
@@ -142,6 +145,62 @@ def test_reviewers_are_tried_in_order_whatever_model_wrote_the_code(project, fak
     assert out["relation"] == "cross_model" and "claude-opus-5-5" in out["summary"]
     with project.read() as tx:
         assert "codex CLI is not on PATH" in tx.require(rv2["id"])["calls"][0]["error"]
+
+
+def finding(severity):
+    return ('Problems.\n```json\n{"verdict": "issues", "findings": [{"location": "src/model.py:2", "evidence": "e", '
+            f'"impact": "result_error", "severity": "{severity}", "fix": "f", "verify": "v"}}], "checked": ["all"], '
+            '"unchecked": []}\n```')
+
+
+def test_a_review_round_holds_two_reviews_and_then_goes_to_the_coordinator(project, fakes, tmp_path, monkeypatch):
+    code(tmp_path)
+    monkeypatch.setenv("FAKE_ANSWER", finding("medium"))
+    first = request(project)
+    out = reviews.run_ticket(project, first["id"])
+    assert "medium open" in out["summary"] and not out["escalated"]
+    assert reviews.code_coverage(project, "E-0001", {"content_digest": "x"})["status"] == "not_passed"
+    code(tmp_path, body="def f(x):\n    return 2 * x\n")
+    second = request(project, recheck_of=first["id"])
+    assert "(review 2 of 2 in round RV-0001)" in second["summary"]
+    out = reviews.run_ticket(project, second["id"])
+    assert out["escalated"] and "the coordinator decides" in out["summary"]
+    assert (f"{second['id']}: the review round RV-0001 used its 2 reviews and medium finding(s) remain"
+            in tasks.inbox(project, "coordinator")["summary"])
+    with pytest.raises(RLError) as exc:
+        request(project, recheck_of=second["id"])
+    assert exc.value.code == "LIMIT" and "--new-round" in exc.value.message
+    monkeypatch.setenv("SMOOTH_RESEARCH_ROLE", "researcher-1")
+    with pytest.raises(RLError):
+        reviews.approve(project, second["id"], "fine by me")  # approving is the coordinator's
+    monkeypatch.delenv("SMOOTH_RESEARCH_ROLE")
+    with project.read() as tx:
+        assert any(i.startswith(f"{second['id']} review round RV-0001 used its two reviews") for i in research.attention(tx))
+    before = reviews.code_coverage(project, "E-0001", {"content_digest": "x"})  # a run registered now records this
+    reviews.approve(project, second["id"], "the shift is a documented choice; keep it")
+    with project.read() as tx:
+        assert not any(i.startswith(second["id"]) for i in research.attention(tx))
+        assert runs.code_review_note(before, tx).endswith(f"; approved by the coordinator since: {second['id']}")
+        assert "since" not in runs.code_review_note(before)
+    covered = reviews.code_coverage(project, "E-0001", {"content_digest": "x"})
+    assert covered["status"] == "covered"
+    assert covered["reviews"] == [f"{second['id']} issues, medium open, approved by the coordinator"]
+    third = request(project, recheck_of=second["id"], new_round="the coordinator wants the loss path checked again")
+    with project.read() as tx:
+        t = tx.require(third["id"])
+    assert (t["round_of"], t["round_index"], t["recheck_of"]) == (third["id"], 1, second["id"])
+
+
+def test_findings_of_low_severity_do_not_hold_a_review_back(project, fakes, tmp_path, monkeypatch):
+    code(tmp_path)
+    monkeypatch.setenv("FAKE_ANSWER", finding("low"))
+    rv = request(project)
+    assert reviews.run_ticket(project, rv["id"])["verdict"] == "issues"
+    assert reviews.code_coverage(project, "E-0001", {"content_digest": "x"})["status"] == "covered"
+    assert reviews.open_severity({"verdict": "issues", "findings": [{"impact": "resource_waste"}]}) == "medium"
+    assert reviews.open_severity({"verdict": "issues", "findings": [{"impact": "nonblocking"}]}) == "low"
+    assert reviews.open_severity({"verdict": "issues", "findings": [{"evidence": "?"}]}) == "medium"
+    assert reviews.open_severity({"verdict": "blocking", "findings": []}) == "high"
 
 
 def test_a_pi_reviewer_reports_its_session_model_and_cost(project, fakes, tmp_path, monkeypatch):
@@ -251,7 +310,7 @@ def test_manual_advisor_waits_for_an_imported_answer(project, tmp_path, monkeypa
     assert out["status"] == "pending" and "submit" in out["summary"]
     (tmp_path / "gpt.md").write_text('```json\n{"proposals": [], "pause_recommended": true}\n```')
     done = reviews.import_answer(store, ad["ids"][0], str(tmp_path / "gpt.md"), "gpt-pro", "ChatGPT Pro (manual)")
-    assert "pause recommended" in done["summary"]
+    assert "recommends pause" in done["summary"]
 
 
 def test_delegation_records_the_exact_session_and_model(project, fakes, monkeypatch):

@@ -6,6 +6,12 @@ the absolute path from SKILL.md.
 
 - Session: register with `--host claude`; the session id is in SKILL.md and in the session-start note.
   Use your exact model id (for example `claude-sonnet-5-5`) for `--model-observed` and `--author-model`.
+- Inside herdr (`HERDR_ENV=1`): researchers, reviewers and advisors are agent sessions in their own tabs,
+  opened with `rl agent open` ([team.md](team.md)). They get the arguments in `agents.args.<host>` of
+  `smooth-research.yaml` (for Claude Code `--permission-mode auto` by default) and no permission-bypass flags.
+  A Claude Code session in a new worktree first asks whether to trust the folder: `rl agent open` reports that
+  it waits at a dialog; look at it with `herdr agent read <name>` and ask the user before answering. The
+  bullets below are the forms without herdr.
 - Researchers: for each implementation or run task, start the native subagent `smooth-research:researcher`
   (Agent tool) with the task id and a role name such as `researcher-1`. Give a short brief; it reads its own
   work pack and has your tools, including MCP servers such as pi-env-mcp and miyabi-mcp. When it reports
@@ -22,6 +28,8 @@ the absolute path from SKILL.md.
   recorded with each answer.
 - Advisors: every entry of models.advisor (by default `codex:gpt-6-astra@max` and
   `claude:claude-fable-5-1@high`) answers an advice round in its own session that sees only the package.
+- Your own subagents (Agent tool `model`) run on a lower tier than you: Fable → Opus or below, Opus → Sonnet
+  or Haiku, Sonnet → Haiku.
 - Long runs: start them with Bash `run_in_background` (or `nohup ... &`), record `running` with the PID,
   keep working, and record the end when you have checked the exit status. Do not sleep-poll.
 - Waiting on cluster jobs is yours: a researcher that submitted Miyabi jobs ends with WAIT and reports the

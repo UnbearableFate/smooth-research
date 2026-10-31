@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 
 from .delegate import rl_command
+from .herdr import caller_role
 from .project import find_project
 from .research import attention, brief
 from .store import Store
@@ -30,6 +31,10 @@ def session_start(host: str, raw: str) -> dict:
             return _out(f"Smooth Research project found, but `{rl} status` fails: {exc.message}")
         text = f"Smooth Research is available (CLI: {rl}); use its skill to start or resume an ML research project."
         return _out(text)
+    if caller_role():  # a session that `rl agent open` started: its brief, not the coordinator's start
+        return _out(f"Smooth Research project at {project.root} (CLI: {rl}). You are {caller_role()}, a session "
+                    f"the coordinator opened; you are not the coordinator. Your work: `{rl} agent brief "
+                    f"{caller_role()}` (wait for an assignment if it names none).")
     store = Store(project, "hook")
     try:
         with store.read() as tx:

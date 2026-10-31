@@ -79,7 +79,11 @@ def _assemble(title: str, sections: list[tuple[str, str]], budget: int) -> dict:
 
 
 def locations(store: Store) -> str:
-    cfg = store.project.config
+    cfg, p = store.project.config, store.project
+    if p.in_worktree:  # a researcher's worktree: code here, records and run outputs in the project
+        return (f"code {cfg['code_root']}/ and notes {cfg['docs_root']}/notes/ in this checkout ({p.checkout}) · "
+                f"records, packages and run outputs in the project: {p.research_root}/ (artifacts/<attempt>/) · "
+                f"reports {p.reports_root}/ · plan and contracts {p.docs_root}/")
     return (f"code {cfg['code_root']}/ · documents {cfg['docs_root']}/ (plan/, experiments/, tasks/, notes/) · "
             f"reports {cfg['reports_root']}/ (reviews/, advice/) · records {cfg['research_root']}/ (sealed "
             "documents, packages, artifacts/<attempt>/)")

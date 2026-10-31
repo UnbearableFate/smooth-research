@@ -26,16 +26,26 @@ EXECUTABLES = {"claude": "claude", "codex": "codex", "pi": "pi"}
 JSON_BLOCK_RE = re.compile(r"```json[ \t]*\n(.*?)```", re.S)
 
 
+FAMILY_NAMES = (("anthropic", r"^(claude|opus|sonnet|haiku|fable)"), ("openai", r"^(gpt|o[1-9]|codex|chatgpt)"),
+                ("deepseek", r"^deepseek"), ("google", r"^(gemini|gemma)"), ("alibaba", r"^(qwen|qwq)"),
+                ("moonshot", r"^(kimi|moonshot)"), ("zhipu", r"^(glm|chatglm)"), ("xai", r"^grok"),
+                ("mistral", r"^(mistral|mixtral|codestral|magistral|devstral)"), ("meta", r"^llama"))
+FAMILY_PROVIDERS = {"anthropic": "anthropic", "openai": "openai", "deepseek": "deepseek", "google": "google",
+                    "gemini": "google", "qwen": "alibaba", "alibaba": "alibaba", "dashscope": "alibaba",
+                    "moonshot": "moonshot", "kimi": "moonshot", "zhipu": "zhipu", "zai": "zhipu", "xai": "xai",
+                    "mistral": "mistral", "meta": "meta"}
+
+
 def family(model: str | None) -> str | None:
-    """Model family by name; None when it cannot be told (then cross-model status stays unverified)."""
+    """Model family by name (a provider prefix such as pi's openai/ or deepseek/ counts too); None when it
+    cannot be told (then cross-model status stays unverified)."""
     if not model:
         return None
-    m = model.lower().split("/", 1)[-1] if model.lower().startswith(("anthropic/", "openai/")) else model.lower()
-    if model.lower().startswith("anthropic/") or m.startswith("claude") or m in ("opus", "sonnet", "haiku", "fable"):
-        return "anthropic"
-    if model.lower().startswith("openai/") or re.match(r"^(gpt|o[1-9]|codex|chatgpt)", m):
-        return "openai"
-    return None
+    parts = model.lower().split("/")
+    for fam, pattern in FAMILY_NAMES:
+        if re.match(pattern, parts[-1]):
+            return fam
+    return next((FAMILY_PROVIDERS[p] for p in parts[:-1] if p in FAMILY_PROVIDERS), None)
 
 
 @dataclass(frozen=True)
@@ -99,15 +109,17 @@ def _run(cmd: list[str], prompt: str, cwd: Path, timeout: int) -> subprocess.Com
 
 
 def call_claude(entry: Entry, prompt: str, cwd: Path, read_only: bool, timeout: int,
-                add_dirs: list[str] = (), log: Path | None = None) -> Call:
+                add_dirs: list[str] = (), log: Path | None = None, web: bool = False) -> Call:
     session = str(uuid.uuid4())
     cmd = ["claude", "-p", "--output-format", "json", "--model", entry.model, "--session-id", session]
     if entry.effort:
         cmd += ["--effort", entry.effort]
     if read_only:
-        # an independent reader: no user customizations, hooks, MCP servers or command tools
-        cmd += ["--safe-mode", "--restricted", "--strict-mcp-config", "--tools", "Read,Grep,Glob",
-                "--permission-mode", "dontAsk"]
+        # an independent reader: no user customizations, hooks, MCP servers or command tools (an advisor may
+        # also search the web)
+        tools = "Read,Grep,Glob" + (",WebSearch,WebFetch" if web else "")
+        cmd += ["--safe-mode", "--restricted", "--strict-mcp-config", "--tools", tools,
+                "--permission-mode", "dontAsk", *(["--allowedTools", "WebSearch,WebFetch"] if web else [])]
     else:
         cmd += ["--permission-mode", "acceptEdits", "--allowedTools", "Bash"]
     for d in add_dirs:
@@ -163,7 +175,7 @@ def codex_write_sandbox() -> str:
 
 
 def call_codex(entry: Entry, prompt: str, cwd: Path, read_only: bool, timeout: int,
-               add_dirs: list[str] = (), log: Path | None = None) -> Call:
+               add_dirs: list[str] = (), log: Path | None = None, web: bool = False) -> Call:
     with tempfile.TemporaryDirectory(prefix="rl-codex-") as tmp:
         last = Path(tmp) / "last.txt"
         cmd = ["codex", "exec", "--json", "--skip-git-repo-check", "--model", entry.model, "--cd", str(cwd),
@@ -205,7 +217,7 @@ def call_codex(entry: Entry, prompt: str, cwd: Path, read_only: bool, timeout: i
 
 
 def call_pi(entry: Entry, prompt: str, cwd: Path, read_only: bool, timeout: int,
-            add_dirs: list[str] = (), log: Path | None = None) -> Call:
+            add_dirs: list[str] = (), log: Path | None = None, web: bool = False) -> Call:
     """`pi -p --mode json`: the first line is the session header, then agent events; the answer is the text of
     the last assistant message, and its model and provider are what pi reports for that message."""
     session = str(uuid.uuid4())
@@ -246,14 +258,42 @@ def call_pi(entry: Entry, prompt: str, cwd: Path, read_only: bool, timeout: int,
     return result
 
 
+def session_model(host: str, session_id: str | None) -> tuple[str | None, str | None]:
+    """(model, provider) of an interactive session, read from the host's own session file when its id is known
+    (Claude Code and pi; the model of the assistant messages, when they all name the same one)."""
+    if not session_id:
+        return None, None
+    if host == "claude":
+        home = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
+        files, provider = list(home.glob(f"projects/*/{session_id}.jsonl")), "anthropic"
+    elif host == "pi":
+        files, provider = list((Path.home() / ".pi" / "agent" / "sessions").glob(f"*/*_{session_id}.jsonl")), None
+    else:
+        return None, None
+    models, providers = set(), set()
+    for path in files:
+        try:
+            for line in path.open(encoding="utf-8"):
+                event = json.loads(line)
+                message = event.get("message") if isinstance(event.get("message"), dict) else {}
+                if message.get("role") == "assistant" and message.get("model") and message["model"] != "<synthetic>":
+                    models.add(message["model"])
+                    providers.add(message.get("provider") or provider)
+        except (OSError, json.JSONDecodeError):
+            continue
+    return (models.pop(), (providers - {None}).pop() if providers - {None} else provider) if len(models) == 1 else (None, None)
+
+
 def call(entry: Entry, prompt: str, cwd: Path, read_only: bool = True, timeout: int = 1800,
-         add_dirs: list[str] = (), log: Path | None = None) -> Call:
+         add_dirs: list[str] = (), log: Path | None = None, web: bool = False) -> Call:
+    """One headless call. web lets a read-only Claude caller search the web (codex exec and pi -p have no web
+    tool to enable here)."""
     problem = available(entry)
     if problem:
         return Call(entry.entry, entry.model, error=problem)
     fn = {"claude": call_claude, "codex": call_codex, "pi": call_pi}[entry.entry]
     try:
-        return fn(entry, prompt, cwd, read_only, timeout, list(add_dirs), log)
+        return fn(entry, prompt, cwd, read_only, timeout, list(add_dirs), log, web)
     except RLError as exc:
         return Call(entry.entry, entry.model, error=exc.message)
 

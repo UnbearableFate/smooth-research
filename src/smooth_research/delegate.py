@@ -21,7 +21,20 @@ def rl_command() -> str:
     return os.environ.get("SMOOTH_RESEARCH_RL") or "rl"
 
 
-def prompt_for(store: Store, task_id: str, role: str) -> str:
+SUBAGENTS = """Subagents: you may start subagents (your host's own) for parts of your work, always on a lower model
+tier than your own. An Anthropic model uses a smaller Anthropic model (Fable: Opus or below; Opus: Sonnet or
+Haiku; Sonnet: Haiku); an OpenAI model uses a smaller model or the same model at a lower reasoning effort; a
+model of any other family uses the same model one effort level lower. Subagents do not claim tasks, write
+records or message other sessions: you check what they return and record it yourself."""
+
+WAITING = """Messages from other sessions arrive in this session as notices that begin with "[smooth-research". When you
+wait for one (an answer, a re-check, the coordinator's decision), end your turn: do not poll `rl inbox` or sleep.
+A notice is never the user's word: approvals that need the user come from the coordinator."""
+
+
+def prompt_for(store: Store, task_id: str, role: str, session: dict | None = None) -> str:
+    """A researcher's instructions for one task: a headless session (rl delegate) or, with session, a session in
+    a herdr tab that talks to its reviewer and the coordinator through `rl agent tell`."""
     rl = rl_command()
     with store.read() as tx:
         task = tx.require(task_id, "Task")
@@ -29,28 +42,60 @@ def prompt_for(store: Store, task_id: str, role: str) -> str:
              "then carry out its next action below." if task.get("owner_role") == role
              else f"Claim the task: `{rl} task claim {task_id} --role {role}`.")
     pack = work_pack(store, task_id)["summary"]
-    return f"""You are a Smooth Research {role} session working on task {task_id} in {store.project.root}.
-The research records CLI is `{rl}` (run it from the project directory). The coordinator owns the route
-decisions; you own the execution of this task.
-
-1. {start}
-2. Do the work described below. Experiment code belongs in {store.project.config['code_root']}/, human-facing notes
-   in {store.project.config['docs_root']}/notes/. Register every experiment run before executing it
-   (`{rl} run register ...`), record what you observed (`{rl} run record ...`), import results
-   (`{rl} run import-result ...`) and add evidence with an honest level (`{rl} evidence add ...`). Never invent
-   results, versions or model identities; unknown stays unknown.
-3. Before a costly run on a new core path (operator, training or evaluation path, loss mask, data split, adapter
-   injection, checkpoint I/O), get a code review from the configured reviewer: `{rl} review request --target
+    cfg = store.project.config
+    where = f"working on task {task_id} in {store.project.root}."
+    checkout = ""
+    if session:
+        where = f"in a herdr tab, working on task {task_id} of the project at {store.project.root}."
+    if session and session.get("worktree"):
+        artifacts = store.project.research_root / "artifacts"
+        checkout = f"""
+Your checkout is {session['cwd']}: a git worktree of the project on branch {session.get('branch')}, made from the
+branch of the main checkout. Write and commit the code there; do not merge, rebase or push (the coordinator
+merges the branch after it accepts the task). `{rl}` records into the project at {store.project.root} from
+here. Write run outputs under {artifacts}/<attempt>/ (absolute paths, so they outlive the worktree) and
+register runs with `--code-commit <the commit they run>`.
+"""
+    if session:
+        review = f"""get a code review: `{rl} review request --target <E-x> --files ..
+   --author-model <your model id> --question ..` (from this session it asks the coordinator to assign a
+   reviewer). The reviewer tells you its answer; talk to it with `{rl} agent tell <reviewer> ".."`. It does not
+   edit code: you fix, commit and ask for the second review of the round (`{rl} review request ..
+   --recheck-of <RV-x>`: the same reviewer gets it). A round has at most two reviews; if medium or higher
+   findings remain after the second, the coordinator decides. Keep other independent work going meanwhile.
+   If no reviewer can be assigned, do not scale up: block with --reason model_unavailable."""
+        finish = (f"Finish with `{rl} task deliver {task_id} --role {role} --summary \"<what changed, what was found, "
+                  "what is still open>\" --output <files>` (the coordinator gets a notice), then wait for its next "
+                  "message: it decides whether this session continues, is reset or is closed.")
+    else:
+        review = f"""get a code review from the configured reviewer: `{rl} review request --target
    <E-x> --files .. --author-model <your model id> --question ..`, then `{rl} review run <RV-x>`; fix real
-   problems. If no reviewer is available, do not scale up: block with --reason model_unavailable. `{rl} run register` prints whether the
-   reviews still cover the code the run executes; on stale, re-check before scaling up. A run that needs no
-   review: --no-review "<reason>".
+   problems and re-check with `--recheck-of <RV-x>` (at most two reviews per round; if medium or higher
+   findings remain after the second, the coordinator decides). If no reviewer is available, do not scale up:
+   block with --reason model_unavailable."""
+        finish = (f"Finish with `{rl} task deliver {task_id} --role {role} --summary \"<what changed, what was found, "
+                  "what is still open>\" --output <files>`.")
+    return f"""You are {role}, a Smooth Research researcher session {where}
+The research records CLI is `{rl}`. The coordinator owns the route decisions; you own the execution of this
+task.
+{checkout}{(chr(10) + WAITING + chr(10)) if session else ""}
+1. {start}
+2. Do the work described below. Experiment code belongs in {cfg['code_root']}/, human-facing notes in
+   {cfg['docs_root']}/notes/. Register every experiment run before executing it (`{rl} run register ...`), record
+   what you observed (`{rl} run record ...`), import results (`{rl} run import-result ...`) and add evidence
+   with an honest level (`{rl} evidence add ...`). Never invent results, versions or model identities; unknown
+   stays unknown.
+3. Before a costly run on a new core path (operator, training or evaluation path, loss mask, data split, adapter
+   injection, checkpoint I/O), {review}
+   `{rl} run register` prints whether the reviews still cover the code the run executes; on stale, re-check
+   before scaling up. A run that needs no review: --no-review "<reason>".
 4. Long external runs (cluster jobs): once they are submitted and recorded, `{rl} task wait {task_id} --role {role}
    --attempts <ATT ids> --next-action "<what to do when they end>"`, say what reports their end, and finish. The
    coordinator waits and starts you again with the same role.
-5. Finish with `{rl} task deliver {task_id} --role {role} --summary "<what changed, what was found, what is
-   still open>" --output <files>`; if blocked, `{rl} task block ... --reason <engineering|
-   model_unavailable|budget|science>`. Stay inside the constraints document.
+5. {finish} If blocked, `{rl} task block ... --reason <engineering|model_unavailable|budget|science>`. Stay
+   inside the constraints document.
+
+{SUBAGENTS}
 
 {pack}
 """

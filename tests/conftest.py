@@ -9,6 +9,14 @@ from smooth_research.project import find_project
 from smooth_research.store import Store
 
 
+@pytest.fixture(autouse=True)
+def outside_herdr(monkeypatch):
+    """Tests never reach a real herdr session: the ones that need herdr use a fake one (tests/test_agents.py)."""
+    for key in ("HERDR_ENV", "HERDR_PANE_ID", "HERDR_TAB_ID", "HERDR_WORKSPACE_ID", "SMOOTH_RESEARCH_ROLE",
+                "SMOOTH_RESEARCH_SESSION", "SMOOTH_RESEARCH_CHECKOUT"):
+        monkeypatch.delenv(key, raising=False)
+
+
 @pytest.fixture
 def project(tmp_path, monkeypatch):
     """An initialized project with one hypothesis and one experiment; cwd is the project root."""

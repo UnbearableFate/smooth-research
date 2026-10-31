@@ -372,6 +372,8 @@ research-tree 已有 export_snapshot，但本次未发现完整的 import/restor
 
 稳定的是 role_id、task_id、worktree 和文档，而非必须永久保留某一个聊天上下文。
 
+（2026-10-31 按用户要求增加：协调者在 herdr 里时，researcher、reviewer、advisor 都是协调者经 `rl agent open` 打开的会话，各占一个 tab，用 Claude Code、Codex 或 pi，模型取配置里该角色列表的第一个可用条目。任何会话都可以开宿主自己的子代理，但只用更低一档的模型：Anthropic 的 Fable 用 Opus 及以下、Opus 用 Sonnet 或 Haiku、Sonnet 用 Haiku；OpenAI 用更小的模型或更低的 effort；其他家族用同一模型、effort 降一级。子代理不领取任务、不写记录。见 §21.9。）
+
 ### 7.2 同 session 与跨 session 使用同一任务协议
 
 **同 session**：优先使用宿主原生子代理和完成事件。按任务提供简报，避免默认继承全部研究历史。子代理完成时直接通知任务 owner，普通状态更新不经过 coordinator 二次转发。
@@ -379,6 +381,8 @@ research-tree 已有 export_snapshot，但本次未发现完整的 import/restor
 **跨 session**：由可用宿主适配器启动独立 CLI session，记录精确 session ID、worktree、请求与观测模型、任务所有权。可以接入现有 herdr，亦可采用宿主已支持的进程方式；herdr 不成为研究核心的必需依赖。
 
 两者都使用版本化任务文档与持久消息索引。宿主聊天消息是通知，任务包才是可恢复的工作依据。
+
+（2026-10-31 实施：跨 session 的默认方式是 herdr。每个 researcher 会话有自己的 git worktree，位于 `<项目>/../<项目名>-worktrees/<会话名>`，每个任务一个分支 `sr/<会话名>/<任务>`，由协调者合并。记录的消息照旧进 inbox；收件人有活动会话时，再用 `herdr agent prompt` 送一行通知，并注明来自其他会话、不是用户。不在 herdr 里时，原生子代理、`rl delegate`、`rl review run`、`rl advise run` 照旧可用。见 §21.9。）
 
 ### 7.3 文档消息的最小信封
 
@@ -419,6 +423,8 @@ next_action: "实现预注册的线性读取对照并运行一次冒烟"
 相关任务继续复用当前 session；到自然任务边界、主题明显切换或上下文负担过大时生成 handoff，用同一个 role_id 开新 session。轮换阈值由使用量观测调整，不预先宣称频繁重启一定省钱。
 
 轮换流程为：封存交接并释放任务 → 新 session 领取任务，校验代码和运行记录 → 接续未完成动作。状态未知时应先通过外部工具核对，不能仅凭聊天中断就重派实验。
+
+（2026-10-31 增加：herdr 会话完成一项工作后，由协调者决定复用还是关闭。相关的下一项工作用 `rl agent reset --compact`，无关的用 `--clear`，再 `rl agent assign`。复用的 researcher 保留它的 worktree，切到新任务的分支；有未提交的改动时拒绝切换。不再需要的会话用 `rl agent close` 关闭，tab 一起关掉。）
 
 原生团队只是运行方式。Claude 当前文档仍将 agent teams 标为实验功能，且 /resume 不恢复 in-process teammates；跨 session 恢复因此必须依赖项目记录，而不是假定宿主保留所有队员。[O4]
 
@@ -468,6 +474,8 @@ Reviewer 获取方法定义、代码 diff、必要上下文、关键测试和中
 
 合法的反对意见保留原文。修复后仅复核受影响范围；若意见有争议，绑定一次独立复核，保留分歧与 coordinator 的处理理由，不反复重开直到得到 pass。
 
+（2026-10-31 按用户要求改为轮次：一轮审查最多两次，即第一次加一次复查（代码审查和结论审查都一样）。每条发现标严重度：high 指结果会错或实验无效，medium 指很可能扭曲结果或浪费大量预算，low 指值得修但不改变结论。只剩 low 的 issues 算通过。第二次审查后仍有 medium 以上的问题，就交给协调者：协调者写明理由批准（`rl review approve`），或者退回工作。第三次请求报 LIMIT；要再审，须写明原因开新一轮（`--new-round`）。herdr 里的 reviewer 由协调者分配，只读，补丁写在回答里，由 researcher 修改，二者直接对话。见 §21.9。）
+
 ### 8.6 结论审查（2026-10-30 增加）
 
 代码审查只回答“实现是否忠实于方法”。实验由协调者设计、结果也由它解读时，结论本身同样需要独立核对。以下关键结论在记录前做一次只读、跨模型的结论审查：
@@ -516,6 +524,8 @@ Reviewer 获取方法定义、代码 diff、必要上下文、关键测试和中
 
 （2026-10-31 按用户决定改为多方独立建议：一轮建议里，`models.advisor` 列出的每个模型各有一个工单，同时调用，各自独立回答；默认 `codex:gpt-6-astra@max` 与 `claude:claude-fable-5-1@high`。协调者综合各方建议，决定采纳哪些、怎样修改假说树。每个项目最多 `advice.max_rounds` 轮（默认 3）；用完后要先向用户报告，经用户同意才开新一轮，同意的原话记在工单上。没有任何 advisor 回答的一轮不计数。）
 
+（2026-10-31 按用户要求增加：herdr 里每个 advisor 工单开一个会话。advisor 独立回答，用 `rl agent tell` 与协调者对话，可以修订自己的回答，旧版本保留。协调者拿到最终建议后关闭会话。Codex advisor 会话带网页搜索；headless 的 Claude advisor 开放 WebSearch 和 WebFetch。）
+
 ### 9.3 输入包与输出协议
 
 输入包含目标、精确瓶颈、关键正负证据、已试路线、最接近文献、当前资源上限和具体问题。提供原始工件索引，让顾问可以质疑 coordinator 的解释。
@@ -529,6 +539,8 @@ Reviewer 获取方法定义、代码 diff、必要上下文、关键测试和中
 5. 何种结果会令它停止。
 
 答案保存为建议来源。选择的条目转成新的 Hypothesis/Experiment；建议本身不进入“已支持证据”。超出既有范围或预算的建议提交用户决定。
+
+（2026-10-31 调整输出协议：顾问先评估现状与证据，再广泛检索相关研究（每个来源给出处，并说明是否亲自核对），指出瓶颈，然后给至多三条机制不同的建议，最后建议继续、暂停或停止并说明理由。JSON 块的键为 assessment、bottleneck、related_work、proposals、recommendation、pause_recommended。）
 
 ### 9.4 避免咨询循环
 
@@ -1188,6 +1200,11 @@ GitHub 链接固定到本次读取的提交；外部产品文档按 2026-10-30 �
   - 配置不能加载时，会话开始的提示直接说明错误；
   - 改名后的目录布局用于 init 和工作包。
 - 再增至 61 项（模型选择）：审查者按配置顺序尝试、不看作者模型族；pi 审查者记录会话、模型与费用；一轮建议同时咨询每个 advisor；超出建议轮数须用户同意，未得到回答的一轮不计数；`rl delegate` 按 researcher 列表依次尝试。
+- 再增至 68 项（多 agent 协作，用伪造的 herdr 与 git 仓库）：
+  - researcher 会话的 worktree、分支、brief、在 worktree 中请求审查、交付通知、接受时的合并提示、reset、有未提交改动时拒绝切换、关闭；
+  - reviewer 与 advisor 的实时回答，复查自动交给同一 reviewer，advisor 的修订与他人不能代答；
+  - 启动时停在对话框；没有 herdr；worktree 里没有配置文件时找回主项目；
+  - 一轮两次审查后交给协调者、批准与新一轮；只剩 low 的发现不挡审查；批准前登记的 run 显示此后的批准。
 
 ### 21.6 端到端测试结果（2026-10-30）
 
@@ -1272,3 +1289,35 @@ GitHub 链接固定到本次读取的提交；外部产品文档按 2026-10-30 �
 - 申请量求和的取整。
 
 这 4 处已在 miyabi-mcp 96f2247 修复，并合并到 main。已独立核对：dry-run 结果符合预期，导出字节没有变化。
+
+### 21.9 多 agent 协作：herdr 会话、worktree 与审查轮次（2026-10-31）
+
+用户要求：模型选择统一写在配置里；非协调者角色经 herdr 在单独的 tab 里运行；researcher 在自己的分支和 worktree 里工作；审查和建议都有轮次上限。不清楚的地方问过用户：每个 researcher 会话一个 worktree，每个任务从主分支新建分支；reviewer 只读；子代理用更低一档的模型；保留 headless 方式。
+
+| 项 | 实施 | 原因 |
+| --- | --- | --- |
+| 开会话 | `rl agent open [名字] --role researcher\|reviewer\|advisor [--task T-x\|--ticket RV-x/AD-x]`。先 `herdr tab create --no-focus`，环境变量带上项目、会话、角色和 checkout；再 `herdr agent start`。模型取角色列表里第一个可用的条目；工单有候选时用工单的 | 角色会话看得见、接得过来；分配只经过 CLI |
+| 会话参数 | CLI 只加模型、effort、会话 id 和名字。Claude reviewer 禁用 Edit、Write、NotebookEdit；Codex advisor 加 `--search`。其余参数写在 `agents.args.<host>` 里，Claude 默认 `--permission-mode auto` | 实施时试过用 `danger-full-access` 加 `-a never` 启动 Codex，被 auto 模式的安全检查拒绝。所以 CLI 不加任何绕过沙箱或审批的参数，由用户在配置里决定 |
+| 启动对话框 | `agent start` 返回 `agent_not_ready` 时，报告会话停在对话框，不代为回答 | Claude Code 在新 worktree 里先问是否信任这个文件夹，回答它是用户的事 |
+| worktree | 每个 researcher 会话一个 worktree，在 `<项目>/../<项目名>-worktrees/<会话名>`；每个任务一个分支 `sr/<会话名>/<任务>`，从主 checkout 的分支建。复用的会话保留 worktree，`assign` 时切到新分支，有未提交的改动就拒绝 | 用户要求；并行的 researcher 互不干扰 |
+| 记录位置 | `Project.root`（记录）和 `Project.checkout`（代码）分开。在 linked worktree 里运行 `rl`，记录仍写进主项目；代码路径、审查指纹、run 的代码检查按 checkout 读 | 记录只有一份；审查看的是 researcher 实际写的代码 |
+| 合并 | `rl task accept` 报告分支比 main 多几个提交。协调者用 `git merge --no-ff` 合并，不 squash，不 rebase | 已登记的 run 指向这些提交，改写历史后 code_ref 就找不到了 |
+| 消息与通知 | 记录的消息照旧进 inbox。收件人有活动会话时，再用 `herdr agent prompt` 送一行通知：`[smooth-research MSG-x TYPE from ...]`，并注明来自其他会话、不是用户。协调者的 pane 在 `rl session start` 时记下 | 不用轮询；通知只是指针，消息才是依据；通知不能当作用户的批准 |
+| 复用与关闭 | `rl agent reset --compact\|--clear` 发送宿主的 slash 命令：Claude 用 /compact 或 /clear，Codex 和 pi 用 /compact 或 /new。然后 `rl agent assign` 给下一项工作。`rl agent close` 关 tab、结束会话记录、报告分支状态；`--remove-worktree` 只删没有改动的 worktree | 用户要求由协调者决定复用还是关闭 |
+| 审查 | researcher 会话请求审查时，CLI 给协调者发 NOTE，由协调者分配 reviewer。reviewer 只读，补丁写在回答里，用 `rl review answer` 提交，并直接和 researcher 对话。复查自动交给同一个 reviewer 会话 | 用户要求 |
+| 审查轮次 | 每轮最多两次（`REVIEWS_PER_ROUND`）。发现分 high、medium、low，只剩 low 的 issues 算通过。第二次后仍有 medium 以上，CLI 给协调者发 NOTE 并列入待处理，由协调者用 `rl review approve --rationale` 批准或退回。第三次请求报 LIMIT，新一轮要写 `--new-round` 原因。agent 会话不能批准 | 用户要求；避免无限复查 |
+| 批准之后 | 批准前登记的 run 保留登记时的检查结果；`rl run show`、报告和结论审查包另列此后批准的审查 | 登记时的检查是快照，不改写；读者仍看得到后来的批准 |
+| 建议 | 每个 advisor 工单一个会话。advisor 用 `rl advise answer` 提交，经 `rl agent tell` 和协调者对话，可以修订自己的回答（旧版本留作 revision）。协调者拿到最终建议后关闭会话。输出协议见 §9.3 | 用户要求 |
+| 模型族 | 认得 anthropic、openai、deepseek、google、alibaba、moonshot、zhipu、xai、mistral、meta；名字认不出时看 pi 的 provider 前缀；和作者的模型同名时直接算同族 | 实测时 deepseek 审 deepseek 被记成 `cross_model_unverified` |
+| pi 的实际模型 | 从 `~/.pi/agent/sessions` 里该会话的记录读出（Claude 会话读 `~/.claude/projects`） | 会话里交的回答也要记实际模型 |
+| 子代理 | 见 §7.1 | 用户要求 |
+| headless | 不在 herdr 里时，`rl delegate`、`rl review run`、`rl advise run` 和 Claude 原生 researcher 子代理照旧可用，轮次限制一样 | 用户选择保留 |
+
+**实测**（herdr 0.9.5，pi 会话，模型 `deepseek/deepseek-flash@low`，临时项目）
+1. **T-0001：** `rl agent open researcher-1 --role researcher --task T-0001` 建好 tab 和 worktree。researcher 读 brief，领取任务，写代码，提交，交付。协调者收到 RESULT 通知；`task accept` 给出合并命令。`git merge --no-ff` 之后 `reset --clear`，再 `close --remove-worktree`。
+2. **T-0002 的第一次审查：** researcher 请求代码审查 RV-0001，协调者收到 NOTE 后开了 reviewer-1。reviewer 找出 1 个 medium、3 个 low，直接告诉 researcher；实际模型从 pi 的会话记录核实为 deepseek-flash。researcher 修复后请求复查 RV-0002，CLI 自动交给 reviewer-1。
+3. **轮次上限：** RV-0002 是本轮第二次，仍剩 1 个 medium（run 登记在修复前的提交上），CLI 给协调者发了 NOTE。researcher 取消了旧 attempt，在新提交上重新登记并运行，然后交付，没有自己合并或推送。协调者读了复查之后的改动，批准 RV-0002，接受任务，合并分支，关闭两个会话，删除 worktree。
+4. **中途发现并已修复：**
+   - reviewer 和 researcher 一开始用 sleep 轮询 inbox。brief 里加了一句：结束这一轮，等通知。
+   - deepseek 审 deepseek 被记成跨模型未核实。加了模型族表和同名判断。
+   - 批准前登记的 run 看不到后来的批准。见上表“批准之后”。

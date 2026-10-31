@@ -11,7 +11,7 @@ import json
 import sys
 from pathlib import Path
 
-from . import (adapters, context, delegate, hooks, literature, research, reviews, runs, snapshot, tasks,
+from . import (adapters, agents, context, delegate, hooks, literature, research, reviews, runs, snapshot, tasks,
                view)
 from .project import advice_limit, find_project, model_entries
 from .schema import ENUMS, LINKABLE, PAPER_ASSESSMENTS
@@ -278,10 +278,15 @@ def cmd_review(args):
     if a == "request":
         return reviews.request_review(store, args.target, _list(args.files), args.question,
                                       _list(args.author_model), _list(args.configs), _list(args.deps),
-                                      _list(args.ignore_keys), args.scope or "", args.diff_base, args.recheck_of)
+                                      _list(args.ignore_keys), args.scope or "", args.diff_base, args.recheck_of,
+                                      args.new_round)
     if a == "conclusion":
         return reviews.request_conclusion_review(store, _list(args.target), args.proposal, _list(args.author_model),
-                                                 args.question, args.recheck_of)
+                                                 args.question, args.recheck_of, args.new_round)
+    if a == "answer":
+        return reviews.answer_live(store, args.id, args.answer, args.session)
+    if a == "approve":
+        return reviews.approve(store, args.id, args.rationale)
     if a == "run":
         if args.background:
             return reviews.start_background(store, args.id, args.timeout)
@@ -297,6 +302,8 @@ def cmd_advise(args):
     a = args.action
     if a == "prepare":
         return reviews.prepare_advice(store, args.question, args.target, args.user_approved)
+    if a == "answer":
+        return reviews.answer_live(store, args.id, args.answer, args.session)
     if a == "run":
         if len(args.id) > 1:
             if args.entry:
@@ -334,6 +341,25 @@ def cmd_delegate(args):
     if args.background:
         return delegate.start_background(store, args.task, args.entry, args.role, args.timeout)
     return delegate.delegate(store, args.task, args.entry, args.role, args.timeout)
+
+
+def cmd_agent(args):
+    store = _store(args)
+    a = args.action
+    if a == "open":
+        return agents.open_session(store, args.role, args.name, args.entry, args.task, args.ticket,
+                                   not args.no_worktree, args.base, args.timeout)
+    if a == "assign":
+        return agents.assign(store, args.name, args.task, args.ticket)
+    if a == "tell":
+        return agents.tell(store, args.to, " ".join(args.text), args.sender, args.task)
+    if a == "reset":
+        return agents.reset(store, args.name, "compact" if args.compact else "clear")
+    if a == "close":
+        return agents.close(store, args.name, args.remove_worktree)
+    if a == "brief":
+        return agents.brief(store, args.name)
+    return agents.list_sessions(store, args.all)
 
 
 def cmd_models(args):
@@ -646,7 +672,8 @@ def build_parser() -> argparse.ArgumentParser:
             s.add_argument("--ignore-keys", action="append", help="config keys allowed to vary, e.g. seed,output_dir")
             s.add_argument("--scope")
             s.add_argument("--diff-base")
-            s.add_argument("--recheck-of")
+            s.add_argument("--recheck-of", help="the review this re-checks after fixes (the second of its round)")
+            s.add_argument("--new-round", help="start a new review round, with the coordinator's reason")
             s = ss.add_parser("conclusion", help="check a key conclusion (supported/challenged, a retired route, "
                                                  "a formal recommendation) before recording it")
             s.add_argument("--target", action="append", required=True, help="hypothesis id(s) the conclusion is about")
@@ -654,7 +681,11 @@ def build_parser() -> argparse.ArgumentParser:
             s.add_argument("--author-model", action="append", required=True,
                            help="model(s) that drew the conclusion (you, and a researcher that interpreted results)")
             s.add_argument("--question")
-            s.add_argument("--recheck-of")
+            s.add_argument("--recheck-of", help="the review this re-checks after changes (the second of its round)")
+            s.add_argument("--new-round", help="start a new review round, with the coordinator's reason")
+            s = ss.add_parser("approve", help="the coordinator accepts a review's remaining findings")
+            s.add_argument("id")
+            s.add_argument("--rationale", required=True)
         else:
             s = ss.add_parser("prepare")
             s.add_argument("--question", required=True)
@@ -668,6 +699,10 @@ def build_parser() -> argparse.ArgumentParser:
         s.add_argument("--background", action="store_true")
         s.add_argument("--timeout", type=int, default=1800)
         s.add_argument("--entry", help="override: one model entry <claude|codex|pi>:<model>[@effort]")
+        s = ss.add_parser("answer", help="the answer of a reviewer or advisor session opened with rl agent open")
+        s.add_argument("id")
+        s.add_argument("--answer", required=True, help="file with the answer, ending with its JSON block")
+        s.add_argument("--session", help="the session name (default: this session's)")
         s = ss.add_parser("import")
         s.add_argument("id")
         s.add_argument("--answer", required=True)
@@ -703,6 +738,40 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--fulltext", required=True, choices=ENUMS["fulltext_access"])
     s.add_argument("--digest")
     ss.add_parser("list")
+
+    sp = add("agent", cmd_agent, "agent sessions in herdr tabs: open, assign, tell, reset, close, list, brief")
+    ss = sp.add_subparsers(dest="action", required=True)
+    s = ss.add_parser("open", help="open a researcher, reviewer or advisor session in a new herdr tab")
+    s.add_argument("name", nargs="?", help="session name, e.g. researcher-1 (default: <role>-<n>)")
+    s.add_argument("--role", required=True, choices=agents.ROLE_KINDS)
+    s.add_argument("--entry", help="<claude|codex|pi>:<model>[@effort] (default: the first available entry of "
+                                   "the ticket or of models.<role>)")
+    s.add_argument("--task", help="first assignment of a researcher")
+    s.add_argument("--ticket", help="first assignment of a reviewer (RV-x) or an advisor (AD-x)")
+    s.add_argument("--no-worktree", action="store_true", help="a researcher works in the project directory")
+    s.add_argument("--base", help="where new task branches start (default: the main checkout's branch)")
+    s.add_argument("--timeout", type=int, default=90, help="seconds to wait for the agent to start")
+    s = ss.add_parser("assign", help="give an open session its next assignment")
+    s.add_argument("name")
+    s.add_argument("--task")
+    s.add_argument("--ticket")
+    s = ss.add_parser("tell", help="a recorded message to a role or session; its live session gets a notice")
+    s.add_argument("to", help="coordinator or a session name")
+    s.add_argument("text", nargs="+")
+    s.add_argument("--from", dest="sender", help="default: this session's name, else coordinator")
+    s.add_argument("--task")
+    s = ss.add_parser("reset", help="prepare a session for reuse")
+    s.add_argument("name")
+    g = s.add_mutually_exclusive_group(required=True)
+    g.add_argument("--compact", action="store_true", help="keep a summary of the conversation (/compact)")
+    g.add_argument("--clear", action="store_true", help="start a new conversation (/clear, or /new in Codex and pi)")
+    s = ss.add_parser("close", help="close the session and its herdr tab")
+    s.add_argument("name")
+    s.add_argument("--remove-worktree", action="store_true", help="also remove its worktree when it is clean")
+    s = ss.add_parser("brief", help="what the session does now (read by the session itself)")
+    s.add_argument("name", nargs="?")
+    s = ss.add_parser("list")
+    s.add_argument("--all", action="store_true", help="closed sessions too")
 
     sp = add("delegate", cmd_delegate, "run a ready task in an independent Claude/Codex/pi CLI session")
     sp.add_argument("task")
