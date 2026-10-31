@@ -8,13 +8,11 @@ from __future__ import annotations
 
 from . import documents
 from .project import context_target
-from .research import _front_matter, attention, brief
+from .research import CONTRACT_FIELDS, _front_matter, attention, brief
 from .runs import describe_attempt
 from .store import Store, Tx
 from .tasks import OPEN_STATES
 from .util import RLError, TOKEN_METHOD, estimate_tokens
-
-CONTRACT_KEYS = ("question", "intervention", "comparator", "metric", "scope", "outcome_actions", "budget", "stop")
 
 
 def _doc_text(tx: Tx, store: Store, ref: str | None, limit_chars: int = 6000) -> str:
@@ -34,7 +32,7 @@ def _contract(tx: Tx, store: Store, exp: dict) -> str:
         rev = documents.resolve(tx, exp["contract_ref"])
         path, source = store.project.abs(rev["object_path"]), exp["contract_ref"]
     front = _front_matter(path) if path.exists() else {}
-    fields = "\n".join(f"  {k}: {front.get(k)}" for k in CONTRACT_KEYS if front.get(k) not in (None, "TODO"))
+    fields = "\n".join(f"  {k}: {front.get(k)}" for k in CONTRACT_FIELDS if front.get(k) not in (None, "TODO"))
     return f"{brief(exp)} (contract {source}: {exp['contract_path']})\n{fields}"
 
 

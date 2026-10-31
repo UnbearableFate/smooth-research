@@ -126,10 +126,12 @@ as `--attempt` fill in or override every record.
 
 `spec_digest` names the RunSpec the job ran. Copy `code_ref`, `data_revision` and `metric` from the RunSpec
 exactly (`{{rl}} show RUN-x`), or leave them out: a differently worded field marks the result as not usable for
-the planned comparison. `partial` results never replace a `complete` one; a later import is a new revision. Local paths are read and
+the planned comparison. `arm`, `seed` and `replicate` may be left out too; a manifest that names them names this
+run's. `partial` results never replace a `complete` one, in tables too; a later import is a new revision. Local paths are read and
 digested; remote URIs are only registered ("not read"). Fields that differ from the RunSpec are kept, and the
 result is marked unusable for the pre-specified comparison. `{{rl}} run reject-result RES-x --reason ..` if
-the result itself is wrong.
+the result itself is wrong: the evidence drawn from it, the hypotheses that evidence bears on and the decisions
+based on either are flagged for re-checking.
 
 ## Usage
 
@@ -150,7 +152,8 @@ several `--attempts`; never split it into invented per-run numbers. Different un
 - Pause needs `--reopen-condition`. A paused or retired hypothesis is reopened only by `--action reopen`.
 - Key conclusions (`--set-evidence-status supported|challenged`, `--action stop`, a stage `recommend_formal`):
   `{{rl}} review conclusion --target H-x --proposal .. --author-model ..` first, then `{{rl}} decide ...
-  --based-on EV-x,RV-x` (skill research-review).
+  --based-on EV-x,RV-x` (skill research-review). A review covers the hypotheses it targets: a decision on H-x
+  and H-y needs a passing review of each.
 
 ## Tasks, messages, sessions
 
@@ -160,7 +163,8 @@ several `--attempts`; never split it into invented per-run numbers. Different un
   --role researcher --summary .. --output <files>`, `task wait .. --attempts ATT-x --next-action ..`,
   `task block .. --reason engineering|model_unavailable|budget|science`, `task resume` (also to continue a
   task your role already owns, for example after a WAIT),
-  `task handoff .. --doc research/tasks/T-x-handoff.md` (the task is then ready to claim again).
+  `task handoff .. --doc research/tasks/T-x-handoff.md` (the task is then ready to claim again). Only the
+  owner updates a task, and not after the coordinator accepted or stopped it (`task reopen` gives it back).
 - Coordinator: `{{rl}} inbox --role coordinator` (add `--ack` after reading), `{{rl}} task accept|stop|reopen T-x
   --reason ..`. Stopping a task does not stop external runs: stop them with your tool and record that.
 - Rotating the coordinator: write a handoff note, end your session (`{{rl}} session end S-x`); the new session
@@ -171,7 +175,9 @@ several `--attempts`; never split it into invented per-run numbers. Different un
 `{{rl}} paper search "<query>"` (arXiv; failures are logged as failures) -> `{{rl}} paper add <arXiv id | DOI>
 --fetch` -> `{{rl}} paper link H-x P-y --relation nearest_work|motivated_by|cites --assessment
 search_hit|metadata_checked|fulltext_read|checked [--locator "Sec 3.2, Eq. 4"] [--note-file research/notes/..]`.
-`checked` needs a locator. "No identical method found" is not a novelty proof.
+`checked` needs a locator. Linking the same claim again updates its assessment, locator and note; after
+`{{rl}} hypothesis revise`, link it again: the new revision gets its own link. "No identical method found" is not a
+novelty proof.
 
 ## Views, backups, integrity
 

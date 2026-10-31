@@ -272,6 +272,8 @@ def _coordinator(store: Store, quiet: bool = False) -> str | None:
 def _remember(store: Store, s: dict, event: tuple | None = None, **changes) -> None:
     """Keep the watcher's notes about a session (in Session.watch), with an event when it acted."""
     memo = {**(s.get("watch") or {}), **changes}
+    if memo == (s.get("watch") or {}) and not event:
+        return  # nothing new: no write, so an idle project's data_version stays put
     with store.write() as tx:
         tx.update(s["id"], {"watch": memo})
         if event:

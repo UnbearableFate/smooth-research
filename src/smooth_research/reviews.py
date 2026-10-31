@@ -31,13 +31,14 @@ from .context import advice_pack, _contract
 from .herdr import caller_role
 from .project import advice_limit, usable_entries
 from .research import brief, review_mark, review_passes
+from .schema import ENUMS
 from .runs import code_review_summary, evidence_attempts
 from .store import Store, Tx
 from .util import RLError, digest_bytes, digest_file, digest_json, now_utc, short
 from .view import _arm_table
 
 REVIEWS_PER_ROUND = 2
-SEVERITIES = ("none", "low", "medium", "high")
+SEVERITIES = ENUMS["severity"]  # in rising order
 IMPACT_SEVERITY = {"result_error": "high", "invalid_experiment": "high", "overclaim": "high", "data_mismatch": "high",
                    "resource_waste": "medium", "wrong_level": "medium", "out_of_scope": "medium",
                    "unruled_alternative": "medium", "nonblocking": "low"}
@@ -184,33 +185,39 @@ def _route(store: Store, rid: str, recheck_of: str | None, requester: str | None
     return f"; the coordinator is asked to assign a reviewer ({msg['id']}" + (f", notice sent to {target})" if target else ")")
 
 
-def _worker_alive(ticket: dict) -> bool:
-    pid = (ticket.get("calls") or [{}])[-1].get("pid") if ticket.get("calls") else None
-    if not pid:
-        return False
+def _worker(ticket: dict) -> int | None:
+    """The pid of another live process that holds the ticket: its claim is the last entry of calls."""
+    pid = (ticket.get("calls") or [{}])[-1].get("pid") if ticket.get("status") == "running" else None
+    if not pid or pid == os.getpid():
+        return None
     try:
         os.kill(pid, 0)
-        return True
     except OSError:
-        return False
+        return None
+    try:  # a reused pid belongs to a process that is not running this ticket
+        return pid if ticket["id"].encode() in Path(f"/proc/{pid}/cmdline").read_bytes() else None
+    except OSError:
+        return pid
 
 
 def _spawn(store: Store, ticket_id: str, timeout: int) -> tuple[subprocess.Popen, Path]:
     log = store.project.dir("calls") / f"{ticket_id}.worker.log"
     cmd = [sys.executable, "-m", "smooth_research", "--project", str(store.project.root),
            "review" if ticket_id.startswith("RV") else "advise", "run", ticket_id, "--timeout", str(timeout)]
-    with open(log, "ab") as out:
+    with open(log, "ab") as out:  # the worker claims the ticket itself (run_ticket)
         proc = subprocess.Popen(cmd, stdout=out, stderr=out, stdin=subprocess.DEVNULL, start_new_session=True,
                                 cwd=store.project.root)
-    with store.write() as tx:
-        t = tx.require(ticket_id, "Ticket")
-        tx.update(ticket_id, {"status": "running", "calls": (t.get("calls") or []) + [
-            {"pid": proc.pid, "started_at": now_utc(), "background": True}]})
     return proc, log
 
 
 def start_background(store: Store, ticket_id: str, timeout: int) -> dict:
     """Run the call in a detached worker process; `rl review show` / `rl advise show` report the outcome."""
+    with store.read() as tx:
+        t = tx.require(ticket_id, "Ticket")
+    if t["status"] == "answered" or _worker(t):
+        return {"id": ticket_id, "summary": f"{ticket_id} " + (f"already answered ({t.get('verdict') or 'see answer'})"
+                                                               if t["status"] == "answered" else
+                                                               f"is being answered by process {_worker(t)}")}
     proc, log = _spawn(store, ticket_id, timeout)
     return {"id": ticket_id, "pid": proc.pid, "log": store.project.rel(log),
             "summary": f"{ticket_id} running in background (pid {proc.pid}); check with "
@@ -235,19 +242,25 @@ def run_many(store: Store, ticket_ids: list[str], timeout: int, background: bool
 
 
 def run_ticket(store: Store, ticket_id: str, timeout: int = 1800, only: str | None = None) -> dict:
-    """Try the ticket's entries in order and record every attempt; the first parseable answer is kept."""
-    with store.read() as tx:
+    """Try the ticket's entries in order and record every attempt; the first parseable answer is kept. The process
+    claims the ticket first, so a second run does not call the models again while this one works."""
+    chosen = [adapters.Entry.parse(only)] if only else None
+    with store.write() as tx:
         t = tx.require(ticket_id, "Ticket")
         if not t.get("request_ref"):
             raise RLError("INVALID", f"{ticket_id} has no request package; prepare it again")
         request_path = store.project.abs(tx.require(t["request_ref"], "DocRevision")["object_path"])
+        calls = [c for c in (t.get("calls") or []) if "pid" not in c]  # without the claims of earlier workers
+        if t["status"] != "answered":
+            if holder := _worker(t):
+                raise RLError("CONFLICT", f"{ticket_id} is being answered by process {holder}; see `rl "
+                                          f"{'review' if ticket_id.startswith('RV') else 'advise'} show {ticket_id}`")
+            tx.update(ticket_id, {"status": "running",
+                                  "calls": calls + [{"pid": os.getpid(), "started_at": now_utc()}]})
     if t["status"] == "answered":
         return {"id": ticket_id, "summary": f"{ticket_id} already answered ({t.get('verdict') or 'see answer'})"}
-    candidates = [adapters.Entry.parse(c) for c in (t.get("candidates") or [])]
-    if only:
-        candidates = [adapters.Entry.parse(only)]
+    candidates = chosen or [adapters.Entry.parse(c) for c in (t.get("candidates") or [])]
     authors = list(t.get("author_models") or [])
-    calls = [c for c in (t.get("calls") or []) if not c.get("background")]
     # The package goes in the prompt. A code review's package names the files, which the reviewer reads where
     # they are (in the requester's checkout, which may be a worktree outside the project).
     checkout = t.get("code_checkout")
@@ -454,7 +467,7 @@ def show(store: Store, ticket_id: str | None, kind: str) -> dict:
         tickets = [tx.require(ticket_id, "Ticket")] if ticket_id else tx.all("Ticket", kind=kind)
     lines = []
     for t in tickets:
-        alive = " (worker not running: run again)" if t["status"] == "running" and not _worker_alive(t) else ""
+        alive = " (worker not running: run again)" if t["status"] == "running" and not _worker(t) else ""
         lines.append(f"{brief(t)}{alive}")
         for key in ("target_id", "relation", "requested_entry", "observed_model", "host_session_id", "summary",
                     "round_of", "round_index", "round_reason", "requested_by", "assigned_session", "answered_by",
@@ -477,10 +490,19 @@ def _strip(value, keys: set):
     return value
 
 
+def _plain(value):
+    """A parsed config as JSON holds it: dates, binary values and keys that are not strings become strings."""
+    if isinstance(value, dict):
+        return {str(k): _plain(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_plain(v) for v in value]
+    return value if value is None or isinstance(value, (str, int, float, bool)) else str(value)
+
+
 def _config_digest(path: str, data: bytes, ignore_keys: list[str]) -> str:
     try:
         loaded = (json.loads if Path(path).suffix == ".json" else yaml.safe_load)(data.decode("utf-8"))
-        return digest_json(_strip(loaded, set(ignore_keys)))
+        return digest_json(_strip(_plain(loaded), set(ignore_keys)))
     except (ValueError, yaml.YAMLError):
         return digest_bytes(data)  # not structured: the whole file counts
 

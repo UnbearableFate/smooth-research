@@ -546,3 +546,75 @@ def test_a_run_from_a_commit_is_checked_against_that_commit(project, fakes, tmp_
     assert runs.register(project, "E-0001", SPEC, "c2")["code_review"]["status"] == "stale"  # the working tree
     elsewhere = runs.register(project, "E-0001", {**SPEC, "code_ref": {"commit": "f" * 40}}, "c3")["code_review"]
     assert elsewhere["status"] == "unchecked" and "not in this repository" in elsewhere["reason"]
+
+
+DATED = "lr: 0.1\nseed: {seed}\nsnapshot: {day}\nstarted: 2026-10-01T08:00:00Z\n3: three\n"
+
+
+def test_a_config_with_dates_and_number_keys_is_compared_like_any_other(project, fakes, tmp_path):
+    from conftest import SPEC
+    code(tmp_path)
+    rv = request(project)
+    (tmp_path / "configs/run.yaml").write_text(DATED.format(seed=0, day="2026-10-01"))  # before the answer came
+    out = reviews.run_ticket(project, rv["id"])
+    assert out["verdict"] == "pass" and "configs/run.yaml changed after the request" in out["summary"]
+    dated = request(project)
+    assert reviews.run_ticket(project, dated["id"])["verdict"] == "pass"
+    (tmp_path / "configs/run.yaml").write_text(DATED.format(seed=7, day="2026-10-01"))  # only the ignored key
+    assert request(project)["reused_from"] == dated["id"]
+    assert runs.register(project, "E-0001", SPEC, "d1")["code_review"]["status"] == "covered"
+    (tmp_path / "configs/run.yaml").write_text(DATED.format(seed=7, day="2026-10-02"))
+    assert runs.register(project, "E-0001", {**SPEC, "seed": 1}, "d2")["code_review"]["status"] == "stale"
+
+
+def test_one_process_at_a_time_answers_a_ticket(project, fakes, tmp_path):
+    import subprocess
+    import sys
+    code(tmp_path)
+    rv = request(project)["id"]
+
+    def held_by(proc):
+        with project.write() as tx:
+            tx.update(rv, {"status": "running", "calls": [{"pid": proc.pid, "started_at": "2026-10-31T00:00:00Z"}]})
+
+    sleep = [sys.executable, "-c", "import time; time.sleep(60)"]
+    worker = subprocess.Popen(sleep + [rv])  # a worker names its ticket on its command line
+    try:
+        held_by(worker)
+        with pytest.raises(RLError) as exc:
+            reviews.run_ticket(project, rv)
+        assert exc.value.code == "CONFLICT" and f"being answered by process {worker.pid}" in exc.value.message
+        assert f"being answered by process {worker.pid}" in reviews.start_background(project, rv, 60)["summary"]
+        assert "worker not running" not in reviews.show(project, rv, "review")["summary"]
+    finally:
+        worker.kill()
+        worker.wait()
+    assert "worker not running: run again" in reviews.show(project, rv, "review")["summary"]
+    other = subprocess.Popen(sleep)  # the pid now belongs to another program
+    try:
+        held_by(other)
+        assert reviews.run_ticket(project, rv)["verdict"] == "pass"
+    finally:
+        other.kill()
+        other.wait()
+    background = reviews.start_background(project, rv, 60)
+    assert "already answered" in background["summary"] and "pid" not in background
+    with project.read() as tx:
+        t = tx.require(rv)
+    assert t["status"] == "answered" and [c for c in t["calls"] if "pid" in c] == []
+
+
+def test_a_conclusion_review_covers_only_the_hypotheses_it_reviewed(project, fakes):
+    research.add_hypothesis(project, "WD helps more", "weight decay helps more under 40% noise", "toy")
+    ev = evidence(project)
+    rv = reviews.request_conclusion_review(project, ["H-0001"], "H-0001 is supported", ["claude-opus-5-5"])["id"]
+    reviews.run_ticket(project, rv)
+    other = research.decide(project, ["H-0002"], "continue", "x", [ev, rv], set_evidence_status="supported")
+    assert other["conclusion_review_gap"] == f"no passing conclusion review covers H-0002 ({rv} reviewed H-0001)"
+    both = research.decide(project, ["H-0001", "H-0002"], "continue", "y", [ev, rv], set_evidence_status="supported")
+    assert both["conclusion_review_gap"] == other["conclusion_review_gap"]
+    with project.read() as tx:
+        items = [i for i in research.attention(tx) if "key conclusion" in i]
+    assert len(items) == 1 and items[0].startswith(f"{both['id']} key conclusion on H-0001, H-0002: no passing")
+    assert research.decide(project, ["H-0001"], "continue", "z", [ev, rv],
+                           set_evidence_status="supported")["conclusion_review_gap"] is None

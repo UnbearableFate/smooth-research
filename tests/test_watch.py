@@ -173,6 +173,18 @@ def test_an_idle_coordinator_is_reminded_once_of_messages_unread_for_a_round(pro
     assert "inbox --role coordinator" in reminders(herdr_log, "w1:p99")[-1]
 
 
+def test_a_round_with_nothing_new_writes_nothing(project, herdr_log):
+    tasks.start_session(project, "coordinator", "claude")
+    agents.open_session(project, "reviewer")
+    watch.check(project)  # the first round takes note of the coordinator's inbox
+    with project.read() as tx:
+        before = tx.meta()["data_version"]
+    watch.check(project)
+    watch.check(project)
+    with project.read() as tx:
+        assert tx.meta()["data_version"] == before  # an idle project keeps its data_version
+
+
 def test_the_watcher_loop_leaves_when_replaced_and_ends_when_no_session_is_open(project, herdr_log, monkeypatch, rl):
     tasks.start_session(project, "coordinator", "claude")
     opened = agents.open_session(project, "reviewer")

@@ -43,6 +43,8 @@ smooth-research skill: {{rl_short}}
    - The package names the files; the reviewer reads them where they are. Leave them unchanged until the
      answer: an answer given while they changed is recorded but does not count, and its re-check
      (`--recheck-of RV-x`) takes its place in the round.
+   - One process at a time answers a ticket: while a worker answers it, `review run` refuses and
+     `review show RV-x` names the process.
 3. Read the answer in `research/reviews/RV-x.md`: verdict pass | issues |
    blocking, findings with severity, location, evidence, impact, fix, verification, plus what was and was
    not checked.
@@ -76,8 +78,9 @@ smooth-research skill: {{rl_short}}
    Then `{{rl}} decide ... --based-on EV-x,RV-x`. A finding you dispute stays in the record; ask for one
    re-check (`--recheck-of RV-x`) if it matters. When medium or higher findings remain after the re-check,
    approve the round with your reason or change the conclusion.
-4. A key decision without an answered conclusion review stays in `{{rl}} status` attention until one is
-   linked: `{{rl}} link D-x based_on RV-x`. An unavailable or blocking review is not a pass.
+4. A key decision without a passing conclusion review stays in `{{rl}} status` attention until one is
+   linked: `{{rl}} link D-x based_on RV-x`. An unavailable or blocking review is not a pass. A review covers
+   only the hypotheses it targets (`--target`): a decision on two hypotheses needs a review of each.
 
 ## Notes
 

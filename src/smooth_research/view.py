@@ -128,7 +128,8 @@ def arm_rows(tx: Tx, exp_id: str) -> tuple[list[str], list[dict]]:
             results = [r for r in tx.all("Result", attempt_id=att["id"]) if r["status"] != "rejected"]
             if not results:
                 continue
-            latest = results[-1]
+            # a partial result never replaces a complete one
+            latest = ([r for r in results if r["status"] == "complete"] or results)[-1]
             if not latest.get("usable_for_planned_comparison", True):
                 arm["mismatch"] += 1
                 continue
@@ -171,9 +172,9 @@ def conclusion_checks(tx: Tx, decisions: list[dict]) -> dict[str, str]:
     """For each decision on a key conclusion: the conclusion reviews that back it, or why none does."""
     checks = {}
     for d in decisions:
-        if key_hypotheses(tx, d):
+        if hyps := key_hypotheses(tx, d):
             revs = conclusion_reviews(tx, [e["id"] for e in tx.out(d["id"], "based_on")])
-            checks[d["id"]] = review_gap(revs) or "conclusion review " + ", ".join(
+            checks[d["id"]] = review_gap(tx, revs, hyps) or "conclusion review " + ", ".join(
                 f"{t['id']} {review_mark(t)}" + (f" ({t['relation']})" if t.get("relation") else "")
                 for t in revs if t["status"] == "answered")
     return checks

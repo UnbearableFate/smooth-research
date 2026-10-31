@@ -11,7 +11,7 @@ import os
 
 from . import documents, herdr
 from .store import Store, Tx
-from .util import RLError, digest_json
+from .util import RLError, digest_json, now_utc
 
 COORDINATOR = "coordinator"
 OPEN_STATES = ("ready", "active", "waiting", "blocked", "delivered")
@@ -35,7 +35,7 @@ def start_session(store: Store, role: str, host: str, host_session_id: str | Non
         if role == COORDINATOR:
             for s in tx.all("Session", status="active"):
                 if s["role_id"] == COORDINATOR:
-                    tx.update(s["id"], {"status": "superseded", "ended_at": tx.meta()["updated_at"]})
+                    tx.update(s["id"], {"status": "superseded", "ended_at": now_utc()})
         tx.create("Session", {"id": sid, "role_id": role, "host": host, "host_session_id": host_session_id,
                               "model_requested": model_requested, "model_observed": model_observed,
                               "effort": effort, "worktree": worktree, "status": "active", "herdr_pane": pane,
@@ -48,7 +48,7 @@ def end_session(store: Store, sid: str) -> dict:
     with store.write() as tx:
         s = tx.require(sid, "Session")
         if s["status"] == "active":
-            tx.update(sid, {"status": "ended", "ended_at": tx.meta()["updated_at"]})
+            tx.update(sid, {"status": "ended", "ended_at": now_utc()})
         tx.event("session.end", sid, s["role_id"])
     return {"id": sid, "summary": f"{sid} ended (running external work is not affected)"}
 
@@ -157,21 +157,31 @@ def claim(store: Store, tid: str, role: str, session: str | None = None) -> dict
                           current={k: task.get(k) for k in ("state", "owner_role", "owner_session", "next_action")})
         open_deps = [d["id"] for d in tx.out(tid, "depends_on")
                      if d["label"] == "Task" and tx.require(d["id"])["state"] not in ("delivered", "accepted")]
+        # the branch to merge is the claimant's: another session may have been assigned the task before
+        mine = [s for s in tx.all("Session", status="active")
+                if s.get("role_id") == role and s.get("assignment") == tid]
         tx.update(tid, {"state": "active", "owner_role": role, "owner_session": session,
-                        "revision": task["revision"] + 1})
+                        "branch": mine[-1].get("branch") if mine else None, "revision": task["revision"] + 1})
         tx.event("task.claimed", tid, role)
     warn = f"; waiting dependencies: {', '.join(open_deps)}" if open_deps else ""
     return {"id": tid, "summary": f"{tid} claimed by {role}{warn}"}
 
 
-def _owner_write(store: Store, tid: str, docs: list[str], doc_type: str, fn) -> dict:
-    """Seal the documents and apply fn in one write; only a claimed task takes owner updates."""
+def _owner_write(store: Store, tid: str, docs: list[str], doc_type: str, from_role: str, fn) -> dict:
+    """Seal the documents and apply fn in one write. Only the task's owner updates it, and not after the
+    coordinator accepted or stopped it."""
     preps = [documents.prepare(store.project, d, doc_type) for d in docs]
     with store.write() as tx:
         task = tx.require(tid, "Task")
         if not task.get("owner_role"):
             raise RLError("CONFLICT", f"{tid} is {task['state']} and has no owner; claim it first "
                                       f"(rl task claim {tid} --role <role>)", current_state=task["state"])
+        if task["owner_role"] != from_role:
+            raise RLError("CONFLICT", f"{tid} is owned by {task['owner_role']}, not {from_role}: only its owner "
+                                      "updates it", current_state=task["state"])
+        if task["state"] in ("accepted", "stopped"):
+            raise RLError("CONFLICT", f"{tid} is {task['state']}: the coordinator closed it, and reopens it if it "
+                                      f"needs more work (rl task reopen {tid})", current_state=task["state"])
         return fn(tx, task, [documents.register(tx, p) for p in preps])
 
 
@@ -204,7 +214,7 @@ def progress(store: Store, tid: str, state: str, from_role: str, summary: str | 
         return {"id": tid, "outputs": refs, "message": msg,
                 "summary": f"{tid} -> {state}" + (f" outputs {', '.join(refs)}" if refs else "")}
 
-    out = _owner_write(store, tid, list(outputs), "task_output", apply)
+    out = _owner_write(store, tid, list(outputs), "task_output", from_role, apply)
     out["summary"] += _notice(store, out.pop("message"))
     return out
 
@@ -220,7 +230,7 @@ def handoff(store: Store, tid: str, doc: str, from_role: str, to_role: str | Non
         return {"id": tid, "handoff_ref": refs[0], "message": msg,
                 "summary": f"{tid} handed off ({refs[0]}); ready to claim"}
 
-    out = _owner_write(store, tid, [doc], "handoff", apply)
+    out = _owner_write(store, tid, [doc], "handoff", from_role, apply)
     out["summary"] += _notice(store, out.pop("message"))
     return out
 

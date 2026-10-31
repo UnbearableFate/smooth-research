@@ -24,9 +24,6 @@ class RLError(Exception):
         self.message = message
         self.details = details
 
-    def as_dict(self) -> dict:
-        return {"error": self.code, "message": self.message, **({"details": self.details} if self.details else {})}
-
 
 def now_utc() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")

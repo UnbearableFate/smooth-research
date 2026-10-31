@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .project import Project
-from .research import brief, prepare_contract, seal_contract
+from .research import brief, prepare_contract, recheck_dependents, seal_contract
 from .schema import ENUMS
 from .store import Store, Tx
 from .util import RLError, digest_file, digest_json, now_utc, parse_time, short
@@ -272,7 +272,7 @@ def record(store: Store, obs: dict) -> dict:
     warnings = []
     ref = obs.get("execution_ref")
     if ref and ref.get("kind") == "local_process" and str(ref.get("opaque_id", "")).isdigit() \
-            and ref.get("executor_namespace", "").count(":") < 1:
+            and (ref.get("executor_namespace") or "").count(":") < 1:
         warnings.append("a bare PID is not unique: include host and boot/start identity in executor_namespace")
     with store.write() as tx:
         existing = tx.get(obs["record_id"], "Observation")
@@ -354,6 +354,10 @@ def _mismatches(spec: dict, spec_digest: str, manifest: dict) -> tuple[list[dict
             unreported.append(field)
         elif actual != expected:
             found.append({"field": field, "expected": expected, "actual": actual})
+    for field in ("arm", "seed", "replicate"):  # which run it is: compared when the manifest names it
+        expected, actual = spec.get(field), manifest.get(field)
+        if expected is not None and actual is not None and str(actual) != str(expected):
+            found.append({"field": field, "expected": expected, "actual": actual})
     return found, unreported
 
 
@@ -412,13 +416,17 @@ def import_result(store: Store, attempt: str, manifest: dict, request_id: str) -
 
 
 def reject_result(store: Store, result_id: str, reason: str) -> dict:
+    """What rests on the result (the evidence drawn from it, their hypotheses, decisions based on either) is
+    marked for re-checking; whether it still holds is the researcher's judgment."""
     with store.write() as tx:
         res = tx.require(result_id, "Result")
         tx.update(result_id, {"status": "rejected", "rejected_reason": reason, "usable_for_planned_comparison": False})
         results = tx.all("Result", attempt_id=res["attempt_id"])
         tx.update(res["attempt_id"], {"result_status": _best(results)})
+        flagged = recheck_dependents(tx, result_id, f"{result_id} rejected: {reason}")
         tx.event("run.reject_result", result_id, reason)
-    return {"result": result_id, "summary": f"{result_id} rejected: {reason}"}
+    return {"result": result_id, "flagged": flagged,
+            "summary": f"{result_id} rejected: {reason}" + (f"; re-check {', '.join(flagged)}" if flagged else "")}
 
 
 # -- usage ----------------------------------------------------------------------------------------------------

@@ -294,16 +294,24 @@ def set_evidence(store: Store, evid: str, validity: str, reason: str) -> dict:
         tx.update(evid, {"validity": validity, "validity_reason": reason})
         flagged = []
         if validity != ev["validity"] and (validity == "invalid" or ev["validity"] == "valid"):
-            for e in tx.out(evid):
-                if e["rel"] in ("supports", "challenges"):
-                    tx.update(e["id"], {"needs_recheck": True, "recheck_reason": f"{evid} now {validity}: {reason}"})
-                    flagged.append(e["id"])
-            for e in tx.inc(evid, "based_on"):
-                tx.update(e["id"], {"needs_recheck": True, "recheck_reason": f"{evid} now {validity}: {reason}"})
-                flagged.append(e["id"])
+            flagged = recheck_dependents(tx, evid, f"{evid} now {validity}: {reason}")
         tx.event("evidence.validity", evid, f"{validity}: {reason}")
     return {"id": evid, "flagged": flagged,
             "summary": f"{evid} -> {validity}" + (f"; re-check {', '.join(flagged)}" if flagged else "")}
+
+
+def recheck_dependents(tx: Tx, source: str, reason: str) -> list[str]:
+    """Mark for re-checking what rests on a record that no longer holds: the hypotheses an evidence supports or
+    challenges and the decisions based on it; for a result, also what rests on the evidence drawn from it."""
+    sources = [source] + ([e["id"] for e in tx.inc(source, "from_result")] if label_of(source) == "Result" else [])
+    flagged = []
+    for sid in sources:
+        rests = [e["id"] for e in tx.out(sid) if e["rel"] in ("supports", "challenges")]
+        for rid in rests + [e["id"] for e in tx.inc(sid, "based_on")]:
+            if rid not in flagged:
+                tx.update(rid, {"needs_recheck": True, "recheck_reason": reason})
+                flagged.append(rid)
+    return flagged
 
 
 def _is_key(kind: str, action: str, evidence_status: str | None) -> bool:
@@ -345,10 +353,17 @@ def review_mark(t: dict) -> str:
     return out + (", approved by the coordinator" if t.get("approved") else "")
 
 
-def review_gap(reviews: list[dict]) -> str | None:
-    """Why a key conclusion has no passing independent check, or None when a cited review passes."""
-    if any(review_passes(t) for t in reviews):
+def review_gap(tx: Tx, reviews: list[dict], hyps: list[str]) -> str | None:
+    """Why a key conclusion on hyps has no passing independent check, or None when each of them has one: a cited
+    conclusion review of that hypothesis that passes."""
+    passing = [t for t in reviews if review_passes(t)]
+    covered = {e["id"] for t in passing for e in tx.out(t["id"], "targets")}
+    missing = [h for h in hyps if h not in covered]
+    if not missing:
         return None
+    if passing:
+        return (f"no passing conclusion review covers {', '.join(missing)} ({', '.join(t['id'] for t in passing)} "
+                f"reviewed {', '.join(sorted(covered)) or 'no hypothesis'})")
     if reviews:
         last = reviews[-1]
         return f"conclusion review {last['id']} is {review_mark(last)}, not a pass"
@@ -404,7 +419,7 @@ def decide(store: Store, targets: list[str], action: str, rationale: str, based_
             tx.link("based_on", did, ref)
         key = _is_key(kind, action, set_evidence_status)
         hyps = [r["id"] for r in records if r["_label"] == "Hypothesis"] if key else []
-        gap = review_gap(conclusion_reviews(tx, list(based_on))) if hyps else None
+        gap = review_gap(tx, conclusion_reviews(tx, list(based_on)), hyps) if hyps else None
         tx.event("decision", did, f"{action} {', '.join(targets)}: {rationale}")
     note = (f"\nkey conclusion on {', '.join(hyps)}: {gap}; before relying on it: {_review_hint(hyps, did)}"
             if gap else "")
@@ -517,9 +532,9 @@ def attention(tx: Tx) -> list[str]:
         for hid in key_hypotheses(tx, d):
             standing[hid] = d
     for did in sorted({d["id"] for d in standing.values()}):
-        gap = review_gap(conclusion_reviews(tx, [e["id"] for e in tx.out(did, "based_on")]))
+        hyps = sorted(h for h, d in standing.items() if d["id"] == did)
+        gap = review_gap(tx, conclusion_reviews(tx, [e["id"] for e in tx.out(did, "based_on")]), hyps)
         if gap:
-            hyps = [h for h, d in standing.items() if d["id"] == did]
             items.append(f"{did} key conclusion on {', '.join(hyps)}: {gap} — {_review_hint(hyps, did)}")
     return items
 

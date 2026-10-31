@@ -15,7 +15,7 @@ from contextlib import contextmanager
 from typing import Any, Iterator
 
 from latticedb import Database
-from latticedb._bindings import LatticeDatabaseLockedError
+from latticedb import LatticeDatabaseLockedError
 
 from .project import Project
 from .schema import ENTITIES, ENUMS, PREFIX_LABEL, RELATIONS, SCHEMA_VERSION
@@ -197,17 +197,23 @@ class Tx:
         if source == target:
             raise RLError("INVALID", f"{rel} cannot link {source} to itself")
         existing = [e for e in self.out(source, rel, s_label) if e["id"] == target]
-        if existing and (not spec.revision_bound or any(e.get("revision") == props.get("revision") for e in existing)):
-            return  # a repeated link is a no-op; a link to a new revision of the target is a new edge
+        if existing and not spec.revision_bound:
+            return  # a repeated link is a no-op
+        bound = {k: props.get(k) for k in ("revision", "source_revision")}
+        same = [e for e in existing if all(e.get(k) == v for k, v in bound.items())]
+        if same:  # the same revision linked again: the edge takes the new description (assessment, locator, note)
+            changed = {k: v for k, v in props.items() if k not in bound and v is not None and same[0].get(k) != v}
+            if changed:
+                where = " AND ".join(f"e.{k} = ${k}" if v is not None else f"e.{k} IS NULL" for k, v in bound.items())
+                self.q(f"MATCH (a:{s_label} {{id: $s}})-[e:{spec.edge}]->(b:{t_label} {{id: $t}}) WHERE {where} "
+                       f"SET {', '.join(f'e.{k} = $new_{k}' for k in changed)}", s=source, t=target,
+                       **{k: v for k, v in bound.items() if v is not None},
+                       **{f"new_{k}": v for k, v in changed.items()})
+            return
         if spec.acyclic and self.reachable(target, t_label, rel, source):
             raise RLError("CONFLICT", f"{rel} {source} -> {target} would create a cycle")
         clean = {k: v for k, v in props.items() if v is not None}
         self.txn.create_edge(s, t, spec.edge, properties=clean or None)
-
-    def unlink(self, rel: str, source: str, target: str) -> None:
-        self._need_write()
-        s_label, t_label = label_of(source), label_of(target)
-        self.txn.delete_edge(self._node(s_label, source), self._node(t_label, target), RELATIONS[rel].edge)
 
     def reachable(self, start: str, start_label: str, rel: str, goal: str) -> bool:
         seen, frontier = {start}, [(start, start_label)]

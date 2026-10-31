@@ -131,6 +131,40 @@ def test_re_execution_is_a_new_attempt_and_keeps_the_failure(project):
         register(project, request_id="r1-changed", spec={**SPEC, "seed": 9}, run="RUN-0001")
 
 
+def test_the_tables_show_the_complete_result_until_it_is_rejected(project):
+    from smooth_research import view
+    register(project)
+    runs.record(project, obs(state="ended", outcome="success"))
+    complete = runs.import_result(project, "ATT-0001-1", {"status": "complete", "metrics": {"acc": 0.9}}, "c1")
+    runs.import_result(project, "ATT-0001-1", {"status": "partial", "metrics": {"acc": 0.1}}, "p1")
+
+    def cells():
+        with project.read() as tx:
+            return view.arm_rows(tx, "E-0001")[1][0]["cells"]
+
+    assert cells() == ["0.9 (n=1)"]  # a late partial upload does not replace the complete result
+    runs.reject_result(project, complete["result"], "wrong labels")
+    assert cells() == ["0.1 (n=1)"]
+    runs.import_result(project, "ATT-0001-1", {"status": "complete", "metrics": {"acc": 0.85}}, "c2")
+    assert cells() == ["0.85 (n=1)"]
+
+
+def test_a_result_that_names_another_arm_or_seed_is_kept_but_not_usable(project):
+    from smooth_research import research
+    register(project)
+    runs.record(project, obs(state="ended", outcome="success"))
+    wrong = runs.import_result(project, "ATT-0001-1", {"status": "complete", "arm": "control", "seed": 99,
+                                                       "metrics": {"acc": 0.9}}, "w1")
+    assert [m["field"] for m in wrong["mismatches"]] == ["arm", "seed"] and "differs from RunSpec" in wrong["summary"]
+    with pytest.raises(RLError, match="cannot be confirmatory"):
+        research.add_evidence(project, "wd wins", "confirmatory", "valid", supports=["H-0001"],
+                              results=[wrong["result"]])
+    named = runs.import_result(project, "ATT-0001-1", {"status": "complete", "arm": "wd", "seed": "0",
+                                                       "metrics": {"acc": 0.8}}, "w2")
+    unnamed = runs.import_result(project, "ATT-0001-1", {"status": "complete", "metrics": {"acc": 0.7}}, "w3")
+    assert named["mismatches"] == unnamed["mismatches"] == []
+
+
 def test_result_mismatch_remote_uris_partial_and_late_results(project, tmp_path):
     register(project)
     metrics = tmp_path / "research" / "artifacts" / "m.json"

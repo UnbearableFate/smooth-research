@@ -1222,6 +1222,7 @@ GitHub 链接固定到本次读取的提交；外部产品文档按 2026-10-30 �
   - Markdown 草稿：刷新记录块、保留正文、列出还要写的节、报告被删掉的块；
   - LaTeX 草稿：转义和符号映射，用伪造的编译命令测试成功、失败（给出错误行）和命令不存在；装了 pdflatex 时，再用它真实编译一次。
 - 再增至 87 项：代码审查包只列路径，审查期间文件变了的回答不算数，审查者读得到项目外的 worktree，headless 的 Codex 审查者不加沙箱参数（21.12）；回答的 JSON 块里有带 ``` 的补丁时也能解析。
+- 再增至 98 项（全项目审查后的修复，见 21.13）：带日期和数字键的配置、同一工单一次只由一个进程回答、结论审查按假设覆盖、只有 owner 能更新任务且关闭后不能再改、会话结束时间、`--exec-id` 缺命名空间时报 INVALID、表格优先取 complete 结果、manifest 写错 arm/seed 时不可用、拒绝结果后标记依赖、文献重复链接更新评估、两个会话先后被分配时合并提示指向认领者的分支、监视程序空转时不写库。
 - 此前增至 84 项：配置里的问题不让命令失败（未知版本、不是键值对的一节、格式不对的模型条目被跳过、不是列表的模型列表、字符串形式和错误类型的 `agents.args`；文件解析不了时沿用上次读到的设置，会话开始的提示照常给出）。
 
 ### 21.6 端到端测试结果（2026-10-30）
@@ -1398,3 +1399,36 @@ GitHub 链接固定到本次读取的提交；外部产品文档按 2026-10-30 �
 | 解析回答 | 实测时发现的原有问题：回答的 JSON 块里，某条发现附带的补丁含有 ```，解析器在那里截断，把一个有效的回答当成无法解析丢掉。现在从开头的 ```json 起按 JSON 解码，字符串里的 ``` 不再截断它 |
 | 没有改的 | 结论审查包和建议包本来就是从记录生成的文本，照旧放在提示词里 |
 
+### 21.13 全项目代码审查与修复（2026-10-31）
+
+用户要求：用 herdr 启动 Claude（Fable 5.1，effort max）和 Codex（gpt-6-astra，effort max），按 `design/review_prompt.md` 审查整个项目（HEAD 92513a6），汇总意见并修复；大幅增加复杂度或过度防御的意见，先问用户。两份报告在 `reports/DOING/code_review/`：Claude 9 项，Codex 8 项，其中两项相同（任务 owner、工单并发）。每一项都先读代码、在临时项目里复现，再修复；每项行为上的修复都有回归测试，并确认这些测试在修复前的代码上失败。
+
+| 问题（来源） | 修复 |
+| --- | --- |
+| 配置里有日期、时间戳或数字键时，摘要计算抛出 TypeError：请求审查失败；审查期间配置加了日期时，已付费的回答在保存时丢失；登记 run 被挡住（Claude F1） | 计算配置摘要前，把解析结果转成 JSON 能表示的值（日期等值和非字符串键转成字符串），三处调用都不再失败 |
+| 任何角色都能 deliver、wait、block、resume、handoff 别人的任务；协调者 accept 或 stop 之后，迟到的更新还能改回任务状态（Claude F2，Codex F3） | 同一个写事务里检查：只有 owner 能更新；accepted、stopped 的任务不接受 owner 的更新，要再做时由协调者 `task reopen` |
+| `rl run record --exec-id` 不带 `--exec-namespace` 时 AttributeError（Claude F3） | 交给原有的校验：`error[INVALID]: execution_ref needs executor_namespace` |
+| 会话的 `ended_at` 是上一次写库的时间（Claude F4） | 用结束时的时间 |
+| 同一工单可同时被两个进程回答：重复付费调用，calls 互相覆盖；后台启动时父进程在子进程写完后把已回答的工单改回 running（Claude F5，Codex F4） | 回答工单的进程先在写事务里认领：status 设为 running，calls 末尾记下自己的 pid。另一个活着的进程持有时报 CONFLICT；pid 已退出，或被别的程序复用（`/proc/<pid>/cmdline` 里没有工单号）时可以重跑。`start_background` 对已回答或正在回答的工单不再启动进程，父进程不再写工单 |
+| 迟到的 partial 结果替换了 complete 结果的数值，报告、论文草稿和结论审查包显示错误的数（Codex F1） | `arm_rows` 取最新的 complete 结果，没有时才取 partial |
+| manifest 写明另一个 arm 或 seed 时仍算匹配，能当确认性证据（Codex F2） | manifest 写了 arm、seed、replicate 时与 RunSpec 比较（按字符串，`"0"` 与 `0` 相同），不同则不能用于预定比较；没写的照旧不算不一致。params 没有加入比较：作业写回的 params 常有补全的默认值或不同写法，会误判；带 `spec_digest` 的 manifest 已经覆盖 params |
+| 一个只审了 H1 的通过的结论审查，让 H2 的关键结论不再提示（Codex F5） | 每个被决定的假设都要有一个以它为 target 的通过的结论审查。决定、待处理和报告用同一个函数（`review_gap`） |
+| 两个会话在 claim 之前先后被分配同一任务时，Task.branch 是后分配的那个，接受时的合并提示指向别人的分支（Codex F6） | claim 时把 Task.branch 设为认领者自己会话的分支 |
+| `run reject-result` 不提示依赖这个结果的证据和决定（Codex F7） | 与 `evidence set --validity invalid` 一样标记复核：从这个结果得出的证据所支持或挑战的假设，基于该证据或该结果的决定。证据本身的有效性不自动改，由研究者判断 |
+| 文献重复链接被当成无操作：assessment 和 locator 的更新丢失，假设改版后也不建新边（Codex F8） | 绑定修订号的关系按 `revision` 和 `source_revision` 两者判断是否同一修订。同一修订再链接时更新边上的 assessment、locator、note；修订不同时新建一条边 |
+| 重复与无用的代码（Claude F9） | 合并 `CONTRACT_KEYS` 与 `CONTRACT_FIELDS`；`SEVERITIES` 用 schema 的枚举；删去 `Tx.unlink`、`__init__.main`、`RLError.as_dict`；`LatticeDatabaseLockedError` 从公开模块导入；监视程序的记录没有变化时不写库，空闲项目的 `data_version` 不再每轮增加 |
+
+判断为不需要的意见：
+
+| 意见 | 理由 |
+| --- | --- |
+| 工单与审查包原子创建（Claude F6） | 只在写包本身失败（磁盘、权限）时留下没有包的工单，`rl review run` 会提示重新准备；要改三个请求函数的顺序，收益很小 |
+| 在 F1 的下游调用处再加兜底（Claude） | 摘要函数已不会因配置内容失败，再加一层是重复防御 |
+| 结论审查的“新鲜度”策略、在投影中显示被拒绝的来源（Codex F5、F7 附带） | 记录变化后再请求结论审查时指纹不同，不会复用旧回答；决定引用哪一个审查由协调者选择，并记在决定里。复核标记已出现在 `rl status` 里 |
+
+待用户决定（会明显增加改动量或防御性的意见）：
+
+- 删除只服务旧格式的兼容代码（Claude F7，约 150 行；需先迁移已有项目）。Codex 的意见相反：有意迁移之前保留。
+- 模块结构（Claude F8）：拆出 `scope.py`、`messages.py`，`agents.open_session` 与 `watch._restart` 共用一个启动流程，合并两个 `_contract` 和三处状态摘要。
+- CLI 把意外异常转成 `error[INTERNAL]` 并写错误日志；`--role` 在设了 `SMOOTH_RESEARCH_ROLE` 时默认取它（Claude）。
+- 同一角色名的旧会话的隔离、子进程只接受当前认领者写入的执行身份协议（Codex F3、F4 附带）；`pyproject.toml` 加 ruff 配置；其余测试缺口（后台 worker、宿主 CLI 参数变化、文献 fetch/search、未测的命令、store 失败路径、监视程序分支）。

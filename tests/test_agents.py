@@ -220,6 +220,22 @@ def test_a_researcher_works_in_its_own_worktree_with_a_branch_per_task(project, 
     assert s["status"] == "ended" and s["assignment"] == "T-0002"
 
 
+def test_the_branch_to_merge_is_the_claimants_when_two_sessions_were_assigned(project, herdr_log, tmp_path):
+    tasks.start_session(project, "coordinator", "claude")
+    tasks.create_task(project, "implement", "implement", ["E-0001"], to_role="researcher")
+    (tmp_path / "src/model.py").write_text("def f(x):\n    return x\n")
+    commit_all(tmp_path)
+    agents.open_session(project, "researcher", "alice", task="T-0001")
+    agents.open_session(project, "researcher", "bob", task="T-0001")  # before either of them claimed it
+    tasks.claim(project, "T-0001", "alice")
+    wt = tmp_path.parent / f"{tmp_path.name}-worktrees" / "alice"
+    (wt / "src/model.py").write_text("def f(x):\n    return 2 * x\n")
+    git(wt, "commit", "-qam", "double f")
+    tasks.progress(project, "T-0001", "delivered", "alice", "doubled")
+    accepted = tasks.review_task(project, "T-0001", "accept", "fine")
+    assert "sr/alice/T-0001 has 1 commit(s) not in main" in accepted["summary"]
+
+
 def test_reviewer_and_advisor_sessions_answer_and_talk_through_messages(project, herdr_log, tmp_path, monkeypatch):
     tasks.start_session(project, "coordinator", "claude")
     (tmp_path / "src/model.py").write_text("def f(x):\n    return x\n")

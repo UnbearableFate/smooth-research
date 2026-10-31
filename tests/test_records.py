@@ -6,7 +6,6 @@ import os
 import signal
 import subprocess
 import sys
-import time
 
 import pytest
 import yaml
@@ -63,6 +62,32 @@ def test_handoff_releases_the_task_for_the_next_owner(project, tmp_path):
     assert [m["type"] for m in tasks.inbox(project, "coordinator")["messages"]] == ["RESULT"]
 
 
+def test_only_the_owner_updates_a_task_and_not_after_the_coordinator_closed_it(project, tmp_path):
+    tasks.create_task(project, "analysis", "analysis", ["H-0001"], to_role="researcher")
+    tasks.claim(project, "T-0001", "researcher-a")
+    (tmp_path / "research/tasks/handoff.md").write_text("state of work")
+
+    def refused(fn, *args):
+        with project.read() as tx:
+            before = tx.require("T-0001")
+        with pytest.raises(RLError) as exc:
+            fn(project, "T-0001", *args)
+        with project.read() as tx:
+            assert tx.require("T-0001") == before
+        assert exc.value.code == "CONFLICT"
+        return exc.value.message
+
+    assert "owned by researcher-a, not researcher-b" in refused(tasks.progress, "delivered", "researcher-b", "mine")
+    assert "only its owner" in refused(tasks.handoff, "research/tasks/handoff.md", "researcher-b")
+    tasks.review_task(project, "T-0001", "stop", "not needed")
+    assert "rl task reopen T-0001" in refused(tasks.progress, "delivered", "researcher-a", "late")
+    tasks.review_task(project, "T-0001", "reopen", "needed after all")
+    tasks.progress(project, "T-0001", "delivered", "researcher-a", "done")
+    tasks.review_task(project, "T-0001", "accept", "fine")
+    assert "is accepted" in refused(tasks.progress, "active", "researcher-a")
+    assert [m["type"] for m in tasks.inbox(project, "coordinator")["messages"]] == ["RESULT"]
+
+
 def test_inbox_cursor_and_repeated_message_delivery(project):
     first = tasks.send(project, "NOTE", "coordinator", "researcher", "hello", message_id="MSG-ext-1")
     again = tasks.send(project, "NOTE", "coordinator", "researcher", "hello", message_id="MSG-ext-1")
@@ -83,6 +108,16 @@ def test_a_new_coordinator_session_supersedes_the_old_one(project):
     with project.read() as tx:
         states = {s["id"]: s["status"] for s in tx.all("Session")}
     assert states == {old["id"]: "superseded", new["id"]: "active"}
+
+
+def test_a_session_ends_when_it_is_ended(project, monkeypatch):
+    researcher = tasks.start_session(project, "researcher-1", "claude", "sess-r")
+    old = tasks.start_session(project, "coordinator", "claude", "sess-a")
+    monkeypatch.setattr(tasks, "now_utc", lambda: "2026-10-31T12:00:00+00:00")
+    tasks.end_session(project, researcher["id"])
+    tasks.start_session(project, "coordinator", "codex", "thread-b")  # supersedes the old coordinator
+    with project.read() as tx:
+        assert {tx.require(s["id"])["ended_at"] for s in (researcher, old)} == {"2026-10-31T12:00:00+00:00"}
 
 
 def test_sealed_contract_does_not_change_when_the_draft_is_edited(project, tmp_path):
@@ -121,6 +156,38 @@ def test_invalid_evidence_flags_only_its_dependents(project):
     with project.read() as tx:
         assert tx.require("H-0001")["needs_recheck"] and tx.require(d["id"])["needs_recheck"]
         assert not tx.require("H-0002").get("needs_recheck") and tx.require(other["id"])["validity"] == "valid"
+
+
+def test_rejecting_a_result_flags_what_rests_on_it(project):
+    research.add_hypothesis(project, "other", "unrelated claim")
+    att = runs.register(project, "E-0001", dict(SPEC), "r1")["attempt"]
+    runs.record(project, obs(state="ended", outcome="success"))
+    res = runs.import_result(project, att, {"status": "complete", "metrics": {"acc": 0.8}}, "res1")["result"]
+    ev = research.add_evidence(project, "acc up", "screening", "valid", supports=["H-0001"], attempts=[att],
+                               results=[res], experiment="E-0001")["id"]
+    other = research.add_evidence(project, "other", "screening", "valid", supports=["H-0002"])["id"]
+    on_ev = research.decide(project, ["H-0001"], "continue", "signal", based_on=[ev])["id"]
+    on_res = research.decide(project, ["E-0001"], "continue", "the number itself", based_on=[res])["id"]
+    unrelated = research.decide(project, ["H-0002"], "continue", "x", based_on=[other])["id"]
+    out = runs.reject_result(project, res, "wrong labels")
+    assert sorted(out["flagged"]) == sorted(["H-0001", on_ev, on_res]) and "re-check" in out["summary"]
+    with project.read() as tx:
+        assert tx.require(on_ev)["recheck_reason"] == f"{res} rejected: wrong labels"
+        assert not tx.require("H-0002").get("needs_recheck") and not tx.require(unrelated).get("needs_recheck")
+        assert tx.require(ev)["validity"] == "valid"  # whether it still holds is the researcher's judgment
+
+
+def test_a_relinked_paper_takes_the_new_assessment_and_a_new_revision_gets_its_own_link(project):
+    from smooth_research import literature
+    paper = literature.add_paper(project, title="Noise and decay", authors=["A. Author"], year=2024)["id"]
+    literature.link_paper(project, "H-0001", paper, "nearest_work", "search_hit")
+    literature.link_paper(project, "H-0001", paper, "nearest_work", "checked", locator="section 3")
+    literature.link_paper(project, "H-0001", paper, "nearest_work", "checked", locator="section 3")
+    research.revise_hypothesis(project, "H-0001", "narrow", scope="toy, 20% noise only", base_revision=1)
+    literature.link_paper(project, "H-0001", paper, "nearest_work", "checked", locator="section 4")
+    with project.read() as tx:
+        edges = sorted((e["source_revision"], e["assessment"], e["locator"]) for e in tx.out("H-0001", "nearest_work"))
+    assert edges == [(1, "checked", "section 3"), (2, "checked", "section 4")]
 
 
 def test_failed_positive_control_is_a_diagnostic_not_a_refutation(project):
@@ -249,6 +316,9 @@ def test_cli_summary_json_and_error_codes(project, rl):
                       "--code-unknown", "--config-digest", "unknown", "--data-revision", "d", "--metric", "m",
                       "--output-spec", "o", "--param", "lr=0.1")
     assert code == 0 and "ATT-0001-1 prepared" in out
+    code, _, err = rl("run", "record", "--attempt", "ATT-0001-1", "--source", "shell", "--state", "running",
+                      "--exec-id", "12")
+    assert code == 1 and "error[INVALID]: execution_ref needs executor_namespace" in err
     code, out, _ = rl("run", "record", "--attempt", "ATT-0001-1", "--source", "shell", "--state", "ended",
                       "--outcome", "success", "--exec-namespace", "host:x:boot", "--exec-id", "12")
     assert code == 0 and "ended/success" in out

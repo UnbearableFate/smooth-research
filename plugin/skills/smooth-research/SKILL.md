@@ -124,8 +124,9 @@ Without herdr, use the headless forms in host.md.
   is not a cancellation. Rules changed after seeing results are not pre-registration.
 - Changing a hypothesis (`{{rl}} hypothesis revise`) leaves old evidence bound to the old revision; re-link
   only after checking that its scope still applies.
-- A key conclusion recorded without an answered conclusion review stays in `{{rl}} status` attention until one
-  is linked (`{{rl}} link D-x based_on RV-x`). An unavailable or blocking review is not a pass.
+- A key conclusion recorded without a passing conclusion review of each of its hypotheses stays in
+  `{{rl}} status` attention until one is linked (`{{rl}} link D-x based_on RV-x`). An unavailable or blocking
+  review is not a pass.
 
 ## Bottlenecks and literature
 
