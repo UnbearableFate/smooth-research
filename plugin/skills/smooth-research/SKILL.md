@@ -25,6 +25,8 @@ reviews, literature); it never runs, polls or cancels experiments for you.
 - `reports/` reports (`{{rl}} report`, review and advice answers, `research-graph.html`)
 - `research/` machine records: database, sealed documents, packages, `artifacts/<attempt-id>/` run outputs.
   Never edit `research/` by hand.
+- These are the default names. `smooth-research.yaml` can rename them; the Locations line of `{{rl}} resume`
+  and of a work pack gives this project's own. Paths in these instructions use the defaults.
 
 ## Start or resume
 

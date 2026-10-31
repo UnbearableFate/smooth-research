@@ -17,6 +17,7 @@ ENV_PROJECT = "SMOOTH_RESEARCH_PROJECT"
 # Project layout: experiment code in src/, human-facing documents in docs/, reports in reports/, and machine
 # records (database, sealed objects, packages, call logs, run artifacts) in research/.
 # Model entries are "<entry>:<model>[@effort]"; entry is claude, codex or manual (a person submits the package).
+# Every key here is read by the CLI; docs/configuration.md explains each one.
 DEFAULT_CONFIG: dict = {
     "version": 1,
     "plan": "docs/plan/original.md",
@@ -26,7 +27,6 @@ DEFAULT_CONFIG: dict = {
     "reports_root": "reports",
     "research_root": "research",
     "models": {
-        "researcher": "inherit",
         "reviewer": {
             "relation_to_author": "different_family",
             "candidates": ["codex:gpt-6-astra@medium", "claude:claude-opus-5-5@medium"],
@@ -37,7 +37,13 @@ DEFAULT_CONFIG: dict = {
         },
     },
     "context": {"work_target_tokens": 4000, "advice_target_tokens": 10000},
-    "artifacts": {"content_digest": "blake2b", "keep_raw_evidence": True},
+}
+
+# Keys that earlier versions wrote into the configuration although nothing read them.
+RETIRED_KEYS = {
+    "models.researcher": "the host picks a researcher subagent's model, by default the session's; "
+                         "`rl delegate` takes --entry",
+    "artifacts": "digests are always blake2b and raw artifacts are always kept",
 }
 
 RESEARCH_DIRS = ("state", "documents/objects", "packages", "mailbox", "snapshots", "literature", "calls",
@@ -57,6 +63,10 @@ def _merge(base: dict, override: dict) -> dict:
 class Project:
     root: Path
     config: dict
+
+    @property
+    def warnings(self) -> list[str]:
+        return config_warnings(self.config)
 
     @property
     def research_root(self) -> Path:
@@ -110,6 +120,31 @@ class Project:
     def abs(self, path: str) -> Path:
         p = Path(path)
         return p if p.is_absolute() else self.root / p
+
+
+def config_warnings(config: dict) -> list[str]:
+    """Keys of a loaded configuration that the CLI does not read (a typo or a retired key), and a reviewer
+    family rule it does not know. Neither stops a command."""
+    out = []
+
+    def walk(given: dict, default: dict, prefix: str) -> None:
+        for key, value in given.items():
+            path = prefix + str(key)
+            if path in RETIRED_KEYS:
+                out.append(f"{CONFIG_NAME}: {path} is no longer used ({RETIRED_KEYS[path]}); delete it")
+            elif key not in default:
+                out.append(f"{CONFIG_NAME}: unknown key {path} has no effect (a typo?)")
+            elif isinstance(value, dict) and isinstance(default[key], dict):
+                walk(value, default[key], path + ".")
+
+    walk(config, DEFAULT_CONFIG, "")
+    models = config.get("models")
+    reviewer = models.get("reviewer") if isinstance(models, dict) else None
+    rule = reviewer.get("relation_to_author", "different_family") if isinstance(reviewer, dict) else None
+    if rule not in (None, "different_family"):
+        out.append(f"{CONFIG_NAME}: models.reviewer.relation_to_author is {rule!r}; only different_family keeps "
+                   "reviewers of the author's model family out, any other value turns that filter off")
+    return out
 
 
 def load_config(root: Path) -> dict:

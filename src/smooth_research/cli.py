@@ -22,7 +22,9 @@ CONFLICT_CODES = {"CONFLICT", "STALE_REVISION"}
 
 
 def _store(args) -> Store:
-    return Store(find_project(args.project), args.actor or "agent")
+    project = find_project(args.project)
+    args.config_warnings = project.warnings
+    return Store(project, args.actor or "agent")
 
 
 def _list(value) -> list[str]:
@@ -364,7 +366,8 @@ def build_parser() -> argparse.ArgumentParser:
         return sp
 
     sp = add("init", cmd_init, "create a research project here and import the plan snapshot")
-    sp.add_argument("--plan", help="the research plan (copied once to docs/plan/original.md and sealed)")
+    sp.add_argument("--plan", help="the research plan (copied once to the configured plan path, "
+                                     "docs/plan/original.md by default, and sealed)")
     sp.add_argument("--title")
     sp.add_argument("--dir", help="project directory (default: cwd)")
     add("status", cmd_status, "short project status and attention items")
@@ -379,8 +382,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp = add("graph", cmd_graph, "tree projection of the hypothesis graph")
     sp.add_argument("--root")
     sp.add_argument("--mermaid", action="store_true")
-    add("view", cmd_view, "write reports/research-graph.html")
-    sp = add("report", cmd_report, "write a human-facing report into reports/")
+    add("view", cmd_view, "write research-graph.html into the reports directory")
+    sp = add("report", cmd_report, "write a human-facing report into the reports directory")
     sp.add_argument("--out")
     sp.add_argument("--title")
     sp = add("export", cmd_export, "consistent snapshot of records and sealed documents")
@@ -718,6 +721,8 @@ def main(argv: list[str] | None = None) -> int:
         if exc.details:
             print(json.dumps(exc.details, ensure_ascii=False, default=str, indent=1), file=sys.stderr)
         return 3 if exc.code in CONFLICT_CODES else 1
+    if getattr(args, "config_warnings", None):
+        result["warnings"] = [*(result.get("warnings") or []), *args.config_warnings]
     if args.command == "hook" or args.json:
         print(json.dumps(result, ensure_ascii=False, default=str, indent=None if args.command == "hook" else 1))
     else:

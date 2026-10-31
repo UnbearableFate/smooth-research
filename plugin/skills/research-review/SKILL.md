@@ -22,8 +22,8 @@ smooth-research skill: {{rl_short}}
 2. Run it: `{{rl}} review run RV-x --background`, then later `{{rl}} review show RV-x`. The first configured
    candidate from another family is used; failures fall through to the next one and are recorded.
    Keep doing independent cheap work meanwhile; do not wait idle.
-3. Read the answer in `reports/reviews/RV-x.md` (verdict pass | issues | blocking, findings with location,
-   evidence, impact, fix, verification, plus what was and was not checked).
+3. Read the answer in `reports/reviews/RV-x.md` (default reports directory): verdict pass | issues |
+   blocking, findings with location, evidence, impact, fix, verification, plus what was and was not checked.
 4. Fix real problems, then re-check only the affected scope:
    `{{rl}} review request ... --recheck-of RV-x`. For a finding you dispute, keep its text, record your
    reasoning (`{{rl}} decide --targets E-x --action modify|continue --rationale .. --based-on RV-x`) and
@@ -47,8 +47,8 @@ smooth-research skill: {{rl_short}}
    adopt. The package is built from the records: the hypothesis, each linked evidence with its attempts
    and results, the contracts and per-arm numbers, code reviews, earlier decisions and the competing open
    hypotheses. Unchanged records and wording reuse an earlier cross-model answer.
-2. `{{rl}} review run RV-x` (or `--background`), then read `reports/reviews/RV-x.md`: verdict and findings
-   (overclaim, wrong_level, out_of_scope, unruled_alternative, data_mismatch).
+2. `{{rl}} review run RV-x` (or `--background`), then read `reports/reviews/RV-x.md` (default reports
+   directory): verdict and findings (overclaim, wrong_level, out_of_scope, unruled_alternative, data_mismatch).
 3. Act on it: weaken the wording, run the missing control, or keep the conclusion with a recorded reason.
    Then `{{rl}} decide ... --based-on EV-x,RV-x`. A finding you dispute stays in the record; ask for one
    re-check (`--recheck-of RV-x`) if it matters.

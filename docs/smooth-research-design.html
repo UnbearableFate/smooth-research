@@ -373,7 +373,7 @@
     <p class="eyebrow"><span class="nb">smooth-research</span> · 设计总览</p>
     <h1>插件只记录，不执行</h1>
     <p class="lead">它把研究计划变成可检验的假说，用成本逐级增加的实验积累证据，把每次运行的事实<span class="ve-ref" data-ref="rec" tabindex="0">登记</span>进 <span class="ve-ref" data-ref="db" tabindex="0">LatticeDB</span>。<b>启动、轮询和取消实验，都由 agent 用自己的<span class="ve-ref" data-ref="tools" tabindex="0">执行工具</span>完成。</b></p>
-    <p class="meta">v0.1.0 · 设计文档 v0.2 · 实施记录 v0.3（§21）· 56 项测试 · <span class="nb">2026-10-30</span></p>
+    <p class="meta">v0.1.0 · 设计文档 v0.2 · 实施记录 v0.3（§21）· 58 项测试 · <span class="nb">2026-10-31</span></p>
   </header>
 
   <!-- Fig. 1: one run through the system, as a replay. Everything is drawn from the start ("0"); each step lights its edges. -->
@@ -935,16 +935,16 @@
 
     <figure>
       <div class="cases">
-        <div class="case" data-ref="r-res"><h3><code>work</code> 工作包</h3><p>当前任务、范围、代码索引、必要文献、最新有效结果、已排除的解释</p>
-          <svg class="ve-mini rng" viewBox="0 0 240 56" role="img" aria-label="工作包目标约 2k 到 6k tokens"><path class="ax" d="M10 30H230"/><path class="tk" d="M10 26V34M120 26V34M230 26V34"/><rect class="hot" x="46.7" y="23" width="73.3" height="14" rx="2"/><text class="rv" x="83" y="11">2k–6k</text><text x="10" y="45">0</text><text class="rm" x="120" y="45">6k</text><text class="re" x="230" y="45">12k</text></svg></div>
-        <div class="case" data-ref="r-coord r-res"><h3><code>resume</code> 恢复包</h3><p>角色、首个未完成动作、未结束的 attempt、最后可信观测、工件位置</p>
-          <svg class="ve-mini rng" viewBox="0 0 240 56" role="img" aria-label="恢复包未设 token 目标"><path class="ax" d="M10 30H230"/><path class="tk" d="M10 26V34M120 26V34M230 26V34"/><text class="rm" x="120" y="11">未设目标</text><text x="10" y="45">0</text><text class="rm" x="120" y="45">6k</text><text class="re" x="230" y="45">12k</text></svg></div>
-        <div class="case" data-ref="r-rev"><h3><code>review</code> 审查包</h3><p>代码审查：方法定义、被审代码与配置、依赖、可选 diff。结论审查：拟记录的结论及其背后的证据、结果、各臂数字与竞争假说。全部内联</p>
-          <svg class="ve-mini rng" viewBox="0 0 240 56" role="img" aria-label="审查包未设 token 目标"><path class="ax" d="M10 30H230"/><path class="tk" d="M10 26V34M120 26V34M230 26V34"/><text class="rm" x="120" y="11">未设目标</text><text x="10" y="45">0</text><text class="rm" x="120" y="45">6k</text><text class="re" x="230" y="45">12k</text></svg></div>
+        <div class="case" data-ref="r-res"><h3><code>work</code> 工作包</h3><p>当前任务、目录位置、范围、代码索引、必要文献、最新有效结果、已排除的解释</p>
+          <svg class="ve-mini rng" viewBox="0 0 240 56" role="img" aria-label="工作包默认目标 4k tokens"><path class="ax" d="M10 30H230"/><path class="tk" d="M10 26V34M120 26V34M230 26V34"/><rect class="hot" x="10" y="23" width="73.3" height="14" rx="2"/><text class="rv" x="83.3" y="11">4k</text><text x="10" y="45">0</text><text class="rm" x="120" y="45">6k</text><text class="re" x="230" y="45">12k</text></svg></div>
+        <div class="case" data-ref="r-coord r-res"><h3><code>resume</code> 恢复包</h3><p>角色、首个未完成动作、未结束的 attempt、最后可信观测、工件位置；与工作包共用一个目标</p>
+          <svg class="ve-mini rng" viewBox="0 0 240 56" role="img" aria-label="恢复包默认目标 4k tokens，与工作包相同"><path class="ax" d="M10 30H230"/><path class="tk" d="M10 26V34M120 26V34M230 26V34"/><rect class="hot" x="10" y="23" width="73.3" height="14" rx="2"/><text class="rv" x="83.3" y="11">4k</text><text x="10" y="45">0</text><text class="rm" x="120" y="45">6k</text><text class="re" x="230" y="45">12k</text></svg></div>
+        <div class="case" data-ref="r-rev"><h3><code>review</code> 审查包</h3><p>代码审查：方法定义、被审代码与配置、依赖、可选 diff。结论审查：拟记录的结论及其背后的证据、结果、各臂数字与竞争假说。全部内联，单个文件最多 6 万字符、合计 24 万字符，超过的只给路径</p>
+          <svg class="ve-mini rng" viewBox="0 0 240 56" role="img" aria-label="审查包没有 token 目标"><path class="ax" d="M10 30H230"/><path class="tk" d="M10 26V34M120 26V34M230 26V34"/><text class="rm" x="120" y="11">未设目标</text><text x="10" y="45">0</text><text class="rm" x="120" y="45">6k</text><text class="re" x="230" y="45">12k</text></svg></div>
         <div class="case" data-ref="r-adv"><h3><code>advice</code> 咨询包</h3><p>瓶颈、关键正反证据、失败机制、尚存解释、预算、待决问题</p>
-          <svg class="ve-mini rng" viewBox="0 0 240 56" role="img" aria-label="咨询包目标约 6k 到 12k tokens"><path class="ax" d="M10 30H230"/><path class="tk" d="M10 26V34M120 26V34M230 26V34"/><rect class="hot" x="120" y="23" width="110" height="14" rx="2"/><text class="rv" x="175" y="11">6k–12k</text><text x="10" y="45">0</text><text class="rm" x="120" y="45">6k</text><text class="re" x="230" y="45">12k</text></svg></div>
+          <svg class="ve-mini rng" viewBox="0 0 240 56" role="img" aria-label="咨询包默认目标 10k tokens"><path class="ax" d="M10 30H230"/><path class="tk" d="M10 26V34M120 26V34M230 26V34"/><rect class="hot" x="10" y="23" width="183.3" height="14" rx="2"/><text class="rv" x="193.3" y="11">10k</text><text x="10" y="45">0</text><text class="rm" x="120" y="45">6k</text><text class="re" x="230" y="45">12k</text></svg></div>
       </div>
-      <figcaption><span class="fig-n">Fig. 12</span>四种上下文包都围绕当前要做的决定。token 目标是待验证的默认值，按“ASCII 字符 / 4 + 非 ASCII 字符”估算；超出部分列为按需读取的索引。</figcaption>
+      <figcaption><span class="fig-n">Fig. 12</span>四种上下文包都围绕当前要做的决定。条形长度是 <code>smooth-research.yaml</code> 里的默认 token 目标（<code>context.work_target_tokens</code>、<code>context.advice_target_tokens</code>），按“ASCII 字符 / 4 + 非 ASCII 字符”估算；超出部分列为按需读取的索引。</figcaption>
     </figure>
 
     <figure>
@@ -1202,7 +1202,7 @@
 
     <figure>
       <div class="frame">
-        <svg class="ve-svg" viewBox="0 0 1000 392" role="img" aria-label="构建：共享的 plugin/（bin/rl、3 个 skill、workflow.md）和 src/smooth_research（17 个模块，4,720 行），加上 hosts/claude 或 hosts/codex 的适配文件，经 build_plugins.py 填占位符、检查并写 blake2b 清单，产出 dist/claude（33 个文件）和 dist/codex（32 个文件）。">
+        <svg class="ve-svg" viewBox="0 0 1000 392" role="img" aria-label="构建：共享的 plugin/（bin/rl、3 个 skill、workflow.md）和 src/smooth_research（17 个模块，4,769 行），加上 hosts/claude 或 hosts/codex 的适配文件，经 build_plugins.py 填占位符、检查并写 blake2b 清单，产出 dist/claude（33 个文件）和 dist/codex（32 个文件）。">
           <rect class="ve-bd" x="16" y="32" width="298" height="164" rx="4"/><text class="ve-bd-t" x="16" y="22">共享 · 两宿主相同</text>
           <rect class="ve-bd" x="16" y="220" width="298" height="162" rx="4"/><text class="ve-bd-t" x="16" y="212">宿主适配</text>
           <path class="ve-e is-hot" d="M300 76H350V180H398"/>
@@ -1213,7 +1213,7 @@
           <path class="ve-e" d="M620 228H660V280H698"/><text class="ve-el l" x="652" y="264">codex</text>
 
           <g class="ve-n" transform="translate(30 44)"><rect class="sh" width="270" height="64" rx="4"/><text class="m" x="135" y="22">plugin/</text><text class="sub" x="135" y="46">bin/rl · 3 个 skill · workflow.md</text></g>
-          <g class="ve-n" transform="translate(30 120)"><rect class="sh" width="270" height="64" rx="4"/><text class="m" x="135" y="22">src/smooth_research/</text><text class="sub" x="135" y="46">17 个模块 · 4,720 行</text></g>
+          <g class="ve-n" transform="translate(30 120)"><rect class="sh" width="270" height="64" rx="4"/><text class="m" x="135" y="22">src/smooth_research/</text><text class="sub" x="135" y="46">17 个模块 · 4,769 行</text></g>
           <g class="ve-n" transform="translate(30 232)"><rect class="sh" width="270" height="64" rx="4"/><text class="m" x="135" y="22">hosts/claude/</text><text class="sub" x="135" y="46">manifest · hook · 子代理 · host.md</text></g>
           <g class="ve-n" transform="translate(30 308)"><rect class="sh" width="270" height="64" rx="4"/><text class="m" x="135" y="22">hosts/codex/</text><text class="sub" x="135" y="46">manifest · hook · host.md</text></g>
           <g class="ve-n is-key" transform="translate(400 160)"><rect class="sh" width="220" height="88" rx="4"/><text class="m" x="110" y="32">build_plugins.py</text><text class="sub" x="110" y="60">填占位符 · 检查 · 清单</text></g>
@@ -1235,35 +1235,35 @@
 
     <figure>
       <div class="frame">
-        <svg class="ve-svg bars" viewBox="0 0 1000 410" role="img" aria-label="模块行数：cli 729，reviews 658，runs 547，research 522，store 334，tasks 229，adapters 226，view 216，context 214，literature 188，schema 177，util 148，project 148，snapshot 114，documents 106，delegate 96，hooks 55。测试项数：records 18，reviews 15，runs 13，executor_contract 5，packaging 5。">
+        <svg class="ve-svg bars" viewBox="0 0 1000 410" role="img" aria-label="模块行数：cli 734，reviews 658，runs 547，research 523，store 334，tasks 229，adapters 226，context 219，view 216，literature 188，project 183，schema 177，util 148，snapshot 114，documents 106，delegate 96，hooks 58。测试项数：records 20，reviews 15，runs 13，executor_contract 5，packaging 5。">
           <text class="hd2" x="0" y="14">src/smooth_research · 行数</text>
-          <text class="hd2" x="657" y="14">tests · 项数（共 56）</text>
-          <text class="lab" x="140" y="44">cli.py</text><rect class="hot" x="150" y="37" width="401" height="14" rx="2"/><text x="559" y="44">729</text>
+          <text class="hd2" x="657" y="14">tests · 项数（共 58）</text>
+          <text class="lab" x="140" y="44">cli.py</text><rect class="hot" x="150" y="37" width="403.7" height="14" rx="2"/><text x="562" y="44">734</text>
           <text class="lab" x="140" y="65">reviews.py</text><rect class="hot" x="150" y="58" width="361.9" height="14" rx="2"/><text x="520" y="65">658</text>
           <text class="lab" x="140" y="86">runs.py</text><rect class="hot" x="150" y="79" width="300.9" height="14" rx="2"/><text x="459" y="86">547</text>
-          <text class="lab" x="140" y="107">research.py</text><rect class="hot" x="150" y="100" width="287.1" height="14" rx="2"/><text x="445" y="107">522</text>
+          <text class="lab" x="140" y="107">research.py</text><rect class="hot" x="150" y="100" width="287.7" height="14" rx="2"/><text x="446" y="107">523</text>
           <text class="lab" x="140" y="128">store.py</text><rect x="150" y="121" width="183.7" height="14" rx="2"/><text x="342" y="128">334</text>
           <text class="lab" x="140" y="149">tasks.py</text><rect x="150" y="142" width="126" height="14" rx="2"/><text x="284" y="149">229</text>
           <text class="lab" x="140" y="170">adapters.py</text><rect x="150" y="163" width="124.3" height="14" rx="2"/><text x="282" y="170">226</text>
-          <text class="lab" x="140" y="191">view.py</text><rect x="150" y="184" width="118.8" height="14" rx="2"/><text x="277" y="191">216</text>
-          <text class="lab" x="140" y="212">context.py</text><rect x="150" y="205" width="117.7" height="14" rx="2"/><text x="276" y="212">214</text>
+          <text class="lab" x="140" y="191">context.py</text><rect x="150" y="184" width="120.5" height="14" rx="2"/><text x="278" y="191">219</text>
+          <text class="lab" x="140" y="212">view.py</text><rect x="150" y="205" width="118.8" height="14" rx="2"/><text x="277" y="212">216</text>
           <text class="lab" x="140" y="233">literature.py</text><rect x="150" y="226" width="103.4" height="14" rx="2"/><text x="261" y="233">188</text>
-          <text class="lab" x="140" y="254">schema.py</text><rect x="150" y="247" width="97.4" height="14" rx="2"/><text x="255" y="254">177</text>
-          <text class="lab" x="140" y="275">util.py</text><rect x="150" y="268" width="81.4" height="14" rx="2"/><text x="239" y="275">148</text>
-          <text class="lab" x="140" y="296">project.py</text><rect x="150" y="289" width="81.4" height="14" rx="2"/><text x="239" y="296">148</text>
+          <text class="lab" x="140" y="254">project.py</text><rect x="150" y="247" width="100.7" height="14" rx="2"/><text x="259" y="254">183</text>
+          <text class="lab" x="140" y="275">schema.py</text><rect x="150" y="268" width="97.4" height="14" rx="2"/><text x="255" y="275">177</text>
+          <text class="lab" x="140" y="296">util.py</text><rect x="150" y="289" width="81.4" height="14" rx="2"/><text x="239" y="296">148</text>
           <text class="lab" x="140" y="317">snapshot.py</text><rect x="150" y="310" width="62.7" height="14" rx="2"/><text x="221" y="317">114</text>
           <text class="lab" x="140" y="338">documents.py</text><rect x="150" y="331" width="58.3" height="14" rx="2"/><text x="216" y="338">106</text>
           <text class="lab" x="140" y="359">delegate.py</text><rect x="150" y="352" width="52.8" height="14" rx="2"/><text x="211" y="359">96</text>
-          <text class="lab" x="140" y="380">hooks.py</text><rect x="150" y="373" width="30.3" height="14" rx="2"/><text x="188" y="380">55</text>
+          <text class="lab" x="140" y="380">hooks.py</text><rect x="150" y="373" width="31.9" height="14" rx="2"/><text x="190" y="380">58</text>
 
-          <text class="lab" x="800" y="44">records</text><rect class="hot" x="810" y="37" width="144" height="14" rx="2"/><text x="962" y="44">18</text>
+          <text class="lab" x="800" y="44">records</text><rect class="hot" x="810" y="37" width="160" height="14" rx="2"/><text x="978" y="44">20</text>
           <text class="lab" x="800" y="72">reviews</text><rect x="810" y="65" width="120" height="14" rx="2"/><text x="938" y="72">15</text>
           <text class="lab" x="800" y="100">runs</text><rect class="hot" x="810" y="93" width="104" height="14" rx="2"/><text x="922" y="100">13</text>
           <text class="lab" x="800" y="128">executor_contract</text><rect x="810" y="121" width="40" height="14" rx="2"/><text x="858" y="128">5</text>
           <text class="lab" x="800" y="156">packaging</text><rect x="810" y="149" width="40" height="14" rx="2"/><text x="858" y="156">5</text>
         </svg>
       </div>
-      <figcaption><span class="fig-n">Fig. 23</span>4,720 行 Python：17 个模块，加上 <code>__init__</code> 与 <code>__main__</code> 的 13 行；最大的四个模块（CLI、审查、运行记录、研究图）合占一半。56 项测试中，记录与运行的契约测试占 31 项。</figcaption>
+      <figcaption><span class="fig-n">Fig. 23</span>4,769 行 Python：17 个模块，加上 <code>__init__</code> 与 <code>__main__</code> 的 13 行；最大的四个模块（CLI、审查、运行记录、研究图）合占一半。58 项测试中，记录与运行的契约测试占 33 项。</figcaption>
     </figure>
 
     <div class="callout">
@@ -1279,7 +1279,7 @@
     <ul>
       <li>设计文档 <code>design/ml-research-agent-design-2026-10-30 (1).md</code>：§2–§10 为设计，§21 为实施记录（与正文冲突时以 §21 为准）。</li>
       <li>代码 <code>src/smooth_research/</code>（<code>runs.py</code> 的观测投影、<code>reviews.py</code> 的审查关系）· <code>plugin/</code> · <code>hosts/</code> · <code>scripts/build_plugins.py</code>。</li>
-      <li>测试 <code>tests/test_records.py</code> · <code>test_runs.py</code> · <code>test_reviews.py</code> · <code>test_executor_contract.py</code> · <code>test_packaging.py</code>（56 项）。</li>
+      <li>测试 <code>tests/test_records.py</code> · <code>test_runs.py</code> · <code>test_reviews.py</code> · <code>test_executor_contract.py</code> · <code>test_packaging.py</code>（58 项）。</li>
       <li>提交 446fd7b · 3ff9329 · a35ac78 · 2e13425 · 07db148；<span class="nb">miyabi-mcp</span> 96f2247。<span class="nb">miyabi-mcp</span> 一侧的权威说明：<span class="nb">miyabi-toolbox</span> <code><span class="nb">miyabi-mcp</span>/DESIGN.md</code> §11。</li>
       <li>e2e 记录：<code>/home/yu/workspace/<span class="nb">sr-e2e</span>/<span class="nb">miyabi-bf16</span></code> 的 <code>rl show</code> / <code>rl run show</code> 输出（<span class="nb">D-0003</span>、<span class="nb">E-0001</span>、<span class="nb">EV-0001</span>…0003、RUN/ATT/<span class="nb">U-0001</span>…0003）；本机 e2e 见设计文档 §21.6。</li>
     </ul>

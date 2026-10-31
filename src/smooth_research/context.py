@@ -78,6 +78,13 @@ def _assemble(title: str, sections: list[tuple[str, str]], budget: int) -> dict:
             "summary": text + f"\n(≈{estimate_tokens(text)} tokens, {TOKEN_METHOD})"}
 
 
+def locations(store: Store) -> str:
+    cfg = store.project.config
+    return (f"code {cfg['code_root']}/ · documents {cfg['docs_root']}/ (plan/, experiments/, tasks/, notes/) · "
+            f"reports {cfg['reports_root']}/ (reviews/, advice/) · records {cfg['research_root']}/ (sealed "
+            "documents, packages, artifacts/<attempt>/)")
+
+
 def work_pack(store: Store, task_id: str, budget: int | None = None) -> dict:
     budget = budget or store.project.config["context"]["work_target_tokens"]
     with store.read() as tx:
@@ -90,7 +97,8 @@ def work_pack(store: Store, task_id: str, budget: int | None = None) -> dict:
             f"waiting on: {', '.join(task['wait_attempts'])}" if task.get("wait_attempts") else None,
             f"handoff: {task['handoff_ref']}" if task.get("handoff_ref") else None,
             f"coordinator: {c['id']} ({c['host']} session {c.get('host_session_id') or 'unknown'}); notices that "
-            "jobs ended go to this session" if c else "coordinator: no active session"])))]
+            "jobs ended go to this session" if c else "coordinator: no active session"]))),
+                    ("Locations", locations(store))]
         if task.get("request_ref"):
             sections.append((f"Request {task['request_ref']}", _doc_text(tx, store, task["request_ref"])))
         if task.get("handoff_ref"):
@@ -161,10 +169,7 @@ def resume_pack(store: Store, role: str | None = None, budget: int | None = None
                                                for d in decisions) or "none")]
     if role:
         sections.append((f"Inbox for {role}", f"{len(unread)} unread message(s): rl inbox --role {role}"))
-    cfg = store.project.config
-    sections.append(("Locations", f"code {cfg['code_root']}/ · documents {cfg['docs_root']}/ (plan/, experiments/, "
-                                  f"tasks/, notes/) · reports {cfg['reports_root']}/ (reviews/, advice/) · records "
-                                  f"{cfg['research_root']}/ (sealed documents, packages, artifacts/<attempt>/)"))
+    sections.append(("Locations", locations(store)))
     return _assemble("# Resume pack (records only: nothing was queried, restarted or retried)\n", sections, budget)
 
 

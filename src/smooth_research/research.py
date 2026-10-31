@@ -81,6 +81,7 @@ def init_project(root: Path, plan: str | None = None, title: str | None = None) 
         tx.event("project.init" if created else "project.reinit", None, f"plan {plan_ref}")
     cfg = project.config
     return {"project": str(root), "created": created, "plan_ref": plan_ref, "config": str(root / CONFIG_NAME),
+            "warnings": project.warnings,
             "summary": (f"{'initialized' if created else 'already initialized'} {root}"
                         + (f"; plan snapshot {plan_ref} ({cfg['plan']})" if plan_ref else "; no plan imported yet")
                         + f"\nlayout: experiment code {cfg['code_root']}/ · documents {cfg['docs_root']}/ · "

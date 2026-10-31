@@ -60,6 +60,10 @@ research/                machine records: state/ (database, not in git), documen
                          packages/, artifacts/<attempt>/ (run outputs, not in git), snapshots/
 ```
 
+The directory names are defaults that `smooth-research.yaml` can change before `rl init`. Every
+configuration key, environment variable and command-line override is explained in
+[docs/configuration.md](docs/configuration.md) (in Chinese).
+
 Typical loop: `rl init --plan plan.md` -> `rl session start --role coordinator ...` ->
 `rl hypothesis add` -> `rl experiment add` -> code in `src/` -> `rl review request/run` for new core
 paths -> `rl run register` -> run with your own tool -> `rl run record` -> `rl run import-result` ->

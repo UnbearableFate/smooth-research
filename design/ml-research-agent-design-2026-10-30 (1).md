@@ -788,27 +788,27 @@ Codex 非交互执行可作为外部模型入口之一，适配器记录确切 s
 
 ```yaml
 version: 1
-plan: plan/original.md
+plan: docs/plan/original.md
+constraints_ref: docs/plan/constraints.md
+code_root: src
+docs_root: docs
+reports_root: reports
 research_root: research
-constraints_ref: plan/constraints.md
 
 models:
-  researcher: inherit
   reviewer:
     relation_to_author: different_family
-    candidates: [configured_reviewer_a, configured_reviewer_b]
+    candidates: [codex:gpt-6-astra@medium, claude:claude-opus-5-5@medium]
   advisor:
-    primary: configured_strongest
-    fallback: [configured_advisor_backup]
+    primary: claude:claude-fable-5-1@high
+    fallback: [codex:gpt-6-astra@high, manual:gpt-pro]
 
 context:
   work_target_tokens: 4000
   advice_target_tokens: 10000
-
-artifacts:
-  content_digest: blake2b
-  keep_raw_evidence: true
 ```
+
+（2026-10-31 按实现更新。上面每个键都由 CLI 读取。原稿中的 `models.researcher: inherit` 和 `artifacts` 一节没有代码读取，已经删除。旧配置里的这些键和拼错的键会触发警告。各键的含义见 `docs/configuration.md`。）
 
 模型别名由用户环境映射到可用入口；token 目标是待验证示例。配置不包含实验执行 profile、队列、SSH、调度器后端或固定 node·h 预算 schema。用户在约束文档中说明资源范围、允许的环境与成本上限，协调者和执行者遵守；已知用量可导入并与约束对照，但这不是调度预算预留或平台限制的实现。
 
@@ -1155,6 +1155,12 @@ GitHub 链接固定到本次读取的提交；外部产品文档按 2026-10-30 �
 - 执行下放（2026-10-30，见 §7.1）：协调者的 skill 改为“掌握与用户的对话、假说和路线决定，实现和运行交给研究者”；记录运行的规则单列一节，研究者和做小检查的协调者共用。研究者子代理不再限定工具，继承主 session 的工具（含 pi-env-mcp、miyabi-mcp），可以直接在 Miyabi 上执行。等待集群作业归协调者：研究者提交后以 `task wait` 结束并报告监听命令，协调者等到通知后以同一角色重启研究者；`rl delegate` 也能续接同一角色拥有的未完成任务。工作包列出协调者的 session，作业通知发往那里。代码审查由写代码的一方（通常是研究者）发起。
 - 结论审查（2026-10-30，见 §8.6）：新增 `rl review conclusion`。Ticket 新增 `subject`（code / conclusion），Decision 新增 `evidence_status_set`（记下该决定设定的证据状态）；两者都是可选字段，旧库照常读取。
 - 登记时的代码审查覆盖检查（2026-10-30，见 §8.7）：Ticket 新增 `code_scope`（审查范围明细），Attempt 新增 `code_review`（登记时的检查结果）；`rl run register` 新增 `--review`、`--no-review`。都是可选字段，旧库照常读取，旧 attempt 显示为 not checked。
+- 配置（2026-10-31，见 §13.1 和 `docs/configuration.md`）：
+  - 删除了没有代码读取的 `models.researcher`、`artifacts.content_digest`、`artifacts.keep_raw_evidence`。
+  - 以下三种情况会给出警告，但不阻止命令：CLI 不认识的键、旧版本写下的上述键、`relation_to_author` 不是 `different_family`。警告出现在每条命令的输出和会话开始的 hook 里。
+  - 配置文件不能加载时，hook 直接说明错误，不再当成没有项目。
+  - 工作包新增 Locations 一行。skill 和 researcher 子代理改为按它放文件，文中路径按默认值书写并注明。
+  - `rl decide` 对结论审查不检查 relation，和 §8.6 不一致；按用户决定，暂不修改。
 
 ### 21.4 首版未做
 
@@ -1167,6 +1173,10 @@ GitHub 链接固定到本次读取的提交；外部产品文档按 2026-10-30 �
 - 其后增至 51 项：观测的批量导入与 `occurred_at`、miyabi-mcp 导出契约（`tests/test_executor_contract.py`，见 21.7）等。Miyabi 上的端到端测试见 21.8。
 - 再增至 54 项：结论审查的审查包内容与复用、未经结论审查的关键决定留在待处理中、`rl delegate` 续接同一角色拥有的任务。
 - 再增至 56 项：登记 run 时的代码审查覆盖检查（工作区与 commit 两种代码来源、忽略键、只复核变化的文件、code_from、没有记录范围的旧工单、`--no-review`、报告中的标注）。
+- 再增至 58 项：
+  - 配置里 CLI 不读取的键给出警告，包括旧版本写下的键和 `relation_to_author` 的未知值；
+  - 配置不能加载时，会话开始的提示直接说明错误；
+  - 改名后的目录布局用于 init 和工作包。
 
 ### 21.6 端到端测试结果（2026-10-30）
 

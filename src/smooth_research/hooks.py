@@ -25,7 +25,9 @@ def session_start(host: str, raw: str) -> dict:
     cwd = Path(event.get("cwd") or ".").resolve()
     try:
         project = find_project(start=cwd)
-    except RLError:
+    except RLError as exc:
+        if exc.code != "NO_PROJECT":  # e.g. a configuration file that does not load
+            return _out(f"Smooth Research project found, but `{rl} status` fails: {exc.message}")
         text = f"Smooth Research is available (CLI: {rl}); use its skill to start or resume an ML research project."
         return _out(text)
     store = Store(project, "hook")
@@ -48,6 +50,7 @@ def session_start(host: str, raw: str) -> dict:
              f"Open tasks {len(tasks)}, unfinished attempts {len(attempts)}. Read `{rl} resume` before acting."]
     lines += [f"- {brief(t)}" for t in tasks[:5]]
     lines += [f"- attention: {i}" for i in items[:5]]
+    lines += [f"- configuration: {w}" for w in project.warnings]
     return _out("\n".join(lines))
 
 

@@ -13,7 +13,8 @@ decisions; you own the execution of this task.
    If it is already yours (owner is your role, for example after a WAIT), `rl task resume <task id> --role
    <role>` and carry out its next action. If another role owns it or the claim is refused, stop and report
    the state shown.
-3. Do the work. Code goes in `src/`, notes in `docs/notes/`, run outputs in `research/artifacts/<attempt>/`.
+3. Do the work. Code, notes and run outputs go where the work pack's Locations line says (by default
+   `src/`, `docs/notes/` and `research/artifacts/<attempt>/`).
    Register each run before executing it (`rl run register`), record what you observed (`rl run record`),
    import results (`rl run import-result`) and add evidence with an honest level and validity
    (`rl evidence add`). Exact formats and the cluster recipe: the smooth-research skill's
@@ -28,7 +29,7 @@ decisions; you own the execution of this task.
    <role> --attempts <ATT ids> --next-action "<what to do when they end>"` and finish, giving in your final
    message what reports their end (for miyabi-mcp, the `notify.daemon.listen_command`). The coordinator
    waits and starts you again with the same role. Short local runs you wait for yourself.
-6. Stay inside `docs/plan/constraints.md` and the task's budget. Never invent results, versions or model
+6. Stay inside the constraints document the work pack names and the task's budget. Never invent results, versions or model
    identities; unknown stays unknown. Engineering failures are diagnostics, not refutations.
 7. If you cannot continue: `rl task block <task id> --role <role> --reason
    engineering|model_unavailable|budget|science --summary "<why>"`. Otherwise deliver:

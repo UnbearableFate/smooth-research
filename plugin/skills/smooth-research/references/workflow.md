@@ -1,6 +1,8 @@
 # Smooth Research: formats and recipes
 
-Read the section you need; the main skill has the loop. `{{rl}}` is the CLI (see SKILL.md).
+Read the section you need; the main skill has the loop. `{{rl}}` is the CLI (see SKILL.md). Paths use the
+default layout (`src/`, `docs/`, `reports/`, `research/`); if the project renames them, take its own from the
+Locations line of `{{rl}} resume`.
 
 ## A local run, end to end
 

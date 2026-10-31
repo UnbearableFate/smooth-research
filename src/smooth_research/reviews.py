@@ -174,7 +174,7 @@ def run_ticket(store: Store, ticket_id: str, timeout: int = 1800, only: str | No
                            "--answer <file> --model-observed <model> --source <where>`"}
     return {"id": ticket_id, "status": status,
             "summary": f"{ticket_id} {status}: {errors}. Recorded as {status} — not a pass; independent low-cost "
-                       f"work can continue (raw output in research/calls/)."}
+                       f"work can continue (raw output in {store.project.rel(store.project.dir('calls'))}/)."}
 
 
 def _parsed(kind: str, text: str) -> bool:

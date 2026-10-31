@@ -263,6 +263,60 @@ def test_session_start_hook_reports_project_state(project, monkeypatch, tmp_path
     assert "available" in elsewhere["hookSpecificOutput"]["additionalContext"]
 
 
+def test_configuration_keys_the_cli_does_not_read_are_reported(project, rl, tmp_path):
+    import yaml
+    from smooth_research import hooks
+    from smooth_research.project import DEFAULT_CONFIG
+    cfg = tmp_path / "smooth-research.yaml"
+    data = yaml.safe_load(cfg.read_text(encoding="utf-8"))
+    assert data == DEFAULT_CONFIG and project.project.warnings == []
+    code, out, _ = rl("status")
+    assert code == 0 and "warning" not in out
+
+    # an older project's retired keys and two typos: the commands still run and say what is ignored
+    data["models"]["researcher"] = "inherit"
+    data["artifacts"] = {"content_digest": "blake2b", "keep_raw_evidence": True}
+    data["models"]["reviewer"]["relation_to_autor"] = "any"
+    data["contxt"] = {"work_target_tokens": 100}
+    cfg.write_text(yaml.safe_dump(data), encoding="utf-8")
+    code, out, _ = rl("status")
+    assert code == 0 and "H-0001" in out
+    assert "warning: smooth-research.yaml: models.researcher is no longer used" in out
+    assert "artifacts is no longer used" in out
+    assert "unknown key models.reviewer.relation_to_autor" in out and "unknown key contxt" in out
+    code, out, _ = rl("--json", "status")
+    assert len(json.loads(out)["warnings"]) == 4
+    hook = hooks.session_start("claude", json.dumps({"cwd": str(tmp_path)}))["hookSpecificOutput"]
+    assert "- configuration: smooth-research.yaml: unknown key contxt" in hook["additionalContext"]
+
+    # a family rule the CLI does not know turns the filter off, so it is named too
+    del data["models"]["reviewer"]["relation_to_autor"]
+    data["models"]["reviewer"]["relation_to_author"] = "different-family"
+    cfg.write_text(yaml.safe_dump(data), encoding="utf-8")
+    code, out, _ = rl("models")
+    assert code == 0 and "relation_to_author is 'different-family'" in out and "turns that filter off" in out
+
+    # a configuration that does not load is reported at session start, not mistaken for no project
+    cfg.write_text("version: 2\n", encoding="utf-8")
+    hook = hooks.session_start("claude", json.dumps({"cwd": str(tmp_path)}))["hookSpecificOutput"]
+    assert "status` fails" in hook["additionalContext"] and "unsupported config version" in hook["additionalContext"]
+
+
+def test_a_renamed_layout_is_used_by_init_and_named_in_work_packs(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("SMOOTH_RESEARCH_PROJECT", raising=False)
+    (tmp_path / "smooth-research.yaml").write_text("version: 1\ncode_root: lora\nresearch_root: records\n",
+                                                   encoding="utf-8")
+    out = research.init_project(tmp_path, None, "renamed")
+    assert out["warnings"] == [] and (tmp_path / "lora" / ".gitignore").is_file()
+    assert (tmp_path / "records" / "state" / "research.lattice").is_file() and not (tmp_path / "research").exists()
+    store = Store(find_project(), "test")
+    tasks.create_task(store, "adapter", "implement", [], to_role="researcher")
+    pack = context.work_pack(store, "T-0001")
+    assert "## Locations\ncode lora/ · documents docs/" in pack["summary"] and "records records/" in pack["summary"]
+    assert "Locations" not in pack["omitted"]
+
+
 def test_report_summarizes_arms_and_lives_in_reports(project, tmp_path):
     from smooth_research import view
     for seed, acc in ((0, 0.8), (1, 0.9)):
