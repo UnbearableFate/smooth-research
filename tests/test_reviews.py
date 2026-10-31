@@ -346,6 +346,9 @@ def test_an_advice_round_asks_every_advisor_on_its_own(project, fakes, monkeypat
         tickets = [tx.require(i) for i in first["ids"]]
     assert [t["candidates"] for t in tickets] == [["codex:gpt-6-astra@max"], ["claude:claude-fable-5-1@high"]]
     assert tickets[0]["request_ref"] == tickets[1]["request_ref"]
+    with project.read() as tx:
+        package = documents.read(project.project, documents.resolve(tx, first["request_ref"]))
+    assert "Does weight decay help" not in package  # the plan was the starting point; the records are the plan
     assert reviews.prepare_advice(project, "why no gain?", "H-0001")["duplicate"]
     monkeypatch.setenv("FAKE_ANSWER", PROPOSALS)
     reviews.run_many(project, first["ids"], timeout=60)

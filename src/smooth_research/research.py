@@ -70,9 +70,11 @@ def init_project(root: Path, plan: str | None = None, title: str | None = None) 
             sealed_digest = tx.require(sealed, "DocRevision")["digest"] if sealed else None
         held = sealed_digest or (digest_file(snapshot) if snapshot.exists() and snapshot.resolve() != source else None)
         if held and held != digest_file(source):
-            raise RLError("CONFLICT", f"the project already holds a different imported plan ({sealed or 'not sealed'}, "
-                                      f"{project.rel(snapshot)}); the original snapshot is immutable. Record plan "
-                                      "changes as hypothesis revisions and decisions instead.")
+            constraints = project.rel(project.constraints_path)
+            raise RLError("CONFLICT", f"the project already holds a different imported plan ({sealed or 'not sealed'}"
+                                      f", {project.rel(snapshot)}); the original snapshot is immutable and only the "
+                                      "starting point. Record a new direction as hypotheses and decisions, and a new "
+                                      f"goal, scope or budget in {constraints} with the user.")
         if snapshot.resolve() != source:
             snapshot.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(source, snapshot)
@@ -90,11 +92,12 @@ def init_project(root: Path, plan: str | None = None, title: str | None = None) 
                         + "\nlayout: experiment code src/ · for people docs/ (the plan, the constraints, the "
                           "research graph page, the manuscript, explanations/) · records and working documents "
                           "research/"),
-            "next": [f"fill {project.rel(project.constraints_path)} with the user's goal, environments and resource "
-                     "scope",
+            "next": [f"fill {project.rel(project.constraints_path)} with what only the user may change: goal and "
+                     "claims in scope, data and environments, resource ceiling, actions that need their decision",
                      f"put the user's model choices in {CONFIG_NAME} (models) and check them: rl models",
                      "register yourself: rl session start --role coordinator ...",
-                     "extract near-term hypotheses: rl hypothesis add ..."]}
+                     "extract near-term hypotheses once (the plan is not read again afterwards): rl hypothesis "
+                     "add ... --origin 'plan §x'"]}
 
 
 # -- hypotheses -----------------------------------------------------------------------------------------------

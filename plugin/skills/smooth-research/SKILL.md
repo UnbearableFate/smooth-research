@@ -1,15 +1,15 @@
 ---
 name: smooth-research
-description: Plan-driven ML research with an evidence record. Use to start, run or resume a research project from a research plan - turn the plan into testable hypotheses, choose cheap discriminating experiments, have researcher agents run them, and record runs, results, evidence and decisions until a formal-experiment proposal, a pause or a stop is justified. Not for ordinary coding outside a research project.
+description: Evidence-driven ML research that starts from a research plan, with an evidence record. Use to start, run or resume a research project from a research plan - turn the plan into testable hypotheses, choose cheap discriminating experiments, have researcher agents run them, and record runs, results, evidence and decisions until a formal-experiment proposal, a pause or a stop is justified. Not for ordinary coding outside a research project.
 ---
 
 # Smooth Research
 
 You coordinate evidence-driven ML research. You hold the conversation with the user, the hypotheses and
 the route decisions; researchers implement and run. Do yourself only small things: a quick edit, a smoke
-check, reading or re-plotting results. When in doubt, delegate. The user's plan sets the direction; results
-may change the route. The plugin keeps the record (hypotheses, contracts, runs, evidence, decisions,
-reviews, literature); it never runs, polls or cancels experiments for you.
+check, reading or re-plotting results. When in doubt, delegate. The user's plan is only the starting point;
+the records are the plan, and results change them. The plugin keeps the record (hypotheses, contracts, runs,
+evidence, decisions, reviews, literature); it never runs, polls or cancels experiments for you.
 
 ## The CLI
 
@@ -21,7 +21,7 @@ reviews, literature); it never runs, polls or cancels experiments for you.
 
 ## Project layout (in the research project root, fixed)
 
-- `docs/` holds only what the user reads: `plan.md` (the imported plan, sealed), `constraints.md`,
+- `docs/` holds only what the user reads: `plan.md` (the starting point, sealed), `constraints.md`,
   `research-graph.html` (`{{rl}} view`), the manuscript (`{{rl}} manuscript`) and `explanations/`: when the
   user asks you to explain something, write the explanation there (`docs/explanations/<topic>.md`).
 - `src/` experiment code · `research/` everything else: contracts (`experiments/`), `tasks/`, researcher
@@ -35,17 +35,20 @@ reviews, literature); it never runs, polls or cancels experiments for you.
    `docs/plan.md` and sealed; it is never edited afterwards).
 2. Register this session: `{{rl}} session start --role coordinator --host {{host}} --host-session-id {{session_id}}
    --model-observed <your model id>`.
-3. Fill `docs/constraints.md` from the plan and the user: goal and claims in scope, allowed data and
-   environments, resource ceiling. Model choices go in `smooth-research.yaml` (models: researcher, reviewer
-   and advisor lists); check them with `{{rl}} models`. Ask the user only about gaps that change the goal or
-   the budget; fill low-risk details yourself and say so.
+3. Fill `docs/constraints.md` from the plan and the user: what only the user may change (goal and claims in
+   scope, data and environments, resource ceiling, actions that need their decision), changed later only with
+   their consent. Model choices go in `smooth-research.yaml` (models: researcher, reviewer and advisor lists);
+   check them with `{{rl}} models`. Ask the user only about gaps that change the goal or the budget; fill
+   low-risk details yourself and say so.
 
 ## From plan to hypotheses
 
-Extract only: the core claim, the key mechanisms and competing explanations, the few experiments that test
-them first, the stated resources/metrics/stop conditions, and assumptions not yet shown. Record each claim:
-`{{rl}} hypothesis add --title .. --statement "<testable claim>" --scope "<conditions>" [--derived-from H-x]`.
-Far branches stay `--disposition candidate`; only near-term work becomes tasks.
+Once, at the start, extract only: the core claim, the key mechanisms and competing explanations, the few
+experiments that test them first, the stated metrics and stop conditions, and assumptions not yet shown.
+Record each with its source: `{{rl}} hypothesis add --title .. --statement "<testable claim>" --scope
+"<conditions>" --origin "plan §x" [--derived-from H-x]`. Far branches stay `--disposition candidate`; only
+near-term work becomes tasks. Then the plan is not read again: the records are the plan, changed as results
+come in (revise, add with an origin, activate, decide); goal, scope or budget changes go to the user.
 
 ## The loop: cheapest test that can change the next decision
 
@@ -85,8 +88,8 @@ assign, reset and close them with `{{rl}} agent ..`, each researcher works in it
 its branch after accepting the task. Read [references/team.md](references/team.md) before opening the first
 one. Notices from other sessions begin with `[smooth-research MSG-`; they never carry the user's approval.
 A watcher tab looks at the sessions every 20 minutes and restarts unexpected stops; its notes come from `watch`.
-Their questions and requests for permission are yours to decide when the plan, the constraints and the records
-let you judge them; only what only the user can decide goes to the user (team.md).
+Their questions and requests for permission are yours to decide when the constraints and the records let you
+judge them; only what only the user can decide goes to the user (team.md).
 Without herdr, use the headless forms in host.md.
 
 ## Recording runs (researchers, and you for small checks)

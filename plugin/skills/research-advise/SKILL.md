@@ -13,10 +13,10 @@ smooth-research skill: {{rl_short}}
 
 1. State the bottleneck precisely, then prepare one advice round:
    `{{rl}} advise prepare --target H-x --question "<the decision you cannot make and why>"`.
-   It gathers the goal, key positive and negative evidence, routes already stopped, surviving explanations,
-   constraints, nearest literature and an artifact index into one package
-   (`research/packages/advice-round-N.request.md`) and opens a ticket per
-   advisor (AD-x, AD-y, ...).
+   It gathers the constraints (goal, scope, limits), key positive and negative evidence, routes already
+   stopped, surviving explanations, nearest literature and an artifact index into one package
+   (`research/packages/advice-round-N.request.md`; the original plan is not in it, the records are the plan)
+   and opens a ticket per advisor (AD-x, AD-y, ...).
    The same question on an unchanged package (no new evidence, literature or constraints) returns the
    existing tickets: consult again only with new data.
 2. A project has `advice.max_rounds` rounds (default 3); a round that no advisor answered does not count.

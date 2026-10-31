@@ -77,8 +77,8 @@ def locations(store: Store) -> str:
     p = store.project
     if p.in_worktree:  # a researcher's worktree: code and notes here, records and run outputs in the project
         return (f"code src/ and notes research/notes/ in this checkout ({p.checkout}) · records, packages and run "
-                f"outputs in the project: {p.research_root}/ (artifacts/<attempt>/, contracts experiments/) · plan "
-                f"and constraints {p.docs_root}/")
+                f"outputs in the project: {p.research_root}/ (artifacts/<attempt>/, contracts experiments/) · "
+                f"constraints {p.constraints_path}")
     return ("code src/ · for people docs/ (plan, constraints, research-graph.html, manuscript, explanations/) "
             "· records and working documents research/ (experiments/, tasks/, notes/, reviews/, advice/, reports/, "
             "sealed documents, packages, artifacts/<attempt>/)")
@@ -176,8 +176,7 @@ def resume_pack(store: Store, role: str | None = None, budget: int | None = None
     c = work["coordinator"]
     model = (c.get("model_observed") or c.get("model_requested") or "model unverified") if c else None
     identity = [f"coordinator {c['id']} ({c['host']}, {model})" if c else "no active coordinator session",
-                f"plan snapshot {meta.get('plan_ref') or 'none'}; "
-                                f"constraints {store.project.rel(store.project.constraints_path)}",
+                f"constraints {store.project.rel(store.project.constraints_path)}",
                 f"data_version {meta['data_version']}"]
     first = []
     for t in tasks:
@@ -204,8 +203,6 @@ def resume_pack(store: Store, role: str | None = None, budget: int | None = None
 def advice_pack(store: Store, target: str | None, question: str, budget: int | None = None) -> dict:
     budget = budget or context_target(store.project.config, "advice_target_tokens")
     with store.read() as tx:
-        meta = tx.meta()
-        plan = _doc_text(tx, store, meta.get("plan_ref"), 4000)
         hyps = tx.all("Hypothesis")
         focus = tx.require(target) if target else None
         sections = [("Question", question)]
@@ -238,7 +235,6 @@ def advice_pack(store: Store, target: str | None, question: str, budget: int | N
         if artifacts:
             sections.append(("Raw artifact index (challenge the interpretation if they disagree)", "\n".join(artifacts)))
         sections.append(("Constraints", _read_constraints(store)))
-        sections.append(("Original plan (snapshot excerpt)", plan))
     return _assemble("# Advice pack\n", sections, budget)
 
 

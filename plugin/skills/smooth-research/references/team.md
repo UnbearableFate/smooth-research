@@ -84,8 +84,8 @@ end your turn; the next notice wakes you.
 
 Role sessions ask you, never the user. A question or a request for permission arrives as a NOTE; a dialog in a
 session's host (an approval, hooks to review, an MCP server to enable) is reported by `{{rl}} agent open`, by a
-notice that could not be typed, or by the watcher. Decide it yourself whenever the plan, the constraints
-document and the records let you judge it, and answer at once:
+notice that could not be typed, or by the watcher. Decide it yourself whenever the constraints document and
+the records let you judge it, and answer at once:
 
 - a question: `{{rl}} agent tell <name> "<answer>"`;
 - a dialog: `{{rl}} agent dialog <name>` shows it with its options; `{{rl}} agent answer <name> "<option>"
