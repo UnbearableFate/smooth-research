@@ -9,10 +9,13 @@ A review round holds at most two reviews: the first and one re-check after fixes
 finding of medium or higher severity remains; when such findings remain after the second, the round goes to
 the coordinator, who approves it or returns the work (a further review then starts a new round, with the
 coordinator's reason). Answers come from a headless call (rl review run), a live reviewer session in a herdr
-tab (rl review answer), or an import.
+tab (rl review answer), or an import; on every path a review answer is final (a further review is a re-check).
 Advice comes in rounds: every configured advisor gets its own ticket on the same package, and a project has a
-limited number of rounds (advice.max_rounds) unless the user approves more. A round is deduplicated by
-question, evidence version, constraints and advisor configuration. A live advisor may revise its answer.
+limited number of rounds (advice.max_rounds) unless the user approves more. A round is deduplicated by its
+package and advisors: the same question on the same records gives the same package. A live advisor may revise
+its answer.
+A ticket is created in the write that seals its request package, so that no ticket is left without one (a package
+file left by a failed write is overwritten by the next request).
 """
 
 from __future__ import annotations
@@ -33,7 +36,7 @@ from .runs import code_review_summary, evidence_attempts
 from .schema import ENUMS
 from .scope import changed_since_request, fingerprint
 from .store import Store, Tx
-from .util import RLError, digest_file, digest_json, now_utc, short
+from .util import RLError, digest_json, now_utc, short
 from .view import _arm_table
 
 REVIEWS_PER_ROUND = 2
@@ -154,14 +157,15 @@ def _round(tx: Tx, recheck_of: str | None, new_round: str | None) -> dict:
         raise RLError("INVALID", f"{recheck_of} is not a review")
     # an answer given while the files changed does not count: its re-check takes its place in the round
     root = prev.get("round_of") or prev["id"]
-    index = (prev.get("round_index") or 1) + (0 if prev.get("changed_during_review") else 1)
-    if index > REVIEWS_PER_ROUND:
+    held = [t for t in tx.all("Ticket", kind="review", round_of=root) if not t.get("changed_during_review")]
+    if len(held) >= REVIEWS_PER_ROUND:
+        last = max(held, key=lambda t: t.get("round_index") or 1)["id"]
         raise RLError("LIMIT", f"the round that began with {root} already had its {REVIEWS_PER_ROUND} reviews (the "
-                               f"last: {recheck_of}). The coordinator approves the remaining findings (`rl review "
-                               f"approve {recheck_of} --rationale ..`) or returns the work; a further review starts a "
-                               f"new round with the coordinator's reason: `--recheck-of {recheck_of} --new-round "
+                               f"last: {last}). The coordinator approves the remaining findings (`rl review "
+                               f"approve {last} --rationale ..`) or returns the work; a further review starts a "
+                               f"new round with the coordinator's reason: `--recheck-of {last} --new-round "
                                "\"<reason>\"`")
-    return {"round_of": root, "round_index": index}
+    return {"round_of": root, "round_index": len(held) + 1}
 
 
 def _route(store: Store, rid: str, recheck_of: str | None, requester: str | None) -> str:
@@ -197,17 +201,18 @@ def _worker(ticket: dict) -> int | None:
         return pid
 
 
-def _spawn(store: Store, ticket_id: str, timeout: int) -> tuple[subprocess.Popen, Path]:
+def _spawn(store: Store, ticket_id: str, timeout: int, entry: str | None = None) -> tuple[subprocess.Popen, Path]:
     log = store.project.dir("calls") / f"{ticket_id}.worker.log"
     cmd = [sys.executable, "-m", "smooth_research", "--project", str(store.project.root),
-           "review" if ticket_id.startswith("RV") else "advise", "run", ticket_id, "--timeout", str(timeout)]
+           "review" if ticket_id.startswith("RV") else "advise", "run", ticket_id, "--timeout", str(timeout),
+           *(["--entry", entry] if entry else [])]
     with open(log, "ab") as out:  # the worker claims the ticket itself (run_ticket)
         proc = subprocess.Popen(cmd, stdout=out, stderr=out, stdin=subprocess.DEVNULL, start_new_session=True,
                                 cwd=store.project.root)
     return proc, log
 
 
-def start_background(store: Store, ticket_id: str, timeout: int) -> dict:
+def start_background(store: Store, ticket_id: str, timeout: int, entry: str | None = None) -> dict:
     """Run the call in a detached worker process; `rl review show` / `rl advise show` report the outcome."""
     with store.read() as tx:
         t = tx.require(ticket_id, "Ticket")
@@ -215,7 +220,7 @@ def start_background(store: Store, ticket_id: str, timeout: int) -> dict:
         return {"id": ticket_id, "summary": f"{ticket_id} " + (f"already answered ({t.get('verdict') or 'see answer'})"
                                                                if t["status"] == "answered" else
                                                                f"is being answered by process {_worker(t)}")}
-    proc, log = _spawn(store, ticket_id, timeout)
+    proc, log = _spawn(store, ticket_id, timeout, entry)
     return {"id": ticket_id, "pid": proc.pid, "log": store.project.rel(log),
             "summary": f"{ticket_id} running in background (pid {proc.pid}); check with "
                        f"`rl {'review' if ticket_id.startswith('RV') else 'advise'} show {ticket_id}`"}
@@ -244,8 +249,6 @@ def run_ticket(store: Store, ticket_id: str, timeout: int = 1800, only: str | No
     chosen = [adapters.Entry.parse(only)] if only else None
     with store.write() as tx:
         t = tx.require(ticket_id, "Ticket")
-        if not t.get("request_ref"):
-            raise RLError("INVALID", f"{ticket_id} has no request package; prepare it again")
         request_path = store.project.abs(tx.require(t["request_ref"], "DocRevision")["object_path"])
         calls = [c for c in (t.get("calls") or []) if "pid" not in c]  # without the claims of earlier workers
         if t["status"] != "answered":
@@ -312,12 +315,15 @@ def _parsed(kind: str, text: str) -> bool:
 def _store_answer(store: Store, ticket_id: str, text: str, entry: str, observed: str | None, provider: str | None,
                   session_id: str | None, usage: dict | None, cost: float | None, calls: list, authors: list,
                   answered_by: dict | None = None) -> dict:
-    """Record an answer. A review answer records its open severity; the second review of a round that still has
-    a medium or higher finding goes to the coordinator. A code review whose files changed after the request may
-    describe another version: it is recorded, but does not count. A revised advice answer keeps the earlier
-    ones."""
+    """Record an answer. A review answer records its open severity and is final; the second review of a round
+    that still has a medium or higher finding goes to the coordinator. A code review whose files changed after the
+    request may describe another version: it is recorded, but does not count. A revised advice answer keeps the
+    earlier ones."""
     with store.read() as tx:
         t = tx.require(ticket_id, "Ticket")
+    if t["kind"] == "review" and t["status"] == "answered":
+        raise RLError("CONFLICT", f"{ticket_id} is already answered; a further review is a re-check: "
+                                  f"rl review request .. --recheck-of {ticket_id}")
     folder = "reviews" if t["kind"] == "review" else "advice"
     earlier = list(t.get("earlier_answers") or []) + ([t["answer_ref"]] if t.get("answer_ref") else [])
     name = f"{ticket_id}.md" if not earlier else f"{ticket_id}.revision-{len(earlier) + 1}.md"
@@ -399,10 +405,7 @@ def answer_live(store: Store, ticket_id: str, answer: str, session_name: str | N
     want = "reviewer" if t["kind"] == "review" else "advisor"
     if s["role_kind"] != want:
         raise RLError("INVALID", f"{ticket_id} is a {t['kind']} ticket; {s['role_id']} is a {s['role_kind']}")
-    if t["status"] == "answered" and t["kind"] == "review":
-        raise RLError("CONFLICT", f"{ticket_id} is already answered; a further review is a re-check: "
-                                  f"rl review request .. --recheck-of {ticket_id}")
-    if t["status"] == "answered" and t.get("answered_by") != s["id"]:
+    if t["kind"] == "advice" and t["status"] == "answered" and t.get("answered_by") != s["id"]:
         raise RLError("CONFLICT", f"{ticket_id} was answered by another session; only that advisor revises it")
     text = store.project.src(answer).read_text(encoding="utf-8")
     if not _parsed(t["kind"], text):
@@ -496,27 +499,24 @@ def request_review(store: Store, target: str | None, files: list[str], question:
             return reused
         rid = tx.next_id("Ticket", "RV")
         rounds = _round(tx, recheck_of, new_round)
+        contract = ""
+        if target and tx.require(target)["_label"] == "Experiment":
+            contract = contract_summary(tx, store, tx.require(target))
+        prior = brief(tx.require(recheck_of)) if recheck_of else ""
+        path = store.project.dir("packages") / f"{rid}.request.md"
+        path.write_text(_review_package(store, rid, target, question, scope, contract, detail, diff_base, prior),
+                        encoding="utf-8")
+        ref = documents.register(tx, documents.prepare(store.project, path, "review_request"))
         tx.create("Ticket", {"id": rid, "kind": "review", "subject": "code",
                              "status": "pending" if eligible else "unavailable",
                              "target_id": target, "question": question, "dedupe_key": fp,
                              "candidates": [str(e) for e in eligible], "author_models": list(author_models),
-                             "recheck_of": recheck_of, "code_scope": detail,
+                             "recheck_of": recheck_of, "code_scope": detail, "request_ref": ref,
                              "code_checkout": str(store.project.checkout), "round_of": rid, **rounds,
                              "requested_by": caller_role(),
                              "error": None if eligible else "no reviewer configured (models.reviewer is empty)"})
         if target:
             tx.link("targets", rid, target)
-        contract = ""
-        if target and tx.require(target)["_label"] == "Experiment":
-            contract = contract_summary(tx, store, tx.require(target))
-        prior = brief(tx.require(recheck_of)) if recheck_of else ""
-    path = store.project.dir("packages") / f"{rid}.request.md"
-    path.write_text(_review_package(store, rid, target, question, scope, contract, detail, diff_base, prior),
-                    encoding="utf-8")
-    prep = documents.prepare(store.project, path, "review_request")
-    with store.write() as tx:
-        ref = documents.register(tx, prep)
-        tx.update(rid, {"request_ref": ref})
         tx.event("review.requested", rid, f"{target or '-'} fingerprint {short(fp)}")
     note = (f"candidates {', '.join(str(e) for e in eligible)}; run it: rl review run {rid} [--background], or "
             "in herdr by a reviewer session. The reviewer reads the files where they are: leave them unchanged "
@@ -600,19 +600,16 @@ def request_conclusion_review(store: Store, targets: list[str], proposal: str, a
             return reused
         rid = tx.next_id("Ticket", "RV")
         rounds = _round(tx, recheck_of, new_round)
+        path = store.project.dir("packages") / f"{rid}.request.md"
+        path.write_text(f"# Conclusion review package {rid}\n\n{body}\n{CONCLUSION_PROTOCOL}", encoding="utf-8")
+        ref = documents.register(tx, documents.prepare(store.project, path, "review_request"))
         tx.create("Ticket", {"id": rid, "kind": "review", "subject": "conclusion",
                              "status": "pending" if eligible else "unavailable", "target_id": target_text,
                              "question": question, "dedupe_key": key, "candidates": [str(e) for e in eligible],
                              "author_models": list(author_models), "recheck_of": recheck_of, "error": error,
-                             "round_of": rid, **rounds, "requested_by": caller_role()})
+                             "request_ref": ref, "round_of": rid, **rounds, "requested_by": caller_role()})
         for t in targets:
             tx.link("targets", rid, t)
-    path = store.project.dir("packages") / f"{rid}.request.md"
-    path.write_text(f"# Conclusion review package {rid}\n\n{body}\n{CONCLUSION_PROTOCOL}", encoding="utf-8")
-    prep = documents.prepare(store.project, path, "review_request")
-    with store.write() as tx:
-        ref = documents.register(tx, prep)
-        tx.update(rid, {"request_ref": ref})
         tx.event("review.requested", rid, f"conclusion on {target_text} key {short(key)}")
     note = (f"candidates {', '.join(str(e) for e in eligible)}; run it: rl review run {rid} [--background] (or "
             f"assign it to a reviewer session in herdr), then cite it: rl decide ... --based-on {rid}"
@@ -691,13 +688,6 @@ def _conclusion_body(tx: Tx, store: Store, targets: list[str], proposal: str, qu
 # -- advice ---------------------------------------------------------------------------------------------------
 
 
-def _evidence_version(tx: Tx) -> str:
-    state = [(ev["id"], ev["validity"], [(e["rel"], e["id"], e.get("revision")) for e in tx.out(ev["id"])])
-             for ev in tx.all("Evidence")]
-    hyps = [(h["id"], h["revision"], h["disposition"], h["evidence_status"]) for h in tx.all("Hypothesis")]
-    return digest_json({"evidence": state, "hypotheses": hyps})
-
-
 def advice_rounds(tx: Tx) -> list:
     """Advice rounds that count toward advice.max_rounds: those with an answer or still waiting for one (a round
     no advisor could answer does not count)."""
@@ -708,25 +698,22 @@ def advice_rounds(tx: Tx) -> list:
 
 
 def prepare_advice(store: Store, question: str, target: str | None = None, user_approved: str | None = None) -> dict:
-    """One advice round: a package for every configured advisor, each on its own ticket, to be asked at once."""
-    constraints = store.project.constraints_path
+    """One advice round: a package for every configured advisor, each on its own ticket, to be asked at once. The
+    same package for the same advisors is the same round."""
     entries = _entries(store, "advice")
     if not entries:
         raise RLError("INVALID", "no advisor configured: list model entries under models.advisor")
     limit = advice_limit(store.project.config)
-    with store.read() as tx:
-        if target:
-            tx.require(target)
-        key = digest_json({"question": question.strip(), "target": target, "evidence": _evidence_version(tx),
-                           "constraints": digest_file(constraints) if constraints.exists() else None,
-                           "advisor": [str(e) for e in entries]})
-        same = [t for t in tx.all("Ticket", dedupe_key=key) if t["kind"] == "advice"]
-        if same:
-            ids = [t["id"] for t in same]
-            return {"ids": ids, "duplicate": True,
-                    "summary": f"{', '.join(ids)} already ask this with the same evidence "
-                               f"({', '.join(t['status'] for t in same)}); send only new data, or wait for new evidence"}
+    question = question.strip()
     pack = advice_pack(store, target, question)
+    key = digest_json({"package": pack["summary"], "advisor": [str(e) for e in entries]})
+    with store.read() as tx:
+        same = [t for t in tx.all("Ticket", dedupe_key=key) if t["kind"] == "advice"]
+    if same:
+        ids = [t["id"] for t in same]
+        return {"ids": ids, "duplicate": True,
+                "summary": f"{', '.join(ids)} already ask this with the same evidence "
+                           f"({', '.join(t['status'] for t in same)}); send only new data, or wait for new evidence"}
     with store.write() as tx:
         used = len(advice_rounds(tx))
         if used >= limit and not (user_approved or "").strip():
@@ -734,22 +721,19 @@ def prepare_advice(store: Store, question: str, target: str | None = None, user_
                                    "why another round is needed, and if they agree pass their approval: "
                                    "--user-approved \"<what the user said>\"")
         number = 1 + max([t["advice_round"] for t in tx.all("Ticket", kind="advice")], default=0)
+        path = store.project.dir("packages") / f"advice-round-{number}.request.md"
+        path.write_text(pack["summary"] + "\n\n" + ADVICE_PROTOCOL, encoding="utf-8")
+        ref = documents.register(tx, documents.prepare(store.project, path, "advice_request"))
         ids = []
         for entry in entries:
             aid = tx.next_id("Ticket", "AD")
             tx.create("Ticket", {"id": aid, "kind": "advice", "status": "pending", "target_id": target,
                                  "question": question, "dedupe_key": key, "candidates": [str(entry)],
-                                 "advice_round": number, "user_approved": (user_approved or "").strip() or None})
+                                 "advice_round": number, "user_approved": (user_approved or "").strip() or None,
+                                 "request_ref": ref})
             if target:
                 tx.link("targets", aid, target)
             ids.append(aid)
-    path = store.project.dir("packages") / f"advice-round-{number}.request.md"
-    path.write_text(pack["summary"] + "\n\n" + ADVICE_PROTOCOL, encoding="utf-8")
-    prep = documents.prepare(store.project, path, "advice_request")
-    with store.write() as tx:
-        ref = documents.register(tx, prep)
-        for aid in ids:
-            tx.update(aid, {"request_ref": ref})
         tx.event("advice.prepared", ids[0], f"round {number} ({len(ids)} advisors)"
                  + (f"; beyond the limit, approved by the user: {user_approved.strip()}" if used >= limit else "")
                  + f": {question}")

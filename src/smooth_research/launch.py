@@ -157,7 +157,7 @@ def _moved(target: str, before: str, wait: float = 2.0) -> str:
     return screen
 
 
-def excerpt(screen: str, lines: int = 12, chars: int = 600) -> str:
+def excerpt(screen: str, chars: int = 600) -> str:
     """The bottom of a screen, where a dialog sits, as one line."""
     shown = " / ".join(" ".join(x.split()) for x in screen.splitlines() if x.strip())
     return ("…" + shown[-chars:]) if len(shown) > chars else shown or "an empty screen"

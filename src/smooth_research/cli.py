@@ -293,7 +293,7 @@ def cmd_review(args):
         return reviews.approve(store, args.id, args.rationale)
     if a == "run":
         if args.background:
-            return reviews.start_background(store, args.id, args.timeout)
+            return reviews.start_background(store, args.id, args.timeout, args.entry)
         return reviews.run_ticket(store, args.id, args.timeout, args.entry)
     if a == "import":
         return reviews.import_answer(store, args.id, args.answer, args.model_observed, args.source, args.provider,
@@ -314,7 +314,7 @@ def cmd_advise(args):
                 raise RLError("INVALID", "--entry overrides the model of one ticket; name one ticket")
             return reviews.run_many(store, args.id, args.timeout, args.background)
         if args.background:
-            return reviews.start_background(store, args.id[0], args.timeout)
+            return reviews.start_background(store, args.id[0], args.timeout, args.entry)
         return reviews.run_ticket(store, args.id[0], args.timeout, args.entry)
     if a == "import":
         return reviews.import_answer(store, args.id, args.answer, args.model_observed, args.source, args.provider,

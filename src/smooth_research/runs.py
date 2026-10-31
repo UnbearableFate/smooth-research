@@ -60,7 +60,8 @@ def register(store: Store, experiment: str, spec: dict, request_id: str, run_id:
              reviews: list[str] = (), no_review: str | None = None) -> dict:
     spec = normalize_spec(dict(spec))
     payload = digest_json({"experiment": experiment, "spec": spec, "run": run_id})
-    prep = prepare_contract(store, experiment)  # a registered run is a formal reference: seal the contract
+    # a new run is a formal reference: seal the contract (an attempt of a run uses the run's sealed revision)
+    prep = None if run_id else prepare_contract(store, experiment)
     check = code_coverage(store, experiment, spec["code_ref"], list(reviews), no_review)
     with store.write() as tx:
         previous = tx.request("run.register", request_id, payload)
@@ -453,7 +454,7 @@ def _usage(tx: Tx, usage: dict, attempts: list[str], revise: bool = False) -> di
     tx.create("Usage", {"id": uid, "accounting_ref": usage["accounting_ref"], "quantity": float(body["quantity"]),
                         "unit": body["unit"], "resource_type": body["resource_type"], "hardware": body["hardware"],
                         "basis": body["basis"], "source_ref": body["source_ref"], "note": usage.get("note"),
-                        "revision": len(current) + 1 if current else 1, "content_digest": digest})
+                        "revision": current[-1]["revision"] + 1 if current else 1, "content_digest": digest})
     for old in current:
         tx.update(old["id"], {"superseded": True})
         tx.link("supersedes", uid, old["id"])

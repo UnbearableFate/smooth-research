@@ -197,16 +197,17 @@ class Tx:
         if source == target:
             raise RLError("INVALID", f"{rel} cannot link {source} to itself")
         existing = [e for e in self.out(source, rel, s_label) if e["id"] == target]
-        if existing and not spec.revision_bound:
-            return  # a repeated link is a no-op
-        bound = {k: props.get(k) for k in ("revision", "source_revision")}
+        bound = {k: props.get(k) for k in ("revision", "source_revision")} if spec.revision_bound else {}
         same = [e for e in existing if all(e.get(k) == v for k, v in bound.items())]
-        if same:  # the same revision linked again: the edge takes the new description (assessment, locator, note)
+        # linked again (a revision-bound relation: at the same revisions): the edge takes the new description
+        # (assessment, locator, note)
+        if same:
             changed = {k: v for k, v in props.items() if k not in bound and v is not None and same[0].get(k) != v}
             if changed:
                 where = " AND ".join(f"e.{k} = ${k}" if v is not None else f"e.{k} IS NULL" for k, v in bound.items())
-                self.q(f"MATCH (a:{s_label} {{id: $s}})-[e:{spec.edge}]->(b:{t_label} {{id: $t}}) WHERE {where} "
-                       f"SET {', '.join(f'e.{k} = $new_{k}' for k in changed)}", s=source, t=target,
+                self.q(f"MATCH (a:{s_label} {{id: $s}})-[e:{spec.edge}]->(b:{t_label} {{id: $t}})"
+                       + (f" WHERE {where}" if where else "")
+                       + f" SET {', '.join(f'e.{k} = $new_{k}' for k in changed)}", s=source, t=target,
                        **{k: v for k, v in bound.items() if v is not None},
                        **{f"new_{k}": v for k, v in changed.items()})
             return

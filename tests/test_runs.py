@@ -124,8 +124,13 @@ def test_namespaces_keep_identical_external_ids_apart_and_attempts_can_share_one
 def test_re_execution_is_a_new_attempt_and_keeps_the_failure(project):
     register(project)
     runs.record(project, obs(state="ended", outcome="failed"))
+    with project.read() as tx:
+        draft = project.project.abs(tx.require("E-0001")["contract_path"])
+    draft.write_text(draft.read_text() + "\nedited after the run was registered\n")
+    objects = set(project.project.objects_dir.iterdir())
     again = register(project, request_id="r1-retry", run="RUN-0001")
     assert again["attempt"] == "ATT-0001-2" and again["run"] == "RUN-0001"
+    assert set(project.project.objects_dir.iterdir()) == objects  # an attempt uses the run's sealed contract
     assert attempt(project)["outcome"] == "failed"
     with pytest.raises(RLError):  # a changed spec is a new run, not an attempt
         register(project, request_id="r1-changed", spec={**SPEC, "seed": 9}, run="RUN-0001")
@@ -212,6 +217,10 @@ def test_shared_usage_counts_once_and_unreported_is_not_zero(project):
     assert summary["totals"] == [{"resource_type": "compute", "unit": "node_h", "hardware": "-", "basis": "reported",
                                   "quantity": 3.0}]
     assert summary["unreported_attempts"] == ["ATT-0003-1"]
+    runs.add_usage(project, {**usage, "quantity": 4.0}, ["ATT-0001-1", "ATT-0002-1"], revise=True)
+    with project.read() as tx:
+        revisions = sorted((u["id"], u["revision"]) for u in tx.all("Usage"))
+    assert revisions == [("U-0001", 1), ("U-0002", 2), ("U-0003", 3)]
 
 
 def test_record_operations_start_query_or_retry_nothing(project, monkeypatch):

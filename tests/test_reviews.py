@@ -8,7 +8,7 @@ import stat
 import pytest
 import yaml
 
-from smooth_research import adapters, delegate, messages, research, reviews, runs, scope, tasks
+from smooth_research import adapters, delegate, documents, literature, messages, research, reviews, runs, scope, tasks
 from smooth_research.util import RLError
 
 FAKE_CODEX = r"""#!{python}
@@ -181,9 +181,10 @@ def test_a_review_round_holds_two_reviews_and_then_goes_to_the_coordinator(proje
     assert out["escalated"] and "the coordinator decides" in out["summary"]
     assert (f"{second['id']}: the review round RV-0001 used its 2 reviews and medium finding(s) remain"
             in messages.inbox(project, "coordinator")["summary"])
-    with pytest.raises(RLError) as exc:
-        request(project, recheck_of=second["id"])
-    assert exc.value.code == "LIMIT" and "--new-round" in exc.value.message
+    for named in (second["id"], first["id"]):  # the round is full whichever of its reviews a re-check names
+        with pytest.raises(RLError) as exc:
+            request(project, recheck_of=named)
+        assert exc.value.code == "LIMIT" and f"--recheck-of {second['id']} --new-round" in exc.value.message
     monkeypatch.setenv("SMOOTH_RESEARCH_ROLE", "researcher-1")
     with pytest.raises(RLError):
         reviews.approve(project, second["id"], "fine by me")  # approving is the coordinator's
@@ -320,6 +321,21 @@ def test_unparsed_answers_and_same_family_imports_are_labelled_honestly(project,
     assert out["relation"] == "same_family_independent_session" and out["verdict"] == "issues"
 
 
+def test_an_imported_review_answer_is_final_too(project, fakes, tmp_path):
+    code(tmp_path)
+    rv = request(project)["id"]
+    (tmp_path / "medium.md").write_text(finding("medium"))
+    reviews.import_answer(project, rv, str(tmp_path / "medium.md"), "gpt-6-astra", "subagent")
+    reviews.approve(project, rv, "accept only the original medium issue")
+    (tmp_path / "blocking.md").write_text('```json\n{"verdict": "blocking", "findings": []}\n```')
+    with pytest.raises(RLError) as exc:
+        reviews.import_answer(project, rv, str(tmp_path / "blocking.md"), "gpt-6-astra", "subagent")
+    assert exc.value.code == "CONFLICT" and f"--recheck-of {rv}" in exc.value.message
+    with project.read() as tx:
+        t = tx.require(rv)
+    assert (t["verdict"], t["open_severity"], t.get("earlier_answers")) == ("issues", "medium", None)
+
+
 PROPOSALS = 'Proposals.\n```json\n{"proposals": [{"title": "x"}, {"title": "y"}], "pause_recommended": false}\n```'
 
 
@@ -342,6 +358,18 @@ def test_an_advice_round_asks_every_advisor_on_its_own(project, fakes, monkeypat
     assert second["round"] == 2 and not second.get("duplicate")
     h = research.add_hypothesis(project, "advised route", "a different writer", derived_from=[first["ids"][0]])
     assert h["id"] == "H-0002"
+
+
+def test_new_literature_makes_a_new_advice_round(project):
+    reviews.prepare_advice(project, "is our direction novel?", "H-0001")
+    paper = literature.add_paper(project, title="A checked, identical prior method", authors=["A. Author"],
+                                 year=2025)["id"]
+    literature.link_paper(project, "H-0001", paper, "nearest_work", "checked", locator="section 2")
+    second = reviews.prepare_advice(project, "is our direction novel?", "H-0001")
+    assert second["round"] == 2 and not second.get("duplicate")
+    with project.read() as tx:
+        assert paper in documents.read(project.project, documents.resolve(tx, second["request_ref"]))
+    assert reviews.prepare_advice(project, "is our direction novel?", "H-0001")["duplicate"]
 
 
 def test_advice_rounds_beyond_the_limit_need_the_users_approval(project, monkeypatch):
@@ -370,6 +398,11 @@ def test_manual_advisor_waits_for_an_imported_answer(project, tmp_path, monkeypa
     (tmp_path / "gpt.md").write_text('```json\n{"proposals": [], "pause_recommended": true}\n```')
     done = reviews.import_answer(store, ad["ids"][0], str(tmp_path / "gpt.md"), "gpt-pro", "ChatGPT Pro (manual)")
     assert "recommends pause" in done["summary"]
+    (tmp_path / "gpt.md").write_text(PROPOSALS)
+    assert "2 proposal(s)" in reviews.import_answer(store, ad["ids"][0], str(tmp_path / "gpt.md"), "gpt-pro",
+                                                    "ChatGPT Pro (manual)")["summary"]  # an advisor may revise
+    with store.read() as tx:
+        assert len(tx.require(ad["ids"][0])["earlier_answers"]) == 1
 
 
 def test_delegation_records_the_exact_session_and_model(project, fakes, monkeypatch):
@@ -595,6 +628,42 @@ def test_one_process_at_a_time_answers_a_ticket(project, fakes, tmp_path):
     with project.read() as tx:
         t = tx.require(rv)
     assert t["status"] == "answered" and [c for c in t["calls"] if "pid" in c] == []
+
+
+def test_a_background_run_keeps_the_entry_it_was_given(project, fakes, tmp_path, monkeypatch, rl):
+    import subprocess
+    from types import SimpleNamespace
+    code(tmp_path)
+    tickets = {"review": request(project)["id"], "advise": reviews.prepare_advice(project, "which route?")["ids"][0]}
+    for kind, tid in tickets.items():
+        started = []
+        with monkeypatch.context() as m:
+            m.setattr(subprocess, "Popen", lambda cmd, **kw: started.append(cmd) or SimpleNamespace(pid=4242))
+            assert rl(kind, "run", tid, "--background", "--entry", "manual:chosen-model")[0] == 0
+        worker = started[0][3:]  # the worker's rl arguments, without the interpreter
+        assert worker[-2:] == ["--entry", "manual:chosen-model"]
+        assert "to chosen-model yourself" in rl(*worker)[1]  # not to the configured reviewer or advisor
+
+
+def test_a_request_whose_package_cannot_be_sealed_leaves_no_ticket(project, fakes, tmp_path, monkeypatch):
+    code(tmp_path)
+    sealed = documents.prepare
+
+    def disk_full(project_, path, doc_type):
+        if doc_type.endswith("_request"):
+            raise OSError("disk full")
+        return sealed(project_, path, doc_type)
+
+    monkeypatch.setattr(documents, "prepare", disk_full)
+    for ask in (lambda: request(project), lambda: reviews.prepare_advice(project, "which route?"),
+                lambda: reviews.request_conclusion_review(project, ["H-0001"], "WD helps", ["claude-sonnet-5-5"])):
+        with pytest.raises(OSError):
+            ask()
+    with project.read() as tx:
+        assert tx.all("Ticket") == []
+    monkeypatch.setattr(documents, "prepare", sealed)
+    assert reviews.prepare_advice(project, "which route?")["round"] == 1  # the failed round neither counts nor blocks
+    assert request(project)["id"] == "RV-0001"
 
 
 def test_a_conclusion_review_covers_only_the_hypotheses_it_reviewed(project, fakes):

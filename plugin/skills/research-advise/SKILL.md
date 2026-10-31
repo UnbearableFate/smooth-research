@@ -17,7 +17,8 @@ smooth-research skill: {{rl_short}}
    constraints, nearest literature and an artifact index into one package
    (`research/packages/advice-round-N.request.md`) and opens a ticket per
    advisor (AD-x, AD-y, ...).
-   The same question with the same evidence returns the existing tickets: consult again only with new data.
+   The same question on an unchanged package (no new evidence, literature or constraints) returns the
+   existing tickets: consult again only with new data.
 2. A project has `advice.max_rounds` rounds (default 3); a round that no advisor answered does not count.
    When they are used up, prepare stops with LIMIT: tell the user why another round is worth its cost, and
    only if they agree run it again with `--user-approved "<what the user said>"`.

@@ -177,17 +177,20 @@ def test_rejecting_a_result_flags_what_rests_on_it(project):
         assert tx.require(ev)["validity"] == "valid"  # whether it still holds is the researcher's judgment
 
 
-def test_a_relinked_paper_takes_the_new_assessment_and_a_new_revision_gets_its_own_link(project):
+@pytest.mark.parametrize("relation", ["nearest_work", "cites", "motivated_by"])
+def test_a_relinked_paper_takes_the_new_assessment(project, relation):
+    """A revision-bound link (nearest_work, cites) is kept per revision of the hypothesis; motivated_by is one."""
     from smooth_research import literature
     paper = literature.add_paper(project, title="Noise and decay", authors=["A. Author"], year=2024)["id"]
-    literature.link_paper(project, "H-0001", paper, "nearest_work", "search_hit")
-    literature.link_paper(project, "H-0001", paper, "nearest_work", "checked", locator="section 3")
-    literature.link_paper(project, "H-0001", paper, "nearest_work", "checked", locator="section 3")
+    literature.link_paper(project, "H-0001", paper, relation, "search_hit")
+    literature.link_paper(project, "H-0001", paper, relation, "checked", locator="section 3")
+    literature.link_paper(project, "H-0001", paper, relation, "checked", locator="section 3")
     research.revise_hypothesis(project, "H-0001", "narrow", scope="toy, 20% noise only", base_revision=1)
-    literature.link_paper(project, "H-0001", paper, "nearest_work", "checked", locator="section 4")
+    literature.link_paper(project, "H-0001", paper, relation, "checked", locator="section 4")
     with project.read() as tx:
-        edges = sorted((e["source_revision"], e["assessment"], e["locator"]) for e in tx.out("H-0001", "nearest_work"))
-    assert edges == [(1, "checked", "section 3"), (2, "checked", "section 4")]
+        edges = sorted((e["source_revision"], e["assessment"], e["locator"]) for e in tx.out("H-0001", relation))
+    kept = [] if relation == "motivated_by" else [(1, "checked", "section 3")]
+    assert edges == kept + [(2, "checked", "section 4")]
 
 
 def test_failed_positive_control_is_a_diagnostic_not_a_refutation(project):

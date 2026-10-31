@@ -20,8 +20,11 @@ smooth-research skill: {{rl_short}}
   findings remain after the second, the CLI hands the round to the coordinator (a NOTE and an attention
   item), who approves it with a reason (`{{rl}} review approve RV-x --rationale ..`) or returns the work.
   Approving is the coordinator's decision; a session that `{{rl}} agent open` started cannot approve.
-- A third request in the same round stops with LIMIT. A further review starts a new round, with the reason:
-  `--recheck-of RV-x --new-round "<why the code needs another review>"`.
+- A third request in the same round stops with LIMIT, whichever review of the round it names. A further
+  review starts a new round, with the reason: `--recheck-of RV-x --new-round "<why the code needs another
+  review>"`.
+- An answer is final, however it came (headless, a reviewer session, an import): a ticket is answered once,
+  and a further review is a re-check.
 - In herdr the reviewer is a session that the coordinator assigns (`{{rl}} agent open --role reviewer
   --ticket RV-x`). It answers with `{{rl}} review answer RV-x --answer <file>` and talks with the requester
   through `{{rl}} agent tell`; the re-check goes to the same reviewer session. Without herdr, `{{rl}} review
