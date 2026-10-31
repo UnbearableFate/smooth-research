@@ -11,8 +11,8 @@ import json
 import sys
 from pathlib import Path
 
-from . import (adapters, agents, context, delegate, hooks, literature, manuscript, research, reviews, runs,
-               snapshot, tasks, view, watch)
+from . import (adapters, agents, context, delegate, hooks, literature, manuscript, messages, research, reviews,
+               runs, snapshot, tasks, view, watch)
 from .project import advice_limit, find_project, model_entries
 from .schema import ENUMS, LINKABLE, PAPER_ASSESSMENTS
 from .store import Store
@@ -39,7 +39,7 @@ def cmd_init(args):
 
 
 def cmd_status(args):
-    return research.status(_store(args))
+    return context.status(_store(args))
 
 
 def cmd_resume(args):
@@ -167,11 +167,11 @@ def cmd_task(args):
 
 
 def cmd_inbox(args):
-    return tasks.inbox(_store(args), args.role, args.ack, args.all)
+    return messages.inbox(_store(args), args.role, args.ack, args.all)
 
 
 def cmd_msg(args):
-    return tasks.send(_store(args), args.type, args.sender, args.to, args.text, args.task, args.next_action,
+    return messages.send(_store(args), args.type, args.sender, args.to, args.text, args.task, args.next_action,
                       _list(args.doc), args.message_id)
 
 

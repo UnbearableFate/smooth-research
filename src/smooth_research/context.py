@@ -1,4 +1,4 @@
-"""Purpose-specific context packs built around the current decision: work, resume and advice.
+"""Purpose-specific context packs built around the current decision: work, resume and advice; and rl status.
 
 Sections are added in priority order until the token target (an estimate, labelled as such) is reached; the
 rest is listed as an index to read on demand. Nothing here queries external systems or restarts work.
@@ -8,10 +8,10 @@ from __future__ import annotations
 
 from . import documents
 from .project import context_target
-from .research import CONTRACT_FIELDS, _front_matter, attention, brief
+from .research import CONTRACT_FIELDS, attention, brief, contract_front
 from .runs import describe_attempt
 from .store import Store, Tx
-from .tasks import OPEN_STATES
+from .tasks import open_tasks
 from .util import RLError, TOKEN_METHOD, estimate_tokens
 
 
@@ -25,15 +25,11 @@ def _doc_text(tx: Tx, store: Store, ref: str | None, limit_chars: int = 6000) ->
     return text if len(text) <= limit_chars else text[:limit_chars] + f"\n… (truncated; full text: rl show {ref})"
 
 
-def _contract(tx: Tx, store: Store, exp: dict) -> str:
-    path = store.project.abs(exp["contract_path"])
-    source = "draft"
-    if exp.get("contract_ref"):
-        rev = documents.resolve(tx, exp["contract_ref"])
-        path, source = store.project.abs(rev["object_path"]), exp["contract_ref"]
-    front = _front_matter(path) if path.exists() else {}
+def contract_summary(tx: Tx, store: Store, exp: dict) -> str:
+    """An experiment and the filled-in fields of its contract (the sealed revision, else the draft)."""
+    front = contract_front(tx, store, exp)
     fields = "\n".join(f"  {k}: {front.get(k)}" for k in CONTRACT_FIELDS if front.get(k) not in (None, "TODO"))
-    return f"{brief(exp)} (contract {source}: {exp['contract_path']})\n{fields}"
+    return f"{brief(exp)} (contract {exp.get('contract_ref') or 'draft'}: {exp.get('contract_path')})\n{fields}"
 
 
 def _evidence_for(tx: Tx, hid: str, current_rev: int) -> list[str]:
@@ -113,7 +109,7 @@ def work_pack(store: Store, task_id: str, budget: int | None = None) -> dict:
             for e in tx.out(exp["id"], "tests"):
                 hyps.setdefault(e["id"], tx.require(e["id"]))
         for exp in exps:
-            sections.append((f"Experiment {exp['id']}", _contract(tx, store, exp)))
+            sections.append((f"Experiment {exp['id']}", contract_summary(tx, store, exp)))
         for h in hyps.values():
             body = [brief(h), f"  statement: {h['statement']}"] + ([f"  scope: {h['scope']}"] if h.get("scope") else [])
             sections.append((f"Hypothesis {h['id']}", "\n".join(body + _evidence_for(tx, h["id"], h["revision"]))))
@@ -133,23 +129,51 @@ def work_pack(store: Store, task_id: str, budget: int | None = None) -> dict:
     return _assemble(f"# Work pack for {task_id}\n", sections, budget)
 
 
+def open_work(tx: Tx) -> dict:
+    """What the summaries of the project start from (rl status, rl resume, the session start hook): the
+    coordinator session, the open tasks, unfinished attempts and tickets, and what needs attention."""
+    coord = [s for s in tx.all("Session", status="active") if s["role_id"] == "coordinator"]
+    return {"coordinator": coord[-1] if coord else None, "tasks": open_tasks(tx),
+            "attempts": [a for a in tx.all("Attempt") if a["execution_state"] != "ended" or a.get("needs_check")],
+            "tickets": [t for t in tx.all("Ticket") if t["status"] != "answered"], "attention": attention(tx)}
+
+
+def status(store: Store) -> dict:
+    with store.read() as tx:
+        meta = tx.meta()
+        hyps = tx.all("Hypothesis")
+        work = open_work(tx)
+        counts = {label: len(tx.all(label)) for label in ("Hypothesis", "Experiment", "Evidence", "Decision",
+                                                           "Paper", "Task", "Run")}
+    c, items = work["coordinator"], work["attention"]
+    lines = [f"project {store.project.root} · data_version {meta['data_version']} · coordinator "
+             + (c["id"] if c else "none"),
+             "counts: " + ", ".join(f"{k} {v}" for k, v in counts.items())]
+    open_h = [h for h in hyps if h["disposition"] in ("active", "candidate")]
+    lines += (["hypotheses (active/candidate):"] + [f"  {brief(h)}" for h in open_h]) if open_h \
+        else ["no open hypotheses"]
+    lines += (["open tasks:"] + [f"  {brief(t)}" + (f" next: {t['next_action']}" if t.get("next_action") else "")
+                                 for t in work["tasks"]]) if work["tasks"] else []
+    lines += (["unfinished attempts:"] + [f"  {brief(a)}" for a in work["attempts"]]) if work["attempts"] else []
+    lines += (["open review/advice tickets:"] + [f"  {brief(t)}" for t in work["tickets"]]) if work["tickets"] else []
+    lines += (["attention:"] + [f"  {i}" for i in items]) if items else []
+    return {"data_version": meta["data_version"], "counts": counts, "attention": items,
+            "summary": "\n".join(lines)}
+
+
 def resume_pack(store: Store, role: str | None = None, budget: int | None = None) -> dict:
     budget = budget or context_target(store.project.config, "work_target_tokens")
     with store.read() as tx:
         meta = tx.meta()
-        sessions = [s for s in tx.all("Session", status="active")]
-        coord = [s for s in sessions if s["role_id"] == "coordinator"]
-        tasks = [t for t in tx.all("Task") if t["state"] in OPEN_STATES
-                 and (role is None or role in (t.get("owner_role"), t.get("to_role")) or role == "coordinator")]
-        attempts = [describe_attempt(tx, a) for a in tx.all("Attempt")
-                    if a["execution_state"] != "ended" or a.get("needs_check")]
-        tickets = [t for t in tx.all("Ticket") if t["status"] != "answered"]
+        work = open_work(tx)
+        tasks = [t for t in work["tasks"]
+                 if role is None or role in (t.get("owner_role"), t.get("to_role")) or role == "coordinator"]
+        attempts = [describe_attempt(tx, a) for a in work["attempts"]]
         hyps = tx.all("Hypothesis")
         decisions = tx.all("Decision")[-5:]
-        items = attention(tx)
         cursor = tx.get(f"CUR-{role}", "Cursor") if role else None
         unread = [m for m in tx.all("Message", to_role=role) if m["seq"] > (cursor["position"] if cursor else 0)] if role else []
-    c = coord[-1] if coord else None
+    c = work["coordinator"]
     model = (c.get("model_observed") or c.get("model_requested") or "model unverified") if c else None
     identity = [f"coordinator {c['id']} ({c['host']}, {model})" if c else "no active coordinator session",
                 f"plan snapshot {meta.get('plan_ref') or 'none'}; "
@@ -165,8 +189,8 @@ def resume_pack(store: Store, role: str | None = None, budget: int | None = None
                 ("Unfinished tasks (first actions)", "\n".join(first) or "none"),
                 ("Unfinished attempts (recorded facts only; verify unknown ones with your execution tool)",
                  "\n".join(attempts) or "none"),
-                ("Attention", "\n".join(items) or "none"),
-                ("Open review/advice tickets", "\n".join(brief(t) for t in tickets) or "none"),
+                ("Attention", "\n".join(work["attention"]) or "none"),
+                ("Open review/advice tickets", "\n".join(brief(t) for t in work["tickets"]) or "none"),
                 ("Open hypotheses", "\n".join(brief(h) for h in hyps if h["disposition"] in ("active", "candidate")) or "none"),
                 ("Paused or retired routes", "\n".join(brief(h) for h in hyps if h["disposition"] in ("paused", "retired")) or "none"),
                 ("Recent decisions", "\n".join(brief(d) + (f" reopen if: {d['reopen_condition']}" if d.get("reopen_condition") else "")

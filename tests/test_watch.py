@@ -6,7 +6,7 @@ import shlex
 from conftest import SPEC, obs
 from test_agents import calls, herdr_log  # noqa: F401 (a fixture)
 
-from smooth_research import agents, reviews, runs, tasks, watch
+from smooth_research import agents, messages, reviews, runs, tasks, watch
 from smooth_research.delegate import rl_command
 
 
@@ -146,7 +146,7 @@ def test_normal_pauses_are_not_woken(project, herdr_log, tmp_path, monkeypatch):
     assert not any(reminders(herdr_log, f"researcher-{n}") for n in range(1, 5))
     assert not watch.check(project)["note"]  # and hears it once
 
-    tasks.inbox(project, "coordinator", ack=True)  # the coordinator read the question and gave no answer
+    messages.inbox(project, "coordinator", ack=True)  # the coordinator read the question and gave no answer
     assert "researcher-4: was idle with T-0004 active; reminded" in watch.check(project)["summary"]
 
 

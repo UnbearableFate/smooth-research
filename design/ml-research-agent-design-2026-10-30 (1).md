@@ -1448,3 +1448,21 @@ GitHub 链接固定到本次读取的提交；外部产品文档按 2026-10-30 �
 | attempt | 检查之前登记的 attempt 记为 `unchecked: registered before rl checked code reviews` | `code_review_note` 对没有检查结果的处理，以及调用处的判断 |
 
 迁移后三个项目没有警告；status、doctor、review show、resume、graph、run show 正常。在一个副本里登记新 run，覆盖检查用上了重建的范围（报告 `src/e1_run.py` 在 RV-0004 之后改过，与当时的过程一致）。没有动的：旧项目的 `docs/experiments/`、`reports/` 等目录留在原处。记录里写的就是这些路径，代码按记录读取。三个项目的改动没有提交到它们各自的 git 仓库。测试：删去只测旧格式的一项和两段断言；“导入的计划不能换”的检查移到目录测试里。
+
+**模块重构（Claude F8，以及 21.13 列出的两项合并）。** 原来有三处循环依赖：runs↔reviews、tasks↔agents（经 delegate→context→tasks）、agents↔watch，都靠函数内部的 import 避开。reviews 在函数内部 import agents 和 tasks，snapshot 在函数内部 import context。按职责拆出下面四个模块后，循环依赖没有了，函数内部的 import 全部改成顶层 import。每个模块都能单独 import。
+
+| 新模块 | 内容（原来所在的模块） | 使用者 |
+| --- | --- | --- |
+| `scope.py` | 代码审查范围的指纹和配置摘要；审查期间文件是否改过；run 执行的代码是否仍被通过的审查覆盖（reviews） | reviews、runs |
+| `messages.py` | 消息的记录（`record`）、`send`、`inbox`；给收件人的在线会话发提醒（`notify`、`notice`）（tasks、herdr） | tasks、agents、watch、reviews、cli |
+| `worktrees.py` | 研究者会话的 git worktree 和任务分支；接受任务时的合并提示（`branch_status`）（agents） | agents、tasks |
+| `launch.py` | 宿主 agent 的命令行参数和 tab；启动流程 `start_agent`；回答信任提问；读取对话框的选项（agents） | agents、watch |
+
+- `rl agent open` 和监视程序重启会话共用 `start_agent`：建 tab（重启时如果原来的 pane 还在，就用原来的 pane），`herdr agent start`，回答本文件夹的信任提问。原来两处各写一份，差异有三点，现在统一：
+  - 重启时回答了信任提问，也记 `session.trusted` 事件。
+  - 重启时建 tab 失败，也算一次失败的重启。它计入每小时 3 次的上限，超过后交给协调者；原来每轮只报告 “not checked”。
+  - `rl agent open` 在 agent 启动后才记录宿主会话 ID，没启动成功的会话不再留下一个没用过的 ID。
+- 合并两个 `_contract`：`research.contract_front` 读取合同的 front matter（已封存的修订，没有时读草稿）。context 的 `contract_summary`（用于工作包和审查包）和论文草稿都用它。
+- 合并三处状态摘要：`context.open_work` 给出协调者会话，未完成的任务、attempt 和工单，以及需要注意的事项；`rl status`、`rl resume` 和 SessionStart hook 都从它开始。三处原来的筛选条件写法不同，但结果相同：任务是“不是 accepted 或 stopped”与 `OPEN_STATES`，工单是“不是 answered”与列出其余四种状态。`rl status` 因此从 research.py 移到 context.py。
+- 被别的模块使用的函数改成公开的名字，例如 `_message` 改为 `messages.record`，`_answer_trust` 改为 `launch.answer_trust`，`watch._assignment` 改为 `watch.assignment_state`，`context._contract` 改为 `contract_summary`。
+- 验证：97 项测试通过。在三个已有项目的副本上，分别用重构前（b1aaaad）和重构后的代码运行 status、resume（不指定角色、coordinator、researcher-1）、review show、agent list 和 SessionStart hook，并生成论文草稿的各个区块和合同摘要，两边输出完全相同。

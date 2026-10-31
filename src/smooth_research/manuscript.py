@@ -15,9 +15,8 @@ import time
 from collections import Counter
 from pathlib import Path
 
-from . import documents
 from .project import latex_command
-from .research import _front_matter
+from .research import contract_front
 from .runs import usage_summary
 from .store import Store, Tx
 from .util import RLError
@@ -180,17 +179,10 @@ class Latex:
         return "\n\n".join(out) + "\n"
 
 
-def _contract(tx: Tx, store: Store, exp: dict) -> tuple[dict, str]:
-    """The front matter of an experiment's contract (sealed revision, else the draft) and where it comes from."""
+def _contract_source(exp: dict) -> str:
     if exp.get("contract_ref"):
-        rev = documents.resolve(tx, exp["contract_ref"])
-        path = store.project.abs(rev["object_path"])
-        source = f"{exp['id']}@{exp['revision']}, sealed as {exp['contract_ref']} ({exp.get('contract_path')})"
-    elif exp.get("contract_path"):
-        path, source = store.project.abs(exp["contract_path"]), f"draft, not sealed ({exp['contract_path']})"
-    else:
-        return {}, "no contract"
-    return (_front_matter(path) if path.exists() else {}), source
+        return f"{exp['id']}@{exp['revision']}, sealed as {exp['contract_ref']} ({exp.get('contract_path')})"
+    return f"draft, not sealed ({exp['contract_path']})" if exp.get("contract_path") else "no contract"
 
 
 def _paper_line(tx: Tx, p: dict) -> str:
@@ -213,10 +205,10 @@ def blocks(tx: Tx, store: Store) -> dict[str, list[tuple]]:
     hyps, exps, decisions = tx.all("Hypothesis"), tx.all("Experiment"), tx.all("Decision")
     method, results = [], []
     for exp in exps:
-        front, source = _contract(tx, store, exp)
+        front = contract_front(tx, store, exp)
         method += [("heading", f"{exp['id']} {exp['title']}"),
                    ("list", [f"{k}: {front[k]}" for k in METHOD_FIELDS if front.get(k) not in (None, "", "TODO")]
-                    + [f"contract: {source}"])]
+                    + [f"contract: {_contract_source(exp)}"])]
         keys, rows = arm_rows(tx, exp["id"])
         if not rows:
             results.append(("text", f"{exp['id']} {exp['title']}: no runs registered."))

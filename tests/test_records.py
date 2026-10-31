@@ -11,7 +11,7 @@ import pytest
 import yaml
 
 from conftest import SPEC, obs
-from smooth_research import context, documents, research, runs, snapshot, tasks
+from smooth_research import context, documents, messages, research, runs, snapshot, tasks
 from smooth_research.project import find_project
 from smooth_research.store import Store
 from smooth_research.util import RLError
@@ -59,7 +59,7 @@ def test_handoff_releases_the_task_for_the_next_owner(project, tmp_path):
     with project.read() as tx:
         task = tx.require("T-0001")
     assert (task["state"], task["owner_role"], len(task["output_refs"])) == ("accepted", "researcher-b", 1)
-    assert [m["type"] for m in tasks.inbox(project, "coordinator")["messages"]] == ["RESULT"]
+    assert [m["type"] for m in messages.inbox(project, "coordinator")["messages"]] == ["RESULT"]
 
 
 def test_only_the_owner_updates_a_task_and_not_after_the_coordinator_closed_it(project, tmp_path):
@@ -85,19 +85,19 @@ def test_only_the_owner_updates_a_task_and_not_after_the_coordinator_closed_it(p
     tasks.progress(project, "T-0001", "delivered", "researcher-a", "done")
     tasks.review_task(project, "T-0001", "accept", "fine")
     assert "is accepted" in refused(tasks.progress, "active", "researcher-a")
-    assert [m["type"] for m in tasks.inbox(project, "coordinator")["messages"]] == ["RESULT"]
+    assert [m["type"] for m in messages.inbox(project, "coordinator")["messages"]] == ["RESULT"]
 
 
 def test_inbox_cursor_and_repeated_message_delivery(project):
-    first = tasks.send(project, "NOTE", "coordinator", "researcher", "hello", message_id="MSG-ext-1")
-    again = tasks.send(project, "NOTE", "coordinator", "researcher", "hello", message_id="MSG-ext-1")
+    first = messages.send(project, "NOTE", "coordinator", "researcher", "hello", message_id="MSG-ext-1")
+    again = messages.send(project, "NOTE", "coordinator", "researcher", "hello", message_id="MSG-ext-1")
     assert first["id"] == again["id"]
     with pytest.raises(RLError):
-        tasks.send(project, "NOTE", "coordinator", "researcher", "changed", message_id="MSG-ext-1")
-    assert len(tasks.inbox(project, "researcher")["messages"]) == 1
-    tasks.inbox(project, "researcher", ack=True)
-    assert tasks.inbox(project, "researcher")["messages"] == []
-    assert len(tasks.inbox(project, "coordinator")["messages"]) == 0  # acknowledging sends nothing
+        messages.send(project, "NOTE", "coordinator", "researcher", "changed", message_id="MSG-ext-1")
+    assert len(messages.inbox(project, "researcher")["messages"]) == 1
+    messages.inbox(project, "researcher", ack=True)
+    assert messages.inbox(project, "researcher")["messages"] == []
+    assert len(messages.inbox(project, "coordinator")["messages"]) == 0  # acknowledging sends nothing
 
 
 def test_a_new_coordinator_session_supersedes_the_old_one(project):

@@ -7,7 +7,7 @@ import subprocess
 
 import pytest
 
-from smooth_research import agents, hooks, reviews, tasks
+from smooth_research import agents, hooks, launch, messages, reviews, tasks
 from smooth_research.project import find_project
 from smooth_research.store import Store
 from smooth_research.util import RLError
@@ -352,7 +352,7 @@ def test_the_coordinator_answers_a_dialog_in_a_session_and_records_why(project, 
     with project.read() as tx:
         why = [e["summary"] for e in tx.all("Event") if e["type"] == "session.answered"]
     assert why == ["reviewer-1: chose 'Continue without it' at '"
-                   + agents._excerpt(" New MCP server found in .mcp.json: codegraph\n ❯ Use this MCP server\n"
+                   + launch.excerpt(" New MCP server found in .mcp.json: codegraph\n ❯ Use this MCP server\n"
                                      "   Continue without it", chars=200)
                    + "': a review reads the package; no MCP server needed"]
     with pytest.raises(RLError) as exc:
@@ -373,7 +373,7 @@ def test_sessions_need_herdr_but_messages_do_not(project, monkeypatch):
         agents.open_session(project, "reviewer")
     assert exc.value.code == "UNAVAILABLE" and "rl review run" in exc.value.message
     assert "recorded (no live session" in agents.tell(project, "researcher-1", "hello")["summary"]
-    assert "MSG-" in tasks.inbox(project, "researcher-1")["summary"]
+    assert "MSG-" in messages.inbox(project, "researcher-1")["summary"]
 
 
 def test_a_worktree_without_the_configuration_belongs_to_the_main_project(project, herdr_log, tmp_path, monkeypatch):

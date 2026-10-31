@@ -21,16 +21,14 @@ from __future__ import annotations
 import os
 import shlex
 import time
-import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import adapters, herdr
-from .agents import _answer_trust, launch_args, new_tab
+from . import herdr, messages
 from .delegate import rl_command
+from .launch import answer_trust, start_agent
 from .project import ENV_PROJECT, watch_minutes
 from .store import Store
-from .tasks import _message
 from .util import RLError, now_utc, parse_time
 
 LABEL = "sr-watch"
@@ -61,8 +59,8 @@ def check(store: Store) -> dict:
     note = told = None
     if news:
         with store.write() as tx:
-            msg = _message(tx, "NOTE", "watch", "coordinator", text="watch round: " + " | ".join(news))
-        told = herdr.notify(store, msg)
+            msg = messages.record(tx, "NOTE", "watch", "coordinator", text="watch round: " + " | ".join(news))
+        told = messages.notify(store, msg)
         note = msg["id"]
     reminder = _coordinator(store, quiet=bool(told))
     head = f"{now_utc()} watch round: {len(sessions)} session(s)" + (f"; {note} to the coordinator" if note else "")
@@ -78,14 +76,14 @@ def _round(store: Store, s: dict) -> tuple[str, bool]:
         return _restart(store, s)
     state, seq = info.get("agent_status") or "unknown", info.get("state_change_seq")
     if state == "blocked":
-        why = _answer_trust(name, s["host"], Path(s["cwd"]), 90)
+        why = answer_trust(name, s["host"], Path(s["cwd"]), 90)
         if why is None:
             return f"{name}: answered the trust question for its folder", True
         return why, _once(store, s, "blocked", seq)
     if state not in ("idle", "done"):  # working, or a state herdr cannot tell
         return f"{name}: {state}" + (f" on {what}" if what else ""), False
     state = "idle"  # herdr's done is an idle agent whose last turn nobody has looked at yet
-    stopped, desc, problems = _assignment(store, s)
+    stopped, desc, problems = assignment_state(store, s)
     if not stopped:
         held = (s.get("watch") or {}).get("problems") or []
         if held != problems:
@@ -111,7 +109,7 @@ def _round(store: Store, s: dict) -> tuple[str, bool]:
     return f"{name}: was {state} with {desc}; reminded it to continue" + (f" (not delivered: {problem})" if problem else ""), True
 
 
-def _assignment(store: Store, s: dict) -> tuple[bool, str, list[str]]:
+def assignment_state(store: Store, s: dict) -> tuple[bool, str, list[str]]:
     """Is the assignment of an idle session unfinished, with nothing it waits for? Also a description, and what
     the coordinator should do about a wait (a review nobody is assigned to)."""
     name, what = s["role_id"], s.get("assignment")
@@ -191,34 +189,24 @@ def _restart(store: Store, s: dict) -> tuple[str, bool]:
         return (f"{name}: herdr no longer knows its agent by name, but its pane {pane} holds a {found['agent']} "
                 f"agent: look at it (herdr pane read {pane}); rl agent close {name} closes the tab"), \
             _once(store, s, "unnamed", pane)
-    if not ours:
-        made = new_tab(store, s)
-        tab, pane = made["tab"]["tab_id"], made["root_pane"]["pane_id"]
-    entry = adapters.Entry.parse(s["entry"])
-    host_session = str(uuid.uuid4()) if entry.entry in ("claude", "pi") else None
-    waiting = None
     try:
-        herdr.call("agent", "start", name, "--kind", entry.entry, "--pane", pane, "--timeout", "90000", "--",
-                   *launch_args(store, entry, s["role_kind"], name, host_session), timeout=120)
+        started = start_agent(store, s, 90, tab, pane) if ours else start_agent(store, s, 90)
     except RLError as exc:
-        if exc.details.get("herdr_code") != "agent_not_ready":
-            if not ours:
-                herdr.call("tab", "close", tab, timeout=30)
-            _remember(store, s, None, restarts=recent + [now_utc()])
-            return f"{name}: its agent had exited and could not be started again: {exc.message}", True
-        waiting = _answer_trust(name, entry.entry, Path(s["cwd"]), 90)
+        _remember(store, s, None, restarts=recent + [now_utc()])
+        return f"{name}: its agent had exited and could not be started again: {exc.message}", True
     if not _open(store, s["id"]):  # closed while it started; rl agent close closed the recorded tab, not a new one
         if not ours:
-            herdr.call("tab", "close", tab, timeout=30)
+            herdr.call("tab", "close", started["tab"], timeout=30)
         return f"{name}: closed while the watcher started it again", False
     with store.write() as tx:
-        tx.update(s["id"], {"herdr_tab": tab, "herdr_pane": pane, "host_session_id": host_session})
+        tx.update(s["id"], {"herdr_tab": started["tab"], "herdr_pane": started["pane"],
+                            "host_session_id": started["host_session"]})
     _remember(store, s, ("session.restarted", s["id"], f"{name} started again in {s['cwd']}"),
               restarts=recent + [now_utc()])
-    if waiting:
-        return f"{name}: its agent had exited; started again, but {waiting}", True
+    if started["waiting"]:
+        return f"{name}: its agent had exited; started again, but {started['waiting']}", True
     what, rl = s.get("assignment"), rl_command()
-    stopped, desc, _ = _assignment(store, s)
+    stopped, desc, _ = assignment_state(store, s)
     if stopped:
         go_on = f"Your assignment is {what}: run `{rl} agent brief {name}` and continue it from the records. "
     elif what:

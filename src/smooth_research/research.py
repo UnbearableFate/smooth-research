@@ -248,6 +248,17 @@ def _front_matter(path: Path) -> dict:
         return {}
 
 
+def contract_front(tx: Tx, store: Store, exp: dict) -> dict:
+    """The front matter of an experiment's contract: of its sealed revision, else of the draft."""
+    if exp.get("contract_ref"):
+        path = store.project.abs(documents.resolve(tx, exp["contract_ref"])["object_path"])
+    elif exp.get("contract_path"):
+        path = store.project.abs(exp["contract_path"])
+    else:
+        return {}
+    return _front_matter(path) if path.exists() else {}
+
+
 # -- evidence and decisions -----------------------------------------------------------------------------------
 
 
@@ -534,31 +545,6 @@ def attention(tx: Tx) -> list[str]:
         if gap:
             items.append(f"{did} key conclusion on {', '.join(hyps)}: {gap} — {_review_hint(hyps, did)}")
     return items
-
-
-def status(store: Store) -> dict:
-    with store.read() as tx:
-        meta = tx.meta()
-        hyps = tx.all("Hypothesis")
-        tasks = [t for t in tx.all("Task") if t["state"] not in ("accepted", "stopped")]
-        attempts = [a for a in tx.all("Attempt") if a["execution_state"] != "ended" or a.get("needs_check")]
-        tickets = [t for t in tx.all("Ticket") if t["status"] in ("pending", "running", "unavailable", "failed")]
-        coordinator = [s for s in tx.all("Session", status="active") if s["role_id"] == "coordinator"]
-        counts = {label: len(tx.all(label)) for label in ("Hypothesis", "Experiment", "Evidence", "Decision",
-                                                           "Paper", "Task", "Run")}
-        items = attention(tx)
-    lines = [f"project {store.project.root} · data_version {meta['data_version']} · coordinator "
-             + (coordinator[-1]["id"] if coordinator else "none"),
-             "counts: " + ", ".join(f"{k} {v}" for k, v in counts.items())]
-    open_h = [h for h in hyps if h["disposition"] in ("active", "candidate")]
-    lines += ["hypotheses (active/candidate):"] + [f"  {_brief(h)}" for h in open_h] if open_h else ["no open hypotheses"]
-    lines += (["open tasks:"] + [f"  {_brief(t)}" + (f" next: {t['next_action']}" if t.get("next_action") else "")
-                                 for t in tasks]) if tasks else []
-    lines += (["unfinished attempts:"] + [f"  {_brief(a)}" for a in attempts]) if attempts else []
-    lines += (["open review/advice tickets:"] + [f"  {_brief(t)}" for t in tickets]) if tickets else []
-    lines += (["attention:"] + [f"  {i}" for i in items]) if items else []
-    return {"data_version": meta["data_version"], "counts": counts, "attention": items,
-            "summary": "\n".join(lines)}
 
 
 def history(store: Store, entity_id: str | None = None, limit: int = 30) -> dict:

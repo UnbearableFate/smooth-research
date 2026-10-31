@@ -14,6 +14,7 @@ from pathlib import Path
 from .project import Project
 from .research import brief, prepare_contract, recheck_dependents, seal_contract
 from .schema import ENUMS
+from .scope import code_coverage
 from .store import Store, Tx
 from .util import RLError, digest_file, digest_json, now_utc, parse_time, short
 
@@ -57,7 +58,6 @@ def normalize_spec(spec: dict) -> dict:
 
 def register(store: Store, experiment: str, spec: dict, request_id: str, run_id: str | None = None,
              reviews: list[str] = (), no_review: str | None = None) -> dict:
-    from .reviews import code_coverage  # reviews imports this module (through context and view)
     spec = normalize_spec(dict(spec))
     payload = digest_json({"experiment": experiment, "spec": spec, "run": run_id})
     prep = prepare_contract(store, experiment)  # a registered run is a formal reference: seal the contract

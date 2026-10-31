@@ -10,6 +10,7 @@ from pathlib import Path
 from latticedb import Database
 
 from . import documents
+from .context import resume_pack
 from .project import CONFIG_NAME, Project, load_config
 from .schema import ENTITIES, SCHEMA_VERSION
 from .store import Store
@@ -83,7 +84,6 @@ def restore(snapshot: str, into: str) -> dict:
         restored = tx.meta()["data_version"]
     if restored != data["meta"]["data_version"]:
         raise RLError("CORRUPT", "restored data_version differs from the snapshot")
-    from .context import resume_pack
     pack = resume_pack(store)
     problems = check["problems"]
     return {"project": str(root), "problems": problems,

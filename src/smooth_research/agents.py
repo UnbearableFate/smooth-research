@@ -1,129 +1,36 @@
 """Agent sessions in herdr tabs: researchers, reviewers and advisors that the coordinator opens and closes.
 
-Each session is a Claude Code, Codex or pi agent in its own herdr tab, recorded as a Session (entry, herdr
-agent and tab, working directory, current assignment). The agent learns its work from `rl agent brief`, so
-the typed prompt stays one line. A researcher works in its own git worktree (one per session, reused with the
-session) at <project>/../<project>-worktrees/<name>, on a new branch per task made from the branch of the main
-checkout; the coordinator merges accepted branches. Sessions talk through recorded messages; a live recipient
-gets a one-line notice. After an assignment the coordinator resets a session for reuse (compact or clear) or
-closes it with its tab. A host's question whether to trust the folder rl opened the session in is answered for
-the coordinator; the sessions' other dialogs, questions and requests for permission go to the coordinator, which
-decides what it can judge (rl agent dialog, rl agent answer). Without herdr the headless commands remain: rl
+Each session is a Claude Code, Codex or pi agent in its own herdr tab, recorded as a Session (entry, herdr agent and
+tab, working directory, current assignment). The agent learns its work from `rl agent brief`, so the typed prompt
+stays one line. A researcher works in its own git worktree (one per session, reused with the session) at
+<project>/../<project>-worktrees/<name>, on a new branch per task made from the branch of the main checkout
+(worktrees.py); the coordinator merges accepted branches. Sessions talk through recorded messages; a live recipient
+gets a one-line notice. After an assignment the coordinator resets a session for reuse (compact or clear) or closes
+it with its tab. A host's question whether to trust the folder rl opened the session in is answered for the
+coordinator (launch.py); the sessions' other dialogs, questions and requests for permission go to the coordinator,
+which decides what it can judge (rl agent dialog, rl agent answer). Without herdr the headless commands remain: rl
 delegate, rl review run, rl advise run.
 """
 
 from __future__ import annotations
 
-import os
 import re
-import subprocess
 import time
-import uuid
 from pathlib import Path
 
-from . import adapters, herdr
+from . import adapters, herdr, messages, watch, worktrees
 from .delegate import SUBAGENTS, WAITING, prompt_for, rl_command
-from .herdr import ENV_ROLE, ENV_SESSION, caller_role
-from .project import ENV_CHECKOUT, ENV_PROJECT, agent_args, linked_worktree, repo_top, usable_entries
+from .herdr import caller_role
+from .launch import SELECTED, excerpt, option_line, select, start_agent
+from .project import usable_entries
 from .store import Store
-from .tasks import _message
 from .util import RLError, now_utc
+from .worktrees import branch_status, prepare_worktree, switch_task
 
 ROLE_KINDS = ("researcher", "reviewer", "advisor")
 NAME_RE = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
 SLASH = {"claude": {"compact": "/compact", "clear": "/clear"}, "codex": {"compact": "/compact", "clear": "/new"},
          "pi": {"compact": "/compact", "clear": "/new"}}
-# The folder trust question of each host: the text that marks it and the option that trusts the folder. rl answers
-# it only for the folder it opened the session in: the session's worktree, or the project root, which the user
-# trusted when starting the coordinator there.
-TRUST_QUESTIONS = {"claude": ("Quick safety check", "Yes, I trust this folder"),
-                   "codex": ("Trust this folder?", "Trust and continue")}
-SELECTED = ("❯", "›", "▶", ">")
-
-
-# -- git worktrees --------------------------------------------------------------------------------------------
-
-
-def _git(cwd: Path, *args: str, check: bool = True) -> str:
-    try:
-        out = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, timeout=60)
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise RLError("GIT", f"git {' '.join(args)}: {exc}") from None
-    if check and out.returncode != 0:
-        raise RLError("GIT", f"git {' '.join(args)} in {cwd}: {(out.stderr or out.stdout).strip()[-400:]}")
-    return out.stdout.strip() if out.returncode == 0 else ""
-
-
-def _top(store: Store) -> Path:
-    top = repo_top(store.project.root)
-    if top is None or linked_worktree(store.project.root):
-        raise RLError("INVALID", f"researcher worktrees need the project in its own git repository: in "
-                                 f"{store.project.root} run `git init`, `git add -A` and `git commit`, or open "
-                                 "the session with --no-worktree to work in the project directory")
-    if not _git(top, "rev-parse", "--verify", "--quiet", "HEAD", check=False):
-        raise RLError("INVALID", f"{top} has no commit yet: commit the project first (worktrees start from it)")
-    return top
-
-
-def base_ref(top: Path) -> str:
-    """New task branches start from the branch checked out in the main checkout (its commit when detached)."""
-    return _git(top, "symbolic-ref", "--quiet", "--short", "HEAD", check=False) or _git(top, "rev-parse", "HEAD")
-
-
-def task_branch(name: str, task_id: str) -> str:
-    return f"sr/{name}/{task_id}"
-
-
-def _has_branch(top: Path, branch: str) -> bool:
-    return bool(_git(top, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}", check=False))
-
-
-def _switch(path: Path, branch: str, base: str) -> None:
-    """Put the worktree on the task's branch; refuse when uncommitted work would be carried along."""
-    current = _git(path, "symbolic-ref", "--quiet", "--short", "HEAD", check=False)
-    if current == branch:
-        return
-    dirty = _git(path, "status", "--porcelain")
-    if dirty:
-        raise RLError("CONFLICT", f"{path} has uncommitted changes on {current or 'a detached HEAD'}:\n{dirty[:800]}\n"
-                                  "commit or discard them before the next task (the coordinator decides which)")
-    if _has_branch(path, branch):
-        _git(path, "switch", branch)
-    else:
-        _git(path, "switch", "-c", branch, base)
-
-
-def prepare_worktree(store: Store, name: str, task_id: str | None, base: str | None = None) -> tuple[Path, Path, str | None]:
-    """(worktree, checkout of the project inside it, branch): created on first use, then reused."""
-    top = _top(store)
-    path = store.project.worktrees_dir / name
-    base = base or base_ref(top)
-    branch = task_branch(name, task_id) if task_id else None
-    if not path.exists():
-        path.parent.mkdir(parents=True, exist_ok=True)
-        if branch and _has_branch(top, branch):
-            _git(top, "worktree", "add", str(path), branch)
-        elif branch:
-            _git(top, "worktree", "add", "-b", branch, str(path), base)
-        else:
-            _git(top, "worktree", "add", "--detach", str(path), base)
-    elif branch:
-        _switch(path, branch, base)
-    return path, path / store.project.root.relative_to(top), branch
-
-
-def branch_status(store: Store, branch: str) -> str:
-    """What the coordinator merges after accepting a task worked on its own branch."""
-    try:
-        top = _top(store)
-        base = base_ref(top)
-        ahead = _git(top, "rev-list", "--count", f"{base}..{branch}")
-    except RLError as exc:
-        return f"branch {branch}: {exc.message}"
-    if ahead == "0":
-        return f"branch {branch} has nothing {base} lacks (merged, or no commits)"
-    return (f"branch {branch} has {ahead} commit(s) not in {base}: merge it with a merge commit, `git merge --no-ff "
-            f"{branch}` (no squash or rebase: recorded runs name these commits)")
 
 
 # -- sessions -------------------------------------------------------------------------------------------------
@@ -171,30 +78,6 @@ def _choose_entry(store: Store, kind: str, entry_text: str | None, ticket: dict 
                                  + ("; ".join(tried) or f"models.{kind} lists none that parses"))
 
 
-def launch_args(store: Store, entry: adapters.Entry, kind: str, name: str, host_session: str | None) -> list[str]:
-    """The agent's own command-line arguments: model, effort, session id and name; tools by role (reviewers do
-    not get file edit tools, Codex advisors get web search); then agents.args.<host> from the configuration."""
-    if entry.entry == "claude":
-        args = ["--model", entry.model, "--session-id", host_session, "-n", name]
-        args += ["--effort", entry.effort] if entry.effort else []
-        args += ["--disallowedTools", "Edit,Write,NotebookEdit"] if kind == "reviewer" else []
-    elif entry.entry == "codex":
-        args = ["-m", entry.model] + (["-c", f'model_reasoning_effort="{entry.effort}"'] if entry.effort else [])
-        args += ["--search"] if kind == "advisor" else []
-    else:
-        args = ["--model", entry.model, "--session-id", host_session, "--name", name]
-        args += ["--thinking", entry.effort] if entry.effort else []
-    return args + agent_args(store.project.config, entry.entry)
-
-
-def new_tab(store: Store, s: dict) -> dict:
-    """A herdr tab for a session, in its folder, with the environment that names its project, session and checkout."""
-    env = {ENV_PROJECT: str(store.project.root), "SMOOTH_RESEARCH_RL": rl_command(), ENV_SESSION: s["id"],
-           ENV_ROLE: s["role_id"], **({ENV_CHECKOUT: s["cwd"]} if s.get("worktree") else {})}
-    return herdr.call("tab", "create", "--cwd", s["cwd"], "--label", s["role_id"], "--no-focus",
-                      *[a for k, v in env.items() for a in ("--env", f"{k}={v}")])
-
-
 def open_session(store: Store, kind: str, name: str | None = None, entry_text: str | None = None,
                  task: str | None = None, ticket: str | None = None, worktree: bool = True,
                  base: str | None = None, timeout: int = 90) -> dict:
@@ -218,37 +101,22 @@ def open_session(store: Store, kind: str, name: str | None = None, entry_text: s
     wt, cwd, branch = None, store.project.root, None
     if kind == "researcher" and worktree:
         wt, cwd, branch = prepare_worktree(store, name, task, base)
-    host_session = str(uuid.uuid4()) if entry.entry in ("claude", "pi") else None
     with store.write() as tx:
         sid = tx.next_id("Session")
         record = tx.create("Session", {"id": sid, "role_id": name, "role_kind": kind, "host": entry.entry,
-                                       "entry": str(entry), "host_session_id": host_session, "model_requested": entry.model,
-                                       "effort": entry.effort, "worktree": str(wt) if wt else None, "cwd": str(cwd),
-                                       "branch": branch, "status": "active"})
+                                       "entry": str(entry), "model_requested": entry.model, "effort": entry.effort,
+                                       "worktree": str(wt) if wt else None, "cwd": str(cwd), "branch": branch,
+                                       "status": "active"})
         tx.event("session.opened", sid, f"{name} ({kind}) {entry} in {cwd}")
     try:
-        tab = new_tab(store, record)
+        started = start_agent(store, record, timeout)
     except RLError as exc:
-        _end(store, sid, f"herdr tab not created: {exc.message}")
+        _end(store, sid, f"agent did not start: {exc.message}")
         raise
-    tab_id, pane = tab["tab"]["tab_id"], tab["root_pane"]["pane_id"]
-    waiting = trusted = None
-    try:
-        herdr.call("agent", "start", name, "--kind", entry.entry, "--pane", pane, "--timeout", str(timeout * 1000),
-                   "--", *launch_args(store, entry, kind, name, host_session), timeout=timeout + 30)
-    except RLError as exc:
-        if exc.details.get("herdr_code") != "agent_not_ready":
-            try:
-                herdr.call("tab", "close", tab_id, timeout=30)
-            finally:
-                _end(store, sid, f"agent did not start: {exc.message}")
-            raise
-        waiting = _answer_trust(name, entry.entry, Path(cwd), timeout)
-        trusted = None if waiting else f"answered {entry.entry}'s folder trust question for {cwd}: trusted"
+    tab_id, pane, waiting, trusted = started["tab"], started["pane"], started["waiting"], started["trusted"]
     with store.write() as tx:
-        tx.update(sid, {"herdr_agent": name, "herdr_tab": tab_id, "herdr_pane": pane})
-        if trusted:
-            tx.event("session.trusted", sid, trusted)
+        tx.update(sid, {"herdr_agent": name, "herdr_tab": tab_id, "herdr_pane": pane,
+                        "host_session_id": started["host_session"]})
     where = f"worktree {wt} on {branch or 'a detached HEAD'}" if wt else f"in {cwd}"
     summary = f"{sid} {name} ({kind}, {entry}) open in herdr tab {tab_id}, {where}" + (f"; {trusted}" if trusted else "")
     out = {"id": sid, "name": name, "tab": tab_id, "pane": pane, "entry": str(entry), "worktree": str(wt) if wt else None,
@@ -258,76 +126,13 @@ def open_session(store: Store, kind: str, name: str | None = None, entry_text: s
         summary += "\n" + given["summary"]
     if waiting:
         summary += f"\n{waiting}; then `rl agent assign {name} {'--task ' + task if task else '--ticket ' + ticket if ticket else '...'}`"
-    from . import watch  # the watcher uses this module
     try:
-        started = watch.start(store)
-        if started.get("started"):
-            summary += "\n" + started["summary"]
+        watching = watch.start(store)
+        if watching.get("started"):
+            summary += "\n" + watching["summary"]
     except RLError as exc:
         summary += f"\nthe watcher did not start ({exc.message}): `rl agent watch --start`"
     return {**out, "summary": summary}
-
-
-def _answer_trust(name: str, host: str, folder: Path, timeout: int) -> str | None:
-    """Answer the host's question whether to trust the folder rl opened the session in, as the coordinator's
-    choice. None once the agent is ready; otherwise why it still waits (any other dialog is the coordinator's
-    to decide)."""
-    ask = (f"decide it: `rl agent dialog {name}` shows it, `rl agent answer {name} \"<option>\" --reason ..` "
-           "answers it (only what only the user can decide goes to the user)")
-    question, accept = TRUST_QUESTIONS.get(host, (None, None))
-    try:
-        screen = herdr.read(name)
-        if not question or question not in screen:
-            return f"{name} waits at a dialog ({_excerpt(screen)}): {ask}"
-        if not _names(screen, folder):
-            return f"{name} waits at a folder trust question that does not name {folder}: {ask}"
-        problem = _select(name, accept, screen)
-        if problem:
-            return f"{name} waits at the folder trust question for {folder}; {problem}: {ask}"
-        herdr.keys(name, "enter")
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            state = herdr.status(name)
-            if state in ("idle", "done"):
-                return None
-            if state == "gone":
-                return f"{name} exited at the folder trust question; close it with `rl agent close {name}`"
-            if state == "blocked" and question not in herdr.read(name):
-                return f"{name} trusted {folder} and now waits at another dialog: {ask}"
-            time.sleep(0.5)
-        return f"{name} trusted {folder} but was not ready within {timeout}s: {ask}"
-    except RLError as exc:
-        return f"{name} waits at a dialog ({exc.message}): {ask}"
-
-
-def _option_line(screen: str, option: str) -> str | None:
-    """The line of a dialog's option: given as its number, or as the start of its text (else any line holding it)."""
-    lines = screen.splitlines()
-    if option.strip().isdigit():
-        pattern = re.compile(rf"^\s*(?:[{''.join(SELECTED)}]\s*)?{option.strip()}[.)]\s")
-        return next((x for x in lines if pattern.match(x)), None)
-    want = " ".join(option.split()).casefold()
-    bare = [(x, re.sub(rf"^\s*(?:[{''.join(SELECTED)}]\s*)?(?:\d+[.)]\s*)?", "", x).casefold()) for x in lines]
-    return next((x for x, b in bare if b.startswith(want)), None) or next((x for x, b in bare if want in b), None)
-
-
-def _select(target: str, option: str, screen: str) -> str | None:
-    """Move a dialog's selection to the option (down, then up), reading the screen after every key; None once it
-    is selected, else why not."""
-    if _option_line(screen, option) is None:
-        return f"no option '{option}' on the screen of {target}"
-    for key in ["down"] * 6 + ["up"] * 12:
-        if (_option_line(screen, option) or "").lstrip().startswith(SELECTED):
-            return None
-        herdr.keys(target, key)
-        screen = herdr.read(target)
-    return f"rl could not select '{option}'"
-
-
-def _excerpt(screen: str, lines: int = 12, chars: int = 600) -> str:
-    """The bottom of a screen, where a dialog sits, as one line."""
-    shown = " / ".join(" ".join(x.split()) for x in screen.splitlines() if x.strip())
-    return ("…" + shown[-chars:]) if len(shown) > chars else shown or "an empty screen"
 
 
 def dialog(store: Store, name: str) -> dict:
@@ -357,37 +162,28 @@ def answer(store: Store, name: str, option: str, reason: str, timeout: int = 30)
     if state != "blocked":
         raise RLError("CONFLICT", f"{name} is {state}, not at a dialog; `rl agent dialog {name}` shows its screen")
     screen = herdr.read(target)
-    problem = _select(target, option, screen)
+    problem = select(target, option, screen)
     if problem:
         raise RLError("NOT_FOUND", f"{name}: {problem}; `rl agent dialog {name}` shows the options")
-    chosen = " ".join((_option_line(herdr.read(target), option) or option).split()).lstrip("".join(SELECTED) + " ")
+    chosen = " ".join((option_line(herdr.read(target), option) or option).split()).lstrip("".join(SELECTED) + " ")
     herdr.keys(target, "enter")
     deadline = time.monotonic() + timeout
     while (state := herdr.status(target)) == "blocked" and time.monotonic() < deadline:
-        if _option_line(herdr.read(target), option) is None:  # another dialog followed
+        if option_line(herdr.read(target), option) is None:  # another dialog followed
             break
         time.sleep(0.5)
     with store.write() as tx:
-        tx.event("session.answered", s["id"], f"{name}: chose '{chosen}' at '{_excerpt(screen, chars=200)}': {reason}")
+        tx.event("session.answered", s["id"], f"{name}: chose '{chosen}' at '{excerpt(screen, chars=200)}': {reason}")
     summary = f"{name}: chose '{chosen}' ({reason}); now {state}"
     if state == "blocked":
         summary += f"; it waits at a dialog again: `rl agent dialog {name}`"
     elif state in ("idle", "done") and s.get("assignment"):
-        from .watch import _assignment  # the watcher uses this module
-        stopped, desc, _ = _assignment(store, s)
+        stopped, desc, _ = watch.assignment_state(store, s)
         if stopped:
             told = herdr.prompt(target, f"[smooth-research] {name}: your assignment is {s['assignment']}. Run "
                                         f"`{rl_command()} agent brief {name}` and follow it.")
             summary += f"; {desc}: " + (f"not told ({told})" if told else "told to read its brief")
     return {"id": s["id"], "chosen": chosen, "state": state, "summary": summary}
-
-
-def _names(screen: str, folder: Path) -> bool:
-    """Does the dialog name exactly this folder (absolute or under ~), not a longer path that starts with it?"""
-    home = str(Path.home())
-    names = [str(folder)] + (["~" + str(folder)[len(home):]] if str(folder).startswith(home + os.sep) else [])
-    ends = r"(?=$|[\s,;:)'\"]|\.(?:\s|$))"
-    return any(re.search(re.escape(n) + ends, line) for n in names for line in screen.splitlines())
 
 
 def _end(store: Store, sid: str, note: str) -> None:
@@ -421,8 +217,7 @@ def assign(store: Store, name: str, task: str | None = None, ticket: str | None 
                 raise RLError("CONFLICT", f"{ticket} is already answered")
     branch = s.get("branch")
     if task and s.get("worktree"):
-        branch = task_branch(name, task)
-        _switch(Path(s["worktree"]), branch, base_ref(_top(store)))
+        branch = switch_task(store, Path(s["worktree"]), name, task)
     with store.write() as tx:
         if task and branch:
             tx.update(task, {"branch": branch})
@@ -448,8 +243,8 @@ def tell(store: Store, to: str, text: str, sender: str | None = None, task: str 
     with store.write() as tx:
         if task:
             tx.require(task, "Task")
-        msg = _message(tx, "NOTE", sender, to, task, None, [], text.strip())
-    target = herdr.notify(store, msg)
+        msg = messages.record(tx, "NOTE", sender, to, task, None, [], text.strip())
+    target = messages.notify(store, msg)
     return {"id": msg["id"], "delivered_to": target,
             "summary": f"{msg['id']} NOTE {sender} -> {to}: "
                        + (f"notice sent to {target}" if target else "recorded (no live session of that name: it "
@@ -490,14 +285,13 @@ def close(store: Store, name: str, remove_worktree: bool = False) -> dict:
         notes.append(branch_status(store, s["branch"]))
     if remove_worktree and s.get("worktree"):
         try:
-            _git(_top(store), "worktree", "remove", s["worktree"])
+            worktrees.remove(store, s["worktree"])
             notes.append(f"worktree {s['worktree']} removed")
         except RLError as exc:
             notes.append(f"worktree kept: {exc.message}")
     elif s.get("worktree"):
         notes.append(f"worktree {s['worktree']} kept (a new session named {name} reuses it)")
     if not _sessions(store):
-        from . import watch
         stopped = watch.stop(store)
         notes += [stopped["summary"]] if stopped["stopped"] else []
     return {"id": s["id"], "summary": f"{s['id']} {name} closed" + "".join(f"\n  {n}" for n in notes)}

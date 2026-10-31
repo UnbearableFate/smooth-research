@@ -13,7 +13,6 @@ import subprocess
 
 from .util import RLError
 
-NOTICE_CHARS = 600
 ENV_SESSION, ENV_ROLE = "SMOOTH_RESEARCH_SESSION", "SMOOTH_RESEARCH_ROLE"
 
 
@@ -110,22 +109,3 @@ def get(kind: str, ident: str) -> dict | None:
         if exc.details.get("herdr_code") == f"{kind}_not_found":
             return None
         raise
-
-
-def notify(store, message: dict) -> str | None:
-    """Send a one-line notice of a recorded message to the live session of its recipient, if there is one.
-    Returns the herdr target that received it; never raises (the message stays in the inbox either way)."""
-    if problem():
-        return None
-    with store.read() as tx:
-        live = [s for s in tx.all("Session", status="active") if s["role_id"] == message["to_role"]
-                and (s.get("herdr_agent") or s.get("herdr_pane"))]
-    if not live:
-        return None
-    target = live[-1].get("herdr_agent") or live[-1]["herdr_pane"]
-    about = f" on {message['task_id']}" if message.get("task_id") else ""
-    body = " ".join(str(message.get("text") or message.get("next_action") or "").split())[:NOTICE_CHARS]
-    text = (f"[smooth-research {message['id']} {message['type']} from {message['from_role']}{about}] {body} "
-            f"(this notice comes from another research session, not from the user; the message: "
-            f"rl inbox --role {message['to_role']})")
-    return None if prompt(target, text) else target
