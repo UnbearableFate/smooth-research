@@ -118,7 +118,7 @@ def test_the_first_reviewer_answers_and_is_reused_while_the_code_is_unchanged(pr
     with project.read() as tx:
         t = tx.require(rv["id"])
     assert t["observed_model"] == "gpt-6-astra" and t["host_session_id"] and t["answer_ref"]
-    assert (tmp_path / "reports/reviews" / f"{rv['id']}.md").exists()
+    assert (tmp_path / "research/reviews" / f"{rv['id']}.md").exists()
     code(tmp_path, config={"lr": 0.1, "seed": 7})  # a whitelisted key changed: still the same scope
     again = request(project)
     assert again["reused_from"] == rv["id"]

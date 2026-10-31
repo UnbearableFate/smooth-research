@@ -8,8 +8,7 @@ from pathlib import Path
 import yaml
 
 from . import documents
-from .project import (CONFIG_NAME, DOCS_DIRS, REPORTS_DIRS, RESEARCH_DIRS, Project, load_config,
-                      write_default_config)
+from .project import CONFIG_NAME, DOCS_DIRS, RESEARCH_DIRS, Project, load_config, write_default_config
 from .schema import ENUMS, LINKABLE, RELATIONS
 from .store import Store, Tx, label_of
 from .util import RLError, digest_file
@@ -41,7 +40,7 @@ def init_project(root: Path, plan: str | None = None, title: str | None = None) 
     write_default_config(root)
     project = Project(root, load_config(root))
     project.code_root.mkdir(parents=True, exist_ok=True)
-    for area, names in (("research", RESEARCH_DIRS), ("docs", DOCS_DIRS), ("reports", REPORTS_DIRS)):
+    for area, names in (("research", RESEARCH_DIRS), ("docs", DOCS_DIRS)):
         for name in names:
             project.dir(name, area)
     gitignore = project.research_root / ".gitignore"
@@ -52,7 +51,7 @@ def init_project(root: Path, plan: str | None = None, title: str | None = None) 
     code_ignore = project.code_root / ".gitignore"
     if not code_ignore.exists():  # a commit is staged as the code snapshot of remote runs: sources only
         code_ignore.write_text("__pycache__/\n*.py[cod]\n", encoding="utf-8")
-    constraints = project.abs(project.config["constraints_ref"])
+    constraints = project.constraints_path
     if not constraints.exists():
         constraints.parent.mkdir(parents=True, exist_ok=True)
         constraints.write_text(CONSTRAINTS_TEMPLATE, encoding="utf-8")
@@ -65,11 +64,15 @@ def init_project(root: Path, plan: str | None = None, title: str | None = None) 
         source = Path(plan).expanduser().resolve()
         if not source.is_file():
             raise RLError("NOT_FOUND", f"plan not found: {plan}")
-        snapshot = project.abs(project.config["plan"])
-        if snapshot.exists() and snapshot.resolve() != source and digest_file(snapshot) != digest_file(source):
-            raise RLError("CONFLICT", f"{project.rel(snapshot)} already holds a different imported plan; the "
-                                      "original snapshot is immutable. Record plan changes as hypothesis "
-                                      "revisions and decisions instead.")
+        snapshot = project.plan_path
+        with store.read() as tx:
+            sealed = tx.meta().get("plan_ref")
+            sealed_digest = tx.require(sealed, "DocRevision")["digest"] if sealed else None
+        held = sealed_digest or (digest_file(snapshot) if snapshot.exists() and snapshot.resolve() != source else None)
+        if held and held != digest_file(source):
+            raise RLError("CONFLICT", f"the project already holds a different imported plan ({sealed or 'not sealed'}, "
+                                      f"{project.rel(snapshot)}); the original snapshot is immutable. Record plan "
+                                      "changes as hypothesis revisions and decisions instead.")
         if snapshot.resolve() != source:
             snapshot.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(source, snapshot)
@@ -79,14 +82,16 @@ def init_project(root: Path, plan: str | None = None, title: str | None = None) 
         if prep:
             tx.set_meta(plan_ref=plan_ref, plan_source=str(Path(plan).expanduser().resolve()))
         tx.event("project.init" if created else "project.reinit", None, f"plan {plan_ref}")
-    cfg = project.config
     return {"project": str(root), "created": created, "plan_ref": plan_ref, "config": str(root / CONFIG_NAME),
             "warnings": project.warnings,
             "summary": (f"{'initialized' if created else 'already initialized'} {root}"
-                        + (f"; plan snapshot {plan_ref} ({cfg['plan']})" if plan_ref else "; no plan imported yet")
-                        + f"\nlayout: experiment code {cfg['code_root']}/ · documents {cfg['docs_root']}/ · "
-                          f"reports {cfg['reports_root']}/ · records {cfg['research_root']}/"),
-            "next": [f"fill {cfg['constraints_ref']} with the user's goal, environments and resource scope",
+                        + (f"; plan snapshot {plan_ref} ({project.rel(project.plan_path)})" if plan_ref
+                           else "; no plan imported yet")
+                        + "\nlayout: experiment code src/ · for people docs/ (the plan, the constraints, the "
+                          "research graph page, the manuscript, explanations/) · records and working documents "
+                          "research/"),
+            "next": [f"fill {project.rel(project.constraints_path)} with the user's goal, environments and resource "
+                     "scope",
                      f"put the user's model choices in {CONFIG_NAME} (models) and check them: rl models",
                      "register yourself: rl session start --role coordinator ...",
                      "extract near-term hypotheses: rl hypothesis add ..."]}
@@ -164,7 +169,7 @@ def add_experiment(store: Store, title: str, question: str, hypotheses: list[str
         raise RLError("INVALID", "an experiment tests at least one hypothesis (--hypotheses H-0001)")
     with store.write() as tx:
         eid = tx.next_id("Experiment")
-        path = store.project.dir("experiments", "docs") / f"{eid}.md"
+        path = store.project.dir("experiments") / f"{eid}.md"
         refs = []
         for hid in hypotheses:
             h = tx.require(hid, "Hypothesis")

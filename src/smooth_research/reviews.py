@@ -304,8 +304,8 @@ def _store_answer(store: Store, ticket_id: str, text: str, entry: str, observed:
         t = tx.require(ticket_id, "Ticket")
     folder = "reviews" if t["kind"] == "review" else "advice"
     earlier = list(t.get("earlier_answers") or []) + ([t["answer_ref"]] if t.get("answer_ref") else [])
-    path = store.project.dir(folder, "reports") / (f"{ticket_id}.md" if not earlier else
-                                                   f"{ticket_id}.revision-{len(earlier) + 1}.md")
+    name = f"{ticket_id}.md" if not earlier else f"{ticket_id}.revision-{len(earlier) + 1}.md"
+    path = store.project.dir(folder) / name
     header = (f"<!-- {ticket_id} answer · entry {entry} · observed model {observed or 'unverified'} · "
               f"session {session_id or 'unknown'} · received {now_utc()} -->\n\n")
     path.write_text(header + text, encoding="utf-8")
@@ -840,7 +840,7 @@ def advice_rounds(tx: Tx) -> list:
 
 def prepare_advice(store: Store, question: str, target: str | None = None, user_approved: str | None = None) -> dict:
     """One advice round: a package for every configured advisor, each on its own ticket, to be asked at once."""
-    constraints = store.project.abs(store.project.config["constraints_ref"])
+    constraints = store.project.constraints_path
     entries = _entries(store, "advice")
     if not entries:
         raise RLError("INVALID", "no advisor configured: list model entries under models.advisor")

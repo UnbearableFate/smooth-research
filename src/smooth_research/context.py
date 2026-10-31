@@ -79,14 +79,14 @@ def _assemble(title: str, sections: list[tuple[str, str]], budget: int) -> dict:
 
 
 def locations(store: Store) -> str:
-    cfg, p = store.project.config, store.project
-    if p.in_worktree:  # a researcher's worktree: code here, records and run outputs in the project
-        return (f"code {cfg['code_root']}/ and notes {cfg['docs_root']}/notes/ in this checkout ({p.checkout}) · "
-                f"records, packages and run outputs in the project: {p.research_root}/ (artifacts/<attempt>/) · "
-                f"reports {p.reports_root}/ · plan and contracts {p.docs_root}/")
-    return (f"code {cfg['code_root']}/ · documents {cfg['docs_root']}/ (plan/, experiments/, tasks/, notes/) · "
-            f"reports {cfg['reports_root']}/ (reviews/, advice/) · records {cfg['research_root']}/ (sealed "
-            "documents, packages, artifacts/<attempt>/)")
+    p = store.project
+    if p.in_worktree:  # a researcher's worktree: code and notes here, records and run outputs in the project
+        return (f"code src/ and notes research/notes/ in this checkout ({p.checkout}) · records, packages and run "
+                f"outputs in the project: {p.research_root}/ (artifacts/<attempt>/, contracts experiments/) · plan "
+                f"and constraints {p.docs_root}/")
+    return ("code src/ · for people docs/ (plan, constraints, research-graph.html, manuscript, explanations/) "
+            "· records and working documents research/ (experiments/, tasks/, notes/, reviews/, advice/, reports/, "
+            "sealed documents, packages, artifacts/<attempt>/)")
 
 
 def work_pack(store: Store, task_id: str, budget: int | None = None) -> dict:
@@ -129,8 +129,8 @@ def work_pack(store: Store, task_id: str, budget: int | None = None) -> dict:
         papers = [p for h in hyps.values() for p in _papers_for(tx, h["id"])]
         if papers:
             sections.append(("Literature", "\n".join(papers)))
-        sections.append(("Constraints", f"see {store.project.config['constraints_ref']} (user-set scope and "
-                                        "resource limits; follow them, the plugin does not enforce them)"))
+        sections.append(("Constraints", f"see {store.project.rel(store.project.constraints_path)} (user-set scope "
+                                        "and resource limits; follow them, the plugin does not enforce them)"))
     return _assemble(f"# Work pack for {task_id}\n", sections, budget)
 
 
@@ -153,7 +153,8 @@ def resume_pack(store: Store, role: str | None = None, budget: int | None = None
     c = coord[-1] if coord else None
     model = (c.get("model_observed") or c.get("model_requested") or "model unverified") if c else None
     identity = [f"coordinator {c['id']} ({c['host']}, {model})" if c else "no active coordinator session",
-                f"plan snapshot {meta.get('plan_ref') or 'none'}; constraints {store.project.config['constraints_ref']}",
+                f"plan snapshot {meta.get('plan_ref') or 'none'}; "
+                                f"constraints {store.project.rel(store.project.constraints_path)}",
                 f"data_version {meta['data_version']}"]
     first = []
     for t in tasks:
@@ -219,5 +220,5 @@ def advice_pack(store: Store, target: str | None, question: str, budget: int | N
 
 
 def _read_constraints(store: Store) -> str:
-    path = store.project.abs(store.project.config["constraints_ref"])
+    path = store.project.constraints_path
     return path.read_text(encoding="utf-8")[:3000] if path.exists() else "no constraints document"

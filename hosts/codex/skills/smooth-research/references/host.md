@@ -36,5 +36,5 @@ directories above the smooth-research SKILL.md). Write the absolute path in each
   shows, or `herdr` when it runs in herdr; see miyabi-mcp's instructions) and runs the returned
   `start_command`; a researcher then ends with WAIT. When the notice arrives, delegate the task again with
   the same role.
-- Context: at a natural task boundary with a heavy context, write a handoff note in `docs/tasks/`, end the
+- Context: at a natural task boundary with a heavy context, write a handoff note in `research/tasks/`, end the
   session record (`rl session end S-x`) and continue in a new session that starts from `rl resume`.

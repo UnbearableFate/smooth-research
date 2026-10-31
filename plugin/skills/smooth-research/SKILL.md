@@ -19,23 +19,23 @@ reviews, literature); it never runs, polls or cancels experiments for you.
 - Host-specific notes (sessions, subagents, default reviewer): [references/host.md](references/host.md).
   Exact formats (RunSpec, observation, manifest) and recipes: [references/workflow.md](references/workflow.md).
 
-## Project layout (in the research project root)
+## Project layout (in the research project root, fixed)
 
-- `src/` experiment code · `docs/` human-facing documents (`plan/`, `experiments/`, `tasks/`, `notes/`)
-- `reports/` reports (`{{rl}} report`, review and advice answers, `research-graph.html`)
-- `research/` machine records: database, sealed documents, packages, `artifacts/<attempt-id>/` run outputs.
-  Never edit `research/` by hand.
-- These are the default names. `smooth-research.yaml` can rename them; the Locations line of `{{rl}} resume`
-  and of a work pack gives this project's own. Paths in these instructions use the defaults.
+- `docs/` holds only what the user reads: `plan.md` (the imported plan, sealed), `constraints.md`,
+  `research-graph.html` (`{{rl}} view`), the manuscript (`{{rl}} manuscript`) and `explanations/`: when the
+  user asks you to explain something, write the explanation there (`docs/explanations/<topic>.md`).
+- `src/` experiment code · `research/` everything else: contracts (`experiments/`), `tasks/`, researcher
+  `notes/`, review and advice answers, stage reports, run outputs (`artifacts/<attempt-id>/`) and the records.
+  Write there only contracts, task notes and notes; `{{rl}}` writes the rest.
 
 ## Start or resume
 
 1. In the project directory: if `smooth-research.yaml` exists, run `{{rl}} resume --role coordinator` and
    continue from the first unfinished action. Otherwise `{{rl}} init --plan <plan.md>` (the plan is copied to
-   `docs/plan/original.md` and sealed; it is never edited afterwards).
+   `docs/plan.md` and sealed; it is never edited afterwards).
 2. Register this session: `{{rl}} session start --role coordinator --host {{host}} --host-session-id {{session_id}}
    --model-observed <your model id>`.
-3. Fill `docs/plan/constraints.md` from the plan and the user: goal and claims in scope, allowed data and
+3. Fill `docs/constraints.md` from the plan and the user: goal and claims in scope, allowed data and
    environments, resource ceiling. Model choices go in `smooth-research.yaml` (models: researcher, reviewer
    and advisor lists); check them with `{{rl}} models`. Ask the user only about gaps that change the goal or
    the budget; fill low-risk details yourself and say so.
@@ -55,7 +55,7 @@ controls) · E2 minimal real model · E3 limited confirmation (pre-fixed compari
 
 1. Contract: `{{rl}} experiment add --title .. --question .. --hypotheses H-x --stage E1 --intervention ..
    --comparator .. --metric .. --scope .. --outcome-actions "<result -> next step>" --budget .. --stop ..`.
-   Edit `docs/experiments/E-x.md` freely until the first run, review or task references it; it is then
+   Edit `research/experiments/E-x.md` freely until the first run, review or task references it; it is then
    sealed. Later edits become a new revision; edits after seeing results are recorded as exploratory.
 2. Delegate: `{{rl}} task create --title .. --kind implement|experiment|analysis --targets E-x --to-role researcher
    --next-action ..`, then start a researcher with the task id and a role name such as `researcher-1`: in herdr a
@@ -140,5 +140,7 @@ the conclusion review first, loop step 5):
 `{{rl}} decide --stage --targets H-x --action recommend_formal|continue_probe|pause|stop
 --implementation-ready "<code, controls, eval, run spec, cost measured?>" --evidence-scope "<what the
 evidence supports: diagnostic, exploratory signal or pre-specified comparison>" --rationale ..`,
-then `{{rl}} report` (writes `reports/`) and `{{rl}} view`. Report "code ready" and "claim verified" separately,
-with costs. At task boundaries `{{rl}} resume` lets a new session continue; `{{rl}} export` makes a backup.
+then `{{rl}} report` (a stage report in `research/reports/`), `{{rl}} view` and `{{rl}} manuscript`: replace the
+manuscript's `[write: ...]` placeholders with prose drawn only from the records (its record blocks are refreshed
+on every run; your text is kept). Report "code ready" and "claim verified" separately, with costs. At task
+boundaries `{{rl}} resume` lets a new session continue; `{{rl}} export` makes a backup.

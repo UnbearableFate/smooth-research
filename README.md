@@ -67,22 +67,23 @@ The first time, the CLI environment is built once from the bundled, locked packa
 ## A research project
 
 ```
-smooth-research.yaml     configuration (layout, model lists per role, advice rounds, context targets)
+smooth-research.yaml     configuration (model lists per role, advice rounds, agent sessions, context targets,
+                         the manuscript's LaTeX command)
 src/                     experiment code
-docs/                    human-facing documents: plan/original.md (imported, sealed), plan/constraints.md,
-                         experiments/E-xxxx.md (contracts), tasks/, notes/
-reports/                 reports: rl report, reviews/RV-xxxx.md, advice/AD-xxxx.md, research-graph.html
-research/                machine records: state/ (database, not in git), documents/objects/ (sealed),
-                         packages/, artifacts/<attempt>/ (run outputs, not in git), snapshots/
+docs/                    only what people read: plan.md (imported, sealed), constraints.md,
+                         research-graph.html (rl view), the manuscript (rl manuscript: manuscript.md, or
+                         manuscript/manuscript.tex and its PDF), explanations/ (written when the user asks)
+research/                everything else: experiments/ (contracts), tasks/, notes/, reviews/, advice/,
+                         reports/ (rl report), and the records: state/ (database, not in git),
+                         documents/objects/ (sealed), packages/, artifacts/<attempt>/ (run outputs, not in git)
 ```
 
-The directory names are defaults that `smooth-research.yaml` can change before `rl init`. Every
-configuration key, environment variable and command-line override is explained in
+The layout is fixed. Every configuration key, environment variable and command-line override is explained in
 [docs/configuration.md](docs/configuration.md) (in Chinese).
 
 Typical loop: `rl init --plan plan.md` -> `rl session start --role coordinator ...` ->
 `rl hypothesis add` -> `rl experiment add` -> code in `src/` -> `rl review request/run` for new core
 paths -> `rl run register` -> run with your own tool -> `rl run record` -> `rl run import-result` ->
-`rl evidence add` -> `rl decide` -> `rl report`. `rl resume` rebuilds the working context in a new
+`rl evidence add` -> `rl decide` -> `rl report` -> `rl manuscript`. `rl resume` rebuilds the working context in a new
 session; `rl export` / `rl restore` back up and restore the records. See
 `plugin/skills/smooth-research/references/workflow.md` for formats.

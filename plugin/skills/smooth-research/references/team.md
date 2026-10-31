@@ -41,9 +41,10 @@ A reused session keeps its worktree; `assign` switches it to the new task's bran
 worktree has uncommitted changes (commit or discard them first; you decide which).
 
 `{{rl}} task accept T-x` names the branch and how many commits main lacks. Merge it with a merge commit,
-`git merge --no-ff <branch>`; never squash or rebase it, because recorded runs name its commits. Records
-(`research/`) always go to the main project, from any worktree; run outputs go under the absolute
-`research/artifacts/<attempt>/` path, so they outlive the worktree.
+`git merge --no-ff <branch>`; never squash or rebase it, because recorded runs name its commits. Code and
+notes (`src/`, `research/notes/`) are committed on the branch; records always go to the main project's
+`research/`, from any worktree; run outputs go under the absolute `research/artifacts/<attempt>/` path, so they
+outlive the worktree.
 
 ## Reviews
 

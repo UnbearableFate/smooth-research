@@ -37,5 +37,5 @@ the absolute path from SKILL.md.
   `notify.daemon.listen_command` returned by the first `job_submit` of the batch. Run it with Bash
   `run_in_background`; it exits when the notification arrives, which wakes you whether you are working or
   idle. Then start the researcher again with the same role; it resumes the task.
-- Context: at a natural task boundary with a heavy context, write a handoff note in `docs/tasks/`, end the
+- Context: at a natural task boundary with a heavy context, write a handoff note in `research/tasks/`, end the
   session record (`rl session end S-x`) and continue in a new session that starts from `rl resume`.

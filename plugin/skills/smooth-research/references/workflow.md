@@ -1,8 +1,7 @@
 # Smooth Research: formats and recipes
 
-Read the section you need; the main skill has the loop. `{{rl}}` is the CLI (see SKILL.md). Paths use the
-default layout (`src/`, `docs/`, `reports/`, `research/`); if the project renames them, take its own from the
-Locations line of `{{rl}} resume`.
+Read the section you need; the main skill has the loop. `{{rl}}` is the CLI (see SKILL.md). The layout is
+fixed: `src/` code, `docs/` what the user reads, `research/` everything else (SKILL.md, Project layout).
 
 ## A local run, end to end
 
@@ -40,7 +39,7 @@ pi-env-mcp moves files and runs remote commands; miyabi-mcp submits, queries, ca
 jobs and exports observations; `{{rl}}` only records. Submit and cancel only through miyabi-mcp: a `qsub` run
 through pi-env-mcp bypasses its ledger and its limits. The remote root is the miyabi-mcp project directory
 (its `--project-dir`, by default `/work/<group>/<user>/<project>`), one per research project and never
-shared: request keys are unique only inside it. Write it in `docs/plan/constraints.md`, and pass absolute
+shared: request keys are unique only inside it. Write it in `docs/constraints.md`, and pass absolute
 remote paths: relative ones follow the remote shell's `cd`. Remote layout: `.miyabi-mcp/` (miyabi-mcp's
 ledger and PBS logs; do not edit), `snapshots/<commit>/` read-only code, the Python environment built on the
 login node of the target system, `runs/<ATT>/` one directory per attempt.
@@ -156,12 +155,12 @@ several `--attempts`; never split it into invented per-run numbers. Different un
 ## Tasks, messages, sessions
 
 - `{{rl}} task create --title .. --kind framework|implement|experiment|analysis|literature|review|advice|other
-  --targets E-x --request docs/tasks/T-brief.md --to-role researcher --next-action ..`
+  --targets E-x --request research/tasks/T-brief.md --to-role researcher --next-action ..`
 - Owner: `{{rl}} task claim T-x --role researcher` (one claimant wins); then `{{rl}} task deliver T-x
   --role researcher --summary .. --output <files>`, `task wait .. --attempts ATT-x --next-action ..`,
   `task block .. --reason engineering|model_unavailable|budget|science`, `task resume` (also to continue a
   task your role already owns, for example after a WAIT),
-  `task handoff .. --doc docs/tasks/T-x-handoff.md` (the task is then ready to claim again).
+  `task handoff .. --doc research/tasks/T-x-handoff.md` (the task is then ready to claim again).
 - Coordinator: `{{rl}} inbox --role coordinator` (add `--ack` after reading), `{{rl}} task accept|stop|reopen T-x
   --reason ..`. Stopping a task does not stop external runs: stop them with your tool and record that.
 - Rotating the coordinator: write a handoff note, end your session (`{{rl}} session end S-x`); the new session
@@ -171,11 +170,25 @@ several `--attempts`; never split it into invented per-run numbers. Different un
 
 `{{rl}} paper search "<query>"` (arXiv; failures are logged as failures) -> `{{rl}} paper add <arXiv id | DOI>
 --fetch` -> `{{rl}} paper link H-x P-y --relation nearest_work|motivated_by|cites --assessment
-search_hit|metadata_checked|fulltext_read|checked [--locator "Sec 3.2, Eq. 4"] [--note-file docs/notes/..]`.
+search_hit|metadata_checked|fulltext_read|checked [--locator "Sec 3.2, Eq. 4"] [--note-file research/notes/..]`.
 `checked` needs a locator. "No identical method found" is not a novelty proof.
 
 ## Views, backups, integrity
 
 `{{rl}} status`, `{{rl}} resume`, `{{rl}} graph`, `{{rl}} show <id>` (a DOC id prints the sealed text),
-`{{rl}} history [id]`, `{{rl}} report`, `{{rl}} view`, `{{rl}} export` (consistent snapshot into
-research/snapshots/), `{{rl}} restore <snapshot> --into <new dir>`, `{{rl}} doctor`.
+`{{rl}} history [id]`, `{{rl}} report` (research/reports/), `{{rl}} view` (docs/research-graph.html), `{{rl}} export`
+(consistent snapshot into research/snapshots/), `{{rl}} restore <snapshot> --into <new dir>`, `{{rl}} doctor`.
+
+## The manuscript
+
+`{{rl}} manuscript` writes `docs/manuscript.md` from the records: a section per part of a paper (abstract,
+introduction, related work, method, results, discussion, conclusion), each with a `[write: ...]` placeholder
+for your prose and blocks of record facts (hypotheses, literature, contract fields, per-arm tables, evidence
+with levels, decisions, record ids) between `<!-- rl:begin X -->` and `<!-- rl:end X -->`. Each run refreshes
+the blocks and keeps everything else, and lists the sections still to write. Write the prose at a stage end
+from the records only, at the evidence level they carry; correct a wrong fact in the records, not in a block;
+delete a block's markers to drop it. With `manuscript.latex` set in `smooth-research.yaml` (a build command,
+e.g. `latexmk -pdf -interaction=nonstopmode`) it writes `docs/manuscript/manuscript.tex` instead (blocks
+between `% rl:begin X` and `% rl:end X`, placeholders `\towrite{...}`) and builds the PDF beside it; a failed
+build prints the LaTeX errors. The preamble is yours: for Chinese or Japanese text build with xelatex or
+lualatex and load a CJK package there.

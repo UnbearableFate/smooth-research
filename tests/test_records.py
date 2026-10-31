@@ -9,6 +9,7 @@ import sys
 import time
 
 import pytest
+import yaml
 
 from conftest import SPEC, obs
 from smooth_research import context, documents, research, runs, snapshot, tasks
@@ -47,14 +48,14 @@ def test_two_sessions_claiming_at_once_get_one_owner(project, tmp_path):
 def test_handoff_releases_the_task_for_the_next_owner(project, tmp_path):
     tasks.create_task(project, "analysis", "analysis", ["H-0001"], to_role="researcher")
     tasks.claim(project, "T-0001", "researcher-a")
-    (tmp_path / "docs/tasks/handoff.md").write_text("state of work")
-    tasks.handoff(project, "T-0001", "docs/tasks/handoff.md", "researcher-a")
+    (tmp_path / "research/tasks/handoff.md").write_text("state of work")
+    tasks.handoff(project, "T-0001", "research/tasks/handoff.md", "researcher-a")
     with pytest.raises(RLError) as exc:  # a released task takes no owner updates until it is claimed again
         tasks.progress(project, "T-0001", "delivered", "researcher-a", "done")
     assert exc.value.code == "CONFLICT"
     tasks.claim(project, "T-0001", "researcher-b")
-    (tmp_path / "docs/notes/result.md").write_text("result")
-    tasks.progress(project, "T-0001", "delivered", "researcher-b", "done", ["docs/notes/result.md"])
+    (tmp_path / "research/notes/result.md").write_text("result")
+    tasks.progress(project, "T-0001", "delivered", "researcher-b", "done", ["research/notes/result.md"])
     tasks.review_task(project, "T-0001", "accept", "checked")
     with project.read() as tx:
         task = tx.require("T-0001")
@@ -86,7 +87,7 @@ def test_a_new_coordinator_session_supersedes_the_old_one(project):
 
 def test_sealed_contract_does_not_change_when_the_draft_is_edited(project, tmp_path):
     research.seal_experiment(project, "E-0001")
-    draft = tmp_path / "docs/experiments/E-0001.md"
+    draft = tmp_path / "research/experiments/E-0001.md"
     draft.write_text(draft.read_text().replace("comparator: no wd", "comparator: tuned wd"))
     with project.read() as tx:
         rev = documents.resolve(tx, tx.require("E-0001")["contract_ref"])
@@ -196,8 +197,8 @@ def test_a_killed_writer_leaves_a_consistent_store(project, tmp_path):
 
 
 def test_an_interrupted_seal_leaves_only_an_unregistered_object(project, tmp_path):
-    (tmp_path / "docs/notes/a.md").write_text("analysis")
-    documents.prepare(project.project, "docs/notes/a.md", "note")  # object written, never registered
+    (tmp_path / "research/notes/a.md").write_text("analysis")
+    documents.prepare(project.project, "research/notes/a.md", "note")  # object written, never registered
     report = snapshot.doctor(project)
     assert report["unregistered_objects"] and not report["problems"]
 
@@ -307,22 +308,53 @@ def test_configuration_keys_the_cli_does_not_read_are_reported(project, rl, tmp_
     assert "status` fails" in hook["additionalContext"] and "unsupported config version" in hook["additionalContext"]
 
 
-def test_a_renamed_layout_is_used_by_init_and_named_in_work_packs(tmp_path, monkeypatch):
+def test_the_layout_is_fixed_with_documents_for_people_in_docs_and_the_rest_in_research(project, tmp_path):
+    for path in ("docs/plan.md", "docs/constraints.md", "docs/explanations", "research/experiments/E-0001.md",
+                 "research/tasks", "research/notes", "research/reviews", "research/advice", "research/reports",
+                 "src/.gitignore"):
+        assert (tmp_path / path).exists(), path
+    assert sorted(p.name for p in (tmp_path / "docs").iterdir()) == ["constraints.md", "explanations", "plan.md"]
+    assert not (tmp_path / "reports").exists()
+    cfg = yaml.safe_load((tmp_path / "smooth-research.yaml").read_text(encoding="utf-8"))
+    assert cfg["manuscript"] == {"latex": None}
+    assert not {"plan", "constraints_ref", "code_root", "docs_root", "reports_root", "research_root"} & set(cfg)
+    tasks.create_task(project, "adapter", "implement", [], to_role="researcher")
+    pack = context.work_pack(project, "T-0001")
+    assert "## Locations\ncode src/ · for people docs/ (plan, constraints" in pack["summary"]
+    assert "see docs/constraints.md" in pack["summary"] and "Locations" not in pack["omitted"]
+
+
+def test_a_project_from_before_the_fixed_layout_keeps_its_files_and_hears_about_its_keys(tmp_path, monkeypatch, rl):
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("SMOOTH_RESEARCH_PROJECT", raising=False)
-    (tmp_path / "smooth-research.yaml").write_text("version: 1\ncode_root: lora\nresearch_root: records\n",
-                                                   encoding="utf-8")
-    out = research.init_project(tmp_path, None, "renamed")
-    assert out["warnings"] == [] and (tmp_path / "lora" / ".gitignore").is_file()
-    assert (tmp_path / "records" / "state" / "research.lattice").is_file() and not (tmp_path / "research").exists()
-    store = Store(find_project(), "test")
-    tasks.create_task(store, "adapter", "implement", [], to_role="researcher")
-    pack = context.work_pack(store, "T-0001")
-    assert "## Locations\ncode lora/ · documents docs/" in pack["summary"] and "records records/" in pack["summary"]
-    assert "Locations" not in pack["omitted"]
+    (tmp_path / "plan.md").write_text("# Plan\nv1\n", encoding="utf-8")
+    research.init_project(tmp_path, "plan.md", "earlier")
+    cfg = tmp_path / "smooth-research.yaml"  # what earlier versions wrote: layout keys, plan and constraints in docs/plan/
+    cfg.write_text(cfg.read_text(encoding="utf-8") + "plan: docs/plan/original.md\nconstraints_ref: "
+                   "docs/plan/constraints.md\ncode_root: src\ndocs_root: docs\nreports_root: reports\n"
+                   "research_root: research/\n", encoding="utf-8")
+    (tmp_path / "docs/plan").mkdir()
+    (tmp_path / "docs/plan.md").rename(tmp_path / "docs/plan/original.md")
+    (tmp_path / "docs/constraints.md").rename(tmp_path / "docs/plan/constraints.md")
+    p = find_project()
+    assert (p.plan_path, p.constraints_path) == (tmp_path / "docs/plan/original.md",
+                                                 tmp_path / "docs/plan/constraints.md")
+    assert len(p.warnings) == 6
+    assert "smooth-research.yaml: code_root is no longer used (experiment code is in src/); delete it" in p.warnings
+    assert any("reports_root is no longer used (review and advice answers and stage reports are in research/" in w
+               for w in p.warnings)
+
+    (tmp_path / "plan2.md").write_text("# Plan\nv2\n", encoding="utf-8")
+    code, _, err = rl("init", "--plan", "plan2.md")  # the sealed plan decides, wherever its file is
+    assert code == 3 and "already holds a different imported plan" in err and not (tmp_path / "docs/plan.md").exists()
+
+    cfg.write_text(cfg.read_text(encoding="utf-8").replace("research_root: research/", "research_root: records"),
+                   encoding="utf-8")
+    code, _, err = rl("status")
+    assert code == 1 and "the records are always in research/. Rename records/ to research/" in err
 
 
-def test_report_summarizes_arms_and_lives_in_reports(project, tmp_path):
+def test_report_summarizes_arms_and_lives_in_research_reports(project, tmp_path):
     from smooth_research import view
     for seed, acc in ((0, 0.8), (1, 0.9)):
         out = runs.register(project, "E-0001", {**SPEC, "seed": seed}, f"r{seed}")
@@ -330,5 +362,5 @@ def test_report_summarizes_arms_and_lives_in_reports(project, tmp_path):
         runs.import_result(project, out["attempt"], {"status": "complete", "metrics": {"acc": acc}}, f"res{seed}")
     path = view.report(project)["path"]
     text = open(path, encoding="utf-8").read()
-    assert path.startswith(str(tmp_path / "reports"))
+    assert path.startswith(str(tmp_path / "research/reports"))
     assert "| wd | 0,1 | 2 ended/success | 0.85 (n=2) |" in text

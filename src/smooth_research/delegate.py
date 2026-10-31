@@ -47,7 +47,6 @@ def prompt_for(store: Store, task_id: str, role: str, session: dict | None = Non
              "then carry out its next action below." if task.get("owner_role") == role
              else f"Claim the task: `{rl} task claim {task_id} --role {role}`.")
     pack = work_pack(store, task_id)["summary"]
-    cfg = store.project.config
     where = f"working on task {task_id} in {store.project.root}."
     checkout = ""
     if session:
@@ -85,8 +84,8 @@ The research records CLI is `{rl}`. The coordinator owns the route decisions; yo
 task.
 {checkout}{(chr(10) + WAITING + chr(10)) if session else ""}
 1. {start}
-2. Do the work described below. Experiment code belongs in {cfg['code_root']}/, human-facing notes in
-   {cfg['docs_root']}/notes/. Register every experiment run before executing it (`{rl} run register ...`), record
+2. Do the work described below. Experiment code belongs in src/, your notes in research/notes/ (both in your
+   checkout). Register every experiment run before executing it (`{rl} run register ...`), record
    what you observed (`{rl} run record ...`), import results (`{rl} run import-result ...`) and add evidence
    with an honest level (`{rl} evidence add ...`). Never invent results, versions or model identities; unknown
    stays unknown.

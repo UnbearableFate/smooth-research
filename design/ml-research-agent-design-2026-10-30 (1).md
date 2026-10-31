@@ -808,12 +808,6 @@ Codex 非交互执行可作为外部模型入口之一，适配器记录确切 s
 
 ```yaml
 version: 1
-plan: docs/plan/original.md
-constraints_ref: docs/plan/constraints.md
-code_root: src
-docs_root: docs
-reports_root: reports
-research_root: research
 
 models:
   researcher: [claude:claude-opus-5-5@high, codex:gpt-6-astra@high]
@@ -821,13 +815,18 @@ models:
   advisor: [codex:gpt-6-astra@max, claude:claude-fable-5-1@high]
 advice:
   max_rounds: 3
+agents:
+  args: {claude: [--permission-mode, auto], codex: [], pi: []}
+  watch_minutes: 20
 
 context:
   work_target_tokens: 4000
   advice_target_tokens: 10000
+manuscript:
+  latex: null
 ```
 
-（2026-10-31 按实现更新。上面每个键都由 CLI 读取。原稿中的 `artifacts` 一节没有代码读取，已经删除。模型选择统一写在这里：三个角色各有一个模型列表，researcher 和 reviewer 按顺序使用第一个可用的，advisor 每轮咨询全部可用的。旧写法（`researcher: inherit`、reviewer 的 `candidates`/`relation_to_author`、advisor 的 `primary`/`fallback`）仍能读取，但会给出警告；拼错的键也会警告。各键的含义见 `docs/configuration.md`。）
+（2026-10-31 按实现更新。上面每个键都由 CLI 读取。原稿中的 `artifacts` 一节没有代码读取，已经删除。模型选择统一写在这里：三个角色各有一个模型列表，researcher 和 reviewer 按顺序使用第一个可用的，advisor 每轮咨询全部可用的。旧写法（`researcher: inherit`、reviewer 的 `candidates`/`relation_to_author`、advisor 的 `primary`/`fallback`）仍能读取，但会给出警告；拼错的键也会警告。各键的含义见 `docs/configuration.md`。2026-10-31 按用户要求，目录改为固定的 `src/`、`docs/`、`research/`，`plan`、`constraints_ref`、`code_root`、`docs_root`、`reports_root`、`research_root` 不再配置，旧配置里的这些键会给出警告，见 §21.10；新增 `manuscript.latex`。）
 
 模型别名由用户环境映射到可用入口；token 目标是待验证示例。配置不包含实验执行 profile、队列、SSH、调度器后端或固定 node·h 预算 schema。用户在约束文档中说明资源范围、允许的环境与成本上限，协调者和执行者遵守；已知用量可导入并与约束对照，但这不是调度预算预留或平台限制的实现。
 
@@ -1153,17 +1152,16 @@ GitHub 链接固定到本次读取的提交；外部产品文档按 2026-10-30 �
 | 路径 | 内容 |
 | --- | --- |
 | `src/` | 实验代码 |
-| `docs/` | 面向人的文档：`plan/original.md`（导入计划快照，封存）、`plan/constraints.md`、`experiments/E-xxxx.md`（实验契约草稿）、`tasks/`、`notes/` |
-| `reports/` | 报告：`rl report` 生成的进度/阶段报告、`reviews/RV-xxxx.md`、`advice/AD-xxxx.md`、`research-graph.html` |
-| `research/` | 机器记录：`state/`（活动数据库与锁，不进 git）、`documents/objects/`（封存对象）、`packages/`（审查与咨询包）、`artifacts/<attempt>/`（运行输出，不进 git）、`calls/`、`snapshots/` |
+| `docs/` | 只放给人读的文档：`plan.md`（导入计划快照，封存）、`constraints.md`、`research-graph.html`（`rl view`）、论文草稿（`rl manuscript`：`manuscript.md`，或 `manuscript/manuscript.tex` 和 PDF）、`explanations/`（用户让 agent 解释时写的说明） |
+| `research/` | 其余的一切。agent 的工作文档：`experiments/E-xxxx.md`（实验契约草稿）、`tasks/`、`notes/`、`reviews/RV-xxxx.md`、`advice/AD-xxxx.md`、`reports/`（`rl report` 的阶段报告）。机器记录：`state/`（活动数据库与锁，不进 git）、`documents/objects/`（封存对象）、`packages/`（审查与咨询包）、`artifacts/<attempt>/`（运行输出，不进 git）、`calls/`、`snapshots/` |
 
-因此 12.3 节中的 `plan/`、`research/tasks|experiments|evidence|reviews|advice/`、`research/view.html` 分别移到上表位置。
+12.3 节中的 `plan/original.md` 移到 `docs/plan.md`，`research/view.html` 移到 `docs/research-graph.html`；`research/tasks|experiments|reviews|advice/` 保持原位置。（2026-10-31 用户要求修改：原先还有 `reports/` 目录，`docs/` 里放着计划目录、实验契约、任务和笔记，四个目录名都能在配置里改。用户认为 docs 和 reports 的含义不清，人也不必读审查和建议的回答。现在目录固定，`docs/` 只放上表那五类，见 §21.10。）
 
 ### 21.3 行为细节
 
 - 记录类型：六类图对象与辅助记录（DocRevision、Run、Attempt、ExecRef、Observation、Result、Usage、Session、Message、Cursor、Ticket、Event、Request）同在一个 LatticeDB 0.15.0 库；ID 计数器存于 Meta，不复用。写入在进程锁与单个数据库事务中完成，异常即整体回滚。
 - 绑定 revision 的关系（tests、supports、challenges、decides、cites 等）允许同类型平行边：修订假说后，旧证据仍绑定旧 revision，核对后可再绑定新 revision。
-- 实验契约：`rl experiment add` 在 `docs/experiments/` 生成草稿；首次被 run 登记、审查或任务正式引用时封存。封存后的修改形成新 revision；已有结果后再改则标记 `revised_after_results`（探索性，不算事前设定）。
+- 实验契约：`rl experiment add` 在 `research/experiments/`（2026-10-31 以前是 `docs/experiments/`）生成草稿；首次被 run 登记、审查或任务正式引用时封存。封存后的修改形成新 revision；已有结果后再改则标记 `revised_after_results`（探索性，不算事前设定）。
 - 会话与任务：不设 epoch。新的协调 session 把此前活动的协调 session 标为 superseded，只作记录；任务领取在事务内完成，只有一个 owner；deliver、wait、block、resume、handoff 只要求任务已被领取，handoff 后任务回到 ready。2026-10-30 按用户决定移除协调者 epoch 与任务 `owner_epoch`（没有必要）；旧库里遗留的 epoch 字段不影响读取。
 - 消息：任务状态变化自动生成 TASK/RESULT/WAIT/BLOCKED/HANDOFF/CANCEL；另有 NOTE。`rl inbox --ack` 只移动游标，不发回执。
 - 观测投影：同一来源有序号时按序号，否则按 `observed_at`；终态后的查询失败只记为观测问题；终态后更晚的非终态、两个不同终态、比最近观测更早的终态都标记待核对；只有带依据的 `--correction-of` 才能改变已确认终态。
@@ -1178,7 +1176,7 @@ GitHub 链接固定到本次读取的提交；外部产品文档按 2026-10-30 �
   - 删除了没有代码读取的 `models.researcher`、`artifacts.content_digest`、`artifacts.keep_raw_evidence`。
   - 以下几种情况会给出警告，但不阻止命令：CLI 不认识的键、旧版本写下的上述键、旧的模型写法或格式不对的模型条目、不是非负整数的 `advice.max_rounds`。警告出现在每条命令的输出和会话开始的 hook 里。
   - 配置文件不能加载时，hook 直接说明错误，不再当成没有项目。
-  - 工作包新增 Locations 一行。skill 和 researcher 子代理改为按它放文件，文中路径按默认值书写并注明。
+  - 工作包新增 Locations 一行。skill 和 researcher 子代理改为按它放文件，文中路径按默认值书写并注明。（目录固定后，Locations 一行保留，文中不再注明默认值，见 §21.10。）
   - `rl decide` 对结论审查不检查 relation，和 §8.6 不一致；按用户决定，当时未修改。随后的模型选择调整让 relation 不再作为任何检查的条件，这个不一致随之消失。
 - 模型选择（2026-10-31，用户要求，见 §8.1、§9.2、§13.1）：
   - 三个角色的模型都写在 `smooth-research.yaml` 的 `models` 里，每个角色一个条目列表；约束文档不再有“模型选择”一项。
@@ -1218,6 +1216,11 @@ GitHub 链接固定到本次读取的提交；外部产品文档按 2026-10-30 �
   - 对话框只报告一次；协调者有消息一整轮没读时提醒一次；
   - 被取代的监视程序退出，过期的被替换；ID 被别的 tab 占用时不关、不复用。
 - 再增至 79 项：协调者回答会话里的对话框，按选项文字或编号选择并记下理由；角色会话不能回答；会话不在对话框时报错；回答后把还没送达的任务告诉会话。
+- 再增至 83 项（目录固定与论文草稿，见 §21.10）：
+  - 新项目的固定目录，`docs/` 里只有计划、约束和 `explanations/`；配置里没有目录键；
+  - 旧项目：旧位置的计划和约束仍然读得到，旧的目录键给出警告，换计划仍报 CONFLICT，`research_root` 改过名时报错（原来的“改名后的目录布局用于 init 和工作包”一项随之删除）；
+  - Markdown 草稿：刷新记录块、保留正文、列出还要写的节、报告被删掉的块；
+  - LaTeX 草稿：转义和符号映射，用伪造的编译命令测试成功、失败（给出错误行）和命令不存在；装了 pdflatex 时，再用它真实编译一次。
 
 ### 21.6 端到端测试结果（2026-10-30）
 
@@ -1346,3 +1349,21 @@ GitHub 链接固定到本次读取的提交；外部产品文档按 2026-10-30 �
 4. **空闲提醒：** 后续任务 T-0002 中，我在 researcher-2 工作时按 Esc 打断它。下一轮监视程序提醒它继续（`session.reminded`），它 11 秒后恢复任务、提交代码并请求代码审查 RV-0003。再下一轮两个会话都在工作，监视程序没有打扰。T-0002 交付、接受、合并，记录决定 D-0002（停止 H-0002）。
 5. **结果：** λ=1e-2 和 λ=1e-1 都没有提高干净测试集上的准确率（三个配对种子的平均差分别为 −0.017 和 −0.043 个百分点），属于筛查级证据。四次审查都通过，没有发现问题；12 次运行共用约 2 秒 CPU。
 6. **其他观察：** Codex 会弹出账户安全提示（“Set up security for Daybreak mode”）。herdr 把这时的会话算作空闲而不是 blocked，打字就会关掉提示，所以通知照常送达。rl 不回答这个提示。herdr 的 `done` 状态在监视程序的报告里写作 idle。
+
+### 21.10 目录固定与论文草稿（2026-10-31）
+
+用户要求：去掉 `reports_root`；`docs/` 只放最初的计划、研究图 HTML、研究论文草稿（默认 Markdown，配置 LaTeX 编译程序后改为 PDF），以及用户让 agent 解释时写的说明；审查和建议的回答这类人不必读的内容放进 `research/` 的子目录；`src/`、`docs/`、`research/` 不再配置，直接固定。约束文档按用户选择放在 `docs/constraints.md`；论文草稿按用户选择做成一个新命令。
+
+| 项 | 实施 | 原因 |
+| --- | --- | --- |
+| 固定目录 | `project.py` 的常量 `CODE_DIR`、`DOCS_DIR`、`RESEARCH_DIR`、`PLAN_PATH`、`CONSTRAINTS_PATH`。`Project.dir` 只剩 research 和 docs 两个区域 | 用户要求 |
+| 旧配置 | `plan`、`constraints_ref`、`code_root`、`docs_root`、`reports_root`、`research_root` 进入 `RETIRED_KEYS`，每条命令给出警告，说明东西现在在哪里。`research_root` 不是 `research` 时，`load_config` 直接报错，让用户把目录改名 | 记录目录找不到时，命令会在空目录里失败，不如直接说明 |
+| 旧文件 | `Project.plan_path`、`constraints_path`：新位置没有文件、旧的默认位置（`docs/plan/original.md`、`docs/plan/constraints.md`）有时，读旧位置 | 旧项目不用搬文件也能继续 |
+| 计划不能换 | `rl init --plan` 先比对已封存的计划（meta 里的 `plan_ref`），再比对快照文件 | 原来只比对配置里那个路径的文件；路径变了以后，换一份计划就能绕过检查 |
+| researcher 笔记 | 写在自己 checkout 的 `research/notes/`，随分支合并。工作包的 Locations 和 `rl delegate` 的提示词都改了 | `docs/` 不再放 agent 的工作文档 |
+| 论文草稿 | `rl manuscript`（`manuscript.py`）写 `docs/manuscript.md`：摘要、引言、相关工作、方法、结果、讨论、结论和附录。每节一个 `[write: ...]` 占位，由协调者在阶段结束时写正文。记录事实放在 `<!-- rl:begin X -->` 和 `<!-- rl:end X -->` 之间：假设、文献、契约字段、每个 arm 的结果表、带等级的证据、决定、记录编号。每次运行只刷新这些块，其余文字保留；输出列出还有占位的节 | 正文要人或 agent 来写，事实要和记录一致；分开以后两者都不会被覆盖 |
+| 命令名 | `rl paper` 已经是文献命令（add、search、link、access、list），所以新命令叫 `rl manuscript`，配置键是 `manuscript.latex` | 避免同名 |
+| LaTeX | `manuscript.latex` 设为编译命令时，写 `docs/manuscript/manuscript.tex`（iftex 判断引擎，booktabs 表格，float 让表格留在所在的节），在该目录运行命令并检查 PDF。记录文本经过转义，常见符号和希腊字母转成数学命令。编译失败报 BUILD，给出 `!` 开头的错误行；命令不存在报 UNAVAILABLE；超时 300 秒 | 用户要求可配置；本机 pdflatex 实测通过 |
+| `rl report` | 保留，写进 `research/reports/`，作为内部的阶段报告 | 它是给协调者看的进度汇总，论文草稿才是给人读的 |
+| 解释说明 | SKILL.md：用户让协调者解释时，写进 `docs/explanations/<主题>.md` | 用户要求 |
+| 共用代码 | `view.py` 的结果表拆成 `arm_rows`（结构化的行），证据行、决定行和结论审查的核对也拆成函数，报告和论文草稿共用 | 两处的数字来自同一段代码 |

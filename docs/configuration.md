@@ -15,26 +15,24 @@
   - `--json` 结果里的 `warnings`；
   - 会话开始时的 hook 提示。
 - 下面几种情况也会警告：
-  - 旧版本写进配置、但从来没有代码读取的键（见本节最后）；
+  - 旧版本写进配置、现在不再读取的键，包括以前的目录键（见本节最后）；
   - 模型列表还是 2026-10-31 以前的写法（见本节最后），或者有条目格式不对；
-  - `advice.max_rounds` 不是非负整数，这时按 3 计算。
-- 配置文件不能加载时（YAML 写错或 `version` 不对），每条命令都报错。会话开始的 hook 也会直接说明这个错误，不会当成"没有项目"。
+  - `advice.max_rounds` 不是非负整数，这时按 3 计算；
+  - `manuscript.latex` 不是一条命令，这时写 Markdown 草稿。
+- 配置文件不能加载时（YAML 写错、`version` 不对，或旧的 `research_root` 不是 `research`），每条命令都报错。会话开始的 hook 也会直接说明这个错误，不会当成"没有项目"。
 
-### 目录和文件
+### 目录（固定）
 
-所有路径都相对于项目根目录。
+目录不能配置，所有项目都一样（2026-10-31 起）。路径都相对于项目根目录。
 
-| 键 | 默认值 | 含义 |
-|---|---|---|
-| `code_root` | `src` | 实验代码目录。init 会创建它，并放一个忽略 `__pycache__` 和 `*.pyc` 的 `.gitignore`。工作包和 `rl delegate` 的提示词会让 agent 把代码放这里，但不强制，审查范围和 RunSpec 可以引用任何路径 |
-| `docs_root` | `docs` | 人读的文档：`plan/`、`experiments/`（实验合同草稿）、`tasks/`、`notes/` |
-| `reports_root` | `reports` | 审查回答 `reviews/`、建议回答 `advice/`、`rl report` 的报告、`rl view` 的 `research-graph.html` |
-| `research_root` | `research` | 机器记录：数据库 `state/research.lattice` 和写锁、封存的文档 `documents/objects/`、请求包 `packages/`、模型调用日志 `calls/`、run 产物 `artifacts/<attempt>/` 等。init 写的 `.gitignore` 让 `state/`、`calls/`、`artifacts/` 不进 git |
-| `plan` | `docs/plan/original.md` | `rl init --plan` 把原始计划复制到这里并封存。之后再导入不同的计划会报 CONFLICT，计划的变化要记成假设修订和决定 |
-| `constraints_ref` | `docs/plan/constraints.md` | 约束文档的位置，见第 2 节 |
+| 位置 | 内容 |
+|---|---|
+| `src/` | 实验代码。init 会创建它，并放一个忽略 `__pycache__` 和 `*.pyc` 的 `.gitignore`。工作包和 `rl delegate` 的提示词让 agent 把代码放这里，但不强制，审查范围和 RunSpec 可以引用任何路径 |
+| `docs/` | 只放给人读的文档：`plan.md`（`rl init --plan` 导入的原始计划，封存）、`constraints.md`（约束文档，见第 2 节）、`research-graph.html`（`rl view`）、论文草稿（`rl manuscript`，见下面的"论文草稿"）、`explanations/`（用户让 agent 解释某件事时，agent 把说明写在这里） |
+| `research/` | 其余的一切。agent 的工作文档：`experiments/`（实验契约）、`tasks/`（任务说明和交接笔记）、`notes/`（researcher 的笔记，写在它自己的 checkout 里，随分支合并）、`reviews/` 和 `advice/`（审查和建议的回答）、`reports/`（`rl report` 的阶段报告）。机器记录：数据库 `state/research.lattice` 和写锁、封存的文档 `documents/objects/`、请求包 `packages/`、模型调用日志 `calls/`、run 产物 `artifacts/<attempt>/` 等。init 写的 `.gitignore` 让 `state/`、`calls/`、`artifacts/` 不进 git |
 
-- **目录要在 init 之前定好。** init 不覆盖已有的配置文件，所以可以先写好 `smooth-research.yaml`，再运行 `rl init`。init 之后再改 `research_root`，CLI 会到新位置找数据库，找不到就报 NO_PROJECT。旧记录还留在原来的目录里，要手动移过去。
-- **改了目录名，agent 看到的路径也跟着变。** 恢复包（`rl resume`）和工作包都有一行 Locations，列出本项目实际的目录。skill 文档里的路径按默认值写，并注明这一点；researcher 子代理按工作包的 Locations 放代码、笔记和 run 产物。
+- **导入的计划不能换。** 再导入不同的计划会报 CONFLICT。判断依据是已经封存的计划，和文件现在在哪里无关。计划的变化要记成假设修订和决定。
+- **旧项目。** 2026-10-31 以前生成的项目把计划和约束放在 `docs/plan/original.md` 和 `docs/plan/constraints.md`。新位置没有文件时，CLI 继续读旧位置。旧项目的 `reports/` 目录留在原处，里面回答的封存副本在 `research/documents/objects/`；新的回答写进 `research/reviews/` 和 `research/advice/`。旧配置里的目录键见"旧版本的写法"。
 
 ### 模型
 
@@ -113,9 +111,22 @@
 - **`--budget` 可以单次覆盖目标。**
 - **审查请求包不用这两个目标。** 它有自己写死的上限，见第 5 节。
 
+### 论文草稿
+
+| 键 | 默认值 | 含义 |
+|---|---|---|
+| `manuscript.latex` | `null` | `null` 时 `rl manuscript` 写 Markdown 草稿 `docs/manuscript.md`。写成编译命令（字符串或列表，如 `latexmk -pdf -interaction=nonstopmode`）时改写 `docs/manuscript/manuscript.tex`，并在 `docs/manuscript/` 里运行这个命令，编译出 `manuscript.pdf` |
+
+- **草稿由两部分组成。** `rl manuscript` 按论文的结构生成各节：摘要、引言、相关工作、方法、结果、讨论、结论和附录。每节有一个 `[write: ...]` 占位（LaTeX 里是 `\towrite{...}`），协调者在阶段结束时把它换成正文。从记录来的事实放在 `rl:begin X` 和 `rl:end X` 两个标记之间：假设、文献、契约字段、每个 arm 的结果表、带等级的证据、决定和记录编号。
+- **每次运行只刷新标记之间的内容。** 标记以外的文字原样保留，包括正文和 LaTeX 导言区。删掉某一块的标记，这一块就不再生成。输出会列出还有占位的节。
+- **事实错了改记录，不改块。** 块里的内容下次运行会被覆盖。
+- **编译。** 命令里没有 `.tex` 参数时，CLI 在末尾加上 `manuscript.tex`。命令的标准输入是空的，超时 300 秒。编译失败时报 BUILD，给出 LaTeX 的错误行和日志路径；命令找不到时报 UNAVAILABLE。两种情况下 `.tex` 都已经写好。`docs/manuscript/.gitignore` 让 `.aux`、`.log` 这类辅助文件不进 git。
+- **中文和日文。** 默认的导言区在 pdflatex 下用 T1 编码和 Latin Modern 字体，在 xelatex 和 lualatex 下用 fontspec，都不带 CJK 字体。正文是中文或日文时，用 xelatex 或 lualatex 编译，并在导言区加载 xeCJK 或 luatexja。
+- **从 Markdown 换到 LaTeX。** 已有的 `docs/manuscript.md` 不会被转换，正文要自己搬过去。
+
 ### 旧版本的写法
 
-2026-10-31 以前生成的配置文件可能有下面的写法。CLI 仍然读得懂，但每条命令都会警告，按最后一栏改写即可：
+2026-10-31 以前生成的配置文件可能有下面的写法。除了改过名的 `research_root`，CLI 都读得懂，但每条命令都会警告，按最后一栏改写即可：
 
 | 旧写法 | 现在怎样读 | 改成 |
 |---|---|---|
@@ -123,8 +134,10 @@
 | `models.reviewer: {candidates: [...], relation_to_author: different_family}` | 只读 `candidates`，`relation_to_author` 不再起作用 | `models.reviewer: [...]` |
 | `models.advisor: {primary: X, fallback: [...]}` | 只读 `primary` | `models.advisor: [...]`，列出每一轮都要咨询的模型 |
 | `artifacts.content_digest: blake2b`、`artifacts.keep_raw_evidence: true` | 不读：摘要算法写死为 blake2b，CLI 从不删除原始产物 | 删掉 |
+| `plan`、`constraints_ref`、`code_root`、`docs_root`、`reports_root` | 不读：目录固定（见"目录"）。旧位置的计划和约束文档仍然读得到 | 删掉。`code_root` 不是 `src` 时，把代码移到 `src/` |
+| `research_root` | 是 `research` 时不读，只警告；不是 `research` 时每条命令都报错 | 把记录目录改名为 `research/`，再删掉这个键 |
 
-## 2. 约束文档 `docs/plan/constraints.md`
+## 2. 约束文档 `docs/constraints.md`
 
 `rl init` 生成一个模板，有四项要填：
 
@@ -164,6 +177,7 @@
 - **超出建议轮数：** `rl advise prepare --user-approved "<用户的原话>"`，见第 1 节。
 - **审查轮次：** `rl review request ... --recheck-of RV-x` 是同一轮的第二次审查；第三次报 LIMIT，要开新一轮写 `--new-round "<原因>"`。`rl review approve RV-x --rationale ..` 由协调者批准还有中等以上问题的一轮。
 - **agent 会话：** `rl agent open [名字] --role researcher|reviewer|advisor [--task T-x | --ticket RV-x/AD-x] [--entry ..] [--no-worktree] [--base ..]`，以及 `assign`、`tell`、`reset --compact|--clear`、`close [--remove-worktree]`、`brief`、`list [--all]`、`dialog <名字>`（会话现在显示的对话框和选项）、`answer <名字> <选项编号或文字> --reason ..`（协调者回答对话框）。
+- **论文草稿：** `rl manuscript [--title ..]` 写或刷新草稿，`--title` 只用于新建的草稿，见第 1 节"论文草稿"。
 - **监视程序：** `rl agent check` 立刻查看一轮；`rl agent watch --start` 在单独的 tab 里启动（已经在运行就不重复启动），`--stop` 停止并关掉它的 tab；`--every <分钟>` 改间隔，不写就用 `agents.watch_minutes`。不带 `--start` 或 `--stop` 时在当前终端前台运行。
 
 ## 5. 写死的常量（不能配置）
@@ -177,4 +191,5 @@
 | `REVIEWS_PER_ROUND` | 2 | 一轮审查最多几次。第二次后还有中等以上问题，就交给协调者批准或退回（`reviews.py`） |
 | `NOTICE_CHARS` | 600 字符 | 发给 herdr 会话的一行通知里，消息正文最多保留多少字符；完整消息在 `rl inbox`（`herdr.py`） |
 | `MAX_RESTARTS` | 一小时 3 次 | 监视程序一小时内最多重启同一个会话几次，再退出就交给协调者（`watch.py`） |
+| `BUILD_TIMEOUT` | 300 秒 | `rl manuscript` 运行一次 LaTeX 编译命令的上限（`manuscript.py`） |
 | `MAX_REMINDERS` | 2 次 | 同一项任务，监视程序最多提醒几次；之后，或者提醒后会话毫无反应，就报告协调者（`watch.py`） |

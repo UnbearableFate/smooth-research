@@ -1,4 +1,5 @@
-"""Projections generated from the records: a tree view of the hypothesis graph, an HTML page and a report.
+"""Projections generated from the records: a tree view of the hypothesis graph, an HTML page (docs/) and a stage
+report (research/reports/).
 
 They are regenerated on demand and never edited by hand; the database and sealed documents stay authoritative.
 """
@@ -103,7 +104,7 @@ A projection of the records; edit records with <code>rl</code>, not this page.</
 <h2>Tree (derived_from)</h2><pre>{html.escape(text)}</pre>
 <h2>Attempts</h2><ul>{''.join(f'<li>{html.escape(a)}</li>' for a in attempts) or '<li>none</li>'}</ul>
 {sections}</body></html>"""
-    path = store.project.reports_root / "research-graph.html"
+    path = store.project.docs_root / "research-graph.html"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(page, encoding="utf-8")
     return {"path": str(path), "summary": f"wrote {store.project.rel(path)} (data_version {meta['data_version']})"}
@@ -113,8 +114,9 @@ def _num(value: float) -> str:
     return f"{value:.4g}"
 
 
-def _arm_table(tx: Tx, exp_id: str) -> list[str]:
-    """One row per arm: attempts, their states, and descriptive means of numeric metrics over usable results."""
+def arm_rows(tx: Tx, exp_id: str) -> tuple[list[str], list[dict]]:
+    """The numeric metrics (at most six) and one row per arm: its seeds, its attempts by state, and the
+    descriptive mean of each metric over usable results."""
     arms: dict[str, dict] = {}
     for run in tx.all("Run", experiment_id=exp_id):
         arm = arms.setdefault(str(run["spec"].get("arm")), {"seeds": set(), "states": {}, "metrics": {},
@@ -133,30 +135,59 @@ def _arm_table(tx: Tx, exp_id: str) -> list[str]:
             for key, value in (latest["manifest"].get("metrics") or {}).items():
                 if isinstance(value, (int, float)) and not isinstance(value, bool):
                     arm["metrics"].setdefault(key, []).append(float(value))
-    if not arms:
-        return ["- no runs registered"]
     keys = sorted({k for a in arms.values() for k in a["metrics"]})[:6]
+    rows = []
+    for name, a in sorted(arms.items()):
+        flag = f" ({a['mismatch']} not usable: spec mismatch)" if a["mismatch"] else ""
+        rows.append({"arm": name,
+                     "seeds": ",".join(str(s) for s in sorted(a["seeds"], key=str) if s is not None) or "-",
+                     "attempts": ", ".join(f"{n} {s}" for s, n in sorted(a["states"].items())) + flag,
+                     "cells": [f"{_num(sum(v) / len(v))} (n={len(v)})" if (v := a["metrics"].get(k)) else "-"
+                               for k in keys]})
+    return keys, rows
+
+
+def _arm_table(tx: Tx, exp_id: str) -> list[str]:
+    """One Markdown row per arm (arm_rows)."""
+    keys, rows = arm_rows(tx, exp_id)
+    if not rows:
+        return ["- no runs registered"]
     lines = ["", f"| arm | seeds | attempts | {' | '.join(keys) or 'metrics'} |",
              "|" + " --- |" * (3 + max(len(keys), 1))]
-    for name, a in sorted(arms.items()):
-        seeds = ",".join(str(s) for s in sorted(a["seeds"], key=str) if s is not None) or "-"
-        states = ", ".join(f"{n} {s}" for s, n in sorted(a["states"].items()))
-        cells = [(f"{_num(sum(v) / len(v))} (n={len(v)})" if (v := a["metrics"].get(k)) else "-") for k in keys] or ["-"]
-        flag = f" ({a['mismatch']} not usable: spec mismatch)" if a["mismatch"] else ""
-        lines.append(f"| {name} | {seeds} | {states}{flag} | {' | '.join(cells)} |")
+    lines += [f"| {r['arm']} | {r['seeds']} | {r['attempts']} | {' | '.join(r['cells']) or '-'} |" for r in rows]
     lines += [f"\nMeans are descriptive over attempts; per-attempt records: `rl run show {exp_id}`.", ""]
     return lines
 
 
-def _decision_line(d: dict, check: str | None) -> str:
+def evidence_line(tx: Tx, ev: dict) -> str:
+    rel = ", ".join(f"{e['rel']} {e['id']}@{e.get('revision')}" for e in tx.out(ev["id"])
+                    if e["rel"] in ("supports", "challenges"))
+    code = code_review_summary(tx, evidence_attempts(tx, ev["id"]))
+    return (f"{ev['id']} [{ev['evidence_level']}, {ev['validity']}] {ev['summary']}" + (f" ({rel})" if rel else "")
+            + (f"; scope: {ev['scope']}" if ev.get("scope") else "") + (f" [code review: {code}]" if code else ""))
+
+
+def conclusion_checks(tx: Tx, decisions: list[dict]) -> dict[str, str]:
+    """For each decision on a key conclusion: the conclusion reviews that back it, or why none does."""
+    checks = {}
+    for d in decisions:
+        if key_hypotheses(tx, d):
+            revs = conclusion_reviews(tx, [e["id"] for e in tx.out(d["id"], "based_on")])
+            checks[d["id"]] = review_gap(revs) or "conclusion review " + ", ".join(
+                f"{t['id']} {review_mark(t)}" + (f" ({t['relation']})" if t.get("relation") else "")
+                for t in revs if t["status"] == "answered")
+    return checks
+
+
+def decision_line(d: dict, check: str | None) -> str:
     status = f"->{d['evidence_status_set']}" if d.get("evidence_status_set") else ""
     reopen = f" (reopen if: {d['reopen_condition']})" if d.get("reopen_condition") else ""
     review = f" [{check}]" if check else ""
-    return f"- {d['id']} {d['kind']}:{d['action']}{status} — {d['rationale']}{reopen}{review}"
+    return f"{d['id']} {d['kind']}:{d['action']}{status} — {d['rationale']}{reopen}{review}"
 
 
 def report(store: Store, out: str | None = None, title: str | None = None) -> dict:
-    """A human-facing progress/stage report generated from the records into reports/."""
+    """A progress or stage report generated from the records into research/reports/."""
     with store.read() as tx:
         meta = tx.meta()
         hyps, decisions = tx.all("Hypothesis"), tx.all("Decision")
@@ -170,23 +201,9 @@ def report(store: Store, out: str | None = None, title: str | None = None) -> di
                              + (" — revised after results (exploratory)" if exp.get("revised_after_results") else "")
                              + f"\n- question: {exp['question']}")
             exp_lines += _arm_table(tx, exp["id"])
-        ev_lines = []
-        for ev in evidence:
-            rel = ", ".join(f"{e['rel']} {e['id']}@{e.get('revision')}" for e in tx.out(ev["id"])
-                            if e["rel"] in ("supports", "challenges"))
-            code = code_review_summary(tx, evidence_attempts(tx, ev["id"]))
-            ev_lines.append(f"- {ev['id']} [{ev['evidence_level']}, {ev['validity']}] {ev['summary']}"
-                            + (f" ({rel})" if rel else "") + (f"; scope: {ev['scope']}" if ev.get("scope") else "")
-                            + (f" [code review: {code}]" if code else ""))
+        ev_lines = [f"- {evidence_line(tx, ev)}" for ev in evidence]
         stage = [d for d in decisions if d["kind"] == "stage"]
-        checks = {}  # key conclusions: which conclusion review backs each one, or why none does
-        for d in decisions:
-            if key_hypotheses(tx, d):
-                revs = conclusion_reviews(tx, [e["id"] for e in tx.out(d["id"], "based_on")])
-                gap = review_gap(revs)
-                checks[d["id"]] = gap or "conclusion review " + ", ".join(
-                    f"{t['id']} {review_mark(t)}" + (f" ({t['relation']})" if t.get("relation") else "")
-                    for t in revs if t["status"] == "answered")
+        checks = conclusion_checks(tx, decisions)
     lines = [f"# {title or 'Research report'}: {meta.get('title', '')}",
              f"\nGenerated {datetime.now(timezone.utc).isoformat(timespec='seconds')} from the research records "
              f"(data_version {meta['data_version']}, plan {meta.get('plan_ref') or '-'}). Regenerate with `rl report`.",
@@ -195,7 +212,7 @@ def report(store: Store, out: str | None = None, title: str | None = None) -> di
     lines += ["\n## Experiments and runs\n", *(exp_lines or ["none"])]
     lines += ["\n## Evidence\n", *(ev_lines or ["none"])]
     lines += ["\n## Decisions\n"]
-    lines += [_decision_line(d, checks.get(d["id"])) for d in decisions] or ["none"]
+    lines += [f"- {decision_line(d, checks.get(d['id']))}" for d in decisions] or ["none"]
     if stage:
         d = stage[-1]
         lines += ["\n## Stage delivery\n", f"- implementation_ready: {d.get('implementation_ready')}",
@@ -210,7 +227,7 @@ def report(store: Store, out: str | None = None, title: str | None = None) -> di
     if usage["unreported_attempts"]:
         lines.append(f"- unreported for: {', '.join(usage['unreported_attempts'])}")
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M")
-    path = store.project.abs(out) if out else store.project.reports_root / f"report-{stamp}.md"
+    path = store.project.abs(out) if out else store.project.dir("reports") / f"report-{stamp}.md"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return {"path": str(path), "summary": f"wrote {store.project.rel(path)}"}

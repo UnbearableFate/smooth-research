@@ -11,8 +11,8 @@ import json
 import sys
 from pathlib import Path
 
-from . import (adapters, agents, context, delegate, hooks, literature, research, reviews, runs, snapshot, tasks,
-               view, watch)
+from . import (adapters, agents, context, delegate, hooks, literature, manuscript, research, reviews, runs,
+               snapshot, tasks, view, watch)
 from .project import advice_limit, find_project, model_entries
 from .schema import ENUMS, LINKABLE, PAPER_ASSESSMENTS
 from .store import Store
@@ -68,6 +68,10 @@ def cmd_view(args):
 
 def cmd_report(args):
     return view.report(_store(args), args.out, args.title)
+
+
+def cmd_manuscript(args):
+    return manuscript.write(_store(args), args.title)
 
 
 def cmd_export(args):
@@ -418,8 +422,7 @@ def build_parser() -> argparse.ArgumentParser:
         return sp
 
     sp = add("init", cmd_init, "create a research project here and import the plan snapshot")
-    sp.add_argument("--plan", help="the research plan (copied once to the configured plan path, "
-                                     "docs/plan/original.md by default, and sealed)")
+    sp.add_argument("--plan", help="the research plan (copied once to docs/plan.md and sealed)")
     sp.add_argument("--title")
     sp.add_argument("--dir", help="project directory (default: cwd)")
     add("status", cmd_status, "short project status and attention items")
@@ -434,10 +437,13 @@ def build_parser() -> argparse.ArgumentParser:
     sp = add("graph", cmd_graph, "tree projection of the hypothesis graph")
     sp.add_argument("--root")
     sp.add_argument("--mermaid", action="store_true")
-    add("view", cmd_view, "write research-graph.html into the reports directory")
-    sp = add("report", cmd_report, "write a human-facing report into the reports directory")
+    add("view", cmd_view, "write the research graph page docs/research-graph.html")
+    sp = add("report", cmd_report, "write a progress or stage report into research/reports/")
     sp.add_argument("--out")
     sp.add_argument("--title")
+    sp = add("manuscript", cmd_manuscript, "write or refresh the manuscript (the paper draft) from the records: "
+                                            "docs/manuscript.md, or LaTeX built into a PDF (manuscript.latex)")
+    sp.add_argument("--title", help="the title of a new draft")
     sp = add("export", cmd_export, "consistent snapshot of records and sealed documents")
     sp.add_argument("--out")
     sp = add("restore", cmd_restore, "rebuild a project from a snapshot into a new directory (records only)")

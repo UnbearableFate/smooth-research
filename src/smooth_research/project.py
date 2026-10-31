@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import os
+import shlex
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -16,22 +17,25 @@ CONFIG_NAME = "smooth-research.yaml"
 ENV_PROJECT = "SMOOTH_RESEARCH_PROJECT"
 ENV_CHECKOUT = "SMOOTH_RESEARCH_CHECKOUT"
 
-# Project layout: experiment code in src/, human-facing documents in docs/, reports in reports/, and machine
-# records (database, sealed objects, packages, call logs, run artifacts) in research/.
+# Project layout, fixed: experiment code in src/; what people read in docs/ (the original plan, the
+# constraints, the research graph page, the manuscript and the explanations the user asked for); everything
+# else in research/: the records (database, sealed objects, packages, call logs, run artifacts) and the
+# agents' working documents (experiment contracts, task notes, researcher notes, review and advice answers,
+# stage reports).
+CODE_DIR, DOCS_DIR, RESEARCH_DIR = "src", "docs", "research"
+PLAN_PATH, CONSTRAINTS_PATH = "docs/plan.md", "docs/constraints.md"
+# Where projects made before 2026-10-31 keep them; read while the new file is absent.
+EARLIER_PLAN, EARLIER_CONSTRAINTS = "docs/plan/original.md", "docs/plan/constraints.md"
+
 # Model entries are "<entry>:<model>[@effort]"; entry is claude, codex, pi or manual (a person submits the
 # package). Researchers and reviewers use the first available entry of their list; every available advisor is
 # asked, each on its own. agents.args are extra launch arguments for the sessions `rl agent open` starts in
 # herdr tabs (no sandbox or approval flags are added otherwise: each CLI's own settings apply);
-# agents.watch_minutes is the time between the watcher's rounds over those sessions (0 turns it off). Every key
-# here is read by the CLI; docs/configuration.md explains each one.
+# agents.watch_minutes is the time between the watcher's rounds over those sessions (0 turns it off).
+# manuscript.latex is the command that builds the manuscript (the paper draft) as a PDF (null: Markdown).
+# Every key here is read by the CLI; docs/configuration.md explains each one.
 DEFAULT_CONFIG: dict = {
     "version": 1,
-    "plan": "docs/plan/original.md",
-    "constraints_ref": "docs/plan/constraints.md",
-    "code_root": "src",
-    "docs_root": "docs",
-    "reports_root": "reports",
-    "research_root": "research",
     "models": {
         "researcher": ["claude:claude-opus-5-5@high", "codex:gpt-6-astra@high"],
         "reviewer": ["codex:gpt-6-astra@medium", "claude:claude-opus-5-5@medium"],
@@ -40,18 +44,26 @@ DEFAULT_CONFIG: dict = {
     "advice": {"max_rounds": 3},
     "agents": {"args": {"claude": ["--permission-mode", "auto"], "codex": [], "pi": []}, "watch_minutes": 20},
     "context": {"work_target_tokens": 4000, "advice_target_tokens": 10000},
+    "manuscript": {"latex": None},
 }
 MODEL_ROLES = ("researcher", "reviewer", "advisor")
 
-# Keys that earlier versions wrote into the configuration although nothing read them.
+# Keys that earlier versions wrote into the configuration, and why nothing reads them now.
 RETIRED_KEYS = {
     "artifacts": "digests are always blake2b and raw artifacts are always kept",
+    "plan": f"the imported plan is {PLAN_PATH}; an earlier project's {EARLIER_PLAN} is still read",
+    "constraints_ref": f"the constraints document is {CONSTRAINTS_PATH}; an earlier project's {EARLIER_CONSTRAINTS} "
+                       "is still read",
+    "code_root": f"experiment code is in {CODE_DIR}/",
+    "docs_root": f"documents for people are in {DOCS_DIR}/",
+    "reports_root": f"review and advice answers and stage reports are in {RESEARCH_DIR}/, the research graph page "
+                    f"in {DOCS_DIR}/",
+    "research_root": f"the records are in {RESEARCH_DIR}/",
 }
 
 RESEARCH_DIRS = ("state", "documents/objects", "packages", "mailbox", "snapshots", "literature", "calls",
-                 "artifacts")
-DOCS_DIRS = ("plan", "experiments", "tasks", "notes")
-REPORTS_DIRS = ("reviews", "advice")
+                 "artifacts", "experiments", "tasks", "notes", "reviews", "advice", "reports")
+DOCS_DIRS = ("explanations",)
 
 
 def _merge(base: dict, override: dict) -> dict:
@@ -82,7 +94,7 @@ class Project:
 
     @property
     def research_root(self) -> Path:
-        return self.root / self.config["research_root"]
+        return self.root / RESEARCH_DIR
 
     @property
     def state_dir(self) -> Path:
@@ -102,7 +114,7 @@ class Project:
 
     @property
     def code_root(self) -> Path:
-        return self.root / self.config["code_root"]
+        return self.root / CODE_DIR
 
     @property
     def worktrees_dir(self) -> Path:
@@ -113,16 +125,25 @@ class Project:
 
     @property
     def docs_root(self) -> Path:
-        return self.root / self.config["docs_root"]
+        return self.root / DOCS_DIR
 
     @property
-    def reports_root(self) -> Path:
-        return self.root / self.config["reports_root"]
+    def plan_path(self) -> Path:
+        """The imported plan, sealed at import."""
+        return self._kept(PLAN_PATH, EARLIER_PLAN)
+
+    @property
+    def constraints_path(self) -> Path:
+        return self._kept(CONSTRAINTS_PATH, EARLIER_CONSTRAINTS)
+
+    def _kept(self, path: str, earlier: str) -> Path:
+        """path, or where a project made before 2026-10-31 keeps the file while path does not exist."""
+        new, old = self.root / path, self.root / earlier
+        return old if old.is_file() and not new.exists() else new
 
     def dir(self, name: str, area: str = "research") -> Path:
-        """A subdirectory of research/ (machine records), docs/ (human documents) or reports/."""
-        base = {"research": self.research_root, "docs": self.docs_root, "reports": self.reports_root}[area]
-        path = base / name
+        """A subdirectory of research/ (records and the agents' working documents) or docs/ (for people)."""
+        path = (self.docs_root if area == "docs" else self.research_root) / name
         path.mkdir(parents=True, exist_ok=True)
         return path
 
@@ -139,7 +160,7 @@ class Project:
         return str(p)
 
     def abs(self, path: str) -> Path:
-        """A record path (research/, reports/, the plan and contracts): relative to the project."""
+        """A record path (research/, docs/): relative to the project."""
         p = Path(path)
         return p if p.is_absolute() else self.root / p
 
@@ -185,6 +206,11 @@ def config_warnings(config: dict) -> list[str]:
     if watch is not None and not _minutes(watch):
         out.append(f"{CONFIG_NAME}: agents.watch_minutes must be a number of minutes (0 turns the watcher off), not "
                    f"{watch!r}; using {DEFAULT_CONFIG['agents']['watch_minutes']}")
+    manuscript = config.get("manuscript")
+    latex = manuscript.get("latex") if isinstance(manuscript, dict) else None
+    if latex is not None and not latex_command(config):
+        out.append(f"{CONFIG_NAME}: manuscript.latex must be a build command such as 'latexmk -pdf "
+                   f"-interaction=nonstopmode', or null for a Markdown draft, not {latex!r}; writing Markdown")
     return out
 
 
@@ -214,6 +240,22 @@ def watch_minutes(config: dict) -> float:
     return float(value) if _minutes(value) else float(DEFAULT_CONFIG["agents"]["watch_minutes"])
 
 
+def latex_command(config: dict) -> list[str] | None:
+    """The command that builds the manuscript as a PDF (manuscript.latex, a string or a list), or None: Markdown."""
+    manuscript = config.get("manuscript")
+    value = manuscript.get("latex") if isinstance(manuscript, dict) else None
+    if isinstance(value, str):
+        try:
+            words = shlex.split(value)
+        except ValueError:
+            return None
+    elif isinstance(value, list) and all(isinstance(v, str) for v in value):
+        words = list(value)
+    else:
+        return None
+    return words or None
+
+
 def _minutes(value) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0
 
@@ -232,6 +274,10 @@ def load_config(root: Path) -> dict:
         raise RLError("INVALID", f"{path} is not valid YAML: {exc}") from None
     if data.get("version") != 1:
         raise RLError("INVALID", f"{path}: unsupported config version {data.get('version')!r}; expected 1")
+    moved = data.get("research_root")
+    if moved is not None and Path(str(moved)) != Path(RESEARCH_DIR):
+        raise RLError("INVALID", f"{path}: research_root is no longer read; the records are always in "
+                                 f"{RESEARCH_DIR}/. Rename {moved}/ to {RESEARCH_DIR}/, then delete research_root")
     return _merge(DEFAULT_CONFIG, data)
 
 
@@ -311,10 +357,13 @@ def find_project(explicit: str | None = None, start: Path | None = None) -> Proj
 def write_default_config(root: Path) -> Path:
     path = root / CONFIG_NAME
     if not path.exists():
-        text = ("# Smooth Research configuration. Resource limits and scope live in the constraints document.\n"
+        text = ("# Smooth Research configuration. Resource limits and scope live in docs/constraints.md; the\n"
+                "# layout is fixed: experiment code in src/, documents for people in docs/, records in research/.\n"
                 "# Model entries: <entry>:<model>[@effort]; entry is claude, codex, pi or manual. Researchers and\n"
                 "# reviewers use the first available entry of their list; every available advisor is asked.\n"
                 "# agents.args: extra launch arguments for sessions opened in herdr tabs (rl agent open);\n"
-                "# agents.watch_minutes: minutes between the watcher's rounds over those sessions (0: off).\n")
+                "# agents.watch_minutes: minutes between the watcher's rounds over those sessions (0: off).\n"
+                "# manuscript.latex: the command that builds the manuscript (rl manuscript) as a PDF, e.g.\n"
+                "# latexmk -pdf -interaction=nonstopmode (null: a Markdown draft, docs/manuscript.md).\n")
         path.write_text(text + yaml.safe_dump(DEFAULT_CONFIG, sort_keys=False, allow_unicode=True), encoding="utf-8")
     return path

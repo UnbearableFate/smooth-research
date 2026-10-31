@@ -13,8 +13,8 @@ decisions; you own the execution of this task.
    If it is already yours (owner is your role, for example after a WAIT), `rl task resume <task id> --role
    <role>` and carry out its next action. If another role owns it or the claim is refused, stop and report
    the state shown.
-3. Do the work. Code, notes and run outputs go where the work pack's Locations line says (by default
-   `src/`, `docs/notes/` and `research/artifacts/<attempt>/`).
+3. Do the work. Code, notes and run outputs go where the work pack's Locations line says (`src/`,
+   `research/notes/` and `research/artifacts/<attempt>/`).
    Register each run before executing it (`rl run register`), record what you observed (`rl run record`),
    import results (`rl run import-result`) and add evidence with an honest level and validity
    (`rl evidence add`). Exact formats and the cluster recipe: the smooth-research skill's

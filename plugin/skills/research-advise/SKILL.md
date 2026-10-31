@@ -15,7 +15,7 @@ smooth-research skill: {{rl_short}}
    `{{rl}} advise prepare --target H-x --question "<the decision you cannot make and why>"`.
    It gathers the goal, key positive and negative evidence, routes already stopped, surviving explanations,
    constraints, nearest literature and an artifact index into one package
-   (`research/packages/advice-round-N.request.md` in the default records directory) and opens a ticket per
+   (`research/packages/advice-round-N.request.md`) and opens a ticket per
    advisor (AD-x, AD-y, ...).
    The same question with the same evidence returns the existing tickets: consult again only with new data.
 2. A project has `advice.max_rounds` rounds (default 3); a round that no advisor answered does not count.
@@ -28,7 +28,7 @@ smooth-research skill: {{rl_short}}
    check with `{{rl}} advise show AD-x`. If an advisor is a `manual:` entry (the mode exists only in a
    product UI), give the user the package path and import their answer verbatim:
    `{{rl}} advise import AD-x --answer <file> --source "<product and mode>" --model-observed <model>`.
-4. Read every answer in `reports/advice/` (default reports directory): the assessment, the related work
+4. Read every answer in `research/advice/`: the assessment, the related work
    with locators (and whether the advisor checked each claim), the bottleneck, the proposals and the
    recommendation. Each proposal should state what it explains, how it differs from tried routes, a
    distinguishing prediction with controls, the cheapest test with its cost, and what would stop it. Note
