@@ -76,11 +76,58 @@ deploy key). Before a run, a researcher runs `{{rl}} compute sync` in its worktr
    `git archive` streamed over ssh, or written locally and uploaded with pi-env-mcp, then extracted. Run them
    with Bash, ssh or the pi-env-mcp tools as printed; each is safe to repeat. rl runs none of it.
 
-The rest of this section is Miyabi with miyabi-mcp (`jobs: mcp:<its server>`): it submits, queries, cancels and
-waits for PBS jobs and exports observations; pi-env-mcp moves files and runs remote commands; `{{rl}}` only
-records. Submit and cancel only through miyabi-mcp: a `qsub` run through pi-env-mcp bypasses its ledger and
-its limits. Pass absolute remote paths: relative ones follow the remote shell's `cd`. The Python environment
-is built on the login node of the target system, outside the snapshot.
+### Python environments: one pyproject.toml and one uv.lock for every resource
+
+Keep a single committed `pyproject.toml` and `uv.lock` for this machine and every remote resource. Never keep a
+second copy for a host, and never edit or re-lock them there. A run's snapshot carries the lock its commit pinned,
+which is what ties the run to its package versions.
+
+- What differs between resources (a CPU build here, a CUDA build on the GPU nodes, another architecture) goes into
+  that one file. uv's lock covers every platform, so `uv lock` here also locks what an aarch64 host installs.
+  Check each host first: architecture (`uname -m`), CUDA driver and modules (`nvidia-smi`, `module avail`). The
+  variants of one package (torch for CPU or for a CUDA version) are mutually exclusive extras, each from its index:
+
+  ```toml
+  [project.optional-dependencies]
+  cpu = ["torch==2.11.*"]      # this machine
+  miyabi = ["torch==2.11.*"]   # the GPU nodes: the same version as here
+  [tool.uv]
+  conflicts = [[{ extra = "cpu" }, { extra = "miyabi" }]]
+  # uv lock fails here, not on the host, when a package has no build for it
+  required-environments = ["sys_platform == 'linux' and platform_machine == 'aarch64'"]
+  [tool.uv.sources]
+  torch = [{ index = "pytorch-cpu", extra = "cpu" }, { index = "pytorch-cu128", extra = "miyabi" }]
+  [[tool.uv.index]]
+  name = "pytorch-cu128"       # the CUDA version the nodes support
+  url = "https://download.pytorch.org/whl/cu128"
+  explicit = true
+  # pytorch-cpu likewise: https://download.pytorch.org/whl/cpu
+  ```
+
+  Pin the same version in every variant. Each index has its own newest version (on 2026-10-31 the cu128 index
+  stopped at torch 2.11 for aarch64 while the CPU index had 2.15), and different versions here and there make a
+  local check say nothing about the remote run. Read the versions the lock chose before you commit it.
+- Change dependencies only here: edit `pyproject.toml`, run `uv lock`, commit both; this machine uses
+  `uv sync --extra cpu`. rl's own dependencies (added by `{{rl}} init`) stay in the list.
+- On the host, build the environment on a login node from the snapshot, outside it, keyed by the lock: the same
+  lock reuses the environment, a new lock gets a new one, and queued jobs keep theirs. After loading the modules
+  the job loads: `UV_PROJECT_ENVIRONMENT=<workspace>/envs/<lock id>-<extra> uv sync --frozen --extra <extra>
+  --no-install-project --project <workspace>/snapshots/<sha>`, where `<lock id>` is the first 12 characters of
+  `git rev-parse <sha>:uv.lock` (the same for every commit with the same lock). The job script loads the same
+  modules, runs that environment's `python`, and writes the torch and CUDA versions it sees into its manifest.
+- Record it: `{{rl}} run register ... --environment-ref "uv.lock <lock id>, extra <extra>, modules <list>"`. Runs
+  with a different environment_ref are not the same comparison.
+- Exception: a package that must match the site's own build (mpi4py for the site's MPI, a torch the site compiled
+  for its CUDA) stays out of the lock. Use the site's module or prepared environment, read-only, and name it and
+  its versions in `--environment-ref`.
+
+### Running on Miyabi with miyabi-mcp
+
+With `jobs: mcp:<its server>`, miyabi-mcp submits, queries, cancels and waits for PBS jobs and exports
+observations; pi-env-mcp moves files and runs remote commands; `{{rl}}` only records. Submit and cancel only
+through miyabi-mcp: a `qsub` run through pi-env-mcp bypasses its ledger and its limits. Pass absolute remote
+paths: relative ones follow the remote shell's `cd`. Build the Python environment on a login node of the target
+system, outside the snapshot (Python environments, above).
 
 3. The job script is part of the snapshot, runs code from it and writes only to `<workspace>/runs/$SR_ATTEMPT_ID/`,
    ending with a `manifest.json` (format below) that carries `spec_digest` and artifact digests written as

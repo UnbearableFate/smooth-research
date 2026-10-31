@@ -96,23 +96,23 @@ judge them; only what only the user can decide goes to the user (team.md). Witho
 
 ## Recording runs (researchers, and you for small checks)
 
-1. Code goes in `src/`. Before a costly run on a new core operator, training/eval path, loss mask, data
-   split, adapter injection or checkpoint I/O, get a code review (skill `research-review`). Smoke
-   tests and deterministic checks may run first. Seeds of an already reviewed spec need no new review.
+1. Code goes in `src/`. Before a costly run on a new core operator, training/eval path, loss mask, data split,
+   adapter injection or checkpoint I/O, get a code review (skill `research-review`). Smoke tests and deterministic
+   checks may run first. Seeds of an already reviewed spec need no new review.
 2. Register before running: `{{rl}} run register --experiment E-x --request-id <unique> --arm .. --seed ..
    --code-digest "$({{rl}} digest src/ | cut -d' ' -f1)" (or --code-commit <full sha>) --config-digest ..
-   --data-revision .. --metric .. --output-spec .. --resource <where it runs>` -> RUN and ATT ids.
-   Write `unknown` for facts you do not have; never guess. Its `code review` line, recorded on the attempt,
-   says whether answered reviews still cover the code this run executes (the commit, else the
-   working tree): covered, stale (a reviewed file changed: re-check before a costly run) or not reviewed.
-   Nothing is blocked; a run that needs no review says why: `--no-review "smoke test"`.
-3. Run it with your own tools (shell, background jobs, remote or HPC tools). Record facts as you observe
-   them: `{{rl}} run record --attempt ATT --source <tool> --state running|ended [--outcome success|failed|cancelled]
-   --exec-namespace host:<hostname> --exec-id <pid or job id> --source-ref <log>`. A remote run (registered
-   with `--code-commit`) executes a read-only snapshot of that commit: `{{rl}} compute steps --attempt ATT`
-   prints how to stage it, start it and fetch the results; you run them. On Miyabi submit with miyabi-mcp,
-   the attempt id as the request key, record its ledger export with `{{rl}} run record --observation @file`
-   and wait for its notification instead of polling; recipe in workflow.md.
+   --data-revision .. --metric .. --output-spec .. --resource <where it runs>` -> RUN and ATT ids. Write `unknown`
+   for facts you do not have; never guess. Its `code review` line says whether answered reviews still cover the code
+   it executes (the commit, else the working tree): covered, stale (a reviewed file changed: re-check before a costly
+   run) or not reviewed. Nothing is blocked; say why a run needs none: `--no-review "smoke test"`.
+3. Run it with your own tools (shell, background jobs, remote or HPC tools). Record facts as you observe them:
+   `{{rl}} run record --attempt ATT --source <tool> --state running|ended [--outcome success|failed|cancelled]
+   --exec-namespace host:<hostname> --exec-id <pid or job id> --source-ref <log>`. A remote run (registered with
+   `--code-commit`) executes a read-only snapshot of that commit: `{{rl}} compute steps --attempt ATT` prints how to
+   stage it, start it and fetch the results; you run them. Packages: the one committed `pyproject.toml`/`uv.lock` for
+   every resource, built on the host outside the snapshot, named by `--environment-ref`. On Miyabi: miyabi-mcp with
+   the attempt id as request key, record its ledger export (`{{rl}} run record --observation @file`), wait for its
+   notification, never poll. Recipes: workflow.md.
 4. `{{rl}} run import-result --attempt ATT --request-id <unique> --manifest @<manifest.json>`; optionally `{{rl}} run
    usage ...` with measured time, unless the executor's export already carried it. Unreported usage is not zero.
 5. Evidence: `{{rl}} evidence add --summary .. --level diagnostic|screening|exploratory|confirmatory

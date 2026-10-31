@@ -113,6 +113,11 @@ def pack_text(project: Project) -> str:
              "prints how to stage the commit there, run it and fetch the results (rl runs nothing); rl compute "
              "sync pushes your branch for the resources that fetch code by git"]
     lines += [f"- {res.describe()}" for res in found.values()]
+    if any(res.remote for res in found.values()):
+        lines.append("Python packages: one committed pyproject.toml and uv.lock for every resource (a CPU or CUDA "
+                     "build as mutually exclusive extras, the same version in each); change and lock them only "
+                     "here; on a host build the environment from the snapshot, outside it, keyed by the lock, and "
+                     "name it with run register --environment-ref (workflow.md, Python environments)")
     return "\n".join(lines)
 
 

@@ -197,7 +197,7 @@ compute:
   3. 给每个资源打印一个脚本：在 `<workspace>/repo.git` bare clone 仓库（已经有就 fetch），并检查主机上有刚推送的 commit。agent 要立刻用这个资源的连接（pi-env-mcp 或 ssh）执行它，这样主机读不了仓库（要在主机上 `gh auth login`，或者配 deploy key）在第一次运行之前就能发现。重复执行是安全的。
   没有 `code: git` 的远程资源时，什么都不做，也不输出。
 - **researcher 推送自己的任务分支。** code 为 git 时，researcher 在需要时用 `rl compute sync` 推送自己 worktree 的任务分支 `sr/<名字>/<任务>`，从不强推：记录过的 run 指向这些 commit。合并后的 main 由协调者用 `rl compute sync` 再推送一次。
-- **工作包和恢复包带上资源列表。** researcher 和接手的会话不用读约束文档就知道去哪里跑。
+- **工作包和恢复包带上资源列表。** researcher 和接手的会话不用读约束文档就知道去哪里跑。有远程资源时还提醒 Python 环境的做法：所有资源共用一份提交的 `pyproject.toml` 和 `uv.lock`（CPU、CUDA 等版本写成互斥的 extras，各个 extra 用同一个版本），只在本地改和 lock；主机上从快照建环境，放在快照外、按 lock 区分，用 `--environment-ref` 记下来。详见 skill 的 workflow.md（Python environments）。
 
 ## 2. 约束文档 `docs/constraints.md`
 

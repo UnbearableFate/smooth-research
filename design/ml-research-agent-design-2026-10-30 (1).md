@@ -1661,3 +1661,13 @@ GitHub 链接固定到本次读取的提交；外部产品文档按 2026-10-30 �
 **不做的**：rl 不在远程主机上执行 clone；不强推；不给已经在更大仓库里的项目建仓库；不把 rl 自己装进项目环境。
 
 验证：148 项测试通过（新增 12 项：`tests/test_setup.py` 7 项，直接运行 `plugin/bin/rl` 和 uv，覆盖新项目、嵌在别的 uv 项目里的项目、已有 `pyproject.toml`、过低的 Python、插件升级后补依赖、researcher worktree、旧项目；`tests/test_compute.py` 5 项）。sync 的测试用假的 `gh`（建本地 bare 仓库）和本地目录代替 GitHub 和 Miyabi，并真的执行打印出来的 clone 脚本。真实环境：在 demo 里用重新构建的插件运行 `rl compute sync`，推送到 GitHub；打印的脚本在 Miyabi 上对已有的 `repo.git` 做了 fetch，在一个临时 workspace 里从头 clone，两次都确认有刚推送的 commit（临时 workspace 已删除）。
+
+### 21.21 远程主机的 Python 环境：一份 pyproject.toml 和 uv.lock（2026-10-31）
+
+用户问插件有没有提醒 agent 按计算环境调整包的版本（比如 CUDA 对应的 PyTorch），以及本地和远程的 `pyproject.toml`/`uv.lock` 怎么维护。原来只有 workflow.md 里一句“环境在目标系统的登录节点上建，在快照之外”。用户决定先只加提醒，不加配置键，`rl compute steps` 也不加建环境的步骤。
+
+做法：所有资源共用一份提交的 `pyproject.toml` 和 `uv.lock`，主机上不改、不重新 lock；uv 的 lock 覆盖所有平台，在本地 `uv lock` 就锁定了 aarch64 主机要装的包。同一个包的不同构建（CPU、某个 CUDA 版本）写成互斥的 extras（`tool.uv.conflicts`），各自从 `explicit` 的 index 取（`tool.uv.sources` 按 extra），`required-environments` 让缺少某个平台构建的包在本地 lock 时就失败。主机上用 `uv sync --frozen --extra <extra> --no-install-project --project <快照>` 建环境，放在 `<workspace>/envs/<lock 的 git blob id 前 12 位>-<extra>/`，用 `--environment-ref` 记下。必须和站点构建一致的包（站点 MPI 的 mpi4py、站点编译的 torch）不进 lock，用站点的模块或现成环境并记下版本。
+
+验证：在 uv 0.13.4 上，这个写法 lock 出 aarch64 的 `torch 2.11.0+cu128` 和 x86_64 的 `torch 2.15.0+cpu`。这说明两个 index 最新的版本不同，所以提醒里要求各个 extra 钉同一个版本，否则本地检查说明不了远程运行。从只读目录 `uv sync --frozen --no-install-project` 到外部环境可以完成，不往项目目录写东西。
+
+改动：workflow.md 新增 “Python environments” 一节，Miyabi 部分改成单独的小节；SKILL.md 记录运行的第 3 步加一句；有远程资源时，工作包和恢复包的 Compute 一节加一行提醒（`compute.pack_text`）。

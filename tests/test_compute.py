@@ -212,6 +212,9 @@ def test_work_and_resume_packs_list_the_resources(project, tmp_path):
     for pack in (context.work_pack(store, "T-0001")["summary"], context.resume_pack(store)["summary"]):
         assert "## Compute resources (smooth-research.yaml)" in pack
         assert "miyabi: host miyabi-g via pi-env-mcp (server miyabi-g) · jobs mcp:miyabi-pbs" in pack
+        assert "Python packages: one committed pyproject.toml and uv.lock for every resource" in pack
+    store = configure(tmp_path, {"local": {"kind": "local"}})  # nothing remote: no reminder
+    assert "Python packages" not in context.work_pack(store, "T-0001")["summary"]
 
 
 def test_rl_compute_lists_resources_with_local_checks(project, tmp_path, rl):
