@@ -11,3 +11,5 @@ wheels/
 
 # Local code index (codegraph)
 .codegraph/
+ms-demo
+demos
