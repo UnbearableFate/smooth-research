@@ -2,6 +2,7 @@
 staging steps rl prints. The steps are run here against local directories that stand in for the remote host, so
 the snapshot a remote job would run is checked, not only the text."""
 
+import json
 import os
 import stat
 import subprocess
@@ -57,8 +58,10 @@ def test_the_default_is_this_machine_and_the_users_resources_replace_it():
 
 def test_resource_problems_warn_and_say_what_is_used_instead():
     cfg = config({"default": "nowhere", "resources": {
-        "box": {"host": "box", "workspace": "/data/p", "connect": "telnet", "code": "rsync", "jobs": "slurm",
+        "box": {"host": "box", "workspace": "/data/p", "code": "rsync",
                 "typo": 1},
+        "badconnect": {"host": "box", "workspace": "/data/p", "connect": "telnet"},
+        "badjobs": {"host": "box", "workspace": "/data/p", "jobs": "slurm"},
         "relative": {"host": "h", "workspace": "work/p"},
         "nohost": {"kind": "remote", "workspace": "/w"},
         "here": {"kind": "local", "workspace": "/x"},
@@ -68,8 +71,8 @@ def test_resource_problems_warn_and_say_what_is_used_instead():
     box = found["box"]
     assert (box.connect, box.code, box.jobs) == ("ssh", "git", "shell")
     text = "\n".join(warnings)
-    for part in ("unknown key compute.resources.box.typo", "box.connect must be ssh, pi-env-mcp",
-                 "box.code must be git or archive", "box.jobs must be shell, mcp:<server> or skill:<name>",
+    for part in ("unknown key compute.resources.box.typo", "badconnect.connect must be ssh, pi-env-mcp",
+                 "box.code must be git or archive", "badjobs.jobs must be shell, mcp:<server> or skill:<name>",
                  "relative.workspace must be an absolute remote path", "nohost: a remote resource needs host",
                  "here: workspace has no effect on a local resource", "bad name!: a resource name is",
                  "compute.default 'nowhere' is not a usable resource; using box"):
@@ -172,7 +175,7 @@ def test_pi_env_mcp_steps_name_its_server_and_the_job_tool(project, tmp_path):
                  f"-> /work/g/u/demo/snapshots/{sha}.tar",
                  "pi-env-mcp bash (server miyabi-g, host miyabi-g)",
                  "Submit with MCP server miyabi-pbs", "request key sr:<ATT>",
-                 "Its project directory must be /work/g/u/demo",
+                 "Use /work/g/u/demo as the executor's project workspace if it requires one",
                  "pi-env-mcp download (server miyabi-g, host miyabi-g): /work/g/u/demo/runs/<ATT>/manifest.json"):
         assert part in text, part
 
@@ -362,3 +365,85 @@ def test_an_unknown_repository_setting_warns_and_creates_nothing():
     cfg = config({"repository": "gitlab"})
     assert compute_repository(cfg) == "none" and compute_repository(DEFAULT_CONFIG) == "github-private"
     assert any("compute.repository must be github-private or none, not 'gitlab'" in w for w in config_warnings(cfg))
+
+
+@pytest.mark.parametrize("coordinator", ["login", "logni", None])
+def test_login_policy_never_falls_back_to_local_execution(coordinator):
+    cfg = config({"coordinator": coordinator})
+    found, warnings = compute_resources(cfg)
+    assert found == {} and compute_default(cfg) is None
+    assert any("coordinator is a login node" in w for w in warnings)
+    if coordinator != "login":
+        assert any("treating it as login" in w for w in warnings)
+
+
+@pytest.mark.parametrize("extra", [{}, {"jobs": "shell"}, {"jobs": "mcp:"},
+                                  {"jobs": "mcp:batch", "code": "git"},
+                                  {"jobs": "mcp:batch", "connect": "local:batch"}])
+def test_invalid_shared_cluster_resources_offer_no_shell_fallback(extra):
+    cfg = config({"coordinator": "login", "resources": {
+        "cluster": {"kind": "remote", "connect": "local", "workspace": "/shared/project", **extra}}})
+    found, warnings = compute_resources(cfg)
+    assert found == {} and warnings and compute_default(cfg) is None
+
+
+def test_login_shared_snapshot_uses_worktree_commit_without_network(project, tmp_path, monkeypatch, rl):
+    workspace = tmp_path.parent / f"{tmp_path.name} shared"
+    configure(tmp_path, {"cluster": {"kind": "remote", "connect": "local", "jobs": "mcp:batch",
+                                     "workspace": str(workspace)}}, default="cluster")
+    path = tmp_path / "smooth-research.yaml"
+    cfg = yaml.safe_load(path.read_text())
+    cfg["compute"]["coordinator"] = "login"
+    path.write_text(yaml.safe_dump(cfg))
+    wt, sha = _repo(project, tmp_path)
+    git(tmp_path, "remote", "remove", "origin")
+    monkeypatch.chdir(wt)
+    store = Store(find_project(), "researcher-1")
+    assert not store.project.warnings
+    res = compute.resource(store.project, "cluster")
+    assert res.remote and res.connect == "local" and res.code == "archive" and res.host is None
+    assert compute.sync(store)["summary"] == ""
+    with pytest.raises(RLError, match="register with --resource"):
+        runs.register(store, "E-0001", SPEC, "missing", no_review="smoke")
+    out = runs.register(store, "E-0001", {**SPEC, "code_ref": {"commit": sha}}, "shared", no_review="smoke",
+                        resource="cluster")
+    steps = compute.steps(store, attempt=out["attempt"])
+    assert steps["problems"] == []
+    assert out["resource"]["connect"] == "local" and out["resource"]["workspace"] == str(workspace)
+    summary = steps["summary"]
+    for part in ("Coordinator is on a login node", "Submit with MCP server batch", "--exec-kind hpc_job",
+                 "no download is needed", f"SR_SPEC_DIGEST={out['spec_digest']}", f"sr:{out['attempt']}"):
+        assert part in summary
+    for forbidden in ("ssh -", "scp ", "git push origin", "local_process", "--exec-id <pid>"):
+        assert forbidden not in summary
+    script = _heredoc(summary)
+    for _ in range(2):
+        done = subprocess.run(["sh", "-s"], input=script, capture_output=True, text=True)
+        assert done.returncode == 0, done.stderr
+    assert "already staged" in done.stdout
+    snap = Path(out["resource"]["snapshot"])
+    assert (snap / "src/train.py").read_text() == "print('v2')\n" and _is_read_only(snap)
+    git(wt, "commit", "-q", "--allow-empty", "-m", "later")
+    assert compute.steps(store, attempt=out["attempt"])["commit"] == sha
+    tasks.create_task(store, "check", "experiment", ["E-0001"], to_role="researcher")
+    for pack in (context.work_pack(store, "T-0001")["summary"], context.resume_pack(store)["summary"]):
+        assert "Coordinator is on a login node" in pack and "mcp:batch" in pack
+    from smooth_research import hooks
+    assert "Coordinator is on a login node" in hooks.session_start("codex", "")["hookSpecificOutput"]["additionalContext"]
+    run_dir = Path(out["resource"]["run_dir"])
+    run_dir.mkdir()
+    metrics = run_dir / "metrics.json"
+    metrics.write_text('{"acc": 1.0}')
+    manifest = run_dir / "manifest.json"
+    manifest.write_text(json.dumps({"status": "complete", "spec_digest": out["spec_digest"],
+                                    "artifacts": [{"path": str(metrics)}]}))
+    code, imported, err = rl("run", "import-result", "--attempt", out["attempt"], "--request-id", "shared-result",
+                              "--manifest", f"@{manifest}")
+    assert code == 0 and "1 read_locally" in imported, (imported, err)
+
+
+def test_local_job_executor_is_not_recorded_as_a_shell_pid(project, tmp_path):
+    store = configure(tmp_path, {"batch": {"kind": "local", "jobs": "mcp:batch"}})
+    text = compute.steps(store)["summary"]
+    assert "Submit with MCP server batch" in text and "--exec-kind hpc_job" in text
+    assert "local_process" not in text and "--exec-id <pid>" not in text

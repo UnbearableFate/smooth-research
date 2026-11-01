@@ -5,6 +5,9 @@ fixed: `src/` code, `docs/` what the user reads, `research/` everything else (SK
 
 ## A local run, end to end
 
+Only on a machine permitted to execute workloads, with `compute.coordinator: local`. On a login node,
+use the cluster recipe below even for tiny checks.
+
 ```bash
 # 1. register (nothing starts); keep the printed RUN / ATT ids. Its "code review" line says whether an
 #    answered review still covers this code; add --no-review "<reason>" when the run needs none
@@ -40,14 +43,14 @@ checks what it can see locally (ssh, the git remote, whether a commit is pushed 
 
 ```yaml
 compute:
-  default: miyabi                    # used unless a task or the coordinator says otherwise
+  default: cluster                    # used unless a task or the coordinator says otherwise
   resources:
     local: {kind: local}             # this machine: code from your checkout, outputs in research/artifacts/<ATT>/
-    miyabi:
-      host: miyabi-g                 # the ssh alias, or pi-env-mcp's host name
-      connect: pi-env-mcp:miyabi-g   # ssh, or pi-env-mcp:<MCP server name>
-      jobs: mcp:miyabi-pbs           # shell (a background process), mcp:<server> or skill:<name>
-      workspace: /work/<group>/<user>/<project>   # absolute; for miyabi-mcp its --project-dir
+    cluster:
+      host: cluster-login                 # the ssh alias, or pi-env-mcp's host name
+      connect: pi-env-mcp:cluster-login   # ssh, or pi-env-mcp:<MCP server name>
+      jobs: mcp:cluster-jobs           # shell (a background process), mcp:<server> or skill:<name>
+      workspace: /work/<group>/<user>/<project>   # absolute shared cluster workspace
       code: git                      # git: push, the host fetches (git_remote: origin, git_url: <URL there>)
                                      # archive: git archive, uploaded
 ```
@@ -55,8 +58,8 @@ compute:
 A remote run executes one commit, staged once as the read-only snapshot `<workspace>/snapshots/<commit>/`:
 the branch or worktree it came from does not matter, and a branch that moves on cannot change a queued job.
 Workspace layout: `repo.git` (a bare clone the host fetches into, code: git), `snapshots/<commit>/`,
-`runs/<ATT>/` (one directory per attempt), and for miyabi-mcp `.miyabi-mcp/` (its ledger and PBS logs; do not
-edit). One workspace per research project, never shared: request keys are unique only inside it.
+`runs/<ATT>/` (one directory per attempt). The executor owns its own ledger and scheduler logs; do not
+edit them. One workspace per research project, never shared: request keys are unique only inside it.
 
 Code by git, at the start: the coordinator's `{{rl}} session start` runs `{{rl}} compute sync`. For the resources
 with `code: git` it pushes the current branch to their git remote. When that remote is missing and
@@ -90,13 +93,13 @@ which is what ties the run to its package versions.
   ```toml
   [project.optional-dependencies]
   cpu = ["torch==2.11.*"]      # this machine
-  miyabi = ["torch==2.11.*"]   # the GPU nodes: the same version as here
+  cuda = ["torch==2.11.*"]   # the GPU nodes: the same version as here
   [tool.uv]
-  conflicts = [[{ extra = "cpu" }, { extra = "miyabi" }]]
+  conflicts = [[{ extra = "cpu" }, { extra = "cuda" }]]
   # uv lock fails here, not on the host, when a package has no build for it
   required-environments = ["sys_platform == 'linux' and platform_machine == 'aarch64'"]
   [tool.uv.sources]
-  torch = [{ index = "pytorch-cpu", extra = "cpu" }, { index = "pytorch-cu128", extra = "miyabi" }]
+  torch = [{ index = "pytorch-cpu", extra = "cpu" }, { index = "pytorch-cu128", extra = "cuda" }]
   [[tool.uv.index]]
   name = "pytorch-cu128"       # the CUDA version the nodes support
   url = "https://download.pytorch.org/whl/cu128"
@@ -109,7 +112,7 @@ which is what ties the run to its package versions.
   local check say nothing about the remote run. Read the versions the lock chose before you commit it.
 - Change dependencies only here: edit `pyproject.toml`, run `uv lock`, commit both; this machine uses
   `uv sync --extra cpu`. rl's own dependencies (added by `{{rl}} init`) stay in the list.
-- On the host, build the environment on a login node from the snapshot, outside it, keyed by the lock: the same
+- On the host, build the environment where the site permits package installation, from the snapshot, outside it, keyed by the lock: the same
   lock reuses the environment, a new lock gets a new one, and queued jobs keep theirs. After loading the modules
   the job loads: `UV_PROJECT_ENVIRONMENT=<workspace>/envs/<lock id>-<extra> uv sync --frozen --extra <extra>
   --no-install-project --project <workspace>/snapshots/<sha>`, where `<lock id>` is the first 12 characters of
@@ -121,48 +124,75 @@ which is what ties the run to its package versions.
   for its CUDA) stays out of the lock. Use the site's module or prepared environment, read-only, and name it and
   its versions in `--environment-ref`.
 
-### Running on Miyabi with miyabi-mcp
+### Coordinator on a cluster login node
 
-With `jobs: mcp:<its server>`, miyabi-mcp submits, queries, cancels and waits for PBS jobs and exports
-observations; pi-env-mcp moves files and runs remote commands; `{{rl}}` only records. Submit and cancel only
-through miyabi-mcp: a `qsub` run through pi-env-mcp bypasses its ledger and its limits. Pass absolute remote
-paths: relative ones follow the remote shell's `cd`. Build the Python environment on a login node of the target
-system, outside the snapshot (Python environments, above).
+Set the dedicated `compute.coordinator: login` option before registering runs. This is an explicit policy,
+not hostname detection: check the current shell using the site's tool, and recheck after changing shells.
+The CLI refuses resources that execute from the caller's checkout or use `jobs: shell`, and requires an
+explicit `--resource` when registering. Invalid coordinator values use login restrictions, never local fallback.
 
-3. The job script is part of the snapshot, runs code from it and writes only to `<workspace>/runs/$SR_ATTEMPT_ID/`,
-   ending with a `manifest.json` (format below) that carries `spec_digest` and artifact digests written as
-   `blake2b:<hex>` (Python: `hashlib.blake2b(data, digest_size=32)`).
-4. Submit with miyabi-mcp `job_submit`: dry run first (show the plan when the user wants to confirm
-   submissions), then submit with `script: <workspace>/snapshots/<sha>/<job script>`, `workdir:
-   <workspace>/snapshots/<sha>` (both read-only, so miyabi-mcp's check that the code cannot change passes), `name:
-   "<ATT>"`, `request_key: "sr:<ATT>"`, `client_ref: "<ATT>"`, `env: {SR_ATTEMPT_ID, SR_SPEC_DIGEST}`,
-   `labels: {code_commit: <sha>}` and, for jobs you will analyse together
-   (the seeds of a comparison), one notification: `notify: {name: "<E>-<batch>", expected: <number of jobs>,
-   message: "<what to do next>"}`. PBS logs go to `.miyabi-mcp/logs/` (`job_get` shows their tail). The same
-   request key returns the same job, so a retried submit is safe; a new attempt needs a new key.
-5. Record without copying JSON by hand: run the `export_command` from the submit result in a local shell,
-   `<export_command> > research/artifacts/miyabi/observations.jsonl`, then
-   `{{rl}} run record --observation @research/artifacts/miyabi/observations.jsonl`. It exports every job of the
-   remote project and records already received are skipped, so repeat it after submitting and after every
-   notification. The ended line carries the measured usage (`node_hours` on G nodes, `mig_instance_hours` on
-   MIG queues): do not record it again with `{{rl}} run usage`.
-6. Wait without polling; waiting belongs to the coordinator (host.md). After the first submit of a batch a
-   researcher ends with `{{rl}} task wait T-x --role .. --attempts ATT-.. --next-action ..` and reports what
-   announces the end (the listener command, or the deliver target it set). The coordinator starts the
-   listener, then keeps working or ends the turn. The first message is either an early failure of one job
-   (start the listener again to wait for the rest) or the batch summary. The coordinator acknowledges it with
-   `notify_ack(id, ack_token)` from the message and starts the researcher again with the same role and the
-   message; the researcher exports and records (step 5). Jobs of a few minutes can use `job_wait` instead.
-7. After the end (PBS exit 0 is not application success): download `<workspace>/runs/<ATT>/manifest.json` and
-   the small files it lists into `research/artifacts/<ATT>/` (`{{rl}} compute steps --attempt ATT` prints the
-   transfer); list checkpoints and other large files as `{"uri": "<resource>:<absolute path>"}` (recorded as not
-   read). Then `{{rl}} run import-result`.
+```yaml
+compute:
+  coordinator: login
+  default: cluster
+  repository: none
+  resources:
+    cluster:
+      kind: remote
+      connect: local
+      jobs: mcp:cluster-jobs
+      workspace: /shared/user/project
+      code: archive
+```
 
-Without miyabi-mcp (`jobs: skill:miyabi-pbs-cmd`), submit with the miyabi skills through pi-env-mcp `bash`, from the
-snapshot, and record by hand:
-`{{rl}} run record --attempt ATT --source "qstat -H -f" --state ended --outcome success --raw-state "F Exit_status=0"
---exec-kind hpc_job --exec-namespace miyabi-pbs --exec-id <full job id>`, plus `{{rl}} run usage
---accounting-ref miyabi-pbs:<job id> ...` from `resources_used.walltime` x nodes.
+`kind: remote` means the workload executes elsewhere, not that SSH is required. `connect: local` means the
+agent already has access to the shared filesystem. The workspace must be visible at the same absolute path
+from both login and compute nodes. No host, SSH connection, upload, Git remote or push is needed. This access
+mode requires a job MCP or skill, and `code: archive` (also its default); it never starts a local shell workload.
+If files are not shared, use `connect: ssh` or `pi-env-mcp:<server>` instead.
+
+The login shell is for coordination: edits, records, bounded inspection and small source-only snapshots.
+Tests, smoke checks, builds, data analysis and experiment programs go through the configured executor,
+including work delegated to subagents or sessions on the same host. A smaller input does not permit running
+on the login node. Check site instructions for environment setup: prebuilt packages may be allowed there;
+source builds and application imports belong in an allocation. `rl` bookkeeping is control work. It is not a
+sandbox and cannot stop arbitrary shell commands; agents must follow this policy. If the MCP is unavailable,
+report the missing executor and continue independent control work; do not silently run the workload locally.
+
+### Jobs through an external executor
+
+With `jobs: mcp:<server>` or `skill:<name>`, the external integration owns scheduler semantics, site policy,
+allocation checks, cancellation, usage accounting and notifications. Read its actual tool schema and
+instructions; the names and fields below describe the information to pass, not a required MCP API. Keep
+server registration, launcher paths, queue names, account names and site-specific scripts in the user's
+project or host configuration, outside this plugin. Do not bypass the configured executor using raw scheduler
+commands. Submit only within the user's authorized resources and budget.
+
+3. `{{rl}} compute steps --attempt ATT` stages the registered commit as a read-only snapshot. With
+   `connect: local`, run its small source archive script directly on the shared filesystem; use an allocation
+   if staging is large. Never submit a mutable checkout or replace the run's commit with current HEAD.
+   The job script runs from that snapshot and writes only to `<workspace>/runs/$SR_ATTEMPT_ID/`, ending with
+   `manifest.json` (format below). Supply `SR_ATTEMPT_ID` and `SR_SPEC_DIGEST`; use `blake2b:<hex>` for artifact
+   digests (Python: `hashlib.blake2b(data, digest_size=32)`). Verify the actual compute allocation inside the
+   job before running the workload. A check on the login-side MCP server cannot verify the job's shell.
+4. Submit through the configured executor, using its plan/dry-run and commit flow when supported. Pass the
+   snapshot script and workdir, output directory, environment, full commit and attempt correlation. Where
+   supported, use `sr:<ATT>` as the idempotency key and the attempt id as the client reference. An uncertain
+   submission must be reconciled using the same key before retrying; a new attempt gets a new key.
+5. Record observed scheduler facts. Import a compatible observation export with
+   `{{rl}} run record --observation @<export.jsonl>`; otherwise translate verified facts into the observation
+   format below. Use `hpc_job`, the executor namespace and the full job id, never the login process PID.
+   Queued is not running. Import measured usage once; unknown usage is not zero.
+6. The coordinator owns waiting (host.md). Configure the executor's completion notification to reach the
+   coordinator, start any returned listener/daemon according to that integration's instructions, then the
+   researcher uses `{{rl}} task wait` and reports the attempts, continuation and notification target. When
+   notified, inspect the job, acknowledge if required, resume the researcher with the same role, and import
+   updated observations. Use a bounded wait for short jobs when supported; do not sleep-poll in the agent.
+7. Verify application outputs after completion: scheduler success alone is insufficient. With a shared
+   filesystem, import `@<workspace>/runs/<ATT>/manifest.json` directly; use absolute shared paths for artifacts, so no download is needed.
+   Relative artifact paths are always resolved from the research project root, not the manifest directory. Otherwise fetch the manifest and its small files into
+   `research/artifacts/<ATT>/` before `{{rl}} run import-result`. Large unfetched outputs may be recorded as
+   `{"uri": "<resource>:<absolute path>"}` (not read).
 
 ## RunSpec fields
 
@@ -176,11 +206,11 @@ Same `--request-id` with the same content returns the earlier record; with diffe
 ## Observation (flags, or `--observation` with one JSON object, a JSON array or JSON Lines)
 
 ```json
-{"record_id": "miyabi-pbs:3731052.opbs:2", "attempt_id": "ATT-0003-1", "source": "miyabi-mcp",
+{"record_id": "cluster-jobs:3731052.opbs:2", "attempt_id": "ATT-0003-1", "source": "cluster-executor",
  "observed_at": "2026-10-30T05:43:10+09:00", "occurred_at": "2026-10-30T05:42:26+09:00", "source_sequence": 2,
- "execution_state": "running", "outcome": "unknown", "raw_state": "R", "source_ref": "qstat -ll @miyabi-g1",
- "execution_ref": {"kind": "hpc_job", "executor_namespace": "miyabi-pbs", "opaque_id": "3731052.opbs",
-                   "locator": "<miyabi-mcp record>"}}
+ "execution_state": "running", "outcome": "unknown", "raw_state": "R", "source_ref": "qstat -ll @cluster-login1",
+ "execution_ref": {"kind": "hpc_job", "executor_namespace": "cluster-jobs", "opaque_id": "3731052.opbs",
+                   "locator": "<cluster-executor record>"}}
 ```
 
 States: prepared, queued (optional), running, ended, unknown. Outcomes: success, failed, cancelled,
@@ -200,7 +230,7 @@ as `--attempt` fill in or override every record.
  "code_ref": {"content_digest": "blake2b:..."}, "data_revision": "synthetic-v1 (...)",
  "metric": "test accuracy", "metrics": {"test_acc": 0.812, "train_loss": 0.41},
  "artifacts": [{"path": "research/artifacts/ATT-0001-1/metrics.json", "role": "metrics"},
-               {"uri": "miyabi:/work/.../ckpt.pt", "digest": "blake2b:...", "role": "checkpoint"}],
+               {"uri": "cluster:/work/.../ckpt.pt", "digest": "blake2b:...", "role": "checkpoint"}],
  "validator": {"name": "check_metrics.py", "passed": true, "source_ref": "stdout"}}
 ```
 

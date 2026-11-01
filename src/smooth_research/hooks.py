@@ -8,10 +8,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from .compute import LOGIN_POLICY
 from .context import open_work
 from .delegate import rl_command
 from .herdr import caller_role
-from .project import find_project
+from .project import coordinator_is_login, find_project
 from .research import brief
 from .store import Store
 from .util import RLError
@@ -31,10 +32,11 @@ def session_start(host: str, raw: str) -> dict:
             return _out(f"Smooth Research project found, but `{rl} status` fails: {exc.message}")
         text = f"Smooth Research is available (CLI: {rl}); use its skill to start or resume an ML research project."
         return _out(text)
+    policy = f"\n{LOGIN_POLICY}" if coordinator_is_login(project.config) else ""
     if caller_role():  # a session that `rl agent open` started: its brief, not the coordinator's start
         return _out(f"Smooth Research project at {project.root} (CLI: {rl}). You are {caller_role()}, a session "
                     f"the coordinator opened; you are not the coordinator. Your work: `{rl} agent brief "
-                    f"{caller_role()}` (wait for an assignment if it names none).")
+                    f"{caller_role()}` (wait for an assignment if it names none).{policy}")
     store = Store(project, "hook")
     try:
         with store.read() as tx:  # the first open by a newer plugin upgrades the records (upgrade.py)
@@ -61,7 +63,7 @@ def session_start(host: str, raw: str) -> dict:
     lines += [f"- {brief(t)}" for t in work["tasks"][:5]]
     lines += [f"- attention: {i}" for i in work["attention"][:5]]
     lines += [f"- configuration: {w}" for w in project.warnings]
-    return _out("\n".join(lines))
+    return _out("\n".join(lines) + policy)
 
 
 def _out(text: str) -> dict:

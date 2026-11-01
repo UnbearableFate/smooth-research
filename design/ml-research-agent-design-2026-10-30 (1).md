@@ -1671,3 +1671,15 @@ GitHub 链接固定到本次读取的提交；外部产品文档按 2026-10-30 �
 验证：在 uv 0.13.4 上，这个写法 lock 出 aarch64 的 `torch 2.11.0+cu128` 和 x86_64 的 `torch 2.15.0+cpu`。这说明两个 index 最新的版本不同，所以提醒里要求各个 extra 钉同一个版本，否则本地检查说明不了远程运行。从只读目录 `uv sync --frozen --no-install-project` 到外部环境可以完成，不往项目目录写东西。
 
 改动：workflow.md 新增 “Python environments” 一节，Miyabi 部分改成单独的小节；SKILL.md 记录运行的第 3 步加一句；有远程资源时，工作包和恢复包的 Compute 一节加一行提醒（`compute.pack_text`）。
+
+### 21.22 协调者在登录节点：通用执行策略（2026-11-01）
+
+新增独立配置 `compute.coordinator: login`，默认 `local` 保持普通工作流。login 模式禁止 checkout 和 shell 资源，登记必须显式带 `--resource`；未知 coordinator 值按 login 处理。工作包、恢复包和 session hook 将限制传给协调者与研究者。CLI 是记录与提示层，不是任意 shell 命令的执行沙箱。
+
+资源访问和任务执行保持独立：`kind: remote, connect: local, jobs: mcp:<server>, workspace: <绝对共享路径>, code: archive` 表示 agent 已在登录节点，直接访问共享目录，通过外部 job MCP 投放 workload。`connect: local` 默认 archive，无需 host、SSH、Git remote 或推送；从调用者 checkout/worktree 的完整 commit 生成只读快照，结果直接导入共享路径。artifact 相对路径继续相对研究项目根目录，故共享结果应给绝对路径。失效连接或 jobs 值不再回退到 ssh/shell。
+
+插件技能和可分发代码中的执行说明统一为通用 executor 协议；服务注册、具体集群名、账户、队列、allocation guard 和通知 API 均由外部集成与项目配置提供。历史实测记录保留其原有事实，不改写。登录侧仅作控制工作，测试、smoke、构建和分析在计算 allocation 内完成；executor 缺失不允许本地回退。
+
+验证：计算 allocation 中相关配置、快照、上下文、结果导入和双宿主打包测试 29 项通过；全量 158 项通过，1 项初始化布局测试失败。该项在未修改的 HEAD 基线单独复现（当前 uv 0.11.26 的 init 未生成测试期待的 src/<package>/__init__.py），保留原有实现与断言，不在此改动中修复。两种插件构建均已检查，不包含集群专属名称。
+
+独立 herdr tab 内的 Codex 使用最终构建 d52e29cfea8bf46b 完成最小确定性 demo：省略资源登记被拒绝且没有新 run；共享 commit 快照只读；外部 MCP 原生预检查/提交成功，计算节点 guard 通过并得到 sum(range(10))=45；原生 ledger 导出最终记录 ended/success 和测量用量，结果 RES-0001 的两个绝对共享路径产物摘要均验证通过，ATT-0001-1 为 ended/success/result:complete，绑定真实 hpc_job。观察到 executor 历史状态与 ledger 短暂不同步，后续 bounded wait 正常返回完成；未修改外部工具、未手工改写台账。

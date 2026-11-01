@@ -6,10 +6,16 @@ an honest, recoverable record of runs, results, evidence and decisions until a f
 a pause or a stop is justified. Design: `design/ml-research-agent-design-2026-10-30 (1).md`.
 
 The plugin records; it never submits, polls, retries or cancels experiments. Local shells, remote tools,
-containers and HPC skills (for example miyabi-toolbox) stay independent. Where experiments run is configured
-in the project (`compute`: this machine, remote hosts and clusters, reached with ssh or pi-env-mcp, jobs started
-by a shell, an MCP server such as miyabi-mcp or a skill); `rl compute steps` prints how to stage a commit there
+containers and HPC skills (configured separately) stay independent. Where experiments run is configured
+in the project (`compute`: this machine, remote hosts and clusters, reached locally, with ssh or pi-env-mcp, jobs started
+by a shell, an MCP server for cluster jobs or a skill); `rl compute steps` prints how to stage a commit there
 (git push and fetch, or an archive) as a read-only snapshot, and the agent runs those steps with its own tools.
+
+When the coordinating agent is on a cluster login node, set `compute.coordinator: login`. Configure the job
+MCP separately and use `connect: local` with an absolute shared workspace and `code: archive`: source snapshots
+and results stay on the shared filesystem, while tests and experiments run through the executor. This mode
+rejects checkout/shell resources and requires `--resource` on run registration. See
+[configuration](docs/configuration.md#计算资源) for the complete example.
 
 ## Repository layout
 

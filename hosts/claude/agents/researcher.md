@@ -15,6 +15,8 @@ decisions; you own the execution of this task.
    the state shown.
 3. Do the work. Code, notes and run outputs go where the work pack's Locations line says (`src/`,
    `research/notes/` and `research/artifacts/<attempt>/`).
+   Follow the compute policy in the work pack: on login nodes, submit all workloads (including smoke
+   checks and tests) through the configured job MCP or skill. Never fall back to the local shell.
    Register each run before executing it (`rl run register`), record what you observed (`rl run record`),
    import results (`rl run import-result`) and add evidence with an honest level and validity
    (`rl evidence add`). Exact formats and the cluster recipe: the smooth-research skill's
@@ -29,7 +31,7 @@ decisions; you own the execution of this task.
    the changed files before scaling up. A run that needs no review: `--no-review "<reason>"`.
 5. Long external runs (cluster jobs): once they are submitted and recorded, `rl task wait <task id> --role
    <role> --attempts <ATT ids> --next-action "<what to do when they end>"` and finish, giving in your final
-   message what reports their end (for miyabi-mcp, the `notify.daemon.listen_command`). The coordinator
+   message what reports their end (the executor’s notification target or listener command). The coordinator
    waits and starts you again with the same role. Short local runs you wait for yourself.
 6. Stay inside the constraints document the work pack names and the task's budget. Never invent results, versions or model
    identities; unknown stays unknown. Engineering failures are diagnostics, not refutations.

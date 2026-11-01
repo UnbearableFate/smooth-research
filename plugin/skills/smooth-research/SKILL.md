@@ -5,11 +5,9 @@ description: Evidence-driven ML research that starts from a research plan, with 
 
 # Smooth Research
 
-You coordinate evidence-driven ML research. You hold the conversation with the user, the hypotheses and
-the route decisions; researchers implement and run. Do yourself only small things: a quick edit, a smoke
-check, reading or re-plotting results. When in doubt, delegate. The user's plan is only the starting point;
-the records are the plan, and results change them. The plugin keeps the record (hypotheses, contracts, runs,
-evidence, decisions, reviews, literature); it never runs, polls or cancels experiments for you.
+You coordinate evidence-driven research: own hypotheses and decisions; researchers implement and run.
+Do only small checks yourself, subject to the execution policy below; delegate when in doubt. Results change
+the plan. The plugin keeps the evidence record; it never runs, polls or cancels experiments for you.
 
 ## The CLI
 
@@ -33,6 +31,10 @@ evidence, decisions, reviews, literature); it never runs, polls or cancels exper
 
 ## Start or resume
 
+First check the shell with site tools. On login nodes set `compute.coordinator: login`; all workloads, even
+smoke checks, go through the configured job executor, including researchers' work. Never fall back locally.
+Shared access: `kind: remote`, `connect: local`, `code: archive`; details and workspace/MCP setup: workflow.md.
+
 1. In the project directory: if `smooth-research.yaml` exists, run `{{rl}} resume --role coordinator` and
    continue from the first unfinished action. Otherwise `{{rl}} init --plan <plan.md>`: it makes the root a uv
    project first (`--python 3.13`: uv init, uv add of rl's dependencies), creates the records with that `.venv`
@@ -43,7 +45,7 @@ evidence, decisions, reviews, literature); it never runs, polls or cancels exper
 3. Fill `docs/constraints.md` from the plan and the user: what only the user may change (goal and claims in
    scope, data and environments, resource ceiling, actions that need their decision), changed later only with
    their consent. `smooth-research.yaml` holds the model lists (`{{rl}} models`) and the compute resources
-   (`compute`: hosts, ssh or pi-env-mcp, job MCP or skill, remote workspace, git or archive; `{{rl}} compute`).
+   (`compute`: coordinator location, local access or ssh/pi-env-mcp, job MCP or skill, workspace, git or archive; `{{rl}} compute`).
    Ask the user only about gaps that change goal, budget or resources; fill low-risk details yourself and say so.
 
 ## From plan to hypotheses
@@ -109,10 +111,8 @@ judge them; only what only the user can decide goes to the user (team.md). Witho
    `{{rl}} run record --attempt ATT --source <tool> --state running|ended [--outcome success|failed|cancelled]
    --exec-namespace host:<hostname> --exec-id <pid or job id> --source-ref <log>`. A remote run (registered with
    `--code-commit`) executes a read-only snapshot of that commit: `{{rl}} compute steps --attempt ATT` prints how to
-   stage it, start it and fetch the results; you run them. Packages: the one committed `pyproject.toml`/`uv.lock` for
-   every resource, built on the host outside the snapshot, named by `--environment-ref`. On Miyabi: miyabi-mcp with
-   the attempt id as request key, record its ledger export (`{{rl}} run record --observation @file`), wait for its
-   notification, never poll. Recipes: workflow.md.
+   stage it, start it and read the results; you run them. Share one `pyproject.toml`/`uv.lock` across resources.
+   Cluster submission, environments, observations and coordinator notifications: workflow.md.
 4. `{{rl}} run import-result --attempt ATT --request-id <unique> --manifest @<manifest.json>`; optionally `{{rl}} run
    usage ...` with measured time, unless the executor's export already carried it. Unreported usage is not zero.
 5. Evidence: `{{rl}} evidence add --summary .. --level diagnostic|screening|exploratory|confirmatory

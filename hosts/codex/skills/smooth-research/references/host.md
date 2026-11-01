@@ -29,12 +29,12 @@ directories above the smooth-research SKILL.md). Write the absolute path in each
 - Advisors: every entry of models.advisor (by default `codex:gpt-6-astra@max` and
   `claude:claude-fable-5-1@high`) answers an advice round in its own session that sees only the package.
 - Your own subagents run on a lower tier than you: a smaller OpenAI model, or your model at a lower effort.
-- Long runs: start them in the background (`nohup ... &` and record the PID), keep working, record the end
+- Long runs on a machine permitted to execute workloads: start them in the background (`nohup ... &` and record the PID), keep working, record the end
   after checking the exit status. Do not sleep-poll.
-- Miyabi jobs (miyabi-mcp): waiting is the coordinator's. Whoever submits gives `notify` a `deliver` the
-  coordinator's session can receive (`codex_queue` with the coordinator's thread id, which the work pack
-  shows, or `herdr` when it runs in herdr; see miyabi-mcp's instructions) and runs the returned
-  `start_command`; a researcher then ends with WAIT. When the notice arrives, delegate the task again with
-  the same role.
+- Cluster jobs: waiting is the coordinator's. Follow the configured executor's notification schema and
+  choose a delivery mechanism that can reach the coordinator's session (its thread id is in the work pack,
+  or its herdr agent identity). Start the listener/daemon it requires; a researcher then ends with WAIT.
+  When the notice arrives, inspect completion and delegate again with the same role. With
+  `compute.coordinator: login`, all workloads, including short checks, use the executor, never local nohup.
 - Context: at a natural task boundary with a heavy context, write a handoff note in `research/tasks/`, end the
   session record (`rl session end S-x`) and continue in a new session that starts from `rl resume`.

@@ -22,12 +22,18 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from .project import Project, Resource, compute_default, compute_repository, compute_resources, repo_top
+from .project import (Project, Resource, compute_default, compute_repository, compute_resources,
+                      coordinator_is_login, repo_top)
 from .store import Store
 from .util import RLError
 from .worktrees import _git
 
 FULL_COMMIT = re.compile(r"^[0-9a-f]{40}([0-9a-f]{24})?$")
+LOGIN_POLICY = ("Coordinator is on a login node: local shell is for control work only (records, edits, staging "
+                "small source snapshots). Submit tests, smoke checks, builds, analysis and experiments through "
+                "the configured job MCP or skill; verify the allocation before workloads. Never fall back to "
+                "local execution when the executor is unavailable. Site tools own allocation checks, queues, "
+                "budgets and notifications; rl does not submit or poll jobs.")
 
 
 def resource(project: Project, name: str | None) -> Resource:
@@ -83,6 +89,8 @@ def show(store: Store, commit: str | None = None) -> dict:
     default = compute_default(project.config)
     lines = [f"compute resources (default: {default or 'none'}; rl connects to none of them, it prints the steps: "
              "rl compute steps <name> --attempt ATT):"]
+    if coordinator_is_login(project.config):
+        lines.append(LOGIN_POLICY)
     items = []
     for res in found.values():
         checks = []
@@ -107,11 +115,14 @@ def show(store: Store, commit: str | None = None) -> dict:
 
 def pack_text(project: Project) -> str:
     """The compute section of work and resume packs."""
-    found, _ = compute_resources(project.config)
+    found, warnings = compute_resources(project.config)
     default = compute_default(project.config)
     lines = [f"default: {default or 'none'} · register with --resource <name>; rl compute steps --attempt ATT "
              "prints how to stage the commit there, run it and fetch the results (rl runs nothing); rl compute "
              "sync pushes your branch for the resources that fetch code by git"]
+    if coordinator_is_login(project.config):
+        lines.insert(0, LOGIN_POLICY)
+    lines += [f"configuration problem: {w}" for w in warnings]
     lines += [f"- {res.describe()}" for res in found.values()]
     if any(res.remote for res in found.values()):
         lines.append("Python packages: one committed pyproject.toml and uv.lock for every resource (a CPU or CUDA "
@@ -168,6 +179,8 @@ def steps(store: Store, name: str | None = None, commit: str | None = None, atte
     if commit and not FULL_COMMIT.match(commit):
         problems.append(f"{commit} is not a full commit id")
     out: list[str] = [f"# {res.describe()}"]
+    if coordinator_is_login(project.config) or res.connect == "local":
+        out.append(LOGIN_POLICY)
     if attempt and not recorded:
         out.append(f"note: {attempt} was registered without --resource; this assumes {res.name}")
     out += [f"problem: {p}" for p in problems if res.remote or "no commit" not in p]
@@ -194,8 +207,12 @@ def _local_steps(project: Project, res: Resource, commit: str | None, facts: dic
                      "--code-digest instead of --code-commit.")
     if head and facts.get("commit") and facts["commit"] != _git(project.checkout, "rev-parse", "HEAD", check=False):
         lines.append(f"   HEAD is not {head[:12]}: check it out (or use a worktree of it) before running.")
-    start = ("with Bash run_in_background (or nohup ... &)" if res.jobs == "shell"
-             else f"with {res.jobs}")
+    if res.jobs != "shell":
+        lines += _run_steps(res, env, att, {**where, "project": where["checkout"]})
+        lines.append(f"4. rl run import-result --attempt {att} --manifest @{where['run_dir']}/manifest.json "
+                     "--request-id <unique>")
+        return lines
+    start = "with Bash run_in_background (or nohup ... &)"
     lines += [f"2. Run {start}, with {env}; write outputs and manifest.json (carrying the spec digest) to "
               f"{where['run_dir']}/.",
               f"3. Record: rl run record --attempt {att} --source local-shell --state running --exec-kind "
@@ -208,6 +225,8 @@ def _local_steps(project: Project, res: Resource, commit: str | None, facts: dic
 
 def _remote(res: Resource, script: str) -> str:
     """How to run a shell script on the resource's host."""
+    if res.connect == "local":
+        return f"   sh -s <<'SR_EOF'\n{_indent(script)}\n   SR_EOF"
     if res.connect == "pi-env-mcp":
         return (f"   pi-env-mcp bash (server {res.server or 'pi-env-mcp'}, host {res.host}), command:\n"
                 + _indent(script))
@@ -226,8 +245,16 @@ def _sync_steps(project: Project, res: Resource, commit: str | None, facts: dict
             "mkdir -p \"$ws/snapshots\" \"$ws/runs\"; tmp=\"$ws/snapshots/.$sha.partial\"; rm -rf \"$tmp\"; "
             "mkdir \"$tmp\"\n")
     tail = "mv \"$tmp\" \"$snap\" && chmod -R a-w \"$snap\" && echo \"staged: $snap\""
-    lines = [f"1. Stage {sha[:12]} once as {snap}/ (read-only; PBS and background jobs read the code when they "
+    lines = [f"1. Stage {sha[:12]} once as {snap}/ (read-only; queued and background jobs read the code when they "
              "start, so a snapshot is never edited; the same commit is staged once):"]
+    if res.connect == "local":
+        script = ("set -eu\n" + head
+                  + f"git -C {_sh(facts['checkout'])} archive --format=tar {sha} -o \"$tmp/.source.tar\"\n"
+                  + 'tar -xf "$tmp/.source.tar" -C "$tmp"\nrm "$tmp/.source.tar"\n' + tail)
+        lines += ["   Shared filesystem: stage from the caller's commit, with no SSH, upload or git push. "
+                  "Keep this to small source-only archives; stage large trees in a compute allocation.",
+                  _remote(res, script)]
+        return lines
     if res.code == "git":
         branch = facts.get("branch")
         pushed = facts.get("pushed") or []
@@ -280,13 +307,19 @@ def _run_steps(res: Resource, env: str, att: str, where: dict) -> list[str]:
                 f"{run_dir}/manifest.json (carrying the spec digest); then {record}."]
     kind, _, tool = res.jobs.partition(":")
     via = f"MCP server {tool}" if kind == "mcp" else f"skill {tool} (through {res.connect})"
-    lines = [f"2. Submit with {via}: job script and workdir in {workdir} (read-only), {env}, request key sr:{att}, "
+    code = f"{workdir} (read-only)" if res.remote else workdir
+    lines = [f"2. Submit with {via}: job script and workdir in {code}, {env}, request key sr:{att}, "
              f"outputs only in {run_dir}/ ending with manifest.json (carrying the spec digest)."]
     if kind == "mcp":
-        lines.append(f"   Its project directory must be {res.workspace}. Record with its export (`rl run record "
-                     "--observation @file`); for miyabi-mcp see workflow.md (A remote or HPC run).")
+        if res.workspace:
+            lines.append(f"   Use {res.workspace} as the executor's project workspace if it requires one.")
+        lines.append("   Read the executor's tool schema and instructions for submission, allocation checks and "
+                     "notifications. Record its compatible export (`rl run record --observation @file`), or "
+                     f"record observed job facts: rl run record --attempt {att} --source {tool} "
+                     "--state <observed state> --exec-kind hpc_job --exec-namespace <scheduler> "
+                     "--exec-id <full job id>. Do not label a queued job running.")
     else:
-        lines.append(f"   Record the job: rl run record --attempt {att} --source {tool} --state running --exec-kind "
+        lines.append(f"   Record the job: rl run record --attempt {att} --source {tool} --state <observed state> --exec-kind "
                      "hpc_job --exec-namespace <scheduler> --exec-id <full job id>")
     return lines
 
@@ -294,6 +327,11 @@ def _run_steps(res: Resource, env: str, att: str, where: dict) -> list[str]:
 def _fetch_steps(project: Project, res: Resource, att: str, where: dict) -> list[str]:
     run_dir = where["run_dir"]
     local = project.research_root / "artifacts" / att
+    if res.connect == "local":
+        return [f"3. After the end, check {run_dir}/manifest.json and the files it lists on the shared "
+                "filesystem (exit 0 is not application success); no download is needed.",
+                f"4. rl run import-result --attempt {att} --manifest {_sh('@' + run_dir + '/manifest.json')} "
+                "--request-id <unique>; artifact paths must be absolute shared paths or relative to the research project root."]
     if res.connect == "pi-env-mcp":
         fetch = (f"pi-env-mcp download (server {res.server or 'pi-env-mcp'}, host {res.host}): {run_dir}/manifest.json "
                  f"and the small files it lists -> {local}/")

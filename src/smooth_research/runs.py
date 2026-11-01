@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from . import compute
-from .project import Project
+from .project import Project, coordinator_is_login
 from .research import brief, prepare_contract, recheck_dependents, seal_contract
 from .schema import ENUMS
 from .scope import code_coverage
@@ -61,6 +61,9 @@ def register(store: Store, experiment: str, spec: dict, request_id: str, run_id:
     """resource names the compute resource the attempt is for (compute.resources); the attempt keeps it with the
     planned code and output locations there. Without it nothing is recorded about where the attempt runs."""
     spec = normalize_spec(dict(spec))
+    if coordinator_is_login(store.project.config) and not resource:
+        raise RLError("INVALID", "coordinator is a login node: register with --resource <cluster resource>; "
+                                 "workloads require the configured executor, never the login shell")
     res = compute.resource(store.project, resource) if resource else None
     request = {"experiment": experiment, "spec": spec, "run": run_id}
     payload = digest_json({**request, "resource": res.name} if res else request)
@@ -115,7 +118,7 @@ def register(store: Store, experiment: str, spec: dict, request_id: str, run_id:
 def _placement_note(res, placed: dict, attempt: str) -> str:
     if not res.remote:
         return f"\nresource {res.name}: outputs in {placed['run_dir']}/"
-    text = (f"\nresource {res.name} ({res.host}): code {placed['project']} · outputs {placed['run_dir']}/; how to "
+    text = (f"\nresource {res.name} ({res.host or 'shared filesystem'}): code {placed['project']} · outputs {placed['run_dir']}/; how to "
             f"stage, run and fetch: rl compute steps --attempt {attempt}")
     if "<commit>" in placed["snapshot"]:
         text += ("\n  this RunSpec names no commit, so its code cannot be staged by commit: register the run with "
@@ -455,7 +458,7 @@ def _usage(tx: Tx, usage: dict, attempts: list[str], revise: bool = False) -> di
         if usage.get(key) in (None, ""):
             raise RLError("INVALID", f"usage needs {key} (unreported usage is simply not recorded, never zero)")
     if ":" not in usage["accounting_ref"]:
-        raise RLError("INVALID", "accounting_ref needs a namespace, e.g. miyabi-pbs:3731052.opbs or local:<host>:<run>")
+        raise RLError("INVALID", "accounting_ref needs a namespace, e.g. scheduler:12345 or local:<host>:<run>")
     body = {k: usage.get(k) for k in ("quantity", "unit", "resource_type", "hardware", "basis", "source_ref")}
     body["basis"] = body["basis"] or "reported"
     digest = digest_json({**body, "attempts": sorted(attempts)})

@@ -157,39 +157,50 @@ Claude Code 和 Codex 一般用订阅，有 5 小时和每周两个窗口。某�
 
 `compute` 一节写实验在哪里跑：本机，以及远程主机或集群。每个资源写清楚怎样连上去、用什么启动作业、远程的工作目录，以及代码怎样过去。rl 不连接任何资源，不复制文件，也不启动作业：它只读配置，检查本地能看到的东西，打印步骤，由 agent 用 Bash、ssh、pi-env-mcp 和提交作业的 MCP 或 skill 执行。唯一的例外是 git 这一侧：对 `code: git` 的资源，`rl compute sync`（协调者的 `rl session start` 会运行它）在本地推送当前分支，remote 不存在时先建一个 private GitHub 仓库（见下面的“开始时同步”）；主机上的 clone 仍然是打印出来、由 agent 执行的步骤。预算和队列限制不写在这里，写在约束文档里（第 2 节）。
 
+专门针对协调者位于超级计算机登录节点的配置是 **`compute.coordinator: login`**。默认 `local` 保持普通本机工作流；`login` 禁止把 checkout 或 shell 资源登记为执行目标，登记必须明确指定 `--resource`。它是显式策略，不根据机器名称猜测，也不替代站点工具的 allocation 检查。
+
+协调者已经在登录节点、代码与结果目录由计算节点共享时：
+
 ```yaml
 compute:
-  default: miyabi
-  repository: github-private
+  coordinator: login
+  default: cluster
+  repository: none
   resources:
-    local:
-      kind: local
-    miyabi:
-      host: miyabi-g
-      connect: pi-env-mcp:miyabi-g
-      jobs: mcp:miyabi-pbs
-      workspace: /work/xg24i002/x10041/my-project
-      code: git
+    cluster:
+      kind: remote
+      connect: local
+      jobs: mcp:cluster-jobs
+      workspace: /shared/user/my-project
+      code: archive
 ```
+
+`kind: remote` 表示实验在另一个执行环境里运行；`connect: local` 表示协调者直接访问共享文件系统，不需要 SSH、上传或下载。共享目录必须在登录节点和计算节点上具有相同的绝对路径。MCP 的注册方式、启动程序、队列和账户都放在宿主或研究项目配置里，插件只引用服务名。
+
+协调者在工作站、需要远程传输时，可以配置 `coordinator: local`，资源使用 `host: cluster-login`、`connect: ssh`（或 `pi-env-mcp:<服务名>`），其余作业工具与工作目录仍然独立配置。
 
 | 键 | 默认值 | 含义 |
 |---|---|---|
-| `compute.default` | `local` | 任务和协调者没有另外指定时用哪个资源。只写进工作包作为提示；`rl run register` 不写 `--resource` 时不记录资源，不按默认值猜 |
-| `compute.repository` | `github-private` | `code: git` 的资源的 git remote 不存在时怎么办。`github-private`：`rl session start` / `rl compute sync` 用 `gh repo create <项目目录名> --private` 建仓库并加成这个 remote；`none`：不建，由 agent 问用户代码放在哪里。其他值有警告，按 `none` 处理 |
-| `compute.resources` | `{local: {kind: local}}` | 资源名到设置的映射。名字只能用字母、数字、`.`、`_`、`-`。整体替换默认值 |
-| `<资源>.kind` | 有 `host` 时是 `remote`，否则是 `local` | `local`：本机，代码就在调用者的 checkout 里，输出在 `research/artifacts/<attempt>/`，下面除 `jobs` 和 `notes` 以外的键对它都没有作用。`remote`：远程主机 |
-| `<资源>.host` | 无，远程资源必填 | 远程连接用的主机名：`connect: ssh` 时是 ssh 别名，用 pi-env-mcp 时是 pi-env-mcp 里的主机名 |
-| `<资源>.connect` | `ssh` | `ssh`，或 `pi-env-mcp`，或 `pi-env-mcp:<MCP 服务名>`（agent 看到的工具前缀，比如 `miyabi-g`） |
-| `<资源>.jobs` | `shell` | 用什么启动作业：`shell`（远程后台进程），`mcp:<服务名>`（比如 miyabi-mcp），或 `skill:<名字>`（比如 `skill:miyabi-pbs-cmd`） |
-| `<资源>.workspace` | 无，远程资源必填 | 远程的绝对路径。下面有 `repo.git`（code 为 git 时的 bare clone）、`snapshots/<commit>/`（只读的代码快照）、`runs/<attempt>/`（每个 attempt 的输出）。用 miyabi-mcp 时必须等于它的 `--project-dir`。一个研究项目一个，不和别的项目共用 |
-| `<资源>.code` | `git` | 代码怎样过去。`git`：推送分支到 `git_remote`，主机从 `git_url` fetch 后取出那个 commit。`archive`：本地 `git archive`，经 ssh 直接传过去，或写成文件后用 pi-env-mcp 上传 |
-| `<资源>.git_remote` | `origin` | 本地推送用的 git remote |
-| `<资源>.git_url` | 本地 `git_remote` 的 URL | 主机 clone 用的 URL。主机上要有读这个仓库的权限，比如 deploy key 或 token；它用的 URL 和本地不一样时写在这里 |
-| `<资源>.notes` | 无 | 给 agent 看的说明，比如“环境在登录节点用 uv 建” |
+| `compute.coordinator` | `local` | `local`：允许普通本机工作流。`login`：协调者处于登录节点，所有 workload（含测试、smoke、构建和分析）通过配置的作业 MCP 或 skill；拒绝 checkout 执行和 `jobs: shell` 资源，登记必须带 `--resource`。未知值警告并按 `login` 处理，不回退成本机执行 |
+| `compute.default` | `local` | 工作包和 `compute steps` 的默认资源；`run register` 不自动采用此默认值。普通 `local` 模式允许省略 `--resource`、不记录资源；`login` 模式拒绝省略 |
+| `compute.repository` | `github-private` | `code: git` 的资源缺少 git remote 时，`session start` / `compute sync` 创建 private GitHub 仓库后推送。`none` 不创建。`connect: local` 不使用它，也不触发 push |
+| `compute.resources` | `{local: {kind: local}}` | 资源名到设置的映射，整体替换默认值。名字只能用字母、数字、`.`、`_`、`-`。登录节点没有有效资源时停止提供执行步骤，不启用本机兜底 |
+| `<资源>.kind` | 有 `host` 或 `connect: local` 时为 `remote`，否则 `local` | `local` 使用调用者 checkout，输出到 `research/artifacts/<attempt>/`；`remote` 在其他执行环境使用 commit 快照，包含共享目录上的集群作业 |
+| `<资源>.host` | 无 | ssh 或 pi-env-mcp 的连接目标；`connect: local` 不需要 |
+| `<资源>.connect` | `ssh` | `ssh`、`pi-env-mcp`、`pi-env-mcp:<服务名>` 或 `local`。`local` 要求作业 MCP/skill 及 `code: archive`，不会启动本机 workload。无效连接方式跳过该资源 |
+| `<资源>.jobs` | `shell` | `shell`、`mcp:<服务名>` 或 `skill:<名字>`。`coordinator: login` 和 `connect: local` 均不允许 `shell`；无效值跳过资源，不回退到 shell |
+| `<资源>.workspace` | 无，`remote` 必填 | 集群的绝对路径，包含 `snapshots/<commit>/`、`runs/<attempt>/`，code 为 git 时还有 `repo.git`。一个研究项目一个 workspace；需要项目目录的 executor 使用此目录 |
+| `<资源>.code` | `connect: local` 时 `archive`，否则 `git` | `git` 推送后由远端 fetch；`archive` 从调用者 commit 导出，上传到远端，或直接生成共享文件系统上的只读快照。`connect: local` 仅支持 archive |
+| `<资源>.git_remote` | `origin` | code 为 git 时本地推送用的 remote |
+| `<资源>.git_url` | 本地 `git_remote` 的 URL | code 为 git 时主机 clone 的 URL，主机须有读权限 |
+| `<资源>.notes` | 无 | 给 agent 看的说明；不能代替明确的 coordinator 策略 |
+
+- **登录节点只做控制工作。** 编辑、研究记录、有限的检查和小型源码快照可以在登录侧进行；实验程序、测试、构建、分析及应用导入必须通过 executor 到计算 allocation。环境安装遵循站点工具规则。工作包、恢复包和 session hook 均传递此限制，研究者和 subagent 也须遵守。MCP 不可用时报告缺少工具，不本地回退。插件不是 shell 沙箱，也不自行验证或创建 allocation。
+- **共享目录不走网络。** `compute steps` 打印本地 `git archive` 和只读快照步骤，源代码取自调用者 worktree 的指定 commit，和队列启动时的 HEAD 无关。仅小型源码可在登录侧 staging；大目录在 allocation 中准备。结果直接从共享目录导入，manifest 的 artifact `path` 使用绝对共享路径（相对路径仍按研究项目根目录解释）。
 
 - **远程只跑快照。** 远程的 run 只执行一个完整 commit 的只读快照 `<workspace>/snapshots/<commit>/`。哪个分支、哪个 worktree 上的提交都可以，分支之后再动也不影响已经排队的作业。同一个 commit 只同步一次，重复执行步骤是安全的。RunSpec 本来就只接受完整的 commit id，不接受分支名。
 - **`rl compute` 只检查本地。** 它列出各资源，检查 `ssh` 在不在 PATH 上、git remote 在不在，加 `--commit` 时还看这个 commit 是否已经推送（按最后一次 push 或 fetch，不访问网络）。pi-env-mcp、MCP 服务和 skill 是 agent 的工具，由 agent 自己检查。
-- **`rl compute steps` 给出一次运行的全部步骤。** 带 `--attempt` 时用 attempt 记录的资源和 RunSpec 里的 commit；不带时用 `--commit`，再不带就用 checkout 的 HEAD。步骤依次是：推送分支（code 为 git，已经推送时说明），在主机上 fetch 并取出那个 commit 的脚本（code 为 archive 时是打包、传输、解开），启动方式和要设的环境变量（`SR_ATTEMPT_ID`、`SR_SPEC_DIGEST`），以及取回 `manifest.json` 和 `rl run import-result`。connect 为 ssh 时给出能直接在 Bash 里运行的命令，为 pi-env-mcp 时写明用哪个工具、哪个服务和主机。attempt 的 RunSpec 只有内容摘要、没有 commit 时，它说明远程的 run 要用 `--code-commit` 登记，而不是改用 HEAD。
+- **`rl compute steps` 给出一次运行的全部步骤。** 带 `--attempt` 时用 attempt 记录的资源和 RunSpec 里的 commit；不带时用 `--commit`，再不带就用 checkout 的 HEAD。步骤依次是：推送分支（code 为 git，已经推送时说明），在主机上 fetch 并取出那个 commit 的脚本（code 为 archive 时是打包、传输、解开），启动方式和要设的环境变量（`SR_ATTEMPT_ID`、`SR_SPEC_DIGEST`），以及取回 `manifest.json` 和 `rl run import-result`。connect 为 ssh 时打印传输命令，为 pi-env-mcp 时写明服务和主机，为 local 时只准备共享快照并直接读结果。attempt 的 RunSpec 只有内容摘要、没有 commit 时，它说明远程的 run 要用 `--code-commit` 登记，而不是改用 HEAD。
 - **`--resource` 把资源记到 attempt 上。** `rl run register ... --resource <名字>` 记下资源的设置和计划中的位置（远程的快照目录和 `runs/<attempt>/`），`rl run show` 显示 `on <名字>`。名字不在配置里时报 NOT_FOUND。资源名属于请求的一部分：同一个 `--request-id` 换了资源会报 CONFLICT。资源不属于 RunSpec，同一个 RunSpec 可以在不同资源上各跑一个 attempt。
 - **开始时同步（code 为 git）。** 协调者的 `rl session start` 运行 `rl compute sync`（`--no-sync` 跳过）。对每个 `code: git` 的资源用到的 git remote：
   1. remote 不存在、`compute.repository` 是 `github-private`、项目自己就是一个 git 仓库（不是更大仓库里的一个目录）、也没有写 `git_url` 时，用 `gh repo create <项目目录名> --private --source <项目> --remote <git_remote>` 建仓库，记一条 `compute.repository` 事件。gh 不在、没有登录或重名时说明原因和手工的做法，不让会话启动失败。

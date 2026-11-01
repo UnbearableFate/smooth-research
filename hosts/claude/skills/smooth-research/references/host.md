@@ -15,7 +15,7 @@ the absolute path from SKILL.md.
   sessions that stopped unexpectedly (team.md). The bullets below are the forms without herdr.
 - Researchers: for each implementation or run task, start the native subagent `smooth-research:researcher`
   (Agent tool) with the task id and a role name such as `researcher-1`. Give a short brief; it reads its own
-  work pack and has your tools, including MCP servers such as pi-env-mcp and miyabi-mcp. When it reports
+  work pack and has your tools, including the configured transport and job MCP servers. When it reports
   back, read `rl inbox --role coordinator`, check the outputs and records, then `rl task accept` or
   `rl task reopen` with what to change. Start several at once only for tasks that can proceed
   independently; do not split work that needs constant coordination.
@@ -31,11 +31,12 @@ the absolute path from SKILL.md.
   `claude:claude-fable-5-1@high`) answers an advice round in its own session that sees only the package.
 - Your own subagents (Agent tool `model`) run on a lower tier than you: Fable → Opus or below, Opus → Sonnet
   or Haiku, Sonnet → Haiku.
-- Long runs: start them with Bash `run_in_background` (or `nohup ... &`), record `running` with the PID,
+- Long runs on a machine permitted to execute workloads: start them with Bash `run_in_background` (or `nohup ... &`), record `running` with the PID,
   keep working, and record the end when you have checked the exit status. Do not sleep-poll.
-- Waiting on cluster jobs is yours: a researcher that submitted Miyabi jobs ends with WAIT and reports the
-  `notify.daemon.listen_command` returned by the first `job_submit` of the batch. Run it with Bash
-  `run_in_background`; it exits when the notification arrives, which wakes you whether you are working or
-  idle. Then start the researcher again with the same role; it resumes the task.
+- Waiting on cluster jobs is yours: a researcher ends with WAIT and reports the completion notification
+  target and any listener command returned by the configured executor. Follow its instructions; for a
+  shell listener use Bash `run_in_background`. When notified, inspect completion and start the researcher
+  again with the same role. With `compute.coordinator: login`, all workloads, including short checks,
+  use the executor, never local background execution.
 - Context: at a natural task boundary with a heavy context, write a handoff note in `research/tasks/`, end the
   session record (`rl session end S-x`) and continue in a new session that starts from `rl resume`.

@@ -41,6 +41,8 @@ UNREAD = "_unread"  # in a loaded configuration: why the file could not be read
 # manuscript.latex is the command that builds the manuscript (the paper draft) as a PDF (null: Markdown).
 # compute: where experiments run (this machine, remote hosts, clusters), how the agent reaches each one and how
 # the code of a commit gets there; rl connects to none of them (compute.py). Budgets stay in docs/constraints.md.
+# compute.coordinator: login disables checkout/shell resources and requires explicit run placement; local keeps
+# the ordinary workstation workflow. This is an execution policy, not hostname or allocation detection.
 # compute.repository: when a remote resource fetches code by git and the git remote is missing, the
 # coordinator's rl session start creates it (github-private: gh repo create --private) or leaves it (none).
 # Every key here is read by the CLI; docs/configuration.md explains each one.
@@ -56,7 +58,8 @@ DEFAULT_CONFIG: dict = {
     "usage": {"switch_left_percent": 10, "coordinator_host_left_percent": 20},
     "context": {"work_target_tokens": 4000, "advice_target_tokens": 10000},
     "manuscript": {"latex": None},
-    "compute": {"default": "local", "repository": "github-private", "resources": {"local": {"kind": "local"}}},
+    "compute": {"coordinator": "local", "default": "local", "repository": "github-private",
+                "resources": {"local": {"kind": "local"}}},
 }
 MODEL_ROLES = ("researcher", "reviewer", "advisor")
 # Mappings the file replaces as a whole instead of merging into the defaults: compute.resources names the user's
@@ -343,7 +346,8 @@ RESOURCE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 class Resource:
     """One entry of compute.resources. local: this machine, code from the caller's checkout. remote: a host the
     agent reaches with ssh or pi-env-mcp (host is the ssh alias, or pi-env-mcp's host name); jobs say what starts
-    the work there (shell: a background process; mcp:<server>, e.g. miyabi-mcp; skill:<name>); workspace is the
+    the work there (shell: a background process; mcp:<server>; skill:<name>); connect: local accesses a shared
+    cluster workspace from the login node without a network hop. workspace is the
     absolute remote directory that holds repo.git, snapshots/<commit>/ and runs/<attempt>/; code says how a commit
     gets there (git: pushed to git_remote and fetched by the host from git_url; archive: git archive, uploaded)."""
     name: str
@@ -367,10 +371,12 @@ class Resource:
         if not self.remote:
             text = f"{self.name}: this machine, code from your checkout · jobs {self.jobs}"
         else:
-            via = f"pi-env-mcp (server {self.server or 'pi-env-mcp'})" if self.connect == "pi-env-mcp" else "ssh"
+            via = f"pi-env-mcp (server {self.server or 'pi-env-mcp'})" if self.connect == "pi-env-mcp" else self.connect
             code = (f"git (push to {self.git_remote}; the host clones {self.git_url or 'the same URL'})"
-                    if self.code == "git" else "archive (git archive, uploaded)")
-            text = (f"{self.name}: host {self.host} via {via} · jobs {self.jobs} · workspace {self.workspace} · "
+                    if self.code == "git" else "archive (git archive, shared filesystem)" if self.connect == "local"
+                    else "archive (git archive, uploaded)")
+            access = "shared cluster filesystem via local" if self.connect == "local" else f"host {self.host} via {via}"
+            text = (f"{self.name}: {access} · jobs {self.jobs} · workspace {self.workspace} · "
                     f"code {code}")
         return text + (f" · notes: {self.notes}" if self.notes else "")
 
@@ -395,15 +401,14 @@ def _resource(name: str, value, out: list[str]) -> Resource | None:
             out.append(f"unknown key {where}.{key} has no effect (a typo?); a resource takes "
                        f"{', '.join(RESOURCE_KEYS)}")
     text = {k: (str(v).strip() if v is not None else None) for k, v in value.items() if k in RESOURCE_KEYS}
-    kind = text.get("kind") or ("remote" if text.get("host") else "local")
+    kind = text.get("kind") or ("remote" if text.get("host") or text.get("connect") == "local" else "local")
     if kind not in ("local", "remote"):
         out.append(f"{where}.kind must be local or remote, not {value.get('kind')!r}; it is skipped")
         return None
     jobs = text.get("jobs") or "shell"
     if not (jobs == "shell" or re.match(r"^(mcp|skill):\S+$", jobs)):
-        out.append(f"{where}.jobs must be shell, mcp:<server> or skill:<name>, not {value.get('jobs')!r}; using "
-                   "shell")
-        jobs = "shell"
+        out.append(f"{where}.jobs must be shell, mcp:<server> or skill:<name>, not {value.get('jobs')!r}; it is skipped")
+        return None
     if kind == "local":
         ignored = [k for k in ("host", "connect", "workspace", "code", "git_remote", "git_url") if k in value]
         if ignored:
@@ -411,20 +416,27 @@ def _resource(name: str, value, out: list[str]) -> Resource | None:
                        "resource (code runs from the caller's checkout, outputs go to research/artifacts/)")
         return Resource(name, "local", jobs=jobs, notes=text.get("notes"))
     host, workspace = text.get("host"), text.get("workspace")
-    if not host or not workspace:
-        missing = " and ".join(k for k, v in (("host", host), ("workspace", workspace)) if not v)
+    connect, _, server = (text.get("connect") or "ssh").partition(":")
+    if connect not in ("ssh", "pi-env-mcp", "local") or (connect != "pi-env-mcp" and server):
+        out.append(f"{where}.connect must be ssh, pi-env-mcp, pi-env-mcp:<MCP server name> or local, not "
+                   f"{value.get('connect')!r}; it is skipped")
+        return None
+    if connect == "local" and jobs == "shell":
+        out.append(f"{where}: connect: local requires jobs: mcp:<server> or skill:<name>; never run workloads "
+                   "on the login node; it is skipped")
+        return None
+    if (not host and connect != "local") or not workspace:
+        missing = " and ".join(k for k, v in (("host", host or connect == "local"), ("workspace", workspace)) if not v)
         out.append(f"{where}: a remote resource needs {missing}; it is skipped")
         return None
     if not workspace.startswith("/"):
         out.append(f"{where}.workspace must be an absolute remote path (relative ones follow the remote shell's "
                    f"cd), not {workspace!r}; it is skipped")
         return None
-    connect, _, server = (text.get("connect") or "ssh").partition(":")
-    if connect not in ("ssh", "pi-env-mcp") or (connect == "ssh" and server):
-        out.append(f"{where}.connect must be ssh, pi-env-mcp or pi-env-mcp:<MCP server name>, not "
-                   f"{value.get('connect')!r}; using ssh")
-        connect, server = "ssh", ""
-    code = text.get("code") or "git"
+    code = text.get("code") or ("archive" if connect == "local" else "git")
+    if connect == "local" and code != "archive":
+        out.append(f"{where}: connect: local requires code: archive (from the local commit, no push); it is skipped")
+        return None
     if code not in ("git", "archive"):
         out.append(f"{where}.code must be git or archive, not {value.get('code')!r}; using git")
         code = "git"
@@ -432,11 +444,20 @@ def _resource(name: str, value, out: list[str]) -> Resource | None:
                     text.get("git_remote") or "origin", text.get("git_url"), text.get("notes"))
 
 
+def coordinator_is_login(config: dict) -> bool:
+    """Explicit execution policy, not hostname detection. Unknown values never authorize local workloads."""
+    compute = config.get("compute")
+    return isinstance(compute, dict) and compute.get("coordinator", "local") != "local"
+
+
 def compute_resources(config: dict) -> tuple[dict[str, Resource], list[str]]:
     """The usable compute resources by name, and what is wrong with the others (each warning says what is used
-    instead). Without a usable compute.resources mapping this machine is the only resource."""
+    instead). Without a mapping the default is this machine, unless the login policy excludes it."""
     out: list[str] = []
     compute = config.get("compute")
+    coordinator = compute.get("coordinator", "local") if isinstance(compute, dict) else "local"
+    if coordinator not in ("local", "login"):
+        out.append(f"compute.coordinator must be local or login, not {coordinator!r}; treating it as login")
     value = compute.get("resources") if isinstance(compute, dict) else None
     if not isinstance(value, dict) or not value:
         if value is not None and isinstance(compute, dict):
@@ -446,7 +467,10 @@ def compute_resources(config: dict) -> tuple[dict[str, Resource], list[str]]:
     found = {}
     for name, item in value.items():
         res = _resource(str(name), item, out)
-        if res:
+        if res and coordinator_is_login(config) and (not res.remote or res.jobs == "shell"):
+            out.append(f"compute.resources.{name}: coordinator is a login node; checkout and shell execution are disabled. "
+                       "Use kind: remote, connect: local, jobs: mcp:<server> and a shared workspace; it is skipped")
+        elif res:
             found[res.name] = res
     default = compute.get("default") if isinstance(compute, dict) else None
     if found and default is not None and str(default) not in found:
@@ -598,12 +622,14 @@ def write_default_config(root: Path) -> Path:
                 "# compute: where experiments run (default: the resource used unless a task says otherwise).\n"
                 "# rl connects to none of them; rl compute checks them, rl compute steps prints how to stage a\n"
                 "# commit there. A remote resource, for example:\n"
-                "#   miyabi:\n"
-                "#     host: miyabi-g                  # ssh alias, or pi-env-mcp's host name\n"
-                "#     connect: pi-env-mcp:miyabi-g    # ssh, or pi-env-mcp:<MCP server name>\n"
-                "#     jobs: mcp:miyabi-pbs            # shell, mcp:<server> or skill:<name>\n"
-                "#     workspace: /work/<group>/<user>/<project>   # absolute; miyabi-mcp's --project-dir\n"
+                "#   cluster:\n"
+                "#     host: cluster-login            # ssh alias, or pi-env-mcp's host name\n"
+                "#     connect: ssh                   # ssh, or pi-env-mcp:<MCP server name>\n"
+                "#     jobs: mcp:cluster-jobs         # shell, mcp:<server> or skill:<name>\n"
+                "#     workspace: /shared/<user>/<project>        # absolute cluster workspace\n"
                 "#     code: git                       # git (push, the host fetches) or archive (upload)\n"
+                "# On a login node set compute.coordinator: login; use a remote resource with connect: local,\n"
+                "# jobs: mcp:<server>, code: archive and a shared workspace (no host, SSH or push needed).\n"
                 "# compute.repository: github-private lets the coordinator's rl session start create a missing git\n"
                 "# remote of those resources as a private GitHub repository (gh) before it pushes; none: never.\n")
         path.write_text(text + yaml.safe_dump(DEFAULT_CONFIG, sort_keys=False, allow_unicode=True), encoding="utf-8")
