@@ -684,7 +684,7 @@ def _conclusion_body(tx: Tx, store: Store, targets: list[str], proposal: str, qu
         lines = [f"## Experiment {contract_summary(tx, store, exp)}"]
         if exp.get("revised_after_results"):
             lines.append("The contract was revised after results: later comparisons are exploratory.")
-        lines += _arm_table(tx, exp["id"])
+        lines += _arm_table(tx, store, exp)
         code = [tx.require(e["id"]) for e in tx.inc(exp["id"], "targets") if e["label"] == "Ticket"]
         code = [f"{brief(t)}" + (f" ({t['relation']})" if t.get("relation") else "")
                 for t in code if t["kind"] == "review" and t.get("subject") != "conclusion"]

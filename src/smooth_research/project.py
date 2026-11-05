@@ -20,7 +20,7 @@ ENV_PROJECT = "SMOOTH_RESEARCH_PROJECT"
 ENV_CHECKOUT = "SMOOTH_RESEARCH_CHECKOUT"
 
 # Project layout, fixed: experiment code in src/; what people read in docs/ (the original plan, the
-# constraints, the research graph page, the manuscript and the explanations the user asked for); everything
+# constraints, the research page research.html, the manuscript and the explanations the user asked for); everything
 # else in research/: the records (database, sealed objects, packages, call logs, run artifacts) and the
 # agents' working documents (experiment contracts, task notes, researcher notes, review and advice answers,
 # stage reports).

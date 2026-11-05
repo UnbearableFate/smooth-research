@@ -6,8 +6,8 @@ rest is listed as an index to read on demand. Nothing here queries external syst
 
 from __future__ import annotations
 
-from . import compute, documents, labels
-from .project import context_target
+from . import compute, documents, explain, labels
+from .project import Project, context_target
 from .research import CONTRACT_FIELDS, attention, brief, contract_front
 from .runs import describe_attempt
 from .store import Store, Tx
@@ -82,7 +82,7 @@ def locations(store: Store) -> str:
         return (f"code src/ and notes research/notes/ in this checkout ({p.checkout}) · records, packages and run "
                 f"outputs in the project: {p.research_root}/ (artifacts/<attempt>/, contracts experiments/) · "
                 f"constraints {p.constraints_path}")
-    return ("code src/ · for people docs/ (plan, constraints, research-graph.html, manuscript, explanations/) "
+    return ("code src/ · for people docs/ (plan, constraints, research.html (rl view), manuscript, explanations/) "
             "· records and working documents research/ (experiments/, tasks/, notes/, reviews/, advice/, reports/, "
             "sealed documents, packages, artifacts/<attempt>/)")
 
@@ -136,20 +136,22 @@ def work_pack(store: Store, task_id: str, budget: int | None = None) -> dict:
     return pack
 
 
-def open_work(tx: Tx) -> dict:
+def open_work(tx: Tx, project: Project) -> dict:
     """What the summaries of the project start from (rl status, rl resume, the session start hook): the
-    coordinator session, the open tasks, unfinished attempts and tickets, and what needs attention."""
+    coordinator session, the open tasks, unfinished attempts and tickets, and what needs attention (with one item
+    for the explanations of docs/research.html once it exists)."""
     coord = [s for s in tx.all("Session", status="active") if s["role_id"] == "coordinator"]
     return {"coordinator": coord[-1] if coord else None, "tasks": open_tasks(tx),
             "attempts": [a for a in tx.all("Attempt") if a["execution_state"] != "ended" or a.get("needs_check")],
-            "tickets": [t for t in tx.all("Ticket") if t["status"] != "answered"], "attention": attention(tx)}
+            "tickets": [t for t in tx.all("Ticket") if t["status"] != "answered"],
+            "attention": attention(tx) + explain.attention(tx, project)}
 
 
 def status(store: Store) -> dict:
     with store.read() as tx:
         meta = tx.meta()
         hyps = tx.all("Hypothesis")
-        work = open_work(tx)
+        work = open_work(tx, store.project)
         counts = {label: len(tx.all(label)) for label in ("Hypothesis", "Experiment", "Evidence", "Decision",
                                                            "Paper", "Task", "Run")}
         known = labels.names(tx)
@@ -173,7 +175,7 @@ def resume_pack(store: Store, role: str | None = None, budget: int | None = None
     budget = budget or context_target(store.project.config, "work_target_tokens")
     with store.read() as tx:
         meta = tx.meta()
-        work = open_work(tx)
+        work = open_work(tx, store.project)
         tasks = [t for t in work["tasks"]
                  if role is None or role in (t.get("owner_role"), t.get("to_role")) or role == "coordinator"]
         attempts = [describe_attempt(tx, a) for a in work["attempts"]]

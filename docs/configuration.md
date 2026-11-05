@@ -36,7 +36,7 @@
 | 位置 | 内容 |
 |---|---|
 | `src/` | 实验代码。init 会创建它，并放一个忽略 `__pycache__` 和 `*.pyc` 的 `.gitignore`。`rl init` 先把项目目录建成 uv 项目（见第 4 节 `rl init`），代码包在 `src/<包名>/`。工作包和 `rl delegate` 的提示词让 agent 把代码放这里，但不强制，审查范围和 RunSpec 可以引用任何路径 |
-| `docs/` | 只放给人读的文档：`plan.md`（`rl init --plan` 导入的原始计划，封存）、`constraints.md`（约束文档，见第 2 节）、`research-graph.html`（`rl view`）、论文草稿（`rl manuscript`，见下面的"论文草稿"）、`explanations/`（用户让 agent 解释某件事时，agent 把说明写在这里） |
+| `docs/` | 只放给人读的文档：`plan.md`（`rl init --plan` 导入的原始计划，封存）、`constraints.md`（约束文档，见第 2 节）、`research.html`（`rl view`，研究说明页，见第 4 节"研究说明页"）、论文草稿（`rl manuscript`，见下面的"论文草稿"）、`explanations/`（用户让 agent 解释某件事时，agent 把说明写在这里） |
 | `research/` | 其余的一切。agent 的工作文档：`experiments/`（实验契约）、`tasks/`（任务说明和交接笔记）、`notes/`（researcher 的笔记，写在它自己的 checkout 里，随分支合并）、`reviews/` 和 `advice/`（审查和建议的回答）、`reports/`（`rl report` 的阶段报告）。机器记录：数据库 `state/research.lattice` 和写锁、封存的文档 `documents/objects/`、请求包 `packages/`、模型调用日志 `calls/`、run 产物 `artifacts/<attempt>/` 等。init 写的 `.gitignore` 让 `state/`、`calls/`、`artifacts/` 不进 git |
 
 - **导入的计划不能换。** 再导入不同的计划会报 CONFLICT。判断依据是已经封存的计划，和文件现在在哪里无关。计划的变化要记成假设修订和决定。
@@ -262,6 +262,16 @@ compute:
 - **订阅额度：** `rl agent list` 显示各宿主的窗口；`rl usage statusline` 是 Claude Code 的状态栏命令，从标准输入读状态栏的 JSON，任何输入都不会让它失败。不带参数的 `rl usage` 报错并指向 `rl agent list`。
 - **层次编号：** 假设和实验除了内部编号（H-0013、E-0016）还有创建时定下、以后不变的层次编号。`rl hypothesis add` 默认挂在最晚创建的假设来源下（H2.1 在 H2 下），`--parent <来源之一>` 指定另一个，`--root` 开一个新的顶层编号（开启新研究线时用，来源关系照常记录）；只源自论文或顾问回答的是顶层。`rl experiment add` 挂在所检验假设的最深共同祖先下（EH2.1/3 是锚在 H2.1 的第三个实验），没有共同祖先时取 `--hypotheses` 的第一个，`--anchor` 指定另一个假设。凡是接受假设或实验编号的参数都接受两种写法，也可以写在逗号列表里或带 `@修订`；未知的层次编号报 NOT_FOUND。`rl status`、各类列表、报告和草稿的记录块只用层次编号，`rl show` 两种都显示，`--json` 有 `label` 字段；路径、作业名和提交信息用内部编号。
 - **论文草稿：** `rl manuscript [--title ..]` 写或刷新草稿，`--title` 只用于新建的草稿，见第 1 节"论文草稿"。
+- **研究说明页：** `rl view` 渲染 `docs/research.html`，事实和文字分开：
+  - **事实来自记录。** 包括层次编号、标题、状态、关系、契约指标、各 arm 的数字、成本、决定和各类计数，每次渲染都在一个读事务里现取。
+  - **文字来自 `research/notes/explanation.yaml`。** 由协调者或它派的写作者写，rl 只读不改。文件有三部分：`lines`（研究线的 `key`、`name`、`desc`、`roots`）、`summary`（`text`，只写判断，不写数字）、`nodes`（键用层次编号或内部编号，值是 `title`、`purpose`、`did`、`result`）。
+  - **页面的组织。** 研究线下按层次编号排出假设树，实验挂在锚点假设下；其他来源和被检验的假设在节点里列出并加链接。没分到研究线的顶层假设放进 Unclassified，没写文字的节点照样显示事实，标 "explanation to write"。
+  - **自包含、确定性。** 页面不加载外部资源，不含渲染时间和 data_version；内容没变就不写文件。
+  - **`rl view --todo`** 列出要写和要改的说明，附上它们现在的事实。
+  - **`rl view --stamp H3,EH3.3/3[,summary]`** 记下这些说明核对过的事实摘要，写进 rl 自己的 `research/notes/explanation.basis.yaml`，然后渲染。摘要只在相关事实变化时改变：假设看陈述、修订、状态、证据及其 validity 和决定；实验看契约修订、stage、attempt 状态计数、结果和决定。消息和心跳不会让它变。摘要变了，节点标 "may be out of date"。导语核对的是阶段决定，出现更新的阶段决定就算过期。
+  - **自动重渲染。** 页面存在时，`hypothesis`、`experiment`、`evidence`、`decide`、`link` 和 `run import-result/reject-result` 结束后重渲染一次；失败只给警告，命令本身照常完成。`run register/record/usage` 很频繁，页面只统计它们，所以不触发渲染；attempt 状态和成本等下一次渲染（或 `rl view`）时更新。
+  - **提醒。** `rl status`、`rl resume` 和会话开始的提示只给一条汇总：几处待写、几处可能过期。说明缺失或过期不阻塞 decide。
+  - **实验表格。** 按契约修订、arm、数据版本、模型版本和配置分组，条件不同的结果分行列出，不做跨条件平均；只有变化的条件才单列一栏。每个 run 只取一个结果：最后一个 complete，没有时才用 partial，并在 notes 里标出。被拒绝的结果不算；和 RunSpec 不符的结果标出来，不进均值。组内代码提交不同时也标出来。契约声明了 `metrics:` 就只列这些指标；没有时先列契约和 RunSpec 的主指标，其余按字母序，最多 6 个。成本分开写已报告、共享作业和未知。`rl report`、论文草稿和结论审核包用同一张表。
 - **插件升级：** `rl upgrade` 显示项目的记录格式和插件 build、做过的升级、新版本读法不同的地方和可以自己调整的范围；`--note "<改了什么>"` 记下 agent 手工做的调整；`--move <旧> <新>` 移动旧布局里的文件或目录，并在同一个事务里改写记录里的路径。见第 6 节。
 - **`rl init [--python 3.13]`：** 记录由项目自己的 Python 环境生成，所以顺序是（与 research-tree 的 prepare + init 相同）：
   1. 在项目目录运行 `uv init . --no-workspace --python=<版本> --name <目录名>`：写 `pyproject.toml`、`.python-version` 和 `src/<包名>/__init__.py`；项目不在任何 git 仓库里时 uv 还会 `git init`。已经有 `pyproject.toml` 时跳过。`--no-workspace` 让放在别的 uv 项目里面的研究项目（比如一个仓库里的 demo）保持独立，不被加进那个项目的 workspace。
@@ -286,6 +296,8 @@ compute:
 | `MAX_RETRIES` | 3 次 | 一串暂时性的回合错误最多重试几次，分别在下一拍、隔 2 拍、隔 4 拍（`RETRY_BEATS`，`watch.py`） |
 | `TOOL_STALLS` | 4 倍 | 一个工具调用挂起超过 `agents.stall_minutes` 的这么多倍时报告一次（`watch.py`） |
 | `SUBMIT_MS` | 20 秒 | 发送提示后等 herdr 看到 working 或 blocked 的上限（`herdr.py`） |
+| `CELL_CHARS` | 60 字符 | 实验表格里单元格的长度上限，超出的截断；完整内容见 `rl run show`（`view.py`） |
+| `MAX_METRICS` | 6 个 | 契约没有声明 `metrics:` 时，实验表格最多列几个指标（`view.py`） |
 | `STALE_MINUTES` | 15 分钟 | 比这更旧的额度读数算过期，不让宿主算作额度低（`usage.py`） |
 
 ## 6. 插件升级
@@ -297,6 +309,7 @@ compute:
 - **旧项目。** 在 `pyproject.toml` 里没有 rl 依赖的项目（这个版本之前建的）照常在插件自己的环境上运行；`rl upgrade` 的 `environment:` 一行会说明。在项目根目录运行 `rl init` 就给它建项目环境（没有 `pyproject.toml` 时先 `uv init`），记录不变。
 - **记录自动升级。** 新版本的 CLI 第一次打开旧项目时，在写锁下先把数据库文件复制到 `research/state/backups/schema-<旧格式>-<时间>/`，再在一个事务里运行旧格式到当前格式之间的全部迁移，记一条 `project.upgrade` 事件。迁移只补充和填写，不删除记录，不改记录下来的事实，不碰封存的文档。做了升级的那条命令会给出一条警告。`rl restore` 也接受旧版本的快照，恢复后同样自动升级。
 - **层次编号的迁移（记录格式 3）。** 按内部编号顺序用新建记录的默认规则补上层次编号：假设只看比它先建的假设来源，实验只看建它时已有的被检验假设，没有共同祖先时取编号最小的那个。迁移不知道哪些假设开过新研究线（`--root`），所以旧项目的编号会偏深。这次升级还留在 `rl upgrade` 的历史里时，`rl upgrade` 打印对照表。
+- **旧的图页面。** 以前的 `rl view` 写 `docs/research-graph.html`（mermaid 图，从 CDN 加载）。现在 `rl view` 写 `docs/research.html`，旧文件不删也不再更新，`rl upgrade` 会提示，不需要时手动删掉。
 - **更新的项目只读。** 项目由更新的插件写过（记录格式比 CLI 新）时，CLI 照常读取，但拒绝写入（UNSUPPORTED），提示更新插件。
 - **`rl upgrade`。** 插件 build 和项目记下的不同时，`rl status`、`rl resume` 和会话开始的提示都会提醒。`rl upgrade` 补建新布局要的目录，列出旧布局放在别处的文件、配置警告、找不到的合同文件和记录问题，并说明 agent 可以自己调整什么；运行后记下当前 build，提醒消失。
 - **agent 自己调整旧资产，不用问用户。** 可以改配置文件、只是格式变了的约束文档措辞、旧布局里的文件位置、未封存的合同草稿、任务说明、笔记、worktree 和分支，也可以用 `rl` 命令补上新版本需要的记录。只有会改变研究目标、结论范围、数据或预算的调整才问用户。记录下来的事实（观察、结果、证据、决定、审查）和封存的文档不改：新版本要求另一种形式时，新增一条引用旧记录的记录或修订。改完用 `rl upgrade --note` 记下来并提交。

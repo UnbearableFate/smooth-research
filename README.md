@@ -96,7 +96,7 @@ smooth-research.yaml     configuration (model lists per role, advice rounds, age
                          the manuscript's LaTeX command, compute resources)
 src/                     experiment code
 docs/                    only what people read: plan.md (imported, sealed), constraints.md,
-                         research-graph.html (rl view), the manuscript (rl manuscript: manuscript.md, or
+                         research.html (rl view), the manuscript (rl manuscript: manuscript.md, or
                          manuscript/manuscript.tex and its PDF), explanations/ (written when the user asks)
 research/                everything else: experiments/ (contracts), tasks/, notes/, reviews/, advice/,
                          reports/ (rl report), and the records: state/ (database, not in git),

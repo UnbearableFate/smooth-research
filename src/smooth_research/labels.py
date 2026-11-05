@@ -114,10 +114,13 @@ def names(tx: Tx) -> dict[str, str]:
             for r in tx.q(f"MATCH (n:{entity}) RETURN n.id AS id, n.label AS l") if r["l"]}
 
 
-def relabel(text: str, known: dict[str, str]) -> str:
+def relabel(text: str, known: dict[str, str], link: bool = False) -> str:
     """text with the internal ids of hypotheses and experiments replaced by their labels (paths and file names
-    keep the ids), so records written before labels existed read the same way as new ones."""
+    keep the ids), so records written before labels existed read the same way as new ones. With link, text is
+    escaped HTML and each label links to its node on the explanation page (the anchor is the id)."""
     def swap(m: re.Match) -> str:
         label = known.get(m[1])
-        return label + (m[2] or "") if label else m[0]
+        if not label:
+            return m[0]
+        return f'<a href="#{m[1]}">{label}{m[2] or ""}</a>' if link else label + (m[2] or "")
     return _ID_IN_TEXT.sub(swap, text)

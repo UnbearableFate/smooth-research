@@ -114,7 +114,8 @@ class Tx:
     def _edges(self, entity_id: str, rel: str | None, label: str | None, outgoing: bool) -> list[dict]:
         label = label or label_of(entity_id)
         edge = f":{RELATIONS[rel].edge}" if rel else ""
-        pattern = f"(a:{label} {{id: $id}})-[e{edge}]->(b)" if outgoing else f"(b)-[e{edge}]->(a:{label} {{id: $id}})"
+        # both directions start from the record's indexed id: written as (b)-[e]->(a {id}), an incoming match scans
+        pattern = f"(a:{label} {{id: $id}})-[e{edge}]->(b)" if outgoing else f"(a:{label} {{id: $id}})<-[e{edge}]-(b)"
         rows = self.q(f"MATCH {pattern} RETURN type(e) AS t, b.id AS other, labels(b) AS l, properties(e) AS p",
                       id=entity_id)
         by_edge = {r.edge: name for name, r in RELATIONS.items()}

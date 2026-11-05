@@ -11,8 +11,8 @@ import json
 import sys
 from pathlib import Path
 
-from . import (adapters, agents, compute, context, delegate, hooks, labels, literature, manuscript, messages,
-               research, reviews, runs, snapshot, tasks, upgrade, usage, view, watch)
+from . import (adapters, agents, compute, context, delegate, explain, hooks, labels, literature, manuscript,
+               messages, research, reviews, runs, snapshot, tasks, upgrade, usage, view, watch)
 from .project import advice_limit, find_project, model_entries
 from .schema import ENUMS, LINKABLE, PAPER_ASSESSMENTS
 from .store import Store
@@ -25,7 +25,12 @@ CONFLICT_CODES = {"CONFLICT", "STALE_REVISION"}
 # a comma-separated list or with @revision) becomes the internal id before the command runs.
 ID_ARGS = ("id", "source", "target", "targets", "experiment", "hypotheses", "derived_from", "combines",
            "motivated_by", "based_on", "supports", "challenges", "compared_with", "depends_on", "code_from", "root",
-           "parent", "anchor")
+           "parent", "anchor", "stamp")
+# The commands that change what docs/research.html says; when the page exists they render it again (explain.py).
+# Run registrations, observations and usage are left to the next of these (or rl view): they are frequent, the page
+# only counts them, and a render reads the whole record graph.
+PAGE_COMMANDS = {"hypothesis": ("add", "revise", "set"), "experiment": ("add", "seal"), "evidence": ("add", "set"),
+                 "decide": None, "link": None, "run": ("import-result", "reject-result")}
 
 
 def _store(args) -> Store:
@@ -65,6 +70,21 @@ def _upgrade_notice(args) -> list[str]:
             f"of the old database: {done['backup']}); run `rl upgrade` to see what else to adjust"]
 
 
+def _refresh_page(args) -> list[str]:
+    """After a command that changed what docs/research.html shows: render it again when it exists. The command has
+    already succeeded, so a failure here is only a warning."""
+    store = getattr(args, "store", None)
+    if store is None or args.command not in PAGE_COMMANDS or (
+            PAGE_COMMANDS[args.command] and getattr(args, "action", None) not in PAGE_COMMANDS[args.command]):
+        return []
+    try:
+        explain.refresh(store)
+    except Exception as exc:  # noqa: BLE001 - whatever failed, the records were written
+        why = exc.message if isinstance(exc, RLError) else f"{type(exc).__name__}: {exc}"
+        return [f"docs/{explain.PAGE} was not rendered again ({why}); run rl view"]
+    return []
+
+
 def _list(value) -> list[str]:
     return split_list(value)
 
@@ -101,7 +121,12 @@ def cmd_graph(args):
 
 
 def cmd_view(args):
-    return view.html_view(_store(args))
+    store = _store(args)
+    if args.todo:
+        return explain.todo(store)
+    if args.stamp:
+        return explain.stamp(store, _list(args.stamp))
+    return explain.render(store)
 
 
 def cmd_report(args):
@@ -525,7 +550,13 @@ def build_parser() -> argparse.ArgumentParser:
     sp = add("graph", cmd_graph, "tree projection of the hypothesis graph")
     sp.add_argument("--root")
     sp.add_argument("--mermaid", action="store_true")
-    add("view", cmd_view, "write the research graph page docs/research-graph.html")
+    sp = add("view", cmd_view, "render the research explanation page docs/research.html from the records and the "
+                               "words in research/notes/explanation.yaml")
+    g = sp.add_mutually_exclusive_group()
+    g.add_argument("--todo", action="store_true", help="list the explanations to write or revise, with their facts")
+    g.add_argument("--stamp", help="comma-separated hypotheses and experiments (labels or ids) and/or summary whose "
+                                   "explanations were checked against their current facts: records that, then "
+                                   "renders the page")
     sp = add("report", cmd_report, "write a progress or stage report into research/reports/")
     sp.add_argument("--out")
     sp.add_argument("--title")
@@ -975,9 +1006,10 @@ def main(argv: list[str] | None = None) -> int:
         for warning in getattr(args, "config_warnings", None) or []:  # they may explain the error
             print(f"warning: {warning}", file=sys.stderr)
         return 3 if exc.code in CONFLICT_CODES else 1
-    if getattr(args, "config_warnings", None) or _upgrade_notice(args):
+    refreshed = _refresh_page(args)
+    if getattr(args, "config_warnings", None) or _upgrade_notice(args) or refreshed:
         result["warnings"] = [*(result.get("warnings") or []), *(getattr(args, "config_warnings", None) or []),
-                              *_upgrade_notice(args)]
+                              *_upgrade_notice(args), *refreshed]
     if args.command == "hook" or args.json:
         print(json.dumps(result, ensure_ascii=False, default=str, indent=None if args.command == "hook" else 1))
     else:

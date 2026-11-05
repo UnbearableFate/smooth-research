@@ -289,6 +289,10 @@ def report(store: "Store", note: str | None = None) -> dict:
     lines += [f"older layout: {old} ({what}) works where it is, since the records point there; this version keeps "
               f"them in {new}. To move them with their records: rl upgrade --move {old} {new}"
               for old, new, what in older]
+    if (project.docs_root / "research-graph.html").exists():
+        lines.append("docs/research-graph.html is no longer updated: rl view writes docs/research.html, the records "
+                     "with the explanations in research/notes/explanation.yaml (rl view --todo lists what to write). "
+                     "Delete the old page when nobody needs it")
     with store.read() as tx:
         lost = [f"{e['id']} contract {e['contract_path']}" for e in tx.all("Experiment")
                 if e.get("contract_path") and not project.abs(e["contract_path"]).is_file()]

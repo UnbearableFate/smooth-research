@@ -49,7 +49,7 @@ def test_the_manuscript_keeps_the_prose_and_refreshes_the_record_blocks(project,
     assert again["to_write"] == [s for s in SECTIONS if s != "Introduction"]
     assert "refreshed the record blocks of docs/manuscript.md" in again["summary"]
     assert "--title is for a new draft" in again["summary"]
-    assert "| wd | 0,1 | 2 ended/success | 0.85 (n=2) |" in text and "- EV-0001 [exploratory, pending]" in text
+    assert "| wd | @1 | 0,1 | 2 ended/success | 0.85 (n=2) | - |" in text and "- EV-0001 [exploratory, pending]" in text
 
     path.write_text(re.sub(r"<!-- rl:begin related -->.*?<!-- rl:end related -->\n", "", text, flags=re.S),
                     encoding="utf-8")

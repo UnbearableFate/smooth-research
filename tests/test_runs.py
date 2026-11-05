@@ -145,7 +145,7 @@ def test_the_tables_show_the_complete_result_until_it_is_rejected(project):
 
     def cells():
         with project.read() as tx:
-            return view.arm_rows(tx, "E-0001")[1][0]["cells"]
+            return view.arm_rows(tx, project, tx.require("E-0001"))[1][0]["cells"]
 
     assert cells() == ["0.9 (n=1)"]  # a late partial upload does not replace the complete result
     runs.reject_result(project, complete["result"], "wrong labels")

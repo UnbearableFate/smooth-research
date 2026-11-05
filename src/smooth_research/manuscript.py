@@ -21,7 +21,7 @@ from .research import contract_front
 from .runs import usage_summary
 from .store import Store, Tx
 from .util import RLError
-from .view import arm_rows, conclusion_checks, decision_line, evidence_line
+from .view import arm_table, conclusion_checks, costs, decision_line, evidence_line
 
 BUILD_TIMEOUT = 300  # seconds for one LaTeX build
 METHOD_FIELDS = ("question", "intervention", "comparator", "metric", "scope")
@@ -153,7 +153,7 @@ class Latex:
                                                              ["none recorded"]) + "\n\\end{itemize}")
             elif kind == "table":
                 caption, header, rows, note = rest
-                spec = "ll" + "p{0.3\\linewidth}" + "l" * (len(header) - 3)
+                spec = "".join("p{0.2\\linewidth}" if h in ("condition", "attempts", "notes") else "l" for h in header)
                 line = lambda cells: " & ".join(tex_escape(c) for c in cells) + r" \\"
                 out.append("\n".join([r"\begin{table}[H]", r"\centering\small",
                                       f"\\caption{{{tex_escape(caption)}}}", f"\\begin{{tabular}}{{{spec}}}",
@@ -211,14 +211,14 @@ def blocks(tx: Tx, store: Store) -> dict[str, list[tuple]]:
         method += [("heading", f"{exp['id']} {exp['title']}"),
                    ("list", [f"{k}: {front[k]}" for k in METHOD_FIELDS if front.get(k) not in (None, "", "TODO")]
                     + [f"contract: {_contract_source(exp)}"])]
-        keys, rows = arm_rows(tx, exp["id"])
+        head, rows = arm_table(tx, store, exp)
         if not rows:
             results.append(("text", f"{exp['id']} {exp['title']}: no runs registered."))
             continue
-        results.append(("table", f"{exp['id']} {exp['title']}: descriptive means over usable attempts",
-                        ["arm", "seeds", "attempts", *keys],
-                        [[r["arm"], r["seeds"], r["attempts"], *r["cells"]] for r in rows],
-                        f"Per-attempt records: rl run show {exp['id']}."))
+        spent = "; ".join(costs(tx, exp["id"])) or "no attempt ran"
+        results.append(("table", f"{exp['id']} {exp['title']}: descriptive means, one result per run", head, rows,
+                        "Rows of different conditions are not averaged together. Per-attempt records: "
+                        f"rl run show {exp['id']}. Resource use: {spent}."))
     checks = conclusion_checks(tx, decisions)
     attempts = tx.all("Attempt")
     states = Counter(f"{a['execution_state']}/{a['outcome']}" for a in attempts)

@@ -460,7 +460,7 @@ def test_a_key_conclusion_is_checked_against_the_records_behind_it(project, fake
     assert out["verdict"] == "pass" and out["relation"] == "cross_model"
     prompt = (tmp_path / "prompt.txt").read_text()
     for part in ("unique-proposal", "weight decay raises test accuracy", f"{ev} supports H-0001", "arm wd seed 1",
-                 '"acc": 0.9', "| wd | 0,1 |", "Code reviews: none recorded", "overclaim"):
+                 '"acc": 0.9', "| wd | @1 | 0,1 |", "Code reviews: none recorded", "overclaim"):
         assert part in prompt, part
     assert reviews.request_conclusion_review(project, ["H-0001"], claim, ["claude-opus-5-5"])["reused_from"] == rv["id"]
     research.set_evidence(project, ev, "invalid", "metric bug")  # the records behind it changed: check again

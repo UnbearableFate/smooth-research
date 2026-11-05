@@ -292,8 +292,42 @@ novelty proof.
 ## Views, backups, integrity
 
 `{{rl}} status`, `{{rl}} resume`, `{{rl}} graph`, `{{rl}} show <id>` (a DOC id prints the sealed text),
-`{{rl}} history [id]`, `{{rl}} report` (research/reports/), `{{rl}} view` (docs/research-graph.html), `{{rl}} export`
+`{{rl}} history [id]`, `{{rl}} report` (research/reports/), `{{rl}} view` (docs/research.html, below), `{{rl}} export`
 (consistent snapshot into research/snapshots/), `{{rl}} restore <snapshot> --into <new dir>`, `{{rl}} doctor`.
+
+## The research page
+
+`{{rl}} view` renders `docs/research.html` for the user: the facts from the records (labels, states, relations,
+contract metrics, the arm tables, costs, decisions, every count) and the words you write in
+`research/notes/explanation.yaml`. It is self-contained and deterministic. The commands that change its facts
+render it again while it exists.
+
+```yaml
+lines:                      # research lines; top-level hypotheses in none go under Unclassified
+  - key: m
+    name: M line - memory read and repair
+    desc: One sentence on what the line is about.
+    roots: [H3]             # the subtrees it shows, by label or id
+summary:
+  text: Judgments only. The page does the counting, so write no numbers here.
+nodes:                      # a hypothesis or an experiment, by label or id
+  H3:
+    title: A readable title
+    purpose: Why this node exists.
+    did: What was done.
+    result: What came of it, at the evidence level the records carry.
+```
+
+- **Listing the work.** `{{rl}} view --todo` lists the explanations to write or revise, each with its current facts.
+- **Stamping.** After writing, `{{rl}} view --stamp H3,EH3.3/3[,summary]` records the facts each explanation was
+  checked against, in rl's `research/notes/explanation.basis.yaml`, then renders the page.
+- **Staleness.** A node whose facts change later is marked "may be out of date". The facts are:
+  - for a hypothesis: statement, revision, status, evidence and its validity, decisions;
+  - for an experiment: contract revision, stage, attempt states, results, decisions.
+
+  The summary goes out of date when a newer stage decision appears.
+- **Never blocking.** Missing or stale explanations never block a decision. `{{rl}} status` counts them in one
+  attention item.
 
 ## After a plugin update
 

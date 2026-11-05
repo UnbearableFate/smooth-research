@@ -40,7 +40,7 @@ def session_start(host: str, raw: str) -> dict:
     store = Store(project, "hook")
     try:
         with store.read() as tx:  # the first open by a newer plugin upgrades the records (upgrade.py)
-            work = open_work(tx)
+            work = open_work(tx, project)
     except RLError as exc:
         return _out(f"Smooth Research project at {project.root}, but its records could not be read: {exc.message}")
     session_id, model = event.get("session_id"), event.get("model")

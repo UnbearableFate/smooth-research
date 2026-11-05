@@ -429,4 +429,4 @@ def test_report_summarizes_arms_and_lives_in_research_reports(project, tmp_path)
     path = view.report(project)["path"]
     text = open(path, encoding="utf-8").read()
     assert path.startswith(str(tmp_path / "research/reports"))
-    assert "| wd | 0,1 | 2 ended/success | 0.85 (n=2) |" in text
+    assert "| wd | @1 | 0,1 | 2 ended/success | 0.85 (n=2) | - |" in text

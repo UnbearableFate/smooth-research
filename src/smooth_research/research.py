@@ -110,7 +110,7 @@ def init_project(root: Path, plan: str | None = None, title: str | None = None) 
                         + (f"; plan snapshot {plan_ref} ({project.rel(project.plan_path)})" if plan_ref
                            else "; no plan imported yet")
                         + "\nlayout: experiment code src/ · for people docs/ (the plan, the constraints, the "
-                          "research graph page, the manuscript, explanations/) · records and working documents "
+                          "research page research.html, the manuscript, explanations/) · records and working documents "
                           f"research/\n{env_line}"),
             "next": (["commit the new project in its root (git add . && git commit; git init first if it is in no "
                       "repository): runs use committed code, and rl session start pushes it to remote resources"]
@@ -277,9 +277,10 @@ def _front_matter(path: Path) -> dict:
     if not text.startswith("---"):
         return {}
     try:
-        return yaml.safe_load(text.split("---", 2)[1]) or {}
+        data = yaml.safe_load(text.split("---", 2)[1])
     except yaml.YAMLError:
         return {}
+    return data if isinstance(data, dict) else {}  # a draft is edited by hand: its callers read fields with .get
 
 
 def contract_front(tx: Tx, store: Store, exp: dict) -> dict:

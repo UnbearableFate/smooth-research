@@ -1,18 +1,19 @@
-"""Projections generated from the records: a tree view of the hypothesis graph, an HTML page (docs/) and a stage
-report (research/reports/).
+"""Projections generated from the records: a tree view of the hypothesis graph, the arm tables and a stage report
+(research/reports/); the explanation page docs/research.html is explain.py.
 
 They are regenerated on demand and never edited by hand; the database and sealed documents stay authoritative.
 """
 
 from __future__ import annotations
 
-import html
+from collections import Counter
 from datetime import datetime, timezone
 
 from . import labels
-from .research import brief, conclusion_reviews, key_hypotheses, review_gap, review_mark
-from .runs import code_review_summary, describe_attempt, evidence_attempts, usage_summary
-from .store import Store, Tx
+from .research import brief, conclusion_reviews, contract_front, key_hypotheses, review_gap, review_mark
+from .runs import code_review_summary, evidence_attempts, usage_summary
+from .store import Store, Tx, _sort_key
+from .util import canonical_json, short
 
 SIDE = ("tests", "supports", "challenges", "decides", "nearest_work", "motivated_by", "cites", "combines")
 
@@ -83,82 +84,142 @@ def mermaid(tx: Tx) -> str:
     return labels.relabel("\n".join(out), labels.names(tx))
 
 
-def html_view(store: Store) -> dict:
-    with store.read() as tx:
-        diagram = mermaid(tx)
-        meta = tx.meta()
-        rows = {label: tx.all(label) for label in ("Hypothesis", "Experiment", "Evidence", "Decision", "Paper", "Task")}
-        attempts = [describe_attempt(tx, a) for a in tx.all("Attempt")]
-    text = tree(store)["summary"]
-    sections = "".join(
-        f"<h2>{label}</h2><ul>" + "".join(f"<li>{html.escape(brief(r))}</li>" for r in recs) + "</ul>"
-        for label, recs in rows.items() if recs)
-    page = f"""<!DOCTYPE html>
-<html lang="en"><head><meta charset="utf-8"><title>Research graph — {html.escape(meta.get('title', ''))}</title>
-<style>body{{font-family:system-ui,sans-serif;max-width:1100px;margin:2em auto;padding:0 1em;color:#222}}
-pre{{background:#f6f6f4;padding:1em;overflow:auto;font-size:13px}}li{{margin:.2em 0}}</style>
-<script type="module">import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
-mermaid.initialize({{startOnLoad:true}});</script></head><body>
-<h1>Research graph: {html.escape(meta.get('title', ''))}</h1>
-<p>Generated {datetime.now(timezone.utc).isoformat(timespec='seconds')} from data_version {meta['data_version']}.
-A projection of the records; edit records with <code>rl</code>, not this page.</p>
-<pre class="mermaid">{html.escape(diagram)}</pre>
-<h2>Tree (derived_from)</h2><pre>{html.escape(text)}</pre>
-<h2>Attempts</h2><ul>{''.join(f'<li>{html.escape(a)}</li>' for a in attempts) or '<li>none</li>'}</ul>
-{sections}</body></html>"""
-    path = store.project.docs_root / "research-graph.html"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(page, encoding="utf-8")
-    return {"path": str(path), "summary": f"wrote {store.project.rel(path)} (data_version {meta['data_version']})"}
+CELL_CHARS = 60  # a longer table cell is cut short: rl run show has all of it
+MAX_METRICS = 6  # metric columns when the contract declares none
 
 
 def _num(value: float) -> str:
     return f"{value:.4g}"
 
 
-def arm_rows(tx: Tx, exp_id: str) -> tuple[list[str], list[dict]]:
-    """The numeric metrics (at most six) and one row per arm: its seeds, its attempts by state, and the
-    descriptive mean of each metric over usable results."""
-    arms: dict[str, dict] = {}
-    for run in tx.all("Run", experiment_id=exp_id):
-        arm = arms.setdefault(str(run["spec"].get("arm")), {"seeds": set(), "states": {}, "metrics": {},
-                                                             "mismatch": 0})
-        arm["seeds"].add(run["spec"].get("seed"))
-        for att in tx.all("Attempt", run_id=run["id"]):
-            state = f"{att['execution_state']}/{att['outcome']}"
-            arm["states"][state] = arm["states"].get(state, 0) + 1
-            results = [r for r in tx.all("Result", attempt_id=att["id"]) if r["status"] != "rejected"]
-            if not results:
-                continue
-            # a partial result never replaces a complete one
-            latest = ([r for r in results if r["status"] == "complete"] or results)[-1]
-            if not latest.get("usable_for_planned_comparison", True):
-                arm["mismatch"] += 1
-                continue
-            for key, value in (latest["manifest"].get("metrics") or {}).items():
-                if isinstance(value, (int, float)) and not isinstance(value, bool):
-                    arm["metrics"].setdefault(key, []).append(float(value))
-    keys = sorted({k for a in arms.values() for k in a["metrics"]})[:6]
+def cut_cell(text: str) -> str:
+    return text if len(text) <= CELL_CHARS else text[:CELL_CHARS - 1] + "…"
+
+
+def _value(value) -> str:
+    if isinstance(value, dict):
+        return ",".join(f"{k}={v}" for k, v in sorted(value.items())) or "-"
+    text = "-" if value is None else str(value)
+    return short(text) if ":" in text and " " not in text and len(text) > 40 else text  # a digest
+
+
+def condition(run: dict) -> dict:
+    """What makes runs of an experiment one comparison: the contract revision they were registered under, the
+    arm, the data and model versions and the configuration. Seeds, code commits and output places may differ."""
+    spec = run["spec"]
+    return {"contract": int(run["experiment_ref"].rpartition("@")[2] or 0), "arm": str(spec.get("arm")),
+            "data": spec.get("data_revision"), "model": spec.get("model_revision"),
+            "config": spec.get("config_ref") or spec.get("config_digest"), "params": spec.get("params") or {}}
+
+
+def run_result(tx: Tx, run: dict) -> tuple[dict | None, list[dict]]:
+    """The run's one result, over all its attempts (a re-run does not count twice): the latest complete one, else
+    the latest partial one; and the attempts."""
+    attempts = tx.all("Attempt", run_id=run["id"])
+    results = sorted((r for a in attempts for r in tx.all("Result", attempt_id=a["id"]) if r["status"] != "rejected"),
+                     key=lambda r: _sort_key(r["id"]))
+    return ([r for r in results if r["status"] == "complete"] or results or [None])[-1], attempts
+
+
+def arm_rows(tx: Tx, store: Store, exp: dict) -> tuple[list[str], list[dict]]:
+    """The metrics shown and one row per condition (condition): its seeds, its attempts by state, the descriptive
+    mean of each metric over its runs (each run once: run_result), and what to keep in mind (partial results,
+    results not usable for the planned comparison, more than one code version). Rows of different conditions are never
+    averaged together. The metrics are those the contract declares (metrics:); without them the contract's main
+    metric and the runs' come first, then the others alphabetically, MAX_METRICS at most."""
+    groups: dict[str, dict] = {}
+    named = []
+    for run in tx.all("Run", experiment_id=exp["id"]):
+        cond = condition(run)
+        g = groups.setdefault(canonical_json(cond), {"condition": cond, "seeds": set(), "states": Counter(),
+                                                      "values": {}, "partial": 0, "mismatch": 0, "code": set()})
+        g["seeds"].add(run["spec"].get("seed"))
+        g["code"].add(canonical_json(run["spec"].get("code_ref")))
+        named.append(run["spec"].get("metric"))
+        result, attempts = run_result(tx, run)
+        g["states"].update(f"{a['execution_state']}/{a['outcome']}" for a in attempts)
+        if result is None:
+            continue
+        if not result.get("usable_for_planned_comparison", True):
+            g["mismatch"] += 1
+            continue
+        g["partial"] += result["status"] == "partial"
+        metrics = result["manifest"].get("metrics")
+        for key, value in (metrics if isinstance(metrics, dict) else {}).items():
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                g["values"].setdefault(key, []).append(float(value))
+    front = contract_front(tx, store, exp)
+    declared = front.get("metrics") if isinstance(front.get("metrics"), list) else []
+    found = sorted({k for g in groups.values() for k in g["values"]})
+    keys = [str(m) for m in declared] or list(dict.fromkeys(
+        [m for m in (front.get("metric"), *named) if m in found] + found))[:MAX_METRICS]
+    varying = [k for k in ("data", "model", "config", "params")
+               if len({canonical_json(g["condition"][k]) for g in groups.values()}) > 1]
     rows = []
-    for name, a in sorted(arms.items()):
-        flag = f" ({a['mismatch']} not usable: spec mismatch)" if a["mismatch"] else ""
-        rows.append({"arm": name,
-                     "seeds": ",".join(str(s) for s in sorted(a["seeds"], key=str) if s is not None) or "-",
-                     "attempts": ", ".join(f"{n} {s}" for s, n in sorted(a["states"].items())) + flag,
-                     "cells": [f"{_num(sum(v) / len(v))} (n={len(v)})" if (v := a["metrics"].get(k)) else "-"
-                               for k in keys]})
+    for g in sorted(groups.values(), key=lambda g: (g["condition"]["arm"], g["condition"]["contract"],
+                                                    canonical_json(g["condition"]))):
+        c = g["condition"]
+        notes = ([f"{g['partial']} partial"] if g["partial"] else []) \
+            + ([f"{g['mismatch']} not usable for the planned comparison"] if g["mismatch"] else []) \
+            + ([f"{len(g['code'])} code versions"] if len(g["code"]) > 1 else [])
+        rows.append({"arm": c["arm"], "contract": f"@{c['contract']}",
+                     "condition": "; ".join(f"{k} {_value(c[k])}" for k in varying),
+                     "seeds": ",".join(str(s) for s in sorted(g["seeds"], key=str) if s is not None) or "-",
+                     "attempts": ", ".join(f"{n} {s}" for s, n in sorted(g["states"].items())),
+                     "cells": [f"{_num(sum(v) / len(v))} (n={len(v)})" if (v := g["values"].get(k)) else "-"
+                               for k in keys],
+                     "notes": "; ".join(notes)})
     return keys, rows
 
 
-def _arm_table(tx: Tx, exp_id: str) -> list[str]:
-    """One Markdown row per arm (arm_rows)."""
-    keys, rows = arm_rows(tx, exp_id)
+def arm_table(tx: Tx, store: Store, exp: dict) -> tuple[list[str], list[list[str]]]:
+    """arm_rows as a header and rows of cells; the condition column only when conditions differ."""
+    keys, rows = arm_rows(tx, store, exp)
+    cond = any(r["condition"] for r in rows)
+    head = ["arm", "contract", *(["condition"] if cond else []), "seeds", "attempts", *keys, "notes"]
+    return head, [[r["arm"], r["contract"], *([r["condition"]] if cond else []), r["seeds"], r["attempts"],
+                   *r["cells"], r["notes"] or "-"] for r in rows]
+
+
+def costs(tx: Tx, exp_id: str) -> list[str]:
+    """The experiment's recorded resource use, kept apart: reported (usage that covers only its attempts), shared
+    jobs (usage that also covers other experiments' attempts: not split) and unknown (attempts that ran with
+    none recorded: unknown, not zero)."""
+    ran = {a["id"] for run in tx.all("Run", experiment_id=exp_id) for a in tx.all("Attempt", run_id=run["id"])
+           if a["execution_state"] != "prepared"}
+    reported: dict[tuple, float] = {}
+    shared, covered = [], set()
+    for uid in sorted({e["id"] for att in ran for e in tx.inc(att, "covers")}, key=_sort_key):
+        u = tx.require(uid, "Usage")
+        if u.get("superseded"):
+            continue
+        cover = {e["id"] for e in tx.out(uid, "covers")}
+        covered |= cover & ran
+        key = (u["resource_type"], u["unit"], u.get("hardware") or "-", u["basis"])
+        if cover <= ran:
+            reported[key] = reported.get(key, 0.0) + u["quantity"]
+        else:
+            shared.append(f"{u['id']} {u['quantity']:g} {key[1]} {key[0]} on {key[2]} ({key[3]}), also for "
+                          f"{len(cover - ran)} attempt(s) of other experiments")
+    unknown = sorted(ran - covered, key=_sort_key)
+    out = ["reported " + "; ".join(f"{q:g} {k[1]} {k[0]} on {k[2]} ({k[3]})" for k, q in sorted(reported.items()))
+           ] if reported else []
+    out += [f"shared job {s}" for s in shared]
+    out += [f"unknown for {len(unknown)} attempt(s) ({', '.join(unknown[:4])}{', …' if len(unknown) > 4 else ''})"
+            ] if unknown else []
+    return out
+
+
+def _arm_table(tx: Tx, store: Store, exp: dict) -> list[str]:
+    """The arm table in Markdown, long cells cut short, and the experiment's resource use."""
+    head, rows = arm_table(tx, store, exp)
     if not rows:
         return ["- no runs registered"]
-    lines = ["", f"| arm | seeds | attempts | {' | '.join(keys) or 'metrics'} |",
-             "|" + " --- |" * (3 + max(len(keys), 1))]
-    lines += [f"| {r['arm']} | {r['seeds']} | {r['attempts']} | {' | '.join(r['cells']) or '-'} |" for r in rows]
-    lines += [f"\nMeans are descriptive over attempts; per-attempt records: `rl run show {exp_id}`.", ""]
+    lines = ["", "| " + " | ".join(head) + " |", "|" + " --- |" * len(head)]
+    lines += ["| " + " | ".join(cut_cell(str(c)).replace("|", "\\|") for c in row) + " |" for row in rows]
+    lines += [f"\nMeans are descriptive, one result per run; rows of different conditions are not averaged together. "
+              f"Per-attempt records: `rl run show {exp['id']}`."]
+    lines += [f"Resource use: {'; '.join(costs(tx, exp['id'])) or 'no attempt ran'}.", ""]
     return lines
 
 
@@ -204,7 +265,7 @@ def report(store: Store, out: str | None = None, title: str | None = None) -> di
                              f"{exp.get('contract_ref') or 'draft (not sealed)'}"
                              + (" — revised after results (exploratory)" if exp.get("revised_after_results") else "")
                              + f"\n- question: {exp['question']}")
-            exp_lines += _arm_table(tx, exp["id"])
+            exp_lines += _arm_table(tx, store, exp)
         ev_lines = [f"- {evidence_line(tx, ev)}" for ev in evidence]
         stage = [d for d in decisions if d["kind"] == "stage"]
         checks = conclusion_checks(tx, decisions)

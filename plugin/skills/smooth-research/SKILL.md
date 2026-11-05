@@ -23,7 +23,7 @@ the plan. The plugin keeps the evidence record; it never runs, polls or cancels 
 ## Project layout (in the research project root, fixed)
 
 - `docs/` holds only what the user reads: `plan.md` (the starting point, sealed), `constraints.md`,
-  `research-graph.html` (`{{rl}} view`), the manuscript (`{{rl}} manuscript`) and `explanations/`: when the
+  `research.html` (`{{rl}} view`), the manuscript (`{{rl}} manuscript`) and `explanations/`: when the
   user asks you to explain something, write the explanation there (`docs/explanations/<topic>.md`).
 - `src/` experiment code · `research/` everything else: contracts (`experiments/`), `tasks/`, researcher
   `notes/`, review and advice answers, stage reports, run outputs (`artifacts/<attempt-id>/`) and the records.
