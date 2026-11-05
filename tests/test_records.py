@@ -11,7 +11,7 @@ import pytest
 import yaml
 
 from conftest import SPEC, obs
-from smooth_research import context, documents, messages, research, runs, snapshot, tasks
+from smooth_research import context, delegate, documents, messages, research, runs, snapshot, tasks
 from smooth_research.project import find_project
 from smooth_research.store import Store
 from smooth_research.util import RLError
@@ -145,6 +145,9 @@ def test_a_delivery_records_its_test_runs_and_accept_notes_a_head_they_did_not_p
     with project.read() as tx:
         assert tx.require("T-0001")["verified"] == [{"command": "uv run pytest -q tests", "commit": head[:9],
                                                     "outcome": "pass", "log": "research/notes/T-0001-tests.log"}]
+    for session in (None, {"name": "researcher-1"}):  # rl delegate's session, and one in a herdr tab
+        assert '--verified "<command> @<commit>: pass|fail, log <path>"' in \
+            delegate.prompt_for(project, "T-0003", "researcher-1", session)
 
 
 def test_only_the_owner_updates_a_task_and_not_after_the_coordinator_closed_it(project, tmp_path):

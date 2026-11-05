@@ -17,7 +17,8 @@ plan. The plugin keeps the evidence record; it never runs, polls or cancels expe
 - After a plugin update the records are upgraded on first use (a copy of the old database is kept). When the
   session note or `{{rl}} status` says the plugin changed, run `{{rl}} upgrade` and adjust the old research assets
   to this version yourself as it lists, without asking the user; never rewrite recorded facts or sealed documents.
-- Commands print a short summary with ids; `--json` gives full records; `{{rl}} <command> --help` shows flags.
+- Commands print a short summary; `--json` gives full records; `{{rl}} <command> --help` shows flags. They take labels
+  (H3, EH3.1/2) or ids (H-0007): labels to the user, in explanations and decisions; ids in paths, job names, commits.
 - Host notes (sessions, subagents, default reviewer): [references/host.md](references/host.md). Exact formats
   (RunSpec, observation, manifest) and recipes: [references/workflow.md](references/workflow.md).
 
@@ -50,12 +51,13 @@ Shared access: `kind: remote`, `connect: local`, `code: archive`; details and wo
 
 ## From plan to hypotheses
 
-Once, at the start, extract only: the core claim, the key mechanisms and competing explanations, the few
-experiments that test them first, the stated metrics and stop conditions, and assumptions not yet shown.
-Record each with its source: `{{rl}} hypothesis add --title .. --statement "<testable claim>" --scope
-"<conditions>" --origin "plan §x" [--derived-from H-x]`. Far branches stay `--disposition candidate`; only
-near-term work becomes tasks. Then the plan is not read again: the records are the plan, changed as results
-come in (revise, add with an origin, activate, decide); goal, scope or budget changes go to the user.
+Once, at the start, extract only: the core claim, the key mechanisms and competing explanations, the few experiments
+that test them first, the stated metrics and stop conditions, and assumptions not yet shown. Record each with its
+source: `{{rl}} hypothesis add --title .. --statement "<testable claim>" --scope "<conditions>" --origin "plan §x"
+[--derived-from H-x [--root]]`; a derived hypothesis is labelled under its source (H3.2) unless `--root` says it opens
+a new line of research (H4). Far branches stay `--disposition candidate`; only near-term work becomes tasks. Then the
+plan is not read again: the records are the plan, changed as results come in (revise, add with an origin, activate,
+decide); goal, scope or budget changes go to the user.
 
 ## The loop: cheapest test that can change the next decision
 
@@ -126,8 +128,7 @@ judge them; only what only the user can decide goes to the user (team.md). Witho
 - Single-seed or small-validation results are `screening`. Confirmation needs a comparison fixed in advance.
 - Never fabricate results, versions, model identities or usage. Unknown stays unknown; a session ending
   is not a cancellation. Rules changed after seeing results are not pre-registration.
-- Changing a hypothesis (`{{rl}} hypothesis revise`) leaves old evidence bound to the old revision; re-link
-  only after checking that its scope still applies.
+- `{{rl}} hypothesis revise` keeps old evidence on the old revision; re-link it only if its scope still applies.
 - A key conclusion without a passing conclusion review of each of its hypotheses stays in `{{rl}} status`
   attention until one is linked (`{{rl}} link D-x based_on RV-x`). An unavailable or blocking review is no pass.
 
@@ -139,12 +140,11 @@ judge them; only what only the user can decide goes to the user (team.md). Witho
 
 ## Finish a stage
 
-Record the stage delivery with three separate fields (recommend_formal and stop are key conclusions: get
-the conclusion review first, loop step 5):
-`{{rl}} decide --stage --targets H-x --action recommend_formal|continue_probe|pause|stop
---implementation-ready "<code, controls, eval, run spec, cost measured?>" --evidence-scope "<what the
-evidence supports: diagnostic, exploratory signal or pre-specified comparison>" --rationale ..`,
-then `{{rl}} report` (a stage report in `research/reports/`), `{{rl}} view` and `{{rl}} manuscript`: replace the
-manuscript's `[write: ...]` placeholders with prose drawn only from the records (its record blocks are refreshed
-on every run; your text is kept). Report "code ready" and "claim verified" separately, with costs. At task
-boundaries `{{rl}} resume` lets a new session continue; `{{rl}} export` makes a backup.
+Record the stage delivery with three separate fields (recommend_formal and stop are key conclusions: get the conclusion
+review first, loop step 5): `{{rl}} decide --stage --targets H-x --action recommend_formal|continue_probe|pause|stop
+--implementation-ready "<code, controls, eval, run spec, cost measured?>" --evidence-scope "<what the evidence
+supports: diagnostic, exploratory signal or pre-specified comparison>" --rationale ..`; then `{{rl}} view --todo`,
+write or revise the explanations it lists (workflow.md), `{{rl}} view [--stamp <labels>]`; then `{{rl}} report` and
+`{{rl}} manuscript`: replace the manuscript's `[write: ...]` placeholders with prose drawn only from the records (its
+record blocks are refreshed on every run; your text is kept). Report "code ready" and "claim verified" separately, with
+costs. At task boundaries `{{rl}} resume` lets a new session continue; `{{rl}} export` makes a backup.

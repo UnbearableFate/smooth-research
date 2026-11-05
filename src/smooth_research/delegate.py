@@ -17,6 +17,10 @@ from .store import Store
 from .util import RLError, now_utc
 
 
+VERIFIED = ("; when you changed code, add the test run that checked it: `--verified \"<command> @<commit>: "
+            "pass|fail, log <path>\"`")  # what task accept shows of the delivery (tasks.parse_verified)
+
+
 def rl_command() -> str:
     return os.environ.get("SMOOTH_RESEARCH_RL") or "rl"
 
@@ -75,8 +79,8 @@ outlive the worktree) and register runs with `--code-commit <the commit they run
    findings remain after the second, the coordinator decides. Keep other independent work going meanwhile.
    If no reviewer can be assigned, do not scale up: block with --reason model_unavailable."""
         finish = (f"Finish with `{rl} task deliver {task_id} --role {role} --summary \"<what changed, what was found, "
-                  "what is still open>\" --output <files>` (the coordinator gets a notice), then wait for its next "
-                  "message: it decides whether this session continues, is reset or is closed.")
+                  f"what is still open>\" --output <files>`{VERIFIED}. The coordinator gets a notice: wait for its next "
+                  "message, which decides whether this session continues, is reset or is closed.")
     else:
         review = f"""get a code review from the configured reviewer: `{rl} review request --target
    <E-x> --files .. --author-model <your model id> --question ..`, then `{rl} review run <RV-x>`; fix real
@@ -84,7 +88,7 @@ outlive the worktree) and register runs with `--code-commit <the commit they run
    findings remain after the second, the coordinator decides). If no reviewer is available, do not scale up:
    block with --reason model_unavailable."""
         finish = (f"Finish with `{rl} task deliver {task_id} --role {role} --summary \"<what changed, what was found, "
-                  "what is still open>\" --output <files>`.")
+                  f"what is still open>\" --output <files>`{VERIFIED}.")
     return f"""You are {role}, a Smooth Research researcher session {where}
 The research records CLI is `{rl}`. The coordinator owns the route decisions; you own the execution of this
 task.

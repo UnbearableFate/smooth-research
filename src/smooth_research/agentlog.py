@@ -18,7 +18,6 @@ session without a known id: its log is not guessed (from the folder, say).
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 
 from .usage import codex_sessions
