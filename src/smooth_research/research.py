@@ -224,7 +224,9 @@ def add_experiment(store: Store, title: str, question: str, hypotheses: list[str
         path.write_text("---\n" + yaml.safe_dump(front, sort_keys=False, allow_unicode=True) + "---\n\n"
                         "## Design\n\nArms, seeds, data split, positive/negative controls and what each outcome "
                         "changes. Edit freely until the first run, review or task references this contract; "
-                        "later edits become a new sealed revision.\n", encoding="utf-8")
+                        "later edits become a new sealed revision. Optional lists in the front matter: `arms:` "
+                        "(run register then takes only these arm names) and `metrics:` (the metrics the tables "
+                        "show).\n", encoding="utf-8")
         tx.event("experiment.added", eid, f"{label}: {title}")
     todo = [k for k in CONTRACT_FIELDS if not (question if k == "question" else contract.get(k))]
     return {"id": eid, "label": label, "contract": store.project.rel(path),
@@ -232,10 +234,19 @@ def add_experiment(store: Store, title: str, question: str, hypotheses: list[str
                        + (f"; fill in: {', '.join(todo)}" if todo else "")}
 
 
-def prepare_contract(store: Store, eid: str) -> documents.Prepared:
+def prepare_contract(store: Store, eid: str, arm: str | None = None) -> documents.Prepared:
+    """The experiment's contract, prepared for sealing. With arm (a new run's), a contract that lists its arms
+    (`arms:` in its front matter) refuses any other first, so a refused registration leaves no object behind."""
     with store.read() as tx:
         exp = tx.require(eid, "Experiment")
-    return documents.prepare(store.project, store.project.abs(exp["contract_path"]), "experiment_contract")
+    path = store.project.abs(exp["contract_path"])
+    if arm is not None and path.is_file():
+        arms = contract_arms(_front_matter(path), exp["contract_path"])
+        if arms is not None and str(arm) not in arms:
+            raise RLError("INVALID", f"arm {arm!r} is not one of the arms of {labels.name(exp)}'s contract "
+                                     f"({', '.join(arms)}): register the run under one of them, or add it to arms: "
+                                     f"in {exp['contract_path']} (a new contract revision)")
+    return documents.prepare(store.project, path, "experiment_contract")
 
 
 def seal_contract(tx: Tx, eid: str, prep: documents.Prepared, project: Project) -> str:
@@ -261,6 +272,16 @@ def seal_contract(tx: Tx, eid: str, prep: documents.Prepared, project: Project) 
     tx.update(eid, changes)
     tx.event("experiment.sealed", eid, ref)
     return f"{eid}@{changes['revision']}"
+
+
+def contract_arms(front: dict, where: str) -> list[str] | None:
+    """The arm names a contract declares (`arms:` in its front matter), or None when it declares none."""
+    arms = front.get("arms")
+    if arms in (None, "", []):
+        return None
+    if not isinstance(arms, list) or not all(isinstance(a, (str, int, float)) for a in arms):
+        raise RLError("INVALID", f"arms: in {where} is a list of arm names")
+    return [str(a) for a in arms]
 
 
 def contract_gaps(front: dict) -> list[str]:
@@ -532,6 +553,11 @@ def decide(store: Store, targets: list[str], action: str, rationale: str, based_
         if not implementation_ready or not evidence_scope:
             raise RLError("INVALID", "a stage delivery records --implementation-ready and --evidence-scope separately")
     prep = documents.prepare(store.project, rationale_file, "decision") if rationale_file else None
+    if not (rationale or "").strip():
+        rationale = _first_line(store.project.abs(prep.object_path)) if prep else ""
+        if not rationale:
+            raise RLError("INVALID", "give the decision's reason: --rationale \"<short reason>\", or --rationale-file "
+                                     "<file> whose first line of text is the short reason")
     with store.write() as tx:
         records = [tx.require(t, "Hypothesis", "Experiment", "Task") for t in targets]
         for rec in records:
@@ -570,6 +596,14 @@ def decide(store: Store, targets: list[str], action: str, rationale: str, based_
             if gap else "") + "".join(f"\nnote: {hint}" for hint in hints)
     return {"id": did, "conclusion_review_gap": gap, "review_hints": hints,
             "summary": f"{did} {kind}:{action} on {', '.join(targets)}{note}"}
+
+
+def _first_line(path: Path) -> str:
+    """The first line of text of a rationale file, without Markdown heading marks."""
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        if text := line.strip().lstrip("#").strip():
+            return text
+    return ""
 
 
 def link(store: Store, source: str, rel: str, target: str, note: str | None = None, locator: str | None = None,
@@ -704,6 +738,31 @@ def attention(tx: Tx) -> list[str]:
         items += [f"{did} key conclusion: {hint}" for hint in review_hints(tx, reviews, hyps)]
     known = labels.names(tx)
     return [labels.relabel(item, known) for item in items]
+
+
+def list_hypotheses(store: Store, status: str | None = None, disposition: str | None = None) -> dict:
+    """The hypotheses, by label, with their state; --json gives the records."""
+    with store.read() as tx:
+        items = sorted((h for h in tx.all("Hypothesis") if status in (None, h["evidence_status"])
+                        and disposition in (None, h["disposition"])), key=lambda h: _sort_key(h.get("label") or h["id"]))
+    which = " ".join(f for f in (disposition, status) if f)
+    return {"hypotheses": items, "summary": "\n".join(_brief(h) for h in items) or f"no {which + ' ' if which else ''}"
+                                                                                   "hypotheses"}
+
+
+def list_evidence(store: Store, validity: str | None = None, level: str | None = None) -> dict:
+    """The evidence records with what each supports or challenges; --json gives the records."""
+    with store.read() as tx:
+        items = [e for e in tx.all("Evidence") if validity in (None, e["validity"]) and level in (None, e["evidence_level"])]
+        known = labels.names(tx)
+        lines = []
+        for ev in items:
+            claims = [f"{e['rel']} {e['id']}" + (f"@{e['revision']}" if e.get("revision") else "")
+                      for e in tx.out(ev["id"]) if e["rel"] in ("supports", "challenges")]
+            lines.append(_brief(ev) + (f" ({', '.join(claims)})" if claims else ""))
+    which = " ".join(f for f in (validity, level) if f)
+    return {"evidence": items, "summary": labels.relabel("\n".join(lines), known)
+            or f"no {which + ' ' if which else ''}evidence"}
 
 
 def history(store: Store, entity_id: str | None = None, limit: int = 30) -> dict:

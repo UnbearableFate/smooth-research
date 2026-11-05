@@ -10,6 +10,8 @@ from __future__ import annotations
 import fcntl
 import json
 import os
+import socket
+import sys
 import time
 from contextlib import contextmanager
 from typing import Any, Iterator
@@ -27,6 +29,26 @@ OPEN_RETRY_S = 10.0
 EXTRA_INDEXES = [("Observation", "attempt_id"), ("Attempt", "run_id"), ("Message", "to_role"),
                  ("Ticket", "dedupe_key"), ("Usage", "accounting_ref"), ("ExecRef", "opaque_id"),
                  ("Document", "path"), ("Run", "experiment_id"), ("Result", "attempt_id")]
+
+
+def _holder(fd: int) -> str:
+    """Who holds the lock, as far as the lock file tells: the writer notes itself there; readers do not."""
+    try:
+        note = json.loads(os.pread(fd, 4096, 0) or b"{}")
+    except (OSError, ValueError):
+        note = {}
+    if not note.get("pid"):
+        return "no writer holds it, so readers do (rl status, rl view and other reads hold it while they read)"
+    if note.get("host") == socket.gethostname():
+        try:
+            os.kill(int(note["pid"]), 0)
+        except ProcessLookupError:
+            return (f"its last writer, process {note['pid']} ({note.get('command')}), has ended, so readers hold it "
+                    "now")
+        except (OSError, ValueError):
+            pass
+    return (f"held by process {note['pid']} on {note.get('host')} ({note.get('command')}) since "
+            f"{note.get('since')}")
 
 
 def label_of(entity_id: str) -> str:
@@ -218,6 +240,12 @@ class Tx:
         clean = {k: v for k, v in props.items() if v is not None}
         self.txn.create_edge(s, t, spec.edge, properties=clean or None)
 
+    def unlink(self, rel: str, source: str, target: str) -> None:
+        """Remove a relation; only for one recorded by mistake (an attempt bound to a wrong job id)."""
+        self._need_write()
+        spec = RELATIONS[rel]
+        self.txn.delete_edge(self._node(label_of(source), source), self._node(label_of(target), target), spec.edge)
+
     def reachable(self, start: str, start_label: str, rel: str, goal: str) -> bool:
         seen, frontier = {start}, [(start, start_label)]
         while frontier:
@@ -293,21 +321,34 @@ class Store:
 
     @contextmanager
     def _lock(self, exclusive: bool) -> Iterator[None]:
+        """The process lock: shared for reads, exclusive for writes. The writer holding it notes itself in the lock
+        file (process, host, command, since when), so one that waits in vain can say who held it."""
         self.project.state_dir.mkdir(parents=True, exist_ok=True)
         fd = os.open(self.project.lock_path, os.O_RDWR | os.O_CREAT, 0o644)
+        held = False
         try:
-            deadline = time.monotonic() + LOCK_TIMEOUT_S
+            start = time.monotonic()
             while True:
                 try:
                     fcntl.flock(fd, (fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH) | fcntl.LOCK_NB)
                     break
                 except BlockingIOError:
-                    if time.monotonic() > deadline:
-                        raise RLError("LOCKED", f"research store busy for {LOCK_TIMEOUT_S:.0f}s: "
-                                                f"{self.project.lock_path}") from None
+                    if time.monotonic() - start > LOCK_TIMEOUT_S:
+                        raise RLError("LOCKED", f"the research store stayed busy: waited {time.monotonic() - start:.0f}s "
+                                                f"to {'write' if exclusive else 'read'}; {_holder(fd)}. Nothing was "
+                                                "written; run the command again (it is not retried, since running it "
+                                                f"twice could write twice). Lock file: {self.project.lock_path}") from None
                     time.sleep(0.05)
+            held = exclusive
+            if held:
+                note = {"pid": os.getpid(), "host": socket.gethostname(), "since": now_utc(),
+                        "command": " ".join(["rl", *sys.argv[1:4]])}
+                os.ftruncate(fd, 0)
+                os.pwrite(fd, json.dumps(note).encode("utf-8"), 0)
             yield
         finally:
+            if held:
+                os.ftruncate(fd, 0)
             os.close(fd)  # closing releases the lock
 
     @contextmanager
@@ -322,7 +363,8 @@ class Store:
                 break
             except LatticeDatabaseLockedError:
                 if time.monotonic() > deadline:
-                    raise RLError("LOCKED", f"database is held by another process: {self.path}") from None
+                    raise RLError("LOCKED", f"the database stayed open in another process for {OPEN_RETRY_S:.0f}s, "
+                                            f"one that does not take the research store's lock: {self.path}") from None
                 time.sleep(0.05)
         try:
             yield db

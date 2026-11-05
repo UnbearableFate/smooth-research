@@ -578,6 +578,25 @@ def test_a_run_from_a_commit_is_checked_against_that_commit(project, fakes, tmp_
     assert elsewhere["status"] == "unchecked" and "not in this repository" in elsewhere["reason"]
 
 
+def test_a_review_against_a_base_commit_has_the_diff_beside_its_package(project, fakes, tmp_path):
+    import subprocess
+
+    def git(*args):
+        return subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True, text=True).stdout.strip()
+
+    code(tmp_path)
+    git("init", "-q")
+    git("add", "src", "configs")
+    git("-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-qm", "base")
+    base = git("rev-parse", "HEAD")
+    code(tmp_path, body="def f(x):\n    return 2 * x\n")
+    rv = request(project, diff_base=base)["id"]
+    packages = tmp_path / "research" / "packages"
+    diff = (packages / f"{rv}.diff").read_text()
+    assert "-    return x\n+    return 2 * x\n" in diff and "src/model.py" in diff
+    assert f"## Diff against {base}\n\n{packages / f'{rv}.diff'}" in (packages / f"{rv}.request.md").read_text()
+
+
 def another_experiment(project, title):
     return research.add_experiment(project, title, "q?", ["H-0001"], "E1", intervention="i", comparator="c",
                                    metric="acc", scope="s", outcome_actions="a", budget="b", stop="c")["id"]

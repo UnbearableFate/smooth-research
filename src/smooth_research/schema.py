@@ -166,7 +166,10 @@ RELATIONS: dict[str, Relation] = {
     "motivated_by": Relation("MOTIVATED_BY", ("Hypothesis", "Experiment"), ("Paper", "Ticket", "Evidence", "Decision")),
     "nearest_work": Relation("NEAREST_WORK", ("Hypothesis",), ("Paper",), revision_bound=True),
     "cites": Relation("CITES", ("Hypothesis", "Experiment", "Evidence", "Decision"), ("Paper",), revision_bound=True),
-    "based_on": Relation("BASED_ON", ("Decision",), ("Evidence", "Paper", "Ticket", "Result", "Experiment")),
+    # a decision may rest on an earlier one (a stage decision on the last): only a reference, so a re-check flag
+    # does not pass along it (research.recheck_dependents)
+    "based_on": Relation("BASED_ON", ("Decision",), ("Evidence", "Paper", "Ticket", "Result", "Experiment", "Decision"),
+                         acyclic=True),
     "decides": Relation("DECIDES", ("Decision",), ("Hypothesis", "Experiment", "Task"), revision_bound=True),
     "supersedes": Relation("SUPERSEDES", ("Hypothesis", "Experiment", "Decision", "Evidence", "Result", "Usage"),
                            ("Hypothesis", "Experiment", "Decision", "Evidence", "Result", "Usage"), acyclic=True),

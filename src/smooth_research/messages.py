@@ -73,14 +73,20 @@ def notice(store: Store, msg: dict | None) -> str:
     return f" (notice sent to {target})" if target else ""
 
 
-def inbox(store: Store, role: str, ack: bool = False, include_all: bool = False) -> dict:
-    """Messages to this role after its cursor. --ack advances the cursor; it never sends anything."""
+def inbox(store: Store, role: str, ack: bool | str = False, include_all: bool = False) -> dict:
+    """Messages to this role after its cursor. --ack advances the cursor over the messages it returns; --ack MSG-x
+    only up to that message, so what arrived after a reading is not acknowledged unread. It never sends anything."""
     cursor_id = f"CUR-{role}"
     if ack:
         with store.write() as tx:
             cursor = tx.get(cursor_id, "Cursor")
             position = cursor["position"] if cursor else 0
             msgs = [m for m in tx.all("Message", to_role=role) if m["seq"] > position]
+            if isinstance(ack, str):
+                upto = tx.require(ack, "Message")
+                if upto["to_role"] != role:
+                    raise RLError("INVALID", f"{ack} is a message to {upto['to_role']}, not to {role}")
+                msgs = [m for m in msgs if m["seq"] <= upto["seq"]]
             if msgs:
                 top = max(m["seq"] for m in msgs)
                 if cursor:

@@ -19,10 +19,14 @@ from .util import RLError, atomic_write, digest_file
 FORMAT = "smooth-research-snapshot/1"
 
 
-def export(store: Store, out: str | None = None) -> dict:
+def export(store: Store, out: str | None = None, records_only: bool = False) -> dict:
+    """A snapshot directory: snapshot.json (records, relations and meta from one read), the sealed documents and
+    the configuration. records_only prints what snapshot.json would hold instead, and writes nothing."""
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    target = Path(out) if out else store.project.dir("snapshots") / stamp
-    if target.exists() and any(target.iterdir()):
+    if records_only and out:
+        raise RLError("INVALID", "--records-only prints the records; it writes no directory (--out)")
+    target = Path(out) if out else None if records_only else store.project.dir("snapshots") / stamp
+    if not records_only and target.exists() and any(target.iterdir()):
         raise RLError("CONFLICT", f"snapshot directory {target} is not empty")
     with store.read() as tx:  # one read transaction: nodes, edges and meta from the same state
         meta = tx.meta()
@@ -33,6 +37,10 @@ def export(store: Store, out: str | None = None) -> dict:
                  for r in tx.q(f"MATCH (a:{label})-[e]->(b) RETURN a.id AS s, labels(a) AS sl, type(e) AS t, "
                                "b.id AS d, labels(b) AS dl, properties(e) AS p")]
         revisions = tx.all("DocRevision")
+    payload = {"format": FORMAT, "exported_at": stamp, "schema_version": SCHEMA_VERSION, "meta": meta,
+               "nodes": nodes, "edges": edges}
+    if records_only:
+        return {"snapshot": payload, "summary": json.dumps(payload, ensure_ascii=False, indent=1)}
     objects = target / "objects"
     objects.mkdir(parents=True, exist_ok=True)
     for rev in revisions:
@@ -40,8 +48,6 @@ def export(store: Store, out: str | None = None) -> dict:
         if source.is_file() and not (objects / source.name).exists():
             shutil.copyfile(source, objects / source.name)
     shutil.copyfile(store.project.root / CONFIG_NAME, target / CONFIG_NAME)
-    payload = {"format": FORMAT, "exported_at": stamp, "schema_version": SCHEMA_VERSION, "meta": meta,
-               "nodes": nodes, "edges": edges}
     atomic_write(target / "snapshot.json", json.dumps(payload, ensure_ascii=False, indent=1).encode("utf-8"))
     count = sum(len(v) for v in nodes.values())
     return {"path": str(target), "summary": f"snapshot {store.project.rel(target)}: {count} records, {len(edges)} "

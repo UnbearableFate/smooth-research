@@ -39,6 +39,27 @@ def test_runspec_refuses_mutable_code_versions_and_guessing(project):
     assert ok["attempt"].startswith("ATT-")
 
 
+def test_a_contract_that_lists_its_arms_takes_runs_only_under_them(project):
+    with project.read() as tx:
+        path = project.project.abs(tx.require("E-0001")["contract_path"])
+    draft = path.read_text()
+    path.write_text(draft.replace("---\n", "---\narms: [wd, no-wd]\nmetrics: [acc]\n", 1))
+    objects = set(project.project.objects_dir.iterdir())
+    with pytest.raises(RLError) as exc:
+        register(project, spec={**SPEC, "arm": "wd-interventions"})
+    assert exc.value.code == "INVALID" and exc.value.message == (
+        "arm 'wd-interventions' is not one of the arms of EH1/1's contract (wd, no-wd): register the run under one "
+        "of them, or add it to arms: in research/experiments/E-0001.md (a new contract revision)")
+    with project.read() as tx:
+        assert tx.all("Run") == [] and tx.require("E-0001")["revision"] == 0
+    assert set(project.project.objects_dir.iterdir()) == objects  # refused before anything was prepared to seal
+    assert register(project)["attempt"] == "ATT-0001-1"
+    assert register(project, request_id="r2", spec={**SPEC, "arm": "no-wd"})["attempt"] == "ATT-0002-1"
+    path.write_text(draft.replace("---\n", "---\narms: wd\n", 1))
+    with pytest.raises(RLError, match="arms: in research/experiments/E-0001.md is a list of arm names"):
+        register(project, request_id="r3")
+
+
 def test_registration_seals_the_contract_and_later_edits_are_new_revisions(project):
     register(project)
     with project.read() as tx:
@@ -121,6 +142,43 @@ def test_namespaces_keep_identical_external_ids_apart_and_attempts_can_share_one
         runs.record(project, obs(execution_ref=ref_b, at="2026-10-30T05:00:00Z"))
 
 
+def test_a_job_id_recorded_by_mistake_is_corrected_and_a_re_execution_is_still_a_new_attempt(project):
+    register(project)
+    guessed, real, rerun = ({"kind": "hpc_job", "executor_namespace": "miyabi-g-pbs", "opaque_id": job}
+                            for job in ("3786622.opbs", "3786487.opbs", "3790000.opbs"))
+    runs.record(project, obs(state="queued", execution_ref=guessed, record_id="guess"))
+    runs.record(project, obs(state="queued", at="2026-10-30T00:00:05Z", execution_ref=guessed, record_id="again"))
+    with pytest.raises(RLError) as exc:
+        runs.record(project, obs(state="queued", at="2026-10-30T00:00:10Z", execution_ref=real))
+    assert exc.value.code == "CONFLICT" and "ATT-0001-1 is bound to X-0001 (miyabi-g-pbs/3786622.opbs). If that id " \
+        "was recorded by mistake, correct the observation that brought it: rl run record --attempt ATT-0001-1 " \
+        "--correction-of guess --exec-id <the right id>" in exc.value.message
+    assert "If the job ran again, a re-execution is a new attempt" in exc.value.message
+    with pytest.raises(RLError, match="guess brought that binding, not again, so this correction cannot move it"):
+        runs.record(project, obs(state="queued", at="2026-10-30T00:00:10Z", execution_ref=real, correction_of="again",
+                                 note="the submit printed 3786487.opbs"))
+    fixed = runs.record(project, obs(state="queued", at="2026-10-30T00:00:10Z", execution_ref=real,
+                                     correction_of="guess", note="the submit printed 3786487.opbs", record_id="fix"))
+    assert fixed["effect"] == "correction" and fixed["execution_ref"] == "X-0002"
+    assert fixed["summary"].endswith("; bound to X-0002 now, in place of X-0001")
+    with project.read() as tx:
+        assert [(e["id"], e["observation"]) for e in tx.out("ATT-0001-1", "bound_to")] == [("X-0002", "fix")]
+        assert [e["summary"] for e in tx.all("Event", entity_id="ATT-0001-1") if e["type"] == "run.rebound"] == \
+            ["X-0001 -> X-0002: fix corrects guess"]
+    done = runs.record(project, obs(state="ended", outcome="success", at="2026-10-30T01:00:00Z", execution_ref=real))
+    assert done["effect"] == "applied"
+    with pytest.raises(RLError, match="fix brought that binding, not guess"):  # moved once: the old proof is spent
+        runs.record(project, obs(state="ended", outcome="success", at="2026-10-30T02:00:00Z", execution_ref=rerun,
+                                 correction_of="guess", note="ran again"))
+    register(project, request_id="r2", spec={**SPEC, "seed": 1})
+    runs.record(project, obs(attempt="ATT-0002-1", state="queued", record_id="old"))
+    with project.write() as tx:  # a binding recorded before rl kept the observation that brought it
+        tx.link("bound_to", "ATT-0002-1", "X-0001")
+    with pytest.raises(RLError, match="that binding was recorded before rl kept the observation that brought it"):
+        runs.record(project, obs(attempt="ATT-0002-1", state="queued", at="2026-10-30T00:00:10Z", execution_ref=real,
+                                 correction_of="old", note="the submit printed 3786487.opbs"))
+
+
 def test_re_execution_is_a_new_attempt_and_keeps_the_failure(project):
     register(project)
     runs.record(project, obs(state="ended", outcome="failed"))
@@ -161,6 +219,9 @@ def test_a_result_that_names_another_arm_or_seed_is_kept_but_not_usable(project)
     wrong = runs.import_result(project, "ATT-0001-1", {"status": "complete", "arm": "control", "seed": 99,
                                                        "metrics": {"acc": 0.9}}, "w1")
     assert [m["field"] for m in wrong["mismatches"]] == ["arm", "seed"] and "differs from RunSpec" in wrong["summary"]
+    assert "the run was registered as arm 'wd' and the result says 'control': if the code is right, register a new " \
+           "run with --arm control and run it again; if the registration is right, fix the code to write arm 'wd'" \
+           in wrong["summary"]
     with pytest.raises(RLError, match="cannot be confirmatory"):
         research.add_evidence(project, "wd wins", "confirmatory", "valid", supports=["H-0001"],
                               results=[wrong["result"]])

@@ -447,3 +447,19 @@ def test_local_job_executor_is_not_recorded_as_a_shell_pid(project, tmp_path):
     text = compute.steps(store)["summary"]
     assert "Submit with MCP server batch" in text and "--exec-kind hpc_job" in text
     assert "local_process" not in text and "--exec-id <pid>" not in text
+
+
+def test_a_job_id_typed_by_hand_for_an_executor_resource_points_to_its_export(project, tmp_path, rl):
+    store = configure(tmp_path, {"miyabi": {"host": "miyabi-g", "connect": "pi-env-mcp:miyabi-g",
+                                            "jobs": "mcp:miyabi-pbs", "workspace": "/work/g/u/demo"},
+                                 "box": {"kind": "local"}}, default="box")
+    remote = runs.register(store, "E-0001", SPEC, "r1", no_review="smoke", resource="miyabi")["attempt"]
+    here = runs.register(store, "E-0001", {**SPEC, "seed": 1}, "r2", no_review="smoke", resource="box")["attempt"]
+    code, out, _ = rl("run", "record", "--attempt", remote, "--source", "agent", "--state", "queued",
+                      "--exec-kind", "hpc_job", "--exec-namespace", "miyabi-g-pbs", "--exec-id", "3786622.opbs")
+    assert code == 0 and f"warning: {remote} runs on miyabi, whose jobs mcp:miyabi-pbs submits: take the job id " \
+        "from its export (rl run record --observation @<export.jsonl>) rather than typing it; a wrong one is " \
+        "corrected with --correction-of the observation that recorded it" in out
+    code, out, _ = rl("run", "record", "--attempt", here, "--source", "shell", "--state", "running",
+                      "--exec-namespace", "box:boot-1", "--exec-id", "4242")
+    assert code == 0 and "warning" not in out

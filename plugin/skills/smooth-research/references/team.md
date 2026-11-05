@@ -39,7 +39,7 @@ own). A host is low when a window has 10% or less left, or 20% or less on your o
 | Reviewer for a ticket | `{{rl}} agent open --role reviewer --ticket RV-x` |
 | One advisor per advice ticket | `{{rl}} agent open --role advisor --ticket AD-x` |
 | A new assignment | `{{rl}} agent assign <name> --task T-y` or `--ticket RV-y` |
-| A message | `{{rl}} agent tell <name> "<text>"` |
+| A message | `{{rl}} agent tell <name> "<text>"`, or `--file <path>` for text with quotes or backticks |
 | Reuse for related work | `{{rl}} agent reset <name> --compact` (keeps a summary) |
 | Reuse for unrelated work | `{{rl}} agent reset <name> --clear` (a fresh conversation) |
 | Close | `{{rl}} agent close <name>` (`--remove-worktree` once its branch is merged) |

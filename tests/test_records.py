@@ -134,6 +134,32 @@ def test_inbox_cursor_and_repeated_message_delivery(project):
     assert len(messages.inbox(project, "coordinator")["messages"]) == 0  # acknowledging sends nothing
 
 
+def test_acknowledging_up_to_a_message_leaves_the_later_ones_unread(project, rl):
+    ids = [messages.send(project, "NOTE", "coordinator", "researcher", f"note {i}")["id"] for i in range(3)]
+    elsewhere = messages.send(project, "NOTE", "researcher", "coordinator", "for the coordinator")["id"]
+    code, out, _ = rl("inbox", "--role", "researcher", "--ack", ids[1])  # read two, a third arrived meanwhile
+    assert code == 0 and out.startswith("2 message(s) for researcher (acknowledged)") and "note 2" not in out
+    assert [m["id"] for m in messages.inbox(project, "researcher")["messages"]] == [ids[2]]
+    with pytest.raises(RLError, match=f"{elsewhere} is a message to coordinator, not to researcher"):
+        messages.inbox(project, "researcher", ack=elsewhere)
+    assert messages.inbox(project, "researcher", ack=ids[0])["messages"] == []  # already acknowledged: no change
+    code, out, _ = rl("inbox", "--ack", "--role", "researcher")  # without an id: what it returns, as before
+    assert code == 0 and out.startswith("1 message(s) for researcher (acknowledged)")
+    assert messages.inbox(project, "researcher")["messages"] == []
+
+
+def test_a_message_told_from_a_file_keeps_its_text_as_written(project, rl, tmp_path):
+    text = "RV-0001 answered: 1 medium finding.\nIt says `loss.mean()` should be \"loss.sum() / n\"; check $HOME.\n"
+    (tmp_path / "msg.md").write_text(text, encoding="utf-8")
+    code, out, _ = rl("agent", "tell", "researcher-1", "--file", "msg.md", "--from", "coordinator")
+    assert code == 0 and "NOTE coordinator -> researcher-1" in out
+    assert messages.inbox(project, "researcher-1")["messages"][0]["text"] == text.strip()
+    code, _, err = rl("agent", "tell", "researcher-1", "hello", "--file", "msg.md")
+    assert code == 1 and "as text or with --file, not both" in err
+    code, _, err = rl("agent", "tell", "researcher-1")
+    assert code == 1 and "the message text is empty" in err
+
+
 def test_a_new_coordinator_session_supersedes_the_old_one(project):
     old = tasks.start_session(project, "coordinator", "claude", "sess-a", model_observed="claude-sonnet-5-5")
     new = tasks.start_session(project, "coordinator", "codex", "thread-b", model_observed="gpt-6-astra")
@@ -250,6 +276,34 @@ def test_decisions_need_reopen_conditions_and_explicit_reopening(project):
                     evidence_scope="exploratory signal on toy data")
 
 
+def test_a_decision_takes_its_reason_from_its_file_and_may_rest_on_an_earlier_one(project, tmp_path, rl):
+    (tmp_path / "why.md").write_text("\n## Pause: no signal at three seeds\n\nThe details.\n", encoding="utf-8")
+    first = research.decide(project, ["H-0001"], "pause", None, reopen_condition="a better writer exists",
+                            rationale_file="why.md")
+    with pytest.raises(RLError, match="give the decision's reason"):
+        research.decide(project, ["H-0001"], "reopen", "  ")
+    (tmp_path / "blank.md").write_text("#\n\n", encoding="utf-8")
+    with pytest.raises(RLError, match="give the decision's reason"):
+        research.decide(project, ["H-0001"], "reopen", "", rationale_file="blank.md")
+    ev = research.add_evidence(project, "wd wins at three seeds", "screening", "valid", supports=["H-0001"])["id"]
+    code, out, _ = rl("decide", "--targets", "H-0001", "--action", "reopen", "--rationale", "seeds agree",
+                      "--rationale-file", "why.md", "--based-on", first["id"], "--based-on", ev)
+    assert code == 0
+    second = out.split()[0]
+    with project.read() as tx:
+        d1, d2 = tx.require(first["id"]), tx.require(second)
+        assert (d1["rationale"], d2["rationale"]) == ("Pause: no signal at three seeds", "seeds agree")
+        assert d1["rationale_ref"] and sorted(e["id"] for e in tx.out(second, "based_on")) == sorted([first["id"], ev])
+    with pytest.raises(RLError, match="cycle"):  # a reference, never a loop
+        research.link(project, first["id"], "based_on", second)
+    research.link(project, first["id"], "based_on", ev)
+    third = research.decide(project, ["H-0001"], "continue", "go on", based_on=[second])["id"]
+    flagged = research.set_evidence(project, ev, "invalid", "wrong split")
+    with project.read() as tx:
+        assert [bool(tx.require(d).get("needs_recheck")) for d in (first["id"], second, third)] == [True, True, False]
+    assert sorted(flagged["flagged"]) == sorted(["H-0001", first["id"], second])
+
+
 def test_dependency_and_derivation_cycles_are_refused(project):
     research.add_hypothesis(project, "child", "x", derived_from=["H-0001"])
     with pytest.raises(RLError, match="cycle"):
@@ -327,6 +381,65 @@ def test_export_restore_and_resume_without_any_session(project, tmp_path):
         assert len(tx.all("Observation")) == len(tx0.all("Observation"))
     with pytest.raises(RLError):
         snapshot.restore(out["path"], str(tmp_path / "restored"))
+
+
+def test_export_of_the_records_only_prints_them_and_writes_nothing(project, rl, tmp_path):
+    def files():  # the database and its lock live in research/state
+        return sorted(p.relative_to(tmp_path) for p in tmp_path.rglob("*") if "state" not in p.parts)
+
+    before = files()
+    code, out, _ = rl("export", "--records-only")
+    assert code == 0
+    payload = json.loads(out)
+    assert payload["format"] == snapshot.FORMAT and [n["id"] for n in payload["nodes"]["Hypothesis"]] == ["H-0001"]
+    code, out, _ = rl("--json", "export", "--records-only")
+    assert code == 0 and json.loads(out)["nodes"] == payload["nodes"]  # the records themselves, not a string of them
+    assert files() == before
+    code, _, err = rl("export", "--records-only", "--out", "snap")
+    assert code == 1 and "writes no directory" in err and not (tmp_path / "snap").exists()
+
+
+def test_hypotheses_and_evidence_are_listed_by_label_and_filtered(project, rl):
+    research.add_hypothesis(project, "LN helps", "layer norm raises accuracy", "toy")
+    research.add_hypothesis(project, "WD on wide nets", "the gain grows with width", "toy", derived_from=["H-0001"])
+    research.decide(project, ["H-0002"], "pause", "later", reopen_condition="H1 settles")
+    listed = research.list_hypotheses(project)
+    assert [h["label"] for h in listed["hypotheses"]] == ["H1", "H1.1", "H2"]
+    assert listed["summary"].splitlines()[1] == "H1.1@1 [active/untested] WD on wide nets"
+    assert research.list_hypotheses(project, disposition="paused")["summary"] == "H2@1 [paused/untested] LN helps"
+    assert research.list_hypotheses(project, status="supported")["summary"] == "no supported hypotheses"
+    good = research.add_evidence(project, "wd wins at three seeds", "screening", "valid", supports=["H-0001"])["id"]
+    bad = research.add_evidence(project, "ln does nothing", "screening", "valid", challenges=["H-0002"])["id"]
+    research.set_evidence(project, bad, "invalid", "wrong split")
+    code, out, _ = rl("evidence", "list")
+    assert code == 0 and out.splitlines()[:2] == [f"{good} [screening/valid] wd wins at three seeds (supports H1@1)",
+                                                  f"{bad} [screening/invalid] ln does nothing (challenges H2@1)"]
+    assert research.list_evidence(project, validity="invalid")["evidence"][0]["id"] == bad
+    assert research.list_evidence(project, level="confirmatory")["summary"] == "no confirmatory evidence"
+    code, out, _ = rl("--json", "hypothesis", "list", "--disposition", "active")
+    assert code == 0 and [h["id"] for h in json.loads(out)["hypotheses"]] == ["H-0001", "H-0003"]
+
+
+def test_a_command_that_waits_in_vain_for_the_store_says_who_holds_it(project, monkeypatch):
+    import socket
+    from smooth_research import store as store_module
+    monkeypatch.setattr(store_module, "LOCK_TIMEOUT_S", 0.2)
+    with project._lock(exclusive=True):  # a writer: this process, noted in the lock file
+        with pytest.raises(RLError) as exc:
+            research.add_hypothesis(project, "x", "y", "toy")
+        with pytest.raises(RLError) as read_exc:
+            research.list_hypotheses(project)
+    assert exc.value.code == "LOCKED" and "the research store stayed busy: waited " in exc.value.message
+    assert f"s to write; held by process {os.getpid()} on {socket.gethostname()} (rl " in exc.value.message
+    assert "Nothing was written; run the command again (it is not retried" in exc.value.message
+    assert f"s to read; held by process {os.getpid()} on" in read_exc.value.message
+    research.add_hypothesis(project, "x", "y", "toy")  # the lock is free again, and its writer note is cleared
+    with project._lock(exclusive=False):  # readers only
+        with pytest.raises(RLError) as exc:
+            research.add_hypothesis(project, "z", "y", "toy")
+    assert "no writer holds it, so readers do" in exc.value.message
+    with project.read() as tx:
+        assert [h["title"] for h in tx.all("Hypothesis")][-1] == "x"
 
 
 def test_context_packs_respect_their_budget_and_list_what_they_omit(project):

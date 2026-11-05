@@ -183,7 +183,8 @@ commands. Submit only within the user's authorized resources and budget.
    submission must be reconciled using the same key before retrying; a new attempt gets a new key.
 5. Record observed scheduler facts. Import a compatible observation export with
    `{{rl}} run record --observation @<export.jsonl>`; otherwise translate verified facts into the observation
-   format below. Use `hpc_job`, the executor namespace and the full job id, never the login process PID.
+   format below. Use `hpc_job`, the executor namespace and the full job id, never the login process PID; take the
+   id from the executor's output, never from memory (`{{rl}} run record --exec-id` reminds you on such a resource).
    Queued is not running. Import measured usage once; unknown usage is not zero.
 6. The coordinator owns waiting (host.md). Configure the executor's completion notification to reach the
    coordinator, start any returned listener/daemon according to that integration's instructions, then the
@@ -205,6 +206,10 @@ commands. Submit only within the user's authorized resources and budget.
 `experiment_ref` and `protocol_ref` (the sealed contract). Branch names, HEAD and short hashes are refused.
 Same `--request-id` with the same content returns the earlier record; with different content it is refused.
 
+A contract may list its arms in its front matter (`arms: [wd1e-2, no-wd]`): `run register` then refuses any other
+arm name, so a misspelt arm cannot start a run that the tables keep apart. To run another arm, add it to the list
+(a new contract revision). `metrics: [test_acc, train_loss]` names the metrics the tables show.
+
 ## Observation (flags, or `--observation` with one JSON object, a JSON array or JSON Lines)
 
 ```json
@@ -221,7 +226,11 @@ the event time the source itself reports, kept as evidence. The attempt's state 
 observations: within one source the `source_sequence` orders them, otherwise `observed_at`; an older
 `running` never overrides a recorded end; a failed lookup after the end only adds an issue; conflicting ends
 mark the attempt for checking. Correct a wrong record explicitly with `--correction-of <record_id> --note
-"<evidence>"`. Several attempts may share one execution ref (one job running several seeds). A batch is
+"<evidence>"`. An attempt is bound to one execution: the first observation with an execution ref binds it. A job
+id recorded by mistake is corrected with `--correction-of <the observation that bound it> --exec-id <the right
+id> --note ..`, which moves the binding (an event records the move); any other observation naming another job is
+refused, since a re-execution is a new attempt. Several attempts may share one execution ref (one job running
+several seeds). A batch is
 recorded in order; records already received are skipped, so re-sending a whole export is safe, and flags such
 as `--attempt` fill in or override every record.
 
@@ -262,6 +271,10 @@ several `--attempts`; never split it into invented per-run numbers. Different un
   (comparator), depends_on, combines, tests, supports, challenges, motivated_by, nearest_work, cites,
   based_on, supersedes. Science source, code origin and comparator are separate on purpose.
 - Pause needs `--reopen-condition`. A paused or retired hypothesis is reopened only by `--action reopen`.
+- `{{rl}} decide` keeps a short reason in the record and reports: `--rationale "<reason>"`, or, with only
+  `--rationale-file <file>` (sealed), the file's first line of text. `--based-on` may also name earlier decisions
+  (a stage decision on the route decisions it sums up); that is a reference, so a re-check flag on the earlier
+  decision does not pass to the later one, and the references may not form a cycle.
 - Key conclusions (`--set-evidence-status supported|challenged`, `--action stop`, a stage `recommend_formal`):
   `{{rl}} review conclusion --target H-x --proposal .. --author-model ..` first, then `{{rl}} decide ...
   --based-on EV-x,RV-x` (skill research-review). A review covers the hypotheses it targets: a decision on H-x
@@ -286,7 +299,8 @@ several `--attempts`; never split it into invented per-run numbers. Different un
   task your role already owns, for example after a WAIT),
   `task handoff .. --doc research/tasks/T-x-handoff.md` (the task is then ready to claim again). Only the
   owner updates a task, and not after the coordinator accepted or stopped it (`task reopen` gives it back).
-- Coordinator: `{{rl}} inbox --role coordinator` (add `--ack` after reading), `{{rl}} task accept|stop|reopen T-x
+- Coordinator: `{{rl}} inbox --role coordinator`; after reading, `--ack MSG-x` with the last message you read
+  (plain `--ack` acknowledges whatever it returns, also what arrived since you read), `{{rl}} task accept|stop|reopen T-x
   --reason ..`. Stopping a task does not stop external runs: stop them with your tool and record that.
 - Rotating the coordinator: write a handoff note, end your session (`{{rl}} session end S-x`); the new session
   registers as coordinator and starts from `{{rl}} resume`.
@@ -303,8 +317,14 @@ novelty proof.
 ## Views, backups, integrity
 
 `{{rl}} status`, `{{rl}} resume`, `{{rl}} graph`, `{{rl}} show <id>` (a DOC id prints the sealed text),
-`{{rl}} history [id]`, `{{rl}} report` (research/reports/), `{{rl}} view` (docs/research.html, below), `{{rl}} export`
-(consistent snapshot into research/snapshots/), `{{rl}} restore <snapshot> --into <new dir>`, `{{rl}} doctor`.
+`{{rl}} history [id]`, `{{rl}} hypothesis list [--status ..] [--disposition ..]`, `{{rl}} evidence list [--validity ..]
+[--level ..]` (with `--json`, the records), `{{rl}} report` (research/reports/), `{{rl}} view` (docs/research.html,
+below), `{{rl}} export` (consistent snapshot into research/snapshots/; `--records-only` prints its records as JSON and
+writes nothing), `{{rl}} restore <snapshot> --into <new dir>`, `{{rl}} doctor`.
+
+A command that finds the records busy waits up to 60 s, then stops with LOCKED, saying how long it waited and which
+process held them. Nothing was written: run it again. It is not retried for you, since running a command twice can
+record twice.
 
 ## The research page
 

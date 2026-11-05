@@ -68,7 +68,7 @@ def register(store: Store, experiment: str, spec: dict, request_id: str, run_id:
     request = {"experiment": experiment, "spec": spec, "run": run_id}
     payload = digest_json({**request, "resource": res.name} if res else request)
     # a new run is a formal reference: seal the contract (an attempt of a run uses the run's sealed revision)
-    prep = None if run_id else prepare_contract(store, experiment)
+    prep = None if run_id else prepare_contract(store, experiment, spec.get("arm"))
     check = code_coverage(store, experiment, spec["code_ref"], list(reviews), no_review)
     with store.write() as tx:
         previous = tx.request("run.register", request_id, payload)
@@ -293,7 +293,11 @@ def _project(att: dict, obs: dict, received: str) -> tuple[str, dict, list[str]]
     return "applied", changes, []
 
 
-def _bind(tx: Tx, attempt: str, ref: dict) -> str:
+def _bind(tx: Tx, attempt: str, ref: dict, record_id: str, correction_of: str | None) -> tuple[str, str | None]:
+    """Bind the attempt to the execution its observation names: (the execution ref, the one it replaced). The
+    binding edge keeps the observation that brought it. A correction of exactly that observation moves the binding
+    (a job id recorded by mistake); anything else naming another execution is a conflict, since a re-execution is a
+    new attempt."""
     for key in ("kind", "executor_namespace", "opaque_id"):
         if not ref.get(key):
             raise RLError("INVALID", f"execution_ref needs {key}")
@@ -311,11 +315,27 @@ def _bind(tx: Tx, attempt: str, ref: dict) -> str:
                               "opaque_id": str(ref["opaque_id"]), "locator": ref.get("locator")})
     bound = tx.out(attempt, "bound_to")
     if bound and bound[0]["id"] != xid:
-        raise RLError("CONFLICT", f"{attempt} is bound to {bound[0]['id']}; a re-execution is a new attempt "
-                                  "(rl run register --run <RUN> --request-id <new>)")
+        old, by = tx.require(bound[0]["id"], "ExecRef"), bound[0].get("observation")
+        if correction_of and correction_of == by:
+            tx.unlink("bound_to", attempt, old["id"])
+            tx.link("bound_to", attempt, xid, observation=record_id)
+            tx.event("run.rebound", attempt, f"{old['id']} -> {xid}: {record_id} corrects {correction_of}")
+            return xid, old["id"]
+        where = f"{old['id']} ({old['executor_namespace']}/{old['opaque_id']})"
+        new = "a re-execution is a new attempt (rl run register --run <RUN> --request-id <new>)"
+        if correction_of:
+            why = (f"{by} brought that binding, not {correction_of}" if by else
+                   "that binding was recorded before rl kept the observation that brought it")
+            raise RLError("CONFLICT", f"{attempt} is bound to {where}; {why}, so this correction cannot move it. If "
+                                      f"the job ran again, {new}")
+        fix = (f"rl run record --attempt {attempt} --correction-of {by} --exec-id <the right id> --note "
+               f"\"<how you know>\"" if by else "(that binding was recorded before rl kept the observation that "
+               "brought it, so it cannot be moved)")
+        raise RLError("CONFLICT", f"{attempt} is bound to {where}. If that id was recorded by mistake, correct the "
+                                  f"observation that brought it: {fix}. If the job ran again, {new}")
     if not bound:
-        tx.link("bound_to", attempt, xid)
-    return xid
+        tx.link("bound_to", attempt, xid, observation=record_id)
+    return xid, None
 
 
 def record(store: Store, obs: dict) -> dict:
@@ -355,7 +375,7 @@ def record(store: Store, obs: dict) -> dict:
             target = tx.require(obs["correction_of"], "Observation")
             if target["attempt_id"] != att["id"]:
                 raise RLError("INVALID", f"{obs['correction_of']} belongs to {target['attempt_id']}")
-        xid = _bind(tx, att["id"], ref) if ref else None
+        xid, replaced = _bind(tx, att["id"], ref, obs["record_id"], obs.get("correction_of")) if ref else (None, None)
         received = now_utc()
         effect, changes, issues = _project(att, obs, received)
         if issues:
@@ -376,7 +396,26 @@ def record(store: Store, obs: dict) -> dict:
         tx.event("run.record", att["id"], f"{obs['record_id']} {obs['execution_state']}/{obs['outcome']} -> {effect}")
     return {"record_id": obs["record_id"], "effect": effect, "attempt": brief(att), "execution_ref": xid,
             "usage": usage, "warnings": warnings,
-            "summary": f"{obs['record_id']} {effect}; {brief(att)}" + (f"; {issues[0]}" if issues else "")}
+            "summary": f"{obs['record_id']} {effect}; {brief(att)}" + (f"; {issues[0]}" if issues else "")
+                       + (f"; bound to {xid} now, in place of {replaced}" if replaced else "")}
+
+
+def executor_hint(store: Store, attempt: str) -> str | None:
+    """For an attempt on a resource whose jobs an external executor submits (jobs: mcp:.. or skill:..): job ids
+    come from that executor's export, not from memory."""
+    with store.read() as tx:
+        placed = tx.require(attempt, "Attempt").get("resource") or {}
+    if not placed.get("name"):
+        return None
+    try:
+        res = compute.resource(store.project, placed["name"])
+    except RLError:
+        return None
+    if not res.jobs.startswith(("mcp:", "skill:")):
+        return None
+    return (f"{attempt} runs on {res.name}, whose jobs {res.jobs} submits: take the job id from its export (rl run "
+            "record --observation @<export.jsonl>) rather than typing it; a wrong one is corrected with "
+            "--correction-of the observation that recorded it")
 
 
 # -- results --------------------------------------------------------------------------------------------------
@@ -475,6 +514,11 @@ def import_result(store: Store, attempt: str, manifest: dict, request_id: str) -
         notes.append("differs from RunSpec in " + ", ".join(m["field"] for m in mismatches)
                      + ": kept, but not usable as the pre-specified comparison (a manifest copies RunSpec fields "
                        "exactly or leaves them out)")
+    arm = next((m for m in mismatches if m["field"] == "arm"), None)
+    if arm:
+        notes.append(f"the run was registered as arm {arm['expected']!r} and the result says {arm['actual']!r}: if the "
+                     f"code is right, register a new run with --arm {arm['actual']} and run it again; if the "
+                     f"registration is right, fix the code to write arm {arm['expected']!r}")
     if bad:
         notes.append(f"digest mismatch: {', '.join(bad)}")
     if att["execution_state"] != "ended":

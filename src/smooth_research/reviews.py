@@ -541,6 +541,7 @@ def request_review(store: Store, target: str | None, files: list[str], question:
     fp, detail = fingerprint(store, files, list(configs), list(deps), list(ignore_keys), scope or question)
     eligible = _entries(store, "review")
     contracts = prepare_contracts(store, [target] if target else [])  # a targeted experiment's contract is sealed
+    diff = _diff(store, diff_base, detail) if diff_base else ""  # git runs before the write lock is taken
     with store.write() as tx:
         if target:
             tx.require(target)
@@ -556,8 +557,8 @@ def request_review(store: Store, target: str | None, files: list[str], question:
             contract = contract_summary(tx, store, tx.require(target))
         prior = brief(tx.require(recheck_of)) if recheck_of else ""
         path = store.project.dir("packages") / f"{rid}.request.md"
-        path.write_text(_review_package(store, rid, target, question, scope, contract, detail, diff_base, prior),
-                        encoding="utf-8")
+        path.write_text(_review_package(store, rid, target, question, scope, contract, detail, diff_base, diff,
+                                        prior), encoding="utf-8")
         ref = documents.register(tx, documents.prepare(store.project, path, "review_request"))
         tx.create("Ticket", {"id": rid, "kind": "review", "subject": "code",
                              "status": "pending" if eligible else "unavailable",
@@ -585,8 +586,17 @@ def _round_note(store: Store, rid: str) -> str:
     return f"(review {t.get('round_index') or 1} of {REVIEWS_PER_ROUND} in round {t.get('round_of') or rid}) "
 
 
+def _diff(store: Store, diff_base: str, detail: dict) -> str:
+    """The diff of the files under review against diff_base, or nothing when git cannot give it."""
+    try:
+        return subprocess.run(["git", "diff", diff_base, "--", *detail["files"]], cwd=store.project.checkout,
+                              capture_output=True, text=True, timeout=30).stdout
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
 def _review_package(store: Store, rid: str, target: str | None, question: str, scope: str, contract: str,
-                    detail: dict, diff_base: str | None, prior: str) -> str:
+                    detail: dict, diff_base: str | None, diff: str, prior: str) -> str:
     """The question, the method and the paths of the code under review: the reviewer reads the files where they
     are. The request recorded their digests; the answer counts only while they still match."""
     parts = [f"# Review package {rid}\n",
@@ -610,16 +620,10 @@ def _review_package(store: Store, rid: str, target: str | None, question: str, s
                         if detail["ignored_keys"] else ""))
     if detail["deps"]:
         parts.append("\n## Key dependencies\n\n" + listed(detail["deps"]))
-    if diff_base:
-        try:
-            diff = subprocess.run(["git", "diff", diff_base, "--", *detail["files"]], cwd=checkout,
-                                  capture_output=True, text=True, timeout=30).stdout
-        except (OSError, subprocess.SubprocessError):
-            diff = ""
-        if diff:
-            path = store.project.dir("packages") / f"{rid}.diff"
-            path.write_text(diff, encoding="utf-8")
-            parts.append(f"\n## Diff against {diff_base}\n\n{path}")
+    if diff:
+        path = store.project.dir("packages") / f"{rid}.diff"
+        path.write_text(diff, encoding="utf-8")
+        parts.append(f"\n## Diff against {diff_base}\n\n{path}")
     parts.append("\n" + REVIEW_PROTOCOL)
     return "\n".join(parts)
 

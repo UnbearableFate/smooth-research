@@ -138,7 +138,8 @@ def cmd_manuscript(args):
 
 
 def cmd_export(args):
-    return snapshot.export(_store(args), args.out)
+    out = snapshot.export(_store(args), args.out, args.records_only)
+    return out["snapshot"] if args.records_only and args.json else out  # --json: the records, not a string of them
 
 
 def cmd_restore(args):
@@ -185,6 +186,8 @@ def cmd_hypothesis(args):
     if args.action == "revise":
         return research.revise_hypothesis(store, args.id, args.reason, args.statement, args.scope, args.title,
                                           args.base_revision, args.statement_file)
+    if args.action == "list":
+        return research.list_hypotheses(store, args.status, args.disposition)
     return research.set_hypothesis(store, args.id, args.reason, args.evidence_status, args.disposition,
                                    args.rechecked)
 
@@ -206,6 +209,8 @@ def cmd_evidence(args):
         return research.add_evidence(store, args.summary, args.level, args.validity, args.scope,
                                      _list(args.supports), _list(args.challenges), _list(args.attempts),
                                      _list(args.results), args.experiment, _list(args.artifacts), args.doc)
+    if args.action == "list":
+        return research.list_evidence(store, args.validity, args.level)
     return research.set_evidence(store, args.id, args.validity, args.reason)
 
 
@@ -241,7 +246,7 @@ def cmd_task(args):
 
 
 def cmd_inbox(args):
-    return messages.inbox(_store(args), args.role, args.ack, args.all)
+    return messages.inbox(_store(args), args.role, args.ack or False, args.all)
 
 
 def cmd_msg(args):
@@ -332,6 +337,8 @@ def cmd_run(args):
                 raise RLError(exc.code, f"observation {n} of {len(items)}: {exc.message} ({n - 1} before it were "
                                         "recorded; re-sending the batch is safe, received records are skipped)",
                               **exc.details) from None
+        if args.exec_id and args.attempt and (hint := runs.executor_hint(store, args.attempt)):
+            out[-1]["warnings"] = [*(out[-1].get("warnings") or []), hint]
         if len(out) == 1:
             return out[0]
         return {"records": out, "summary": "\n".join(r["summary"] for r in out)}
@@ -432,7 +439,10 @@ def cmd_agent(args):
     if a == "assign":
         return agents.assign(store, args.name, args.task, args.ticket)
     if a == "tell":
-        return agents.tell(store, args.to, " ".join(args.text), args.sender, args.task)
+        if args.file and args.text:
+            raise RLError("INVALID", "give the message as text or with --file, not both")
+        text = Path(args.file).read_text(encoding="utf-8") if args.file else " ".join(args.text)
+        return agents.tell(store, args.to, text, args.sender, args.task)
     if a == "reset":
         return agents.reset(store, args.name, "compact" if args.compact else "clear")
     if a == "close":
@@ -567,6 +577,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--title", help="the title of a new draft")
     sp = add("export", cmd_export, "consistent snapshot of records and sealed documents")
     sp.add_argument("--out")
+    sp.add_argument("--records-only", action="store_true",
+                    help="print what snapshot.json would hold (records, relations, meta) and write nothing")
     sp = add("restore", cmd_restore, "rebuild a project from a snapshot into a new directory (records only)")
     sp.add_argument("snapshot")
     sp.add_argument("--into", required=True)
@@ -616,7 +628,7 @@ def build_parser() -> argparse.ArgumentParser:
     s = ss.add_parser("end")
     s.add_argument("id")
 
-    sp = add("hypothesis", cmd_hypothesis, "add, revise or set the status of a hypothesis")
+    sp = add("hypothesis", cmd_hypothesis, "add, revise, set the status of or list hypotheses")
     ss = sp.add_subparsers(dest="action", required=True)
     s = ss.add_parser("add")
     s.add_argument("--title", required=True)
@@ -648,6 +660,9 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--evidence-status", choices=ENUMS["evidence_status"])
     s.add_argument("--disposition", choices=ENUMS["disposition"])
     s.add_argument("--rechecked", action="store_true", help="clear a needs-recheck flag after checking")
+    s = ss.add_parser("list", help="the hypotheses by label (rl --json hypothesis list: the records)")
+    s.add_argument("--status", choices=ENUMS["evidence_status"])
+    s.add_argument("--disposition", choices=ENUMS["disposition"])
 
     sp = add("experiment", cmd_experiment, "create an experiment contract draft or seal it")
     ss = sp.add_subparsers(dest="action", required=True)
@@ -666,7 +681,7 @@ def build_parser() -> argparse.ArgumentParser:
     s = ss.add_parser("seal")
     s.add_argument("id")
 
-    sp = add("evidence", cmd_evidence, "record evidence or change its validity")
+    sp = add("evidence", cmd_evidence, "record evidence, change its validity or list it")
     ss = sp.add_subparsers(dest="action", required=True)
     s = ss.add_parser("add")
     s.add_argument("--summary", required=True)
@@ -684,12 +699,17 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("id")
     s.add_argument("--validity", required=True, choices=ENUMS["validity"])
     s.add_argument("--reason", required=True)
+    s = ss.add_parser("list", help="the evidence and what it supports or challenges (rl --json evidence list: the "
+                                   "records)")
+    s.add_argument("--validity", choices=ENUMS["validity"])
+    s.add_argument("--level", choices=ENUMS["evidence_level"])
 
     sp = add("decide", cmd_decide, "record a route or stage decision")
     sp.add_argument("--targets", action="append", required=True)
     sp.add_argument("--action", required=True, choices=ENUMS["decision_action"])
-    sp.add_argument("--rationale", required=True)
-    sp.add_argument("--based-on", action="append", help="evidence, results, papers or tickets")
+    sp.add_argument("--rationale", help="the short reason, kept in the record and reports (default: the first line "
+                                        "of text of --rationale-file)")
+    sp.add_argument("--based-on", action="append", help="evidence, results, papers, tickets or earlier decisions")
     sp.add_argument("--reopen-condition")
     sp.add_argument("--stage", action="store_true", help="stage delivery: implementation, evidence scope, investment")
     sp.add_argument("--implementation-ready")
@@ -736,7 +756,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = add("inbox", cmd_inbox, "messages for a role; --ack advances the cursor (no reply is sent)")
     sp.add_argument("--role", required=True)
-    sp.add_argument("--ack", action="store_true")
+    sp.add_argument("--ack", nargs="?", const=True, metavar="MSG-x",
+                    help="acknowledge the messages shown; with MSG-x, only up to that message")
     sp.add_argument("--all", action="store_true")
     sp = add("msg", cmd_msg, "send a short message that points to documents")
     sp.add_argument("--type", required=True, choices=ENUMS["message_type"])
@@ -933,7 +954,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--ticket")
     s = ss.add_parser("tell", help="a recorded message to a role or session; its live session gets a notice")
     s.add_argument("to", help="coordinator or a session name")
-    s.add_argument("text", nargs="+")
+    s.add_argument("text", nargs="*")
+    s.add_argument("--file", help="read the message text from this file (no shell quoting)")
     s.add_argument("--from", dest="sender", help="default: this session's name, else coordinator")
     s.add_argument("--task")
     s = ss.add_parser("reset", help="prepare a session for reuse")

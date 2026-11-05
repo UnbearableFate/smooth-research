@@ -299,7 +299,7 @@ compute:
 
 | 常量 | 值 | 含义 |
 |---|---|---|
-| `LOCK_TIMEOUT_S` | 60 秒 | 写入等待写锁的上限，超时报 LOCKED（`store.py`） |
+| `LOCK_TIMEOUT_S` | 60 秒 | 读写等锁的上限，超时报 LOCKED，写明等了多久、锁被哪个进程占着（写入方把自己记在锁文件里）。什么都没写入，不自动重试（`store.py`） |
 | `STALE_AFTER_H` | 6 小时 | 未结束的 attempt 超过这么久没有新观察，描述里会加一句 "stale?" 提示（`runs.py`） |
 | `REVIEWS_PER_ROUND` | 2 | 一轮审查最多几次。第二次后还有中等以上问题，就交给协调者批准或退回（`reviews.py`） |
 | `NOTICE_CHARS` | 600 字符 | 发给 herdr 会话的一行通知里，消息正文最多保留多少字符；完整消息在 `rl inbox`（`herdr.py`） |
