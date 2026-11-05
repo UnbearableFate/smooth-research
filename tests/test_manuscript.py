@@ -34,9 +34,9 @@ def test_the_manuscript_keeps_the_prose_and_refreshes_the_record_blocks(project,
     text = path.read_text(encoding="utf-8")
     assert first["path"] == str(path) and first["format"] == "markdown" and first["to_write"] == SECTIONS
     assert "created docs/manuscript.md" in first["summary"]
-    assert "- H-0001@1 (untested, active) WD helps: weight decay raises test accuracy under 20% noise (scope: toy)" in text
-    assert "### E-0001 WD smoke\n\n- question: does wd beat no wd?\n- intervention: wd" in text
-    assert "E-0001 WD smoke: no runs registered." in text and "## Appendix: records" in text
+    assert "- H1@1 (untested, active) WD helps: weight decay raises test accuracy under 20% noise (scope: toy)" in text
+    assert "### EH1/1 WD smoke\n\n- question: does wd beat no wd?\n- intervention: wd" in text
+    assert "EH1/1 WD smoke: no runs registered." in text and "## Appendix: records" in text
 
     text = text.replace("[write: the problem, why it matters, the hypotheses below and what this work adds]",
                         "Label noise hurts; we test whether weight decay helps.")

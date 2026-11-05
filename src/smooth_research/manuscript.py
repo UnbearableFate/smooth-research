@@ -15,6 +15,7 @@ import time
 from collections import Counter
 from pathlib import Path
 
+from . import labels
 from .project import latex_command
 from .research import contract_front
 from .runs import usage_summary
@@ -200,9 +201,10 @@ def _paper_line(tx: Tx, p: dict) -> str:
 
 def blocks(tx: Tx, store: Store) -> dict[str, list[tuple]]:
     """Each record block as parts: ("heading", text), ("list", items), ("table", caption, header, rows, note) or
-    ("text", text)."""
+    ("text", text); hypotheses and experiments are named by their labels, also in the text of the records."""
     meta, project = tx.meta(), store.project
-    hyps, exps, decisions = tx.all("Hypothesis"), tx.all("Experiment"), tx.all("Decision")
+    hyps, exps, decisions = labels.ordered(tx.all("Hypothesis")), labels.ordered(tx.all("Experiment")), \
+        tx.all("Decision")
     method, results = [], []
     for exp in exps:
         front = contract_front(tx, store, exp)
@@ -233,7 +235,7 @@ def blocks(tx: Tx, store: Store) -> dict[str, list[tuple]]:
                                   or "none"),
         "resource use: " + ("; ".join(f"{t['quantity']:g} {t['unit']} {t['resource_type']} on {t['hardware']} "
                                       f"({t['basis']})" for t in usage["totals"]) or "none recorded")]
-    return {
+    out = {
         "hypotheses": [("list", [f"{h['id']}@{h['revision']} ({h['evidence_status']}, {h['disposition']}) "
                                  f"{h['title']}: {h['statement']}"
                                  + (f" (scope: {h['scope']})" if h.get("scope") else "") for h in hyps])],
@@ -245,6 +247,13 @@ def blocks(tx: Tx, store: Store) -> dict[str, list[tuple]]:
         "decisions": [("list", [decision_line(d, checks.get(d["id"])) for d in decisions])],
         "records": [("list", records)],
     }
+    known = labels.names(tx)
+
+    def named(part):
+        if isinstance(part, str):
+            return labels.relabel(part, known)
+        return [named(p) for p in part] if isinstance(part, list) else part
+    return {block: [tuple(named(p) for p in part) for part in parts] for block, parts in out.items()}
 
 
 def _sections_to_write(text: str, fmt) -> list[str]:

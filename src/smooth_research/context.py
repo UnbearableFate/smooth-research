@@ -6,7 +6,7 @@ rest is listed as an index to read on demand. Nothing here queries external syst
 
 from __future__ import annotations
 
-from . import compute, documents
+from . import compute, documents, labels
 from .project import context_target
 from .research import CONTRACT_FIELDS, attention, brief, contract_front
 from .runs import describe_attempt
@@ -54,9 +54,12 @@ def _papers_for(tx: Tx, hid: str) -> list[str]:
     return out
 
 
-def _assemble(title: str, sections: list[tuple[str, str]], budget: int) -> dict:
+def _assemble(title: str, sections: list[tuple[str, str]], budget: int, known: dict[str, str]) -> dict:
+    """The sections in order until the budget is used (the rest listed by name), hypotheses and experiments named
+    by their labels (known)."""
     used, parts, omitted = estimate_tokens(title), [title], []
     for name, text in sections:
+        name, text = labels.relabel(name, known), labels.relabel(text, known)
         if not text.strip():
             continue
         block = f"\n## {name}\n{text.rstrip()}\n"
@@ -127,7 +130,10 @@ def work_pack(store: Store, task_id: str, budget: int | None = None) -> dict:
         sections.append(("Compute resources (smooth-research.yaml)", compute.pack_text(store.project)))
         sections.append(("Constraints", f"see {store.project.rel(store.project.constraints_path)} (user-set scope "
                                         "and resource limits; follow them, the plugin does not enforce them)"))
-    return _assemble(f"# Work pack for {task_id}\n", sections, budget)
+        known = labels.names(tx)
+    pack = _assemble(f"# Work pack for {task_id}\n", sections, budget, known)
+    pack["labels"] = {r["id"]: known[r["id"]] for r in [*exps, *hyps.values()] if r["id"] in known}
+    return pack
 
 
 def open_work(tx: Tx) -> dict:
@@ -146,11 +152,12 @@ def status(store: Store) -> dict:
         work = open_work(tx)
         counts = {label: len(tx.all(label)) for label in ("Hypothesis", "Experiment", "Evidence", "Decision",
                                                            "Paper", "Task", "Run")}
+        known = labels.names(tx)
     c, items = work["coordinator"], work["attention"]
     lines = [f"project {store.project.root} · data_version {meta['data_version']} · coordinator "
              + (c["id"] if c else "none"),
              "counts: " + ", ".join(f"{k} {v}" for k, v in counts.items())]
-    open_h = [h for h in hyps if h["disposition"] in ("active", "candidate")]
+    open_h = labels.ordered([h for h in hyps if h["disposition"] in ("active", "candidate")])
     lines += (["hypotheses (active/candidate):"] + [f"  {brief(h)}" for h in open_h]) if open_h \
         else ["no open hypotheses"]
     lines += (["open tasks:"] + [f"  {brief(t)}" + (f" next: {t['next_action']}" if t.get("next_action") else "")
@@ -159,7 +166,7 @@ def status(store: Store) -> dict:
     lines += (["open review/advice tickets:"] + [f"  {brief(t)}" for t in work["tickets"]]) if work["tickets"] else []
     lines += (["attention:"] + [f"  {i}" for i in items]) if items else []
     return {"data_version": meta["data_version"], "counts": counts, "attention": items,
-            "summary": "\n".join(lines)}
+            "summary": labels.relabel("\n".join(lines), known)}
 
 
 def resume_pack(store: Store, role: str | None = None, budget: int | None = None) -> dict:
@@ -170,10 +177,11 @@ def resume_pack(store: Store, role: str | None = None, budget: int | None = None
         tasks = [t for t in work["tasks"]
                  if role is None or role in (t.get("owner_role"), t.get("to_role")) or role == "coordinator"]
         attempts = [describe_attempt(tx, a) for a in work["attempts"]]
-        hyps = tx.all("Hypothesis")
+        hyps = labels.ordered(tx.all("Hypothesis"))
         decisions = tx.all("Decision")[-5:]
         cursor = tx.get(f"CUR-{role}", "Cursor") if role else None
         unread = [m for m in tx.all("Message", to_role=role) if m["seq"] > (cursor["position"] if cursor else 0)] if role else []
+        known = labels.names(tx)
     c = work["coordinator"]
     model = (c.get("model_observed") or c.get("model_requested") or "model unverified") if c else None
     identity = [f"coordinator {c['id']} ({c['host']}, {model})" if c else "no active coordinator session",
@@ -199,13 +207,15 @@ def resume_pack(store: Store, role: str | None = None, budget: int | None = None
         sections.append((f"Inbox for {role}", f"{len(unread)} unread message(s): rl inbox --role {role}"))
     sections.append(("Locations", locations(store)))
     sections.append(("Compute resources (smooth-research.yaml)", compute.pack_text(store.project)))
-    return _assemble("# Resume pack (records only: nothing was queried, restarted or retried)\n", sections, budget)
+    return _assemble("# Resume pack (records only: nothing was queried, restarted or retried)\n", sections, budget,
+                     known)
 
 
 def advice_pack(store: Store, target: str | None, question: str, budget: int | None = None) -> dict:
     budget = budget or context_target(store.project.config, "advice_target_tokens")
     with store.read() as tx:
-        hyps = tx.all("Hypothesis")
+        hyps = labels.ordered(tx.all("Hypothesis"))
+        known = labels.names(tx)
         focus = tx.require(target) if target else None
         sections = [("Question", question)]
         if focus:
@@ -237,7 +247,7 @@ def advice_pack(store: Store, target: str | None, question: str, budget: int | N
         if artifacts:
             sections.append(("Raw artifact index (challenge the interpretation if they disagree)", "\n".join(artifacts)))
         sections.append(("Constraints", _read_constraints(store)))
-    return _assemble("# Advice pack\n", sections, budget)
+    return _assemble("# Advice pack\n", sections, budget, known)
 
 
 def _read_constraints(store: Store) -> str:

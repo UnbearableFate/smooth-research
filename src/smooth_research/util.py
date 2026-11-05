@@ -13,6 +13,8 @@ from typing import Any
 
 DIGEST_ALGO = "blake2b"
 REF_RE = re.compile(r"^(?P<id>[A-Z]+-[0-9]+(?:-[0-9]+)?)(?:@(?P<rev>[0-9]+))?$")
+# the hierarchical label of a hypothesis (H2.1.3) or an experiment (EH2.1/2), with an optional @revision
+LABEL_RE = re.compile(r"^(?P<label>H[0-9]+(?:\.[0-9]+)*|EH[0-9]+(?:\.[0-9]+)*/[0-9]+)(?:@(?P<rev>[0-9]+))?$")
 
 
 class RLError(Exception):

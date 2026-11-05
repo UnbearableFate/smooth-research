@@ -46,7 +46,12 @@ def prompt_for(store: Store, task_id: str, role: str, session: dict | None = Non
     start = (f"Continue the task; it is already yours ({task['state']}): `{rl} task resume {task_id} --role {role}`, "
              "then carry out its next action below." if task.get("owner_role") == role
              else f"Claim the task: `{rl} task claim {task_id} --role {role}`.")
-    pack = work_pack(store, task_id)["summary"]
+    work = work_pack(store, task_id)
+    pack = work["summary"]
+    named = "; ".join(f"{label} is {rid}" for rid, label in work["labels"].items())
+    named = (f"\nPeople read hypotheses and experiments by their labels, and the work pack below names them so: "
+             f"{named}. Use the ids in paths, job names, branch names and commit messages; rl takes either.\n"
+             if named else "")
     where = f"working on task {task_id} in {store.project.root}."
     checkout = ""
     if session:
@@ -83,7 +88,7 @@ outlive the worktree) and register runs with `--code-commit <the commit they run
     return f"""You are {role}, a Smooth Research researcher session {where}
 The research records CLI is `{rl}`. The coordinator owns the route decisions; you own the execution of this
 task.
-{checkout}{(chr(10) + WAITING + chr(10)) if session else ""}
+{named}{checkout}{(chr(10) + WAITING + chr(10)) if session else ""}
 1. {start}
 2. Do the work described below. Experiment code belongs in src/, your notes in research/notes/ (both in your
    checkout). Register every experiment run before executing it (`{rl} run register ...`), record

@@ -260,6 +260,7 @@ compute:
 - **审查轮次：** `rl review request ... --recheck-of RV-x` 是同一轮的第二次审查；第三次报 LIMIT，要开新一轮写 `--new-round "<原因>"`。`rl review approve RV-x --rationale ..` 由协调者批准还有中等以上问题的一轮。
 - **agent 会话：** `rl agent open [名字] --role researcher|reviewer|advisor [--task T-x | --ticket RV-x/AD-x] [--entry ..] [--no-worktree] [--base ..]`，以及 `assign`、`tell`、`reset --compact|--clear`、`close [--remove-worktree]`、`switch <名字> [--entry ..] [--now]`（换一个模型继续这个会话的工作，见第 1 节“订阅额度”；`--now` 连还在工作的会话也换）、`brief`、`list [--all]`、`dialog <名字>`（会话现在显示的对话框和选项）、`answer <名字> <选项编号或文字> --reason ..`（协调者回答对话框）。
 - **订阅额度：** `rl agent list` 显示各宿主的窗口；`rl usage statusline` 是 Claude Code 的状态栏命令，从标准输入读状态栏的 JSON，任何输入都不会让它失败。不带参数的 `rl usage` 报错并指向 `rl agent list`。
+- **层次编号：** 假设和实验除了内部编号（H-0013、E-0016）还有创建时定下、以后不变的层次编号。`rl hypothesis add` 默认挂在最晚创建的假设来源下（H2.1 在 H2 下），`--parent <来源之一>` 指定另一个，`--root` 开一个新的顶层编号（开启新研究线时用，来源关系照常记录）；只源自论文或顾问回答的是顶层。`rl experiment add` 挂在所检验假设的最深共同祖先下（EH2.1/3 是锚在 H2.1 的第三个实验），没有共同祖先时取 `--hypotheses` 的第一个，`--anchor` 指定另一个假设。凡是接受假设或实验编号的参数都接受两种写法，也可以写在逗号列表里或带 `@修订`；未知的层次编号报 NOT_FOUND。`rl status`、各类列表、报告和草稿的记录块只用层次编号，`rl show` 两种都显示，`--json` 有 `label` 字段；路径、作业名和提交信息用内部编号。
 - **论文草稿：** `rl manuscript [--title ..]` 写或刷新草稿，`--title` 只用于新建的草稿，见第 1 节"论文草稿"。
 - **插件升级：** `rl upgrade` 显示项目的记录格式和插件 build、做过的升级、新版本读法不同的地方和可以自己调整的范围；`--note "<改了什么>"` 记下 agent 手工做的调整；`--move <旧> <新>` 移动旧布局里的文件或目录，并在同一个事务里改写记录里的路径。见第 6 节。
 - **`rl init [--python 3.13]`：** 记录由项目自己的 Python 环境生成，所以顺序是（与 research-tree 的 prepare + init 相同）：
@@ -295,6 +296,7 @@ compute:
 - **插件自己的环境。** 每个插件版本有一个（`$SMOOTH_RESEARCH_HOME/env-<build>`），只给研究项目以外的命令（比如别处的会话 hook、状态栏）和还没有自己环境的旧项目用。会话开始的 hook 在后台开始构建，第一条要用它的命令等它构建完；几个会话同时启动时只构建一次。`rl setup` 强制重建它，在项目里还会更新项目的环境。需要 uv。
 - **旧项目。** 在 `pyproject.toml` 里没有 rl 依赖的项目（这个版本之前建的）照常在插件自己的环境上运行；`rl upgrade` 的 `environment:` 一行会说明。在项目根目录运行 `rl init` 就给它建项目环境（没有 `pyproject.toml` 时先 `uv init`），记录不变。
 - **记录自动升级。** 新版本的 CLI 第一次打开旧项目时，在写锁下先把数据库文件复制到 `research/state/backups/schema-<旧格式>-<时间>/`，再在一个事务里运行旧格式到当前格式之间的全部迁移，记一条 `project.upgrade` 事件。迁移只补充和填写，不删除记录，不改记录下来的事实，不碰封存的文档。做了升级的那条命令会给出一条警告。`rl restore` 也接受旧版本的快照，恢复后同样自动升级。
+- **层次编号的迁移（记录格式 3）。** 按内部编号顺序用新建记录的默认规则补上层次编号：假设只看比它先建的假设来源，实验只看建它时已有的被检验假设，没有共同祖先时取编号最小的那个。迁移不知道哪些假设开过新研究线（`--root`），所以旧项目的编号会偏深。这次升级还留在 `rl upgrade` 的历史里时，`rl upgrade` 打印对照表。
 - **更新的项目只读。** 项目由更新的插件写过（记录格式比 CLI 新）时，CLI 照常读取，但拒绝写入（UNSUPPORTED），提示更新插件。
 - **`rl upgrade`。** 插件 build 和项目记下的不同时，`rl status`、`rl resume` 和会话开始的提示都会提醒。`rl upgrade` 补建新布局要的目录，列出旧布局放在别处的文件、配置警告、找不到的合同文件和记录问题，并说明 agent 可以自己调整什么；运行后记下当前 build，提醒消失。
 - **agent 自己调整旧资产，不用问用户。** 可以改配置文件、只是格式变了的约束文档措辞、旧布局里的文件位置、未封存的合同草稿、任务说明、笔记、worktree 和分支，也可以用 `rl` 命令补上新版本需要的记录。只有会改变研究目标、结论范围、数据或预算的调整才问用户。记录下来的事实（观察、结果、证据、决定、审查）和封存的文档不改：新版本要求另一种形式时，新增一条引用旧记录的记录或修订。改完用 `rl upgrade --note` 记下来并提交。

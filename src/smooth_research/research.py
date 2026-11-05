@@ -7,7 +7,7 @@ from pathlib import Path
 
 import yaml
 
-from . import documents
+from . import documents, labels
 from .project import CONFIG_NAME, DOCS_DIRS, RESEARCH_DIRS, Project, load_config, write_default_config
 from .schema import ENUMS, LINKABLE, RELATIONS
 from .store import Store, Tx, label_of
@@ -128,19 +128,24 @@ def init_project(root: Path, plan: str | None = None, title: str | None = None) 
 
 def add_hypothesis(store: Store, title: str, statement: str, scope: str | None = None,
                    disposition: str = "active", derived_from: list[str] = (), combines: list[str] = (),
-                   motivated_by: list[str] = (), origin: str | None = None, statement_file: str | None = None) -> dict:
+                   motivated_by: list[str] = (), origin: str | None = None, statement_file: str | None = None,
+                   parent: str | None = None, root: bool = False) -> dict:
+    """A new hypothesis; its label goes under its primary parent among the hypotheses it is derived from (the
+    latest created, or parent), or starts a new top-level line (none of them, or root): see labels."""
     prep = documents.prepare(store.project, statement_file, "hypothesis") if statement_file else None
     with store.write() as tx:
+        sources = [t for t in dict.fromkeys(derived_from) if tx.require(t)["_label"] == "Hypothesis"]
+        label = labels.for_hypothesis(tx, sources, parent, root)
         hid = tx.next_id("Hypothesis")
-        tx.create("Hypothesis", {"id": hid, "title": title, "statement": statement, "scope": scope,
+        tx.create("Hypothesis", {"id": hid, "label": label, "title": title, "statement": statement, "scope": scope,
                                  "statement_ref": documents.register(tx, prep) if prep else None,
                                  "evidence_status": "untested", "disposition": disposition, "revision": 1,
                                  "origin": origin})
         for rel, targets in (("derived_from", derived_from), ("combines", combines), ("motivated_by", motivated_by)):
             for target in targets:
                 tx.link(rel, hid, target)
-        tx.event("hypothesis.added", hid, title)
-    return {"id": hid, "revision": 1, "summary": f"{hid}@1 {disposition}: {title}"}
+        tx.event("hypothesis.added", hid, f"{label}: {title}")
+    return {"id": hid, "label": label, "revision": 1, "summary": f"{label}@1 {disposition}: {title} (id {hid})"}
 
 
 def revise_hypothesis(store: Store, hid: str, reason: str, statement: str | None = None, scope: str | None = None,
@@ -190,17 +195,20 @@ CONTRACT_FIELDS = ("question", "intervention", "comparator", "metric", "scope", 
 
 def add_experiment(store: Store, title: str, question: str, hypotheses: list[str], stage: str | None = None,
                    compared_with: list[str] = (), code_from: str | None = None, depends_on: list[str] = (),
-                   **contract: str | None) -> dict:
+                   anchor: str | None = None, **contract: str | None) -> dict:
+    """A new experiment with a draft contract; its label goes under the deepest common ancestor of the hypotheses
+    it tests, else under the first of them, or under anchor: see labels."""
     if not hypotheses:
         raise RLError("INVALID", "an experiment tests at least one hypothesis (--hypotheses H-0001)")
     with store.write() as tx:
-        eid = tx.next_id("Experiment")
-        path = store.project.dir("experiments") / f"{eid}.md"
         refs = []
         for hid in hypotheses:
             h = tx.require(hid, "Hypothesis")
             refs.append(f"{hid}@{h['revision']}")
-        tx.create("Experiment", {"id": eid, "title": title, "question": question, "stage": stage,
+        label = labels.for_experiment(tx, list(hypotheses), anchor)
+        eid = tx.next_id("Experiment")
+        path = store.project.dir("experiments") / f"{eid}.md"
+        tx.create("Experiment", {"id": eid, "label": label, "title": title, "question": question, "stage": stage,
                                  "contract_path": store.project.rel(path), "revision": 0})
         for hid in hypotheses:
             tx.link("tests", eid, hid, revision=tx.require(hid)["revision"])
@@ -210,17 +218,17 @@ def add_experiment(store: Store, title: str, question: str, hypotheses: list[str
             tx.link("code_from", eid, code_from)
         for dep in depends_on:
             tx.link("depends_on", eid, dep)
-        front = {"experiment": eid, "title": title, "stage": stage, "hypotheses": refs,
+        front = {"experiment": eid, "label": label, "title": title, "stage": stage, "hypotheses": refs,
                  **{k: (question if k == "question" else contract.get(k)) or "TODO" for k in CONTRACT_FIELDS}}
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("---\n" + yaml.safe_dump(front, sort_keys=False, allow_unicode=True) + "---\n\n"
                         "## Design\n\nArms, seeds, data split, positive/negative controls and what each outcome "
                         "changes. Edit freely until the first run, review or task references this contract; "
                         "later edits become a new sealed revision.\n", encoding="utf-8")
-        tx.event("experiment.added", eid, title)
+        tx.event("experiment.added", eid, f"{label}: {title}")
     todo = [k for k in CONTRACT_FIELDS if not (question if k == "question" else contract.get(k))]
-    return {"id": eid, "contract": store.project.rel(path),
-            "summary": f"{eid} draft contract {store.project.rel(path)}"
+    return {"id": eid, "label": label, "contract": store.project.rel(path),
+            "summary": f"{label} (id {eid}) draft contract {store.project.rel(path)}"
                        + (f"; fill in: {', '.join(todo)}" if todo else "")}
 
 
@@ -484,9 +492,10 @@ def _brief(rec: dict) -> str:
     label = rec["_label"]
     if label == "Hypothesis":
         flag = " NEEDS-RECHECK" if rec.get("needs_recheck") else ""
-        return f"{rec['id']}@{rec['revision']} [{rec['disposition']}/{rec['evidence_status']}{flag}] {rec['title']}"
+        return (f"{labels.name(rec)}@{rec['revision']} [{rec['disposition']}/{rec['evidence_status']}{flag}] "
+                f"{rec['title']}")
     if label == "Experiment":
-        return f"{rec['id']}@{rec['revision']} [{rec.get('stage') or '-'}] {rec['title']}"
+        return f"{labels.name(rec)}@{rec['revision']} [{rec.get('stage') or '-'}] {rec['title']}"
     if label == "Evidence":
         return f"{rec['id']} [{rec['evidence_level']}/{rec['validity']}] {rec['summary']}"
     if label == "Decision":
@@ -521,9 +530,13 @@ def show(store: Store, entity_id: str) -> dict:
             return {"record": rev, "summary": f"{rev['id']} {rev['source_path']} {rev['digest']}\n\n{text}"}
         rec = tx.require(entity_id)
         out, inc = tx.out(entity_id), tx.inc(entity_id)
-        lines = [_brief(rec)]
+        known = labels.names(tx)
+
+        def other(e: dict, rev: str = "") -> str:  # a related record by its label and its id
+            return f"{known[e['id']]}{rev} ({e['id']})" if e["id"] in known else f"{e['id']}{rev}"
+        lines = [_brief(rec)] + ([f"  id: {rec['id']}"] if rec.get("label") else [])
         for key, value in rec.items():
-            if key not in ("id", "_label", "title") and value not in (None, "", []):
+            if key not in ("id", "_label", "title", "label") and value not in (None, "", []):
                 lines.append(f"  {key}: {value}")
         if label == "Hypothesis":
             for e in inc:
@@ -532,10 +545,11 @@ def show(store: Store, entity_id: str) -> dict:
                     bound = "" if e.get("revision") == rec["revision"] else f" (bound to @{e.get('revision')}, re-check)"
                     lines.append(f"  <- {e['rel']}: {_brief(ev)}{bound}")
         for e in out:
-            lines.append(f"  -> {e['rel']} {e['id']}" + (f"@{e['revision']}" if e.get("revision") else ""))
+            rev = f"@{e['revision']}" if e.get("revision") else ""
+            lines.append(f"  -> {e['rel']} {other(e, rev)}")
         for e in inc:
             if not (label == "Hypothesis" and e["rel"] in ("supports", "challenges")):
-                lines.append(f"  <- {e['rel']} {e['id']}")
+                lines.append(f"  <- {e['rel']} {other(e)}")
     return {"record": rec, "out": out, "in": inc, "summary": "\n".join(lines)}
 
 
@@ -574,7 +588,8 @@ def attention(tx: Tx) -> list[str]:
         gap = review_gap(tx, conclusion_reviews(tx, [e["id"] for e in tx.out(did, "based_on")]), hyps)
         if gap:
             items.append(f"{did} key conclusion on {', '.join(hyps)}: {gap} — {_review_hint(hyps, did)}")
-    return items
+    known = labels.names(tx)
+    return [labels.relabel(item, known) for item in items]
 
 
 def history(store: Store, entity_id: str | None = None, limit: int = 30) -> dict:

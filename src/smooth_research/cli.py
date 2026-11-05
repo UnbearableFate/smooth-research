@@ -11,21 +11,49 @@ import json
 import sys
 from pathlib import Path
 
-from . import (adapters, agents, compute, context, delegate, hooks, literature, manuscript, messages, research,
-               reviews, runs, snapshot, tasks, upgrade, usage, view, watch)
+from . import (adapters, agents, compute, context, delegate, hooks, labels, literature, manuscript, messages,
+               research, reviews, runs, snapshot, tasks, upgrade, usage, view, watch)
 from .project import advice_limit, find_project, model_entries
 from .schema import ENUMS, LINKABLE, PAPER_ASSESSMENTS
 from .store import Store
-from .util import RLError, load_json_arg, load_json_records, now_utc, split_list
+from .util import LABEL_RE, RLError, load_json_arg, load_json_records, now_utc, split_list
 
 CONFLICT_CODES = {"CONFLICT", "STALE_REVISION"}
+
+
+# The arguments that name hypotheses or experiments (among other records): a label in them (H2.1, EH2.1/3, also in
+# a comma-separated list or with @revision) becomes the internal id before the command runs.
+ID_ARGS = ("id", "source", "target", "targets", "experiment", "hypotheses", "derived_from", "combines",
+           "motivated_by", "based_on", "supports", "challenges", "compared_with", "depends_on", "code_from", "root",
+           "parent", "anchor")
 
 
 def _store(args) -> Store:
     project = find_project(args.project)
     args.config_warnings = project.warnings
     args.store = Store(project, args.actor or "agent")
+    _resolve_labels(args, args.store)
     return args.store
+
+
+def _resolve_labels(args, store: Store) -> None:
+    """The labels in ID_ARGS become internal ids, all in one read."""
+    def values(dest: str) -> list:
+        if dest == "source" and args.command not in ("link", "paper"):  # elsewhere: who observed or answered
+            return []
+        value = getattr(args, dest, None)
+        return [v for v in (value if isinstance(value, list) else [value]) if isinstance(v, str)]
+
+    found = [dest for dest in ID_ARGS
+             if any(LABEL_RE.match(part.strip()) for v in values(dest) for part in v.split(","))]
+    if not found:
+        return
+    with store.read() as tx:
+        for dest in found:
+            value = getattr(args, dest)
+            items = [",".join(labels.resolve(tx, part.strip()) for part in v.split(","))
+                     for v in (value if isinstance(value, list) else [value])]
+            setattr(args, dest, items if isinstance(value, list) else items[0])
 
 
 def _upgrade_notice(args) -> list[str]:
@@ -128,7 +156,7 @@ def cmd_hypothesis(args):
     if args.action == "add":
         return research.add_hypothesis(store, args.title, args.statement, args.scope, args.disposition,
                                        _list(args.derived_from), _list(args.combines), _list(args.motivated_by),
-                                       args.origin, args.statement_file)
+                                       args.origin, args.statement_file, args.parent, args.root)
     if args.action == "revise":
         return research.revise_hypothesis(store, args.id, args.reason, args.statement, args.scope, args.title,
                                           args.base_revision, args.statement_file)
@@ -141,7 +169,7 @@ def cmd_experiment(args):
     if args.action == "add":
         return research.add_experiment(store, args.title, args.question, _list(args.hypotheses), args.stage,
                                        _list(args.compared_with), args.code_from, _list(args.depends_on),
-                                       intervention=args.intervention, comparator=args.comparator,
+                                       anchor=args.anchor, intervention=args.intervention, comparator=args.comparator,
                                        metric=args.metric, scope=args.scope, outcome_actions=args.outcome_actions,
                                        budget=args.budget, stop=args.stop)
     return research.seal_experiment(store, args.id)
@@ -180,9 +208,10 @@ def cmd_task(args):
     if a == "list":
         with store.read() as tx:
             items = tx.all("Task") if args.all else tasks.open_tasks(tx)
-        return {"tasks": items, "summary": "\n".join(research.brief(t) + (f" next: {t['next_action']}"
-                                                                          if t.get("next_action") else "")
-                                                     for t in items) or "no open tasks"}
+            known = labels.names(tx)
+        return {"tasks": items, "summary": labels.relabel("\n".join(
+            research.brief(t) + (f" next: {t['next_action']}" if t.get("next_action") else "") for t in items),
+            known) or "no open tasks"}
     return tasks.review_task(store, args.id, a, args.reason)
 
 
@@ -561,11 +590,17 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--statement", required=True, help="the testable claim, one or two sentences")
     s.add_argument("--scope", help="conditions the claim is about")
     s.add_argument("--disposition", default="active", choices=ENUMS["disposition"])
-    s.add_argument("--derived-from", action="append", help="scientific source: H-, AD- or P- ids")
+    s.add_argument("--derived-from", action="append", help="scientific source: hypotheses (H2.1 or H-0005), AD- or "
+                                                           "P- ids; the label goes under the latest hypothesis")
     s.add_argument("--combines", action="append")
     s.add_argument("--motivated-by", action="append")
     s.add_argument("--origin", help="where it came from, e.g. 'plan §3' or 'advice AD-0002 #1'")
     s.add_argument("--statement-file", help="longer statement document to seal")
+    g = s.add_mutually_exclusive_group()
+    g.add_argument("--parent", help="the --derived-from hypothesis its label goes under (default: the latest "
+                                    "created)")
+    g.add_argument("--root", action="store_true", help="a new top-level label (Hn): it opens a new line of research; "
+                                                       "its sources are recorded as usual")
     s = ss.add_parser("revise")
     s.add_argument("id")
     s.add_argument("--reason", required=True)
@@ -587,6 +622,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--title", required=True)
     s.add_argument("--question", required=True)
     s.add_argument("--hypotheses", action="append", required=True)
+    s.add_argument("--anchor", help="the hypothesis its label goes under (default: the deepest common ancestor of "
+                                    "--hypotheses, else the first)")
     s.add_argument("--stage", choices=ENUMS["stage"])
     for f in ("intervention", "comparator", "metric", "scope", "outcome-actions", "budget", "stop"):
         s.add_argument(f"--{f}")

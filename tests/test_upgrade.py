@@ -32,10 +32,14 @@ def _manual_advisor(root: Path) -> None:
     path.write_text(yaml.safe_dump(config, sort_keys=False))
 
 
+# the fields each record format added: an older store lacks those of the later formats
+ADDED = {2: (("Attempt", "code_review"), ("Ticket", "advice_round")), 3: (("Hypothesis", "label"), ("Experiment", "label"))}
+
+
 def _make_old(store: Store, version: int = 1) -> None:
     """Make the store look written by an older plugin: drop the fields that version did not write."""
     with store.write() as tx:
-        for label, field in (("Attempt", "code_review"), ("Ticket", "advice_round")):
+        for label, field in (pair for added, pairs in ADDED.items() if added > version for pair in pairs):
             for rec in tx.all(label):
                 tx.txn.set_property(tx._node(label, rec["id"]), field, None)
         tx.set_meta(schema_version=version)
@@ -54,7 +58,7 @@ def test_an_older_project_is_upgraded_in_place_with_a_copy_of_its_database(proje
     _older_project(project, tmp_path)
     code, out, _ = rl("run", "show")  # reads code_review on every attempt
     assert code == 0 and "code review: unchecked: registered before code review checks were recorded" in out
-    assert "the records were upgraded from format 1 to 2" in out and "run `rl upgrade`" in out
+    assert f"the records were upgraded from format 1 to {SCHEMA_VERSION}" in out and "run `rl upgrade`" in out
     backups = list((tmp_path / "research/state/backups").glob("schema-1-*"))
     assert len(backups) == 1 and (backups[0] / "research.lattice").is_file()
     store = Store(find_project(), "test")
@@ -62,7 +66,10 @@ def test_an_older_project_is_upgraded_in_place_with_a_copy_of_its_database(proje
         assert tx.meta()["schema_version"] == SCHEMA_VERSION
         assert [t["advice_round"] for t in tx.all("Ticket", kind="advice")] == [1, 1]
         event = [e for e in tx.all("Event") if e["type"] == "project.upgrade"]
-        assert len(event) == 1 and "schema 1 -> 2" in event[0]["summary"] and "1 attempt(s)" in event[0]["summary"]
+        assert len(event) == 1 and f"schema 1 -> {SCHEMA_VERSION}" in event[0]["summary"]
+        assert "1 attempt(s)" in event[0]["summary"]
+        assert [(r["id"], r["label"]) for r in tx.all("Hypothesis") + tx.all("Experiment")] == \
+            [("H-0001", "H1"), ("E-0001", "EH1/1")]
     assert store.upgraded is None
     code, out, _ = rl("models")  # counts advice rounds
     assert code == 0 and "advice rounds used: 1 of 3" in out and "upgraded" not in out
@@ -89,7 +96,7 @@ def test_a_project_from_a_newer_plugin_is_read_but_not_written(project, tmp_path
     with project.write() as tx:
         tx.set_meta(schema_version=SCHEMA_VERSION + 1)
     code, out, _ = rl("status")
-    assert code == 0 and "H-0001" in out
+    assert code == 0 and "H1@1" in out
     code, _, err = rl("hypothesis", "add", "--title", "t", "--statement", "s")
     assert code != 0 and "written by a newer smooth-research" in err and "nothing was written" in err
     text = hooks.session_start("claude", "{}")["hookSpecificOutput"]["additionalContext"]
@@ -103,11 +110,12 @@ def test_an_older_snapshot_restores_and_is_upgraded(project, tmp_path):
     snapshot.export(store, str(snap))
     data = json.loads((snap / "snapshot.json").read_text())
     data["schema_version"] = data["meta"]["schema_version"] = 1
-    for rec in data["nodes"]["Attempt"]:
-        rec.pop("code_review", None)
+    for label, field in (pair for pairs in ADDED.values() for pair in pairs):
+        for rec in data["nodes"][label]:
+            rec.pop(field, None)
     (snap / "snapshot.json").write_text(json.dumps(data))
     out = snapshot.restore(str(snap), str(tmp_path.parent / f"{tmp_path.name}-restored"))
-    assert out["problems"] == [] and "records upgraded from format 1 to 2" in out["summary"]
+    assert out["problems"] == [] and f"records upgraded from format 1 to {SCHEMA_VERSION}" in out["summary"]
     data["schema_version"] = SCHEMA_VERSION + 1
     (snap / "snapshot.json").write_text(json.dumps(data))
     with pytest.raises(RLError) as exc:
@@ -138,7 +146,7 @@ def test_a_plugin_update_is_flagged_until_rl_upgrade_records_it(project, tmp_pat
 def test_the_hook_says_the_records_were_upgraded(project, tmp_path):
     _older_project(project, tmp_path)
     text = hooks.session_start("claude", "{}")["hookSpecificOutput"]["additionalContext"]
-    assert "Its records were upgraded from format 1 to 2" in text
+    assert f"Its records were upgraded from format 1 to {SCHEMA_VERSION}" in text
 
 
 def test_layout_repair_creates_only_what_is_missing(project, tmp_path):

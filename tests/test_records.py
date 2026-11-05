@@ -306,7 +306,7 @@ def test_context_packs_respect_their_budget_and_list_what_they_omit(project):
 
 def test_cli_summary_json_and_error_codes(project, rl):
     code, out, _ = rl("status")
-    assert code == 0 and "H-0001" in out
+    assert code == 0 and "H1@1 [active/untested] WD helps" in out
     code, out, _ = rl("--json", "show", "H-0001")
     assert code == 0 and json.loads(out)["record"]["id"] == "H-0001"
     code, _, err = rl("show", "H-9999")
@@ -351,7 +351,7 @@ def test_configuration_keys_the_cli_does_not_read_are_reported(project, rl, tmp_
     data["contxt"] = {"work_target_tokens": 100}
     cfg.write_text(yaml.safe_dump(data), encoding="utf-8")
     code, out, _ = rl("status")
-    assert code == 0 and "H-0001" in out
+    assert code == 0 and "H1@1" in out
     assert "warning: smooth-research.yaml: unknown key contxt has no effect (a typo?)" in out
     code, out, _ = rl("--json", "status")
     assert len(json.loads(out)["warnings"]) == 1

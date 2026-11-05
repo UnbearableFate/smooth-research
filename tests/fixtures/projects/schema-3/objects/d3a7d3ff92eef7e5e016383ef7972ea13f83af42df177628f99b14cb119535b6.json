@@ -1,0 +1,1 @@
+{"attempt_id": "ATT-0001-1", "spec_digest": "blake2b:f4a4ef307d58d458f3a19ff50ab63a997d451451a5e2c62d1ec3ed4f05bbbdcd", "status": "complete", "metrics": {"acc": 0.81}, "artifacts": [{"path": "research/artifacts/ATT-0001-1/metrics.json", "digest": "blake2b:140ee5bd85feba94356660eb7668bed48a53ec0daf9ad344f2e369c80061049d", "role": "metrics"}]}

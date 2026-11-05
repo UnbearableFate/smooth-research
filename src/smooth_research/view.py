@@ -9,6 +9,7 @@ from __future__ import annotations
 import html
 from datetime import datetime, timezone
 
+from . import labels
 from .research import brief, conclusion_reviews, key_hypotheses, review_gap, review_mark
 from .runs import code_review_summary, describe_attempt, evidence_attempts, usage_summary
 from .store import Store, Tx
@@ -57,7 +58,8 @@ def tree(store: Store, root: str | None = None) -> dict:
         seen: set = set()
         for hid in starts:
             walk(hid, 0, seen)
-    return {"summary": "\n".join(lines) or "no hypotheses yet"}
+        known = labels.names(tx)
+    return {"summary": labels.relabel("\n".join(lines), known) or "no hypotheses yet"}
 
 
 def mermaid(tx: Tx) -> str:
@@ -78,7 +80,7 @@ def mermaid(tx: Tx) -> str:
             if e["id"] in nodes:
                 arrow = "-.->" if e["rel"] in ("challenges", "motivated_by", "nearest_work", "cites") else "-->"
                 out.append(f"    {nid.replace('-', '_')} {arrow}|{e['rel']}| {e['id'].replace('-', '_')}")
-    return "\n".join(out)
+    return labels.relabel("\n".join(out), labels.names(tx))
 
 
 def html_view(store: Store) -> dict:
@@ -191,13 +193,14 @@ def report(store: Store, out: str | None = None, title: str | None = None) -> di
     """A progress or stage report generated from the records into research/reports/."""
     with store.read() as tx:
         meta = tx.meta()
-        hyps, decisions = tx.all("Hypothesis"), tx.all("Decision")
-        exps, evidence, papers = tx.all("Experiment"), tx.all("Evidence"), tx.all("Paper")
+        hyps, decisions = labels.ordered(tx.all("Hypothesis")), tx.all("Decision")
+        exps, evidence, papers = labels.ordered(tx.all("Experiment")), tx.all("Evidence"), tx.all("Paper")
+        known = labels.names(tx)
         tickets = tx.all("Ticket")
         usage = usage_summary(tx)
         exp_lines = []
         for exp in exps:
-            exp_lines.append(f"### {exp['id']} {exp['title']}\n\n- stage {exp.get('stage') or '-'}, contract "
+            exp_lines.append(f"### {labels.name(exp)} {exp['title']}\n\n- stage {exp.get('stage') or '-'}, contract "
                              f"{exp.get('contract_ref') or 'draft (not sealed)'}"
                              + (" — revised after results (exploratory)" if exp.get("revised_after_results") else "")
                              + f"\n- question: {exp['question']}")
@@ -230,5 +233,5 @@ def report(store: Store, out: str | None = None, title: str | None = None) -> di
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M")
     path = store.project.abs(out) if out else store.project.dir("reports") / f"report-{stamp}.md"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    path.write_text(labels.relabel("\n".join(lines), known) + "\n", encoding="utf-8")
     return {"path": str(path), "summary": f"wrote {store.project.rel(path)}"}

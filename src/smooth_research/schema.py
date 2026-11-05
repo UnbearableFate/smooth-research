@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 # The record format. A change that older records do not already satisfy (a field every record of a type is read
 # with, a renamed field or enum value) raises it and adds a migration to upgrade.MIGRATIONS; tests open a frozen
 # project of every earlier version (tests/fixtures/projects/).
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 ENUMS: dict[str, tuple[str, ...]] = {
     "evidence_status": ("untested", "supported", "challenged", "inconclusive"),
@@ -61,18 +61,18 @@ class Entity:
 COMMON = {"id": F(required=True), "created_at": F(), "updated_at": F()}
 
 
-def _e(label: str, prefix: str, graph: bool = False, width: int = 4, **fields: F) -> Entity:
-    return Entity(label, prefix, {**COMMON, **fields}, graph, width)
+def _e(entity: str, prefix: str, graph: bool = False, width: int = 4, **fields: F) -> Entity:
+    return Entity(entity, prefix, {**COMMON, **fields}, graph, width)
 
 
 ENTITIES: dict[str, Entity] = {e.label: e for e in [
     _e("Hypothesis", "H", graph=True, title=F(required=True), statement=F(required=True), scope=F(),
        statement_ref=F(), evidence_status=F(required=True, enum="evidence_status"),
        disposition=F(required=True, enum="disposition"), revision=F("int", True), needs_recheck=F("bool"),
-       recheck_reason=F(), origin=F()),
+       recheck_reason=F(), origin=F(), label=F(required=True)),
     _e("Experiment", "E", graph=True, title=F(required=True), question=F(required=True),
        stage=F(enum="stage"), contract_path=F(), contract_ref=F(), revision=F("int", True),
-       revised_after_results=F("bool"), code_origin=F()),
+       revised_after_results=F("bool"), code_origin=F(), label=F(required=True)),
     _e("Evidence", "EV", graph=True, summary=F(required=True), validity=F(required=True, enum="validity"),
        evidence_level=F(required=True, enum="evidence_level"), scope=F(), artifact_refs=F("json"), doc_ref=F(),
        validity_reason=F()),

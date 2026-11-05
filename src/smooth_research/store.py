@@ -20,7 +20,7 @@ from latticedb import LatticeDatabaseLockedError
 from .project import Project
 from .schema import ENTITIES, ENUMS, PREFIX_LABEL, RELATIONS, SCHEMA_VERSION
 from .upgrade import build, migrate
-from .util import RLError, now_utc
+from .util import LABEL_RE, RLError, now_utc
 
 LOCK_TIMEOUT_S = 60.0
 OPEN_RETRY_S = 10.0
@@ -249,8 +249,17 @@ class Tx:
                                 "result": result})
 
 
-def _sort_key(entity_id: str) -> tuple:
-    parts = entity_id.replace("@", "-").split("-")
+def _sort_key(ref: str) -> tuple:
+    """Record ids by their numbers (H-0002 before H-0010, DOC-0003@2 after DOC-0003); labels by the number at each
+    level: H2.9 before H2.10, a hypothesis before the ones under it, and the experiments anchored at a hypothesis
+    (EH2.1/3) before those anchored under it (EH2.1.1/1)."""
+    m = LABEL_RE.match(ref)
+    if m:
+        kind = "EH" if ref.startswith("EH") else "H"
+        path, _, n = m["label"][len(kind):].partition("/")
+        return ((1, 0, kind), *((0, int(x), "") for x in path.split(".")), *([(-1, int(n), "")] if n else []),
+                *([(-2, int(m["rev"]), "")] if m["rev"] else []))
+    parts = ref.replace("@", "-").split("-")
     return tuple((0, int(p), "") if p.isdigit() else (1, 0, p) for p in parts)
 
 

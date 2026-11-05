@@ -62,9 +62,37 @@ def _v2(tx: "Tx") -> list[str]:
     return out
 
 
+def _v3(tx: "Tx") -> list[str]:
+    """Labels (H2.1, EH2.1/3) for the hypotheses and experiments written before them, by the rules new records
+    follow (labels), in the order they were created: the hypotheses by id, each placed by the hypotheses it is
+    derived from that were created before it; then the experiments by id, each by the hypotheses it tests that
+    existed when it was created, the first by id standing in for the first one named. Which hypotheses opened a
+    new line of research (--root) was never recorded, so the labels of an older project run deeper than new ones."""
+    from .labels import for_experiment, for_hypothesis
+    from .store import _sort_key
+    hyps = [h for h in tx.all("Hypothesis") if not h.get("label")]
+    for h in hyps:
+        sources = [e["id"] for e in tx.out(h["id"], "derived_from")
+                   if e["label"] == "Hypothesis" and _sort_key(e["id"]) < _sort_key(h["id"])]
+        tx.update(h["id"], {"label": for_hypothesis(tx, list(dict.fromkeys(sources)))})
+    exps, untested = [e for e in tx.all("Experiment") if not e.get("label")], []
+    for exp in exps:
+        tested = [tx.require(e["id"]) for e in tx.out(exp["id"], "tests")]
+        before = [h["id"] for h in tested if h["created_at"] <= exp["created_at"]] or [h["id"] for h in tested]
+        if not before:
+            untested.append(exp["id"])
+            continue
+        tx.update(exp["id"], {"label": for_experiment(tx, before)})
+    out = [f"{len(hyps)} hypothes{'i' if len(hyps) == 1 else 'e'}s and {len(exps) - len(untested)} experiment(s) "
+           "labelled in the order they were created (rl upgrade lists them)"] if hyps or exps else []
+    out += [f"{', '.join(untested)} test(s) no hypothesis: no label, shown by id"] if untested else []
+    return out
+
+
 MIGRATIONS = [
     Migration(2, "fill in fields that records written before them lack (attempt code review check, advice round)",
               _v2),
+    Migration(3, "labels for hypotheses and experiments (H2.1, EH2.1/3)", _v3),
 ]
 
 
@@ -220,6 +248,19 @@ ADJUST = """A plugin update does not stop the research: adjust the old research 
 - Say what you changed: rl upgrade --note "<what and why>", and commit it."""
 
 
+def _labels_given(tx: "Tx", upgrades: list[dict]) -> list[str]:
+    """The labels the upgrade to schema 3 gave the hypotheses and experiments that existed then, a few per row;
+    shown while that upgrade is in the history rl upgrade lists."""
+    import re
+    done = [e for e in upgrades if (m := re.match(r"schema (\d+) -> (\d+)", e.get("summary") or ""))
+            and int(m[1]) < 3 <= int(m[2])]
+    if not done:
+        return []
+    pairs = [f"{r['id']} {r['label']}" for entity in ("Hypothesis", "Experiment") for r in tx.all(entity)
+             if r.get("label") and r["created_at"] <= done[-1]["created_at"]]
+    return [" · ".join(pairs[i:i + 6]) for i in range(0, len(pairs), 6)]
+
+
 def report(store: "Store", note: str | None = None) -> dict:
     """rl upgrade: the format and plugin build of the project, upgrades done, what this version reads differently,
     and what the agent may adjust; with note, records the agent's own adjustments."""
@@ -230,6 +271,7 @@ def report(store: "Store", note: str | None = None) -> dict:
     with store.read() as tx:
         meta = tx.meta()
         upgrades = [e for e in tx.all("Event") if e["type"] in ("project.upgrade", "project.adjusted")]
+        given = _labels_given(tx, upgrades[-5:])
     last = meta.get("last_build")
     with store.write() as tx:
         tx.set_meta(last_build=build())
@@ -238,6 +280,9 @@ def report(store: "Store", note: str | None = None) -> dict:
     lines = [f"project format: schema {meta.get('schema_version')} (this CLI: {SCHEMA_VERSION}) · plugin build "
              f"{build()} (last used with {last or 'unknown'})", environment(project)[0]]
     lines += [f"history: {e['created_at'][:16]} {e['type']}: {e['summary']}" for e in upgrades[-5:]]
+    if given:
+        lines += ["labels the schema 3 upgrade gave the records (id label; commands take either, paths, job names "
+                  "and commits keep the ids):"] + [f"  {row}" for row in given]
     if note and note.strip():
         lines.append(f"recorded: project.adjusted: {note.strip()}")
     lines += [f"layout: created {', '.join(created)}" for _ in [0] if created]

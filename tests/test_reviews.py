@@ -475,7 +475,7 @@ def test_key_conclusions_without_a_passing_review_stay_in_attention(project, fak
     with project.read() as tx:
         assert tx.require(d1["id"])["evidence_status_set"] == "supported"
         items = research.attention(tx)
-    assert any(i.startswith(f"{d1['id']} key conclusion on H-0001: no conclusion review") for i in items)
+    assert any(i.startswith(f"{d1['id']} key conclusion on H1: no conclusion review") for i in items)
     rv = reviews.request_conclusion_review(project, ["H-0001"], "supported at screening level", ["claude-opus-5-5"])
     reviews.run_ticket(project, rv["id"])
     research.link(project, d1["id"], "based_on", rv["id"])
@@ -680,6 +680,6 @@ def test_a_conclusion_review_covers_only_the_hypotheses_it_reviewed(project, fak
     assert both["conclusion_review_gap"] == other["conclusion_review_gap"]
     with project.read() as tx:
         items = [i for i in research.attention(tx) if "key conclusion" in i]
-    assert len(items) == 1 and items[0].startswith(f"{both['id']} key conclusion on H-0001, H-0002: no passing")
+    assert len(items) == 1 and items[0].startswith(f"{both['id']} key conclusion on H1, H2: no passing")
     assert research.decide(project, ["H-0001"], "continue", "z", [ev, rv],
                            set_evidence_status="supported")["conclusion_review_gap"] is None

@@ -114,3 +114,9 @@ paths -> `rl run register --resource ..` -> `rl compute steps` -> run with your 
 `rl evidence add` -> `rl decide` -> `rl report` -> `rl manuscript`. `rl resume` rebuilds the working context in a new
 session; `rl export` / `rl restore` back up and restore the records. See
 `plugin/skills/smooth-research/references/workflow.md` for formats.
+
+Hypotheses and experiments have a label besides their id, given at creation and never changed: H2.1 is a
+hypothesis under H2 (its latest hypothesis source, `--parent` another, `--root` a new line), EH2.1/3 the third
+experiment anchored at H2.1 (the deepest common ancestor of what it tests, `--anchor` another). People read the
+labels (status, lists, reports, the manuscript); the ids stay in relations, paths, job names and commits, and every
+command takes either.
