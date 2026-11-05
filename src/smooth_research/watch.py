@@ -55,7 +55,7 @@ from typing import Iterator
 
 from . import agentlog, herdr, messages, usage
 from .delegate import rl_command
-from .launch import answer_trust, excerpt, start_agent
+from .launch import UNSEEN, answer_trust, excerpt, start_agent, unseen
 from .project import DEFAULT_CONFIG, ENV_PROJECT, stall_minutes, watch_minutes
 from .store import Store
 from .util import RLError, now_utc, parse_time
@@ -87,19 +87,23 @@ def target(s: dict) -> str | None:
 
 
 def probe(s: dict) -> dict:
-    """How a session is now: herdr's status ("gone" when no agent answers), state_change_seq and the host's session
-    id (the one herdr reports, else the recorded one), and what its log says. Raises RLError when herdr fails."""
+    """How a session is now: herdr's status ("gone" when no agent answers; "blocked" also at a dialog herdr does
+    not see, named in "dialog"), state_change_seq and the host's session id (the one herdr reports, else the
+    recorded one), and what its log says. Raises RLError when herdr fails."""
     info = herdr.agent(target(s))
     memo = s.get("watch") or {}
     if info is None:
         return {"status": "gone", "seq": None, "sid": s.get("host_session_id"), "reported": None,
-                "log": memo.get("log"), "view": None}
+                "log": memo.get("log"), "view": None, "dialog": None}
     given = info.get("agent_session")
     reported = str(given["value"]) if isinstance(given, dict) and given.get("value") else None
     sid = reported or s.get("host_session_id")
     log = agentlog.follow(s.get("host") or "", sid, memo.get("log"))
-    return {"status": info.get("agent_status") or "unknown", "seq": info.get("state_change_seq"), "sid": sid,
-            "reported": reported, "log": log, "view": agentlog.turn_view(log)}
+    status, dialog = info.get("agent_status") or "unknown", None
+    if status in ("idle", "done") and s.get("host") in UNSEEN:
+        dialog = unseen(s.get("host"), herdr.read(target(s)))
+    return {"status": "blocked" if dialog else status, "seq": info.get("state_change_seq"), "sid": sid,
+            "reported": reported, "log": log, "view": agentlog.turn_view(log), "dialog": dialog}
 
 
 def classify(store: Store, s: dict, p: dict, low: dict, stall: float, now: datetime | None = None) -> dict:
@@ -729,6 +733,9 @@ def deliver(s: dict, p: dict, text: str) -> tuple[str, str | None]:
     ("refused", why) when it certainly was not typed (a dialog was open, the agent is gone); ("unconfirmed", why)
     otherwise, with the end of its screen. p: the session as probed just before."""
     where = target(s)
+    if p.get("dialog"):  # herdr would take the prompt, and the dialog would swallow it
+        return "refused", (f"{where} waits at a dialog herdr does not see ({p['dialog']}), so nothing was typed; "
+                           f"the coordinator decides it (`rl agent dialog {s['role_id']}`)")
     sent = now_utc()
     outcome, why = herdr.submit(where, text)
     codex = s.get("host") == "codex" and (p.get("log") or {}).get("path")

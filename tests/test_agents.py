@@ -7,7 +7,7 @@ import subprocess
 
 import pytest
 
-from smooth_research import agents, hooks, launch, messages, reviews, tasks
+from smooth_research import agents, hooks, launch, messages, reviews, tasks, watch
 from smooth_research.project import find_project
 from smooth_research.store import Store
 from smooth_research.util import RLError
@@ -41,7 +41,10 @@ DIALOGS = {
     "new": (["1. Use current Git worktree  Keep using the current working directory",
              "2. Create new Git worktree   Create a separate checkout of this repository in another directory"],
             "  Where should the new conversation run?\n{options}\n  enter select · esc back"),
+    "hooks": (["1. Review hooks", "2. Trust all and continue", "3. Continue without trusting (hooks won't run)"],
+              "  Hooks need review\n  1 hook is new or changed.\n{options}\n  enter confirm · esc skip"),
 }
+UNSEEN = ("new", "hooks")  # Codex's dialogs that herdr does not recognize: it sees the agent idle
 
 def done(result=None, error=None, text=None):
     state_path.write_text(json.dumps(state))
@@ -128,6 +131,8 @@ if (group, action) == ("agent", "start"):
         state["sessions"].pop(name, None)
     state["logs"].pop(name, None)
     state["starting"][name] = int(os.environ.get("FAKE_HERDR_STARTING") or 0)
+    if os.environ.get("FAKE_HERDR_HOOKS") and state["kinds"][name] == "codex":  # a new hook to review
+        state["dialog"][name] = {"kind": "hooks", "sel": 0, "cwd": ""}
     blocked = os.environ.get("FAKE_HERDR_BLOCKED")
     if blocked:  # 1 or mcp: another dialog; claude, codex: their trust question; claude-other: for another folder
         kind = {"1": "mcp"}.get(blocked, blocked).replace("-other", "")
@@ -153,7 +158,7 @@ if (group, action) in (("agent", "prompt"), ("agent", "get")):
     name = args[2]
     if name not in state["agents"] and not name.startswith("w1:p"):
         done(error=("agent_not_found", f"agent target {name} not found"))
-    if state["dialog"].get(name, {}).get("kind") == "new":  # a question herdr does not recognize: it sees idle
+    if state["dialog"].get(name, {}).get("kind") in UNSEEN:  # a dialog herdr does not recognize: it sees idle
         if action == "prompt":  # what is typed goes to the question, and its Enter picks the selected option: lost
             del state["dialog"][name]
             done(error=("agent_prompt_stalled", "no working state observed") if "--wait" in args else None,
@@ -416,6 +421,22 @@ def test_a_codex_session_without_an_id_from_herdr_is_reported(project, herdr_log
     assert "herdr integration install codex" in out["summary"]
 
 
+def test_a_dialog_herdr_does_not_see_is_left_to_the_coordinator(project, herdr_log, monkeypatch):
+    tasks.start_session(project, "coordinator", "claude")
+    monkeypatch.setenv("FAKE_HERDR_HOOKS", "1")  # Codex asks to review a new hook; herdr sees the agent idle
+    task = tasks.create_task(project, "implement", "implement", ["E-0001"], to_role="researcher")["id"]
+    out = agents.open_session(project, "researcher", "researcher-1", entry_text="codex:m", task=task, worktree=False)
+    assert "researcher-1 waits at a dialog herdr does not see (" in out["summary"] and "Hooks need review" in out["summary"]
+    assert "not yet told" in out["summary"] and "rl agent answer researcher-1" in out["summary"]
+    assert "researcher-1 waits at a dialog (" in watch.check(project)["summary"]  # reported, nothing typed
+    assert not any(c[:3] == ["agent", "prompt", "researcher-1"] for c in calls(herdr_log))
+    assert "at a dialog herdr does not see" in agents.dialog(project, "researcher-1")["summary"]
+    out = agents.answer(project, "researcher-1", "Continue without trusting", "hooks not read")
+    assert out["chosen"].startswith("3. Continue without trusting") and "told to read its brief" in out["summary"]
+    assert any(c[:3] == ["agent", "prompt", "researcher-1"] and "agent brief researcher-1" in c[3]
+               for c in calls(herdr_log))
+
+
 def test_a_session_waiting_at_another_dialog_is_left_to_the_coordinator(project, herdr_log, monkeypatch):
     for n, (dialog, said) in enumerate((("mcp", "waits at a dialog (New MCP server found"),
                                         ("claude-other", "a folder trust question that does not name")), 1):
@@ -454,7 +475,8 @@ def test_the_first_assignment_waits_until_codex_has_started(project, herdr_log, 
     log = calls(herdr_log)
     reads = [i for i, c in enumerate(log) if c[:3] == ["agent", "read", "researcher-1"]]
     first = next(i for i, c in enumerate(log) if c[:3] == ["agent", "prompt", "researcher-1"])
-    assert len(reads) == 4 and reads[-1] < first  # typed only once Codex had started
+    # typed only once Codex had started (4 looks) and showed no dialog herdr does not see (1 more)
+    assert len(reads) == 5 and reads[-1] < first
 
 
 def test_the_coordinator_answers_a_dialog_in_a_session_and_records_why(project, herdr_log, tmp_path, monkeypatch):

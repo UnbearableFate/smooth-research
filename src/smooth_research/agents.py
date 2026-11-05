@@ -21,7 +21,7 @@ from pathlib import Path
 from . import adapters, herdr, messages, usage, watch, worktrees
 from .delegate import SUBAGENTS, WAITING, prompt_for, rl_command
 from .herdr import caller_role
-from .launch import SELECTED, answer_new, excerpt, option_line, select, start_agent
+from .launch import SELECTED, answer_new, excerpt, option_line, select, start_agent, unseen
 from .project import stall_minutes, usable_entries, watch_minutes
 from .store import Store
 from .util import RLError, now_utc
@@ -151,11 +151,12 @@ def dialog(store: Store, name: str) -> dict:
     state = herdr.status(s["herdr_agent"])
     screen = herdr.read(s["herdr_agent"])
     shown = [x.rstrip() for x in screen.splitlines() if x.strip()][-40:]
-    head = f"{name} is {state}" + (" at a dialog" if state == "blocked" else "")
+    at = state == "blocked" or unseen(s["host"], screen)
+    head = f"{name} is {state}" + (" at a dialog" if state == "blocked" else " at a dialog herdr does not see" if at else "")
     return {"name": name, "state": state, "screen": screen,
             "summary": head + (":\n" + "\n".join(shown) if shown else " (nothing on its screen)")
                        + (f"\nanswer it: rl agent answer {name} \"<option text or number>\" --reason \"<why>\""
-                          if state == "blocked" else "")}
+                          if at else "")}
 
 
 def answer(store: Store, name: str, option: str, reason: str, timeout: int = 30) -> dict:
@@ -169,23 +170,25 @@ def answer(store: Store, name: str, option: str, reason: str, timeout: int = 30)
     s = _session(store, name)
     target = s["herdr_agent"]
     state = herdr.status(target)
-    if state != "blocked":
-        raise RLError("CONFLICT", f"{name} is {state}, not at a dialog; `rl agent dialog {name}` shows its screen")
     screen = herdr.read(target)
+    shown = unseen(s["host"], screen)  # a dialog herdr does not see: it reports the agent idle
+    if state != "blocked" and not shown:
+        raise RLError("CONFLICT", f"{name} is {state}, not at a dialog; `rl agent dialog {name}` shows its screen")
     problem = select(target, option, screen)
     if problem:
         raise RLError("NOT_FOUND", f"{name}: {problem}; `rl agent dialog {name}` shows the options")
     chosen = " ".join((option_line(herdr.read(target), option) or option).split()).lstrip("".join(SELECTED) + " ")
     herdr.keys(target, "enter")
-    deadline = time.monotonic() + timeout
-    while (state := herdr.status(target)) == "blocked" and time.monotonic() < deadline:
-        if option_line(herdr.read(target), option) is None:  # another dialog followed
-            break
+    deadline, now = time.monotonic() + timeout, screen
+    while time.monotonic() < deadline:
+        state, now = herdr.status(target), herdr.read(target)
+        if (state != "blocked" and not (shown and shown in now)) or option_line(now, option) is None:
+            break  # the dialog is gone, or another one followed
         time.sleep(0.5)
     with store.write() as tx:
         tx.event("session.answered", s["id"], f"{name}: chose '{chosen}' at '{excerpt(screen, chars=200)}': {reason}")
     summary = f"{name}: chose '{chosen}' ({reason}); now {state}"
-    if state == "blocked":
+    if state == "blocked" or unseen(s["host"], now):
         summary += f"; it waits at a dialog again: `rl agent dialog {name}`"
     elif state in ("idle", "done") and s.get("assignment"):
         stopped, desc, _ = watch.assignment_state(store, s)

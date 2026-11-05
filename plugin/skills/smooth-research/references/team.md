@@ -113,7 +113,8 @@ end your turn; the next notice wakes you.
 
 Role sessions ask you, never the user. A question or a request for permission arrives as a NOTE; a dialog in a
 session's host (an approval, hooks to review, an MCP server to enable) is reported by `{{rl}} agent open`, by a
-notice that could not be typed, or by the watcher. Decide it yourself whenever the constraints document and
+notice that could not be typed, or by the watcher. herdr does not recognize some of Codex's dialogs (its hook
+review, its question after `/new`); rl reads those from the screen, types nothing into them, and lets you answer. Decide it yourself whenever the constraints document and
 the records let you judge it, and answer at once:
 
 - a question: `{{rl}} agent tell <name> "<answer>"`;
@@ -134,7 +135,9 @@ actions outside the project that cannot be undone.
 minutes (default 5) it looks at each open session and at you: once through herdr and, for a Codex session,
 through what its own log gained since the last beat. It finds that log by the session id herdr reports through its
 Codex integration; when `{{rl}} agent open` says herdr reports none, ask the user to install it (`herdr integration
-install codex`); until then such sessions are seen through herdr only. A session gets the first class that applies:
+install codex`); until then such sessions are seen through herdr only. Codex asks to review that hook when it is new
+or changed: trusting it is the user's decision (it runs outside the sandbox); until the user has trusted it, answer
+"Continue without trusting". A session gets the first class that applies:
 
 | Session | Watcher |
 | --- | --- |

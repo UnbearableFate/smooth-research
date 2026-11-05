@@ -97,7 +97,7 @@
   - **空闲未完成**：空闲、任务没做完、又没在等什么。连续两拍 `state_change_seq` 不变才提醒它继续；同一项任务最多提醒 2 次，之后报告协调者；
   - **其他**：在工作，或者正常的暂停：任务记为 waiting（`rl task wait`，比如等集群作业）或 blocked；在等自己申请的审查；任务所测实验的 run 还处于 queued 或 running；发出的消息还没有回复（发给协调者的，以协调者还没读为准）。回合出错的会话不算在等回复。
 
-  日志说回合已经结束时，以日志为准，不看 herdr 的 working。Claude Code 和 pi 的会话只看 herdr（Claude 的日志还没有错误样本，不定规则）；没有会话 id 时也只看 herdr，不按目录去猜日志，`rl agent list` 显示“log unavailable”。Codex 的会话 id 由它自己生成，herdr 只有装了 Codex 集成（`herdr integration install codex`，会在用户的 Codex 配置里加一个 hook）才上报；没装时 `rl agent open` 会说明，协调者请用户安装，之后启动的会话才有 id。
+  日志说回合已经结束时，以日志为准，不看 herdr 的 working。Claude Code 和 pi 的会话只看 herdr（Claude 的日志还没有错误样本，不定规则）；没有会话 id 时也只看 herdr，不按目录去猜日志，`rl agent list` 显示“log unavailable”。Codex 的会话 id 由它自己生成，herdr 只有装了 Codex 集成（`herdr integration install codex`，会在用户的 Codex 配置里加一个 hook）才上报；没装时 `rl agent open` 会说明，协调者请用户安装，之后启动的会话才有 id。这个 hook 新装或更新后，Codex 启动时会先问“Hooks need review”：信任它（hook 在沙箱外运行）由用户决定，用户信任之前协调者选“Continue without trusting”。herdr 认不出 Codex 的这类对话框（hook 审核、`/new` 之后的问题），把会话报成 idle：rl 从屏幕上认出它们，`rl agent open` 不发分配、监视程序按“停在对话框”处理且不输入任何东西，`rl agent dialog`/`answer` 照常可用。
 
   非斜杠命令的提示用 `herdr agent prompt <目标> <文字> --wait --until working --until blocked --timeout 20000` 发送：herdr 看到 working 或 blocked 才算送达；Codex 会话的日志在发送之后出现新的 `task_started` 也算。确认不了的报告“delivery not confirmed”（附屏幕末尾；屏幕上像是 Codex 的 Hooks 面板时注明可能被面板挡住），不计数，在会话有动静之前不再输入；只有确定没送出去（对话框挡着、agent 不在）才在下一拍重发。斜杠命令照旧；`rl agent reset --clear` 给 Codex 输入 `/new` 后，Codex 会问新对话在哪里运行（herdr 把这个问题看成 idle，这时输入的提示只会回答它然后丢失），rl 选“Use current Git worktree”（会话自己的目录），等问题消失再返回。提醒、重试、重启的次数分别记在 `Session.watch` 里，只在确认送达后加一；写入时在写事务里重新读出再合并。“已经告诉过协调者”的标记和那一拍的 NOTE 在同一个事务里写入。
 

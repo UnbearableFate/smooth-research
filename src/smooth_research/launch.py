@@ -35,6 +35,20 @@ STARTING = {"codex": "Waiting for startup"}
 # keeps the folder rl opened the session in. herdr sees the agent idle there: a prompt typed then only answers the
 # question, and is lost
 NEW_CONVERSATION = {"codex": ("Where should the new conversation run?", "Use current Git worktree")}
+# Dialogs a host shows that herdr does not recognize (it sees the agent idle, and what is typed then goes to the
+# dialog), by the text that marks them: Codex's review of new or changed hooks, and its question after /new
+UNSEEN = {"codex": ("Hooks need review", NEW_CONVERSATION["codex"][0])}
+
+
+def unseen(host: str | None, screen: str) -> str | None:
+    """The dialog on the screen that herdr does not recognize as one, if any."""
+    return next((d for d in UNSEEN.get(host or "", ()) if d in screen), None)
+
+
+def decide(name: str) -> str:
+    """How the coordinator decides a dialog in a session."""
+    return (f"decide it: `rl agent dialog {name}` shows it, `rl agent answer {name} \"<option>\" --reason ..` "
+            "answers it (only what only the user can decide goes to the user)")
 
 
 def launch_args(store: Store, entry: adapters.Entry, kind: str, name: str, host_session: str | None) -> list[str]:
@@ -91,17 +105,23 @@ def start_agent(store: Store, s: dict, timeout: int = 90, tab: str | None = None
             with store.write() as tx:
                 tx.event("session.trusted", s["id"], trusted)
     if not waiting:
-        _until_started(name, entry.entry, timeout)
+        screen = _until_started(name, entry.entry, timeout)
+        if unseen(entry.entry, screen):
+            waiting = f"{name} waits at a dialog herdr does not see ({excerpt(screen)}): {decide(name)}"
     # the id herdr reports (Codex chooses its own): the watcher reads the session's log by it, and keeps it current
     host_session = herdr.session_id(name) or host_session
     return {"tab": tab, "pane": pane, "host_session": host_session, "waiting": waiting, "trusted": trusted}
 
 
-def _until_started(name: str, host: str, timeout: int) -> None:
-    """Wait, at most timeout seconds, while the host shows that it still starts, so the first prompt starts a turn."""
+def _until_started(name: str, host: str, timeout: int) -> str:
+    """Wait, at most timeout seconds, while the host shows that it still starts, so the first prompt starts a turn.
+    The screen then ('' for a host whose screen rl need not read)."""
     marker, deadline = STARTING.get(host), time.monotonic() + timeout
-    while marker and marker in herdr.read(name) and time.monotonic() < deadline:
+    screen = herdr.read(name) if marker or host in UNSEEN else ""
+    while marker and marker in screen and time.monotonic() < deadline:
         time.sleep(0.5)
+        screen = herdr.read(name)
+    return screen
 
 
 def answer_new(name: str, host: str, timeout: int = 30, asked: float = 5.0) -> str | None:
@@ -111,7 +131,7 @@ def answer_new(name: str, host: str, timeout: int = 30, asked: float = 5.0) -> s
     question, keep = NEW_CONVERSATION.get(host, (None, None))
     if not question:
         return None
-    ask = f"decide it: `rl agent dialog {name}` shows it, `rl agent answer {name} \"<option>\" --reason ..` answers it"
+    ask = decide(name)
     deadline, until = time.monotonic() + timeout, time.monotonic() + asked
     try:
         while question not in (screen := herdr.read(name)):
@@ -137,8 +157,7 @@ def answer_trust(name: str, host: str, folder: Path, timeout: int) -> str | None
     """Answer the host's question whether to trust the folder rl opened the session in, as the coordinator's
     choice. None once the agent is ready; otherwise why it still waits (any other dialog is the coordinator's
     to decide)."""
-    ask = (f"decide it: `rl agent dialog {name}` shows it, `rl agent answer {name} \"<option>\" --reason ..` "
-           "answers it (only what only the user can decide goes to the user)")
+    ask = decide(name)
     question, accept = TRUST_QUESTIONS.get(host, (None, None))
     try:
         screen = herdr.read(name)
