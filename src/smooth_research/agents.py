@@ -21,7 +21,7 @@ from pathlib import Path
 from . import adapters, herdr, messages, usage, watch, worktrees
 from .delegate import SUBAGENTS, WAITING, prompt_for, rl_command
 from .herdr import caller_role
-from .launch import SELECTED, excerpt, option_line, select, start_agent
+from .launch import SELECTED, answer_new, excerpt, option_line, select, start_agent
 from .project import stall_minutes, usable_entries, watch_minutes
 from .store import Store
 from .util import RLError, now_utc
@@ -127,6 +127,8 @@ def open_session(store: Store, kind: str, name: str | None = None, entry_text: s
                         "host_session_id": started["host_session"]})
     where = f"worktree {wt} on {branch or 'a detached HEAD'}" if wt else f"in {cwd}"
     summary = f"{sid} {name} ({kind}, {entry}) open in herdr tab {tab_id}, {where}" + (f"; {trusted}" if trusted else "")
+    if entry.entry == "codex" and not started["host_session"] and not waiting:
+        summary += f"\n{name}: {watch.NO_ID}"
     out = {"id": sid, "name": name, "tab": tab_id, "pane": pane, "entry": str(entry), "worktree": str(wt) if wt else None,
            "branch": branch}
     if task or ticket:
@@ -271,17 +273,21 @@ def tell(store: Store, to: str, text: str, sender: str | None = None, task: str 
 
 def reset(store: Store, name: str, mode: str) -> dict:
     """Prepare a session for its next assignment: compact keeps a summary of the conversation, clear starts a
-    new one (/clear in Claude Code, /new in Codex and pi)."""
+    new one (/clear in Claude Code, /new in Codex and pi; Codex asks where the new one runs: in the session's own
+    folder)."""
     s = _session(store, name)
     command = SLASH[s["host"]][mode]
     problem = herdr.prompt(s["herdr_agent"], command, wait_ms=600_000 if mode == "compact" else None)
     if problem:
         raise RLError("HERDR", f"{name}: {command} not sent: {problem}")
+    waiting = answer_new(s["herdr_agent"], s["host"]) if mode == "clear" else None
     with store.write() as tx:
         tx.update(s["id"], {"assignment": None, **({"host_session_id": None} if mode == "clear" else {})})
-        tx.event("session.reset", s["id"], f"{name} {command} after {s.get('assignment') or 'no assignment'}")
-    return {"id": s["id"], "summary": f"{s['id']} {name}: sent {command}; ready for `rl agent assign {name} ...`"
-                                      + (" (a new host conversation: its id is not known)" if mode == "clear" else "")}
+        tx.event("session.reset", s["id"], f"{name} {command} after {s.get('assignment') or 'no assignment'}"
+                 + (f"; {waiting}" if waiting else ""))
+    return {"id": s["id"], "waiting": waiting,
+            "summary": f"{s['id']} {name}: sent {command}; {waiting or f'ready for `rl agent assign {name} ...`'}"
+                       + (" (a new host conversation: its id is not known)" if mode == "clear" else "")}
 
 
 def _close_tab(s: dict) -> list[str]:

@@ -27,7 +27,8 @@ smooth-research skill: {{rl_short}}
   review starts a new round, with the reason: `--recheck-of RV-x --new-round "<why the code needs another
   review>"`.
 - An answer is final, however it came (headless, a reviewer session, an import): a ticket is answered once,
-  and a further review is a re-check.
+  and a further review is a re-check. Of two answers that arrive together the first recorded stands; a
+  headless worker that ends after another answer adds only its calls.
 - In herdr the reviewer is a session that the coordinator assigns (`{{rl}} agent open --role reviewer
   --ticket RV-x`). It answers with `{{rl}} review answer RV-x --answer <file>` and talks with the requester
   through `{{rl}} agent tell`; the re-check goes to the same reviewer session. Without herdr, `{{rl}} review

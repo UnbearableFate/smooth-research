@@ -1,7 +1,7 @@
 # Team sessions in herdr
 
 When the coordinator runs inside herdr (`HERDR_ENV=1`), researchers, reviewers and advisors are agent sessions
-in their own herdr tabs. The coordinator opens them, gives each one assignment at a time, and resets or closes
+in their own tabs of the coordinator's herdr workspace. The coordinator opens them, gives each one assignment at a time, and resets or closes
 them afterwards. Without herdr, the headless forms in host.md do the same work (a native subagent or
 `{{rl}} delegate`, `{{rl}} review run`, `{{rl}} advise run`); review rounds and advice rounds count the same way.
 
@@ -49,7 +49,7 @@ own). A host is low when a window has 10% or less left, or 20% or less on your o
 A session reads its work from `{{rl}} agent brief <name>`; the assignment prompt only names it. A session
 opened without a name is called `<role>-<n>`. Each `open` records a Session; `close` closes the tab and ends
 the record.
-Reset only an idle session: it types `/compact`, `/clear` or `/new` into the agent. Advisors are costly: close
+Reset only an idle session: it types `/compact`, `/clear` or `/new` into the agent (Codex then asks where the new conversation runs; rl answers with the session's own folder). Advisors are costly: close
 each one when you have its final advice.
 
 ## Worktrees and merging
@@ -132,7 +132,9 @@ actions outside the project that cannot be undone.
 
 `{{rl}} agent open` also starts the watcher in its own tab (`sr-watch`). Every `agents.watch_minutes`
 minutes (default 5) it looks at each open session and at you: once through herdr and, for a Codex session,
-through what its own log gained since the last beat. A session gets the first class that applies:
+through what its own log gained since the last beat. It finds that log by the session id herdr reports through its
+Codex integration; when `{{rl}} agent open` says herdr reports none, ask the user to install it (`herdr integration
+install codex`); until then such sessions are seen through herdr only. A session gets the first class that applies:
 
 | Session | Watcher |
 | --- | --- |

@@ -179,6 +179,12 @@ def revise_hypothesis(store: Store, hid: str, reason: str, statement: str | None
 
 def set_hypothesis(store: Store, hid: str, reason: str, evidence_status: str | None = None,
                    disposition: str | None = None, rechecked: bool = False) -> dict:
+    """Status bookkeeping. A key conclusion (supported, challenged) is a decision, which the conclusion review check
+    follows; it is not set here."""
+    if evidence_status in KEY_STATUSES:
+        raise RLError("INVALID", f"{evidence_status} is a key conclusion: record it as a decision, after a conclusion "
+                                 f"review (rl review conclusion --target {hid} ...): rl decide --targets {hid} --action "
+                                 f"continue --set-evidence-status {evidence_status} --rationale .. --based-on EV-x,RV-x")
     with store.write() as tx:
         tx.require(hid, "Hypothesis")
         changes = {k: v for k, v in (("evidence_status", evidence_status), ("disposition", disposition)) if v}

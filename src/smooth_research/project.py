@@ -518,9 +518,10 @@ def advice_limit(config: dict) -> int:
     return value if _count(value) else DEFAULT_CONFIG["advice"]["max_rounds"]
 
 
-def load_config(root: Path) -> dict:
+def load_config(root: Path, remember: bool = True) -> dict:
     """The configuration over the defaults. Nothing in the file stops a command: while it does not parse, the
-    settings read the last time it did are used (the defaults before that), and config_warnings says so."""
+    settings read the last time it did are used (the defaults before that), and config_warnings says so. remember
+    False (rl --read-only) leaves that fallback as it is."""
     path, last = root / CONFIG_NAME, root / LAST_READ
     try:
         data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
@@ -538,7 +539,7 @@ def load_config(root: Path) -> dict:
                                                         "until it is fixed"}
     text = json.dumps(data, sort_keys=True, ensure_ascii=False, default=str)
     try:
-        if last.parent.is_dir() and (not last.exists() or last.read_text(encoding="utf-8") != text):
+        if remember and last.parent.is_dir() and (not last.exists() or last.read_text(encoding="utf-8") != text):
             atomic_write(last, text.encode("utf-8"))
     except OSError:
         pass  # a read-only checkout: the fallback stays as it was
@@ -588,30 +589,31 @@ def _checkout(root: Path, here: Path) -> Path:
     return root
 
 
-def find_project(explicit: str | None = None, start: Path | None = None) -> Project:
+def find_project(explicit: str | None = None, start: Path | None = None, read_only: bool = False) -> Project:
     """--project, then $SMOOTH_RESEARCH_PROJECT, then the nearest directory above cwd with smooth-research.yaml.
     In a linked git worktree of the project (a researcher's), the project is the one in the main checkout and
-    the worktree is the caller's checkout."""
+    the worktree is the caller's checkout. read_only (rl --read-only) writes nothing, not even the configuration's
+    fallback copy."""
     here = (start or Path.cwd()).resolve()
     chosen = explicit or os.environ.get(ENV_PROJECT)
     if chosen:
         root = Path(chosen).expanduser().resolve()
         if not (root / CONFIG_NAME).is_file():
             raise RLError("NO_PROJECT", f"{root} has no {CONFIG_NAME}; run `rl init` there first")
-        return Project(root, load_config(root), _checkout(root, here))
+        return Project(root, load_config(root, not read_only), _checkout(root, here))
     for candidate in (here, *here.parents):
         if (candidate / CONFIG_NAME).is_file():
             main = _in_main(candidate)
             if main:
-                return Project(main[0], load_config(main[0]), main[1])
-            return Project(candidate, load_config(candidate))
+                return Project(main[0], load_config(main[0], not read_only), main[1])
+            return Project(candidate, load_config(candidate, not read_only))
     linked = linked_worktree(here)
     if linked:  # the configuration is not committed, so the worktree has no copy of it
         top, main_top = linked
         for candidate in (here, *here.parents):
             root = main_top / candidate.relative_to(top)
             if (root / CONFIG_NAME).is_file():
-                return Project(root, load_config(root), candidate)
+                return Project(root, load_config(root, not read_only), candidate)
             if candidate == top:
                 break
     raise RLError("NO_PROJECT", f"no {CONFIG_NAME} in {here} or its parents; run `rl init --plan <plan.md>` "

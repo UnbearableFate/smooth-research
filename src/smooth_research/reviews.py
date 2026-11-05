@@ -23,7 +23,6 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-import sys
 from pathlib import Path
 
 from . import adapters, documents, messages, usage
@@ -36,7 +35,7 @@ from .runs import code_review_summary, evidence_attempts
 from .schema import ENUMS
 from .scope import changed_since_request, fingerprint
 from .store import Store, Tx, _sort_key
-from .util import RLError, digest_json, now_utc, short
+from .util import RLError, digest_json, now_utc, rl_process, short
 from .view import _arm_table
 
 REVIEWS_PER_ROUND = 2
@@ -207,9 +206,8 @@ def _worker(ticket: dict) -> int | None:
 
 def _spawn(store: Store, ticket_id: str, timeout: int, entry: str | None = None) -> tuple[subprocess.Popen, Path]:
     log = store.project.dir("calls") / f"{ticket_id}.worker.log"
-    cmd = [sys.executable, "-m", "smooth_research", "--project", str(store.project.root),
-           "review" if ticket_id.startswith("RV") else "advise", "run", ticket_id, "--timeout", str(timeout),
-           *(["--entry", entry] if entry else [])]
+    cmd = rl_process("--project", str(store.project.root), "review" if ticket_id.startswith("RV") else "advise", "run",
+                     ticket_id, "--timeout", str(timeout), *(["--entry", entry] if entry else []))
     with open(log, "ab") as out:  # the worker claims the ticket itself (run_ticket)
         proc = subprocess.Popen(cmd, stdout=out, stderr=out, stdin=subprocess.DEVNULL, start_new_session=True,
                                 cwd=store.project.root)
@@ -264,6 +262,7 @@ def run_ticket(store: Store, ticket_id: str, timeout: int = 1800, only: str | No
                                   "calls": calls + [{"pid": os.getpid(), "started_at": now_utc()}]})
     if t["status"] == "answered":
         return {"id": ticket_id, "summary": f"{ticket_id} already answered ({t.get('verdict') or 'see answer'})"}
+    mine = len(calls)  # calls from here on are this worker's
     candidates = chosen or [adapters.Entry.parse(c) for c in (t.get("candidates") or [])]
     authors = list(t.get("author_models") or [])
     # The package goes in the prompt. A code review's package names the files, which the reviewer reads where
@@ -297,14 +296,24 @@ def run_ticket(store: Store, ticket_id: str, timeout: int = 1800, only: str | No
                                         + " ".join(res.text.split())[:200])
         calls.append({"entry": str(entry), **res.as_dict(), "finished_at": now_utc()})
         if res.ok:
-            return _store_answer(store, ticket_id, res.text, str(entry), res.observed_model, res.provider,
-                                 res.session_id, res.usage, res.cost_usd, calls, authors)
+            try:
+                return _store_answer(store, ticket_id, res.text, str(entry), res.observed_model, res.provider,
+                                     res.session_id, res.usage, res.cost_usd, calls, authors)
+            except RLError as exc:
+                if "answer_ref" not in exc.details:
+                    raise
+                return _answered_meanwhile(store, ticket_id, calls[mine:],
+                                           f"its answer, not recorded, is in {store.project.rel(log)}")
     status = "pending" if manual else "failed" if answered else "unavailable"
     errors = "; ".join(f"{c['entry']}: {c.get('error')}" for c in calls if c.get("error"))
     with store.write() as tx:
-        tx.update(ticket_id, {"status": status, "calls": calls,
-                              "error": errors or ("waiting for a manual answer" if manual else "no candidate could be called")})
-        tx.event(f"{t['kind']}.{status}", ticket_id, "no usable automatic answer")
+        late = tx.require(ticket_id, "Ticket")["status"] == "answered"
+        if not late:
+            tx.update(ticket_id, {"status": status, "calls": calls, "error": errors or (
+                "waiting for a manual answer" if manual else "no candidate could be called")})
+            tx.event(f"{t['kind']}.{status}", ticket_id, "no usable automatic answer")
+    if late:
+        return _answered_meanwhile(store, ticket_id, calls[mine:], f"its own calls gave no usable answer ({errors})")
     if manual:
         return {"id": ticket_id, "status": status,
                 "summary": f"{ticket_id}: submit {store.project.rel(request_path)}"
@@ -316,11 +325,34 @@ def run_ticket(store: Store, ticket_id: str, timeout: int = 1800, only: str | No
                        f"work can continue (raw output in {store.project.rel(store.project.dir('calls'))}/)."}
 
 
+def _answered_meanwhile(store: Store, ticket_id: str, worker_calls: list, what: str) -> dict:
+    """The ticket was answered (by a session or an import) while this worker called its models: that answer
+    stands, and the worker's calls join the ticket's record in place of its claim."""
+    with store.write() as tx:
+        t = tx.require(ticket_id, "Ticket")
+        kept = [c for c in (t.get("calls") or []) if c.get("pid") != os.getpid()]
+        tx.update(ticket_id, {"calls": kept + worker_calls})
+        tx.event(f"{t['kind']}.late_worker", ticket_id, f"answered while worker {os.getpid()} ran; {what}")
+    return {"id": ticket_id, "status": t["status"],
+            "summary": f"{ticket_id} was answered while this worker ran ({t.get('verdict') or 'see answer'}): that "
+                       f"answer stands; {what}"}
+
+
 def _parsed(kind: str, text: str) -> bool:
     data = adapters.last_json_block(text) or {}
     if kind == "review":
         return data.get("verdict") in ("pass", "issues", "blocking")
     return isinstance(data.get("proposals"), list)
+
+
+def _refuse_answered(t: dict, by: dict | None = None) -> None:
+    """A review is answered once, however the answer came; a further review is a re-check. An advisor session
+    (by) revises only the advice answer it gave."""
+    if t["kind"] == "review" and t["status"] == "answered":
+        raise RLError("CONFLICT", f"{t['id']} is already answered; a further review is a re-check: "
+                                  f"rl review request .. --recheck-of {t['id']}", answer_ref=t.get("answer_ref"))
+    if by and t["kind"] == "advice" and t["status"] == "answered" and t.get("answered_by") != by["id"]:
+        raise RLError("CONFLICT", f"{t['id']} was answered by another session; only that advisor revises it")
 
 
 def _store_answer(store: Store, ticket_id: str, text: str, entry: str, observed: str | None, provider: str | None,
@@ -332,17 +364,10 @@ def _store_answer(store: Store, ticket_id: str, text: str, entry: str, observed:
     earlier ones."""
     with store.read() as tx:
         t = tx.require(ticket_id, "Ticket")
-    if t["kind"] == "review" and t["status"] == "answered":
-        raise RLError("CONFLICT", f"{ticket_id} is already answered; a further review is a re-check: "
-                                  f"rl review request .. --recheck-of {ticket_id}")
+    _refuse_answered(t, answered_by)
     folder = "reviews" if t["kind"] == "review" else "advice"
-    earlier = list(t.get("earlier_answers") or []) + ([t["answer_ref"]] if t.get("answer_ref") else [])
-    name = f"{ticket_id}.md" if not earlier else f"{ticket_id}.revision-{len(earlier) + 1}.md"
-    path = store.project.dir(folder) / name
     header = (f"<!-- {ticket_id} answer · entry {entry} · observed model {observed or 'unverified'} · "
               f"session {session_id or 'unknown'} · received {now_utc()} -->\n\n")
-    path.write_text(header + text, encoding="utf-8")
-    prep = documents.prepare(store.project, path, f"{t['kind']}_answer")
     data = adapters.last_json_block(text) or {}
     verdict = data.get("verdict") if t["kind"] == "review" else None
     if t["kind"] == "review" and verdict not in ("pass", "issues", "blocking"):
@@ -360,7 +385,15 @@ def _store_answer(store: Store, ticket_id: str, text: str, entry: str, observed:
         summary += ", pause recommended" if data.get("pause_recommended") and rec != "pause" else ""
     msg = None
     with store.write() as tx:
-        ref = documents.register(tx, prep)
+        # again inside the write, where no other answer can come in between (another review answer, or another
+        # advisor's): the file is written only now, so a refused answer replaces no recorded one
+        t = tx.require(ticket_id, "Ticket")
+        _refuse_answered(t, answered_by)
+        earlier = list(t.get("earlier_answers") or []) + ([t["answer_ref"]] if t.get("answer_ref") else [])
+        name = f"{ticket_id}.md" if not earlier else f"{ticket_id}.revision-{len(earlier) + 1}.md"
+        path = store.project.dir(folder) / name
+        path.write_text(header + text, encoding="utf-8")
+        ref = documents.register(tx, documents.prepare(store.project, path, f"{t['kind']}_answer"))
         tx.update(ticket_id, {"status": "answered", "answer_ref": ref, "verdict": verdict, "relation": relation,
                               "requested_entry": entry, "observed_model": observed, "provider": provider,
                               "host_session_id": session_id, "usage": usage,
@@ -416,8 +449,7 @@ def answer_live(store: Store, ticket_id: str, answer: str, session_name: str | N
     want = "reviewer" if t["kind"] == "review" else "advisor"
     if s["role_kind"] != want:
         raise RLError("INVALID", f"{ticket_id} is a {t['kind']} ticket; {s['role_id']} is a {s['role_kind']}")
-    if t["kind"] == "advice" and t["status"] == "answered" and t.get("answered_by") != s["id"]:
-        raise RLError("CONFLICT", f"{ticket_id} was answered by another session; only that advisor revises it")
+    _refuse_answered(t, s)
     text = store.project.src(answer).read_text(encoding="utf-8")
     if not _parsed(t["kind"], text):
         raise RLError("INVALID", "the answer has no parseable result block: end it with the JSON block of the "

@@ -25,6 +25,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .adapters import codex_home
 from .project import usage_percent
 from .util import RLError, atomic_write, now_utc, parse_time
 
@@ -48,7 +49,7 @@ def claude_cache() -> Path:
 
 
 def codex_sessions() -> Path:
-    return Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex").expanduser() / "sessions"
+    return codex_home() / "sessions"
 
 
 def _number(value) -> bool:
@@ -201,11 +202,11 @@ def hosts(store) -> dict[str, dict]:
         mine = host == coordinator
         limit = usage_percent(store.project.config, "coordinator_host_left_percent" if mine else "switch_left_percent")
         stale = bool(found) and _minutes_since(found["at"]) > STALE_MINUTES
-        short = [] if stale else sorted((left(w, now), w) for w in (found or {}).get("windows", [])
-                                        if left(w, now) <= limit)
+        short = [] if stale else [w for w in (found or {}).get("windows", []) if left(w, now) <= limit]
         low = None
         if short:
-            rest, w = short[0][0], short[0][1]
+            w = min(short, key=lambda x: left(x, now))  # the narrowest; of equal ones the first listed
+            rest = left(w, now)
             low = {"host": host, "window": w["name"], "left": rest, "resets_at": w.get("resets_at"),
                    "key": f"{host} {w['name']} {w.get('resets_at')}",
                    "reason": f"the {host} subscription has {rest:.0f}% of its {w['name']} window left (its sessions "

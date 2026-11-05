@@ -273,6 +273,29 @@ def test_the_watcher_loop_beats_at_once_leaves_when_replaced_and_ends_when_no_se
         assert not tx.meta().get("watch_tab")
 
 
+def test_a_session_recorded_while_a_beat_found_none_keeps_the_watcher(project, herdr_log, monkeypatch):
+    tasks.start_session(project, "coordinator", "claude")
+    opened = agents.open_session(project, "reviewer")
+    with project.read() as tx:
+        tab = tx.meta()["watch_tab"]
+    monkeypatch.setenv("HERDR_TAB_ID", tab)
+    agents._end(project, opened["id"], "ended elsewhere")
+    real = watch.check
+
+    def opened_during_the_beat(store):  # rl agent open records a session after the beat read none
+        out = real(store)
+        with store.write() as tx:
+            tx.update(opened["id"], {"status": "active"})
+        return out
+
+    def replaced(seconds):  # ends the loop at its next beat
+        with project.write() as tx:
+            tx.set_meta(watch_tab="w1:t77")
+    monkeypatch.setattr(watch, "check", opened_during_the_beat)
+    monkeypatch.setattr(watch.time, "sleep", replaced)
+    assert "the watcher in tab w1:t77 took over" in watch.run(project, 1, own_tab=True)["summary"]
+
+
 def test_a_beat_and_a_manual_check_never_act_together(project, herdr_log, rl):
     tasks.start_session(project, "coordinator", "claude")
     researcher(project, 1)
@@ -400,6 +423,11 @@ def test_a_stall_is_reported_once_with_the_screen_and_settings_do_not_count_as_p
               event(130, "response_item", type="function_call", call_id="c2", name="exec"))
     codex_log(herdr_log, "researcher-3", event(100, "event_msg", type="task_started", turn_id="t3"),
               event(90, "response_item", type="function_call", call_id="c3", name="exec"))
+
+    def reads():  # of researcher-1's screen, from here on (opening it read whether Codex still starts)
+        return len([c for c in calls(herdr_log) if c[:3] == ["agent", "read", "researcher-1"]]) - opened
+    opened = 0
+    opened = reads()
     out = watch.check(project)
     assert "researcher-1: its turn shows no progress for 40 min" in out["summary"] and out["note"]
     assert "with no tool call pending; nothing was typed; its screen ends: >" in out["summary"]
@@ -408,7 +436,7 @@ def test_a_stall_is_reported_once_with_the_screen_and_settings_do_not_count_as_p
     assert "researcher-3: working" in out["summary"]  # a tool call may take a while
     assert not any(reminders(herdr_log, f"researcher-{n}") for n in (1, 2, 3))
     assert not watch.check(project)["note"]  # each is reported once
-    assert len([c for c in calls(herdr_log) if c[:3] == ["agent", "read", "researcher-1"]]) == 1
+    assert reads() == 1
 
 
 def test_a_session_on_a_low_host_is_not_retried(project, herdr_log):

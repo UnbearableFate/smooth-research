@@ -8,13 +8,12 @@ from __future__ import annotations
 
 import os
 import subprocess
-import sys
 
 from . import adapters, usage
 from .context import work_pack
 from .project import usable_entries
 from .store import Store
-from .util import RLError, now_utc
+from .util import RLError, now_utc, rl_process
 
 
 VERIFIED = ("; when you changed code, add the test run that checked it: `--verified \"<command> @<commit>: "
@@ -176,8 +175,8 @@ def start_background(store: Store, task_id: str, entry_text: str | None, role: s
     if entry_text:
         adapters.Entry.parse(entry_text)
     log = store.project.dir("calls") / f"{task_id}.delegate.worker.log"
-    cmd = [sys.executable, "-m", "smooth_research", "--project", str(store.project.root), "delegate", task_id,
-           *(["--entry", entry_text] if entry_text else []), "--role", role, "--timeout", str(timeout)]
+    cmd = rl_process("--project", str(store.project.root), "delegate", task_id,
+                     *(["--entry", entry_text] if entry_text else []), "--role", role, "--timeout", str(timeout))
     with open(log, "ab") as out:
         proc = subprocess.Popen(cmd, stdout=out, stderr=out, stdin=subprocess.DEVNULL, start_new_session=True,
                                 cwd=store.project.root, env={**os.environ, "SMOOTH_RESEARCH_RL": rl_command()})

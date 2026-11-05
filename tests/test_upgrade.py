@@ -257,8 +257,22 @@ def test_a_move_refuses_clashes_and_protected_paths_and_rolls_back(project, tmp_
     code, _, err = rl("upgrade", "--move", "docs/experiments", "research/experiments")
     assert code != 0 and "already there: research/experiments/E-0001.md" in err
     (tmp_path / "research/experiments/E-0001.md").unlink()
-    code, _, err = rl("upgrade", "--move", "research/state", "elsewhere")
-    assert code != 0 and "not a movable path" in err
+    for protected in ("research/state", "research", "research/documents/objects"):  # in it, or holding it
+        code, _, err = rl("upgrade", "--move", protected, "elsewhere")
+        assert code != 0 and "not a movable path" in err, protected
+    assert (tmp_path / "research/state/research.lattice").is_file() and not (tmp_path / "elsewhere").exists()
+    (tmp_path / "stray/state").mkdir(parents=True)
+    (tmp_path / "stray/state/notes.txt").write_text("x\n")
+    code, _, err = rl("upgrade", "--move", "stray", "research")  # its files would land in research/state
+    assert code != 0 and "research/state/notes.txt would land among the database" in err
+    assert (tmp_path / "stray/state/notes.txt").is_file()
+    (tmp_path / "incoming/alias").mkdir(parents=True)
+    (tmp_path / "incoming/alias/probe.txt").write_text("x\n")
+    (tmp_path / "research/alias").symlink_to(tmp_path / "research/state")  # a link inside the destination
+    code, _, err = rl("upgrade", "--move", "incoming", "research")
+    assert code != 0 and "research/alias/probe.txt would land among the database" in err
+    assert (tmp_path / "incoming/alias/probe.txt").is_file() and not (tmp_path / "research/state/probe.txt").exists()
+    (tmp_path / "research/alias").unlink()
     from smooth_research.store import Tx
 
     def broken(self, *args, **kwargs):
@@ -276,6 +290,8 @@ def test_a_move_refuses_clashes_and_protected_paths_and_rolls_back(project, tmp_
 def test_read_only_reads_without_upgrading_writing_or_creating_anything(project, tmp_path, rl):
     research.decide(project, ["H-0001"], "continue", "go on")
     (tmp_path / "research/state/write.lock").unlink()  # a project no writer has locked yet (a copy, say)
+    with open(tmp_path / "smooth-research.yaml", "a") as config:  # changed since a command last read it
+        config.write("\nadvice:\n  max_rounds: 5\n")
 
     def files():
         return {p.relative_to(tmp_path): p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}

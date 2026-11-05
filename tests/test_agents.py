@@ -20,7 +20,7 @@ state = json.loads(state_path.read_text()) if state_path.exists() else {}
 state.setdefault("n", 0)
 # sessions: the host session id herdr reports per agent; logs: a Codex session log the fake appends a turn to when
 # the agent takes a prompt; asks: a dialog the next prompt opens (a request for permission)
-for key in ("agents", "cwd", "dialog", "status", "labels", "kinds", "seq", "sessions", "logs", "asks"):
+for key in ("agents", "cwd", "dialog", "status", "labels", "kinds", "seq", "sessions", "logs", "asks", "starting"):
     state.setdefault(key, {})
 # deaf: takes no prompt (herdr sees nothing); quick: its turn is too short for herdr to see it working; fail: its
 # turns end with the service's overload error
@@ -38,6 +38,9 @@ DIALOGS = {
     "mcp": (["Use this MCP server", "Continue without it"], " New MCP server found in .mcp.json: codegraph\n{options}"),
     "approval": (["1. Yes", "2. Yes, and don't ask again for rm commands", "3. No, and tell Claude what to do differently"],
                  " Bash command\n   rm -rf build/\n Do you want to proceed?\n{options}"),
+    "new": (["1. Use current Git worktree  Keep using the current working directory",
+             "2. Create new Git worktree   Create a separate checkout of this repository in another directory"],
+            "  Where should the new conversation run?\n{options}\n  enter select · esc back"),
 }
 
 def done(result=None, error=None, text=None):
@@ -50,6 +53,9 @@ def done(result=None, error=None, text=None):
 
 def screen(name):
     d = state["dialog"].get(name)
+    if state["starting"].get(name):  # Codex still starts its MCP servers for this many more reads
+        state["starting"][name] -= 1
+        return "> \n  GPT-6.1 Terra medium · Waiting for startup · esc cancel"
     if not d:
         return "> "
     options, text = DIALOGS[d["kind"]]
@@ -116,11 +122,12 @@ if (group, action) == ("agent", "start"):
     launched = args[args.index("--") + 1:] if "--" in args else []
     if "--session-id" in launched:  # Claude Code and pi take the id rl chose
         state["sessions"][name] = launched[launched.index("--session-id") + 1]
-    elif state["kinds"][name] == "codex":  # Codex chooses its own
-        state["sessions"][name] = f"cx-{name}-{state['seq'][name]}"
+    elif state["kinds"][name] == "codex" and not os.environ.get("FAKE_HERDR_NO_CODEX_ID"):  # Codex chooses its own
+        state["sessions"][name] = f"cx-{name}-{state['seq'][name]}"  # herdr's Codex integration reports it
     else:
         state["sessions"].pop(name, None)
     state["logs"].pop(name, None)
+    state["starting"][name] = int(os.environ.get("FAKE_HERDR_STARTING") or 0)
     blocked = os.environ.get("FAKE_HERDR_BLOCKED")
     if blocked:  # 1 or mcp: another dialog; claude, codex: their trust question; claude-other: for another folder
         kind = {"1": "mcp"}.get(blocked, blocked).replace("-other", "")
@@ -146,14 +153,26 @@ if (group, action) in (("agent", "prompt"), ("agent", "get")):
     name = args[2]
     if name not in state["agents"] and not name.startswith("w1:p"):
         done(error=("agent_not_found", f"agent target {name} not found"))
+    if state["dialog"].get(name, {}).get("kind") == "new":  # a question herdr does not recognize: it sees idle
+        if action == "prompt":  # what is typed goes to the question, and its Enter picks the selected option: lost
+            del state["dialog"][name]
+            done(error=("agent_prompt_stalled", "no working state observed") if "--wait" in args else None,
+                 result=reply(name))
+        done(reply(name))
     if name in state["dialog"]:
         if action == "prompt":
             done(error=("agent_blocked", "the agent waits at a dialog"))
         done(reply(name, "blocked"))
     if action == "prompt":
         waited = "--wait" in args
+        if args[3] == "/new" and state["kinds"].get(name) == "codex":  # Codex asks where the new conversation runs
+            state["dialog"][name] = {"kind": "new", "sel": 0, "cwd": ""}
+            done(reply(name))
         if waited and args[3].startswith("/"):
             done(error=("agent_prompt_stalled", "no working state observed"))
+        if state["starting"].get(name):  # it only queues the prompt until it has started
+            done(error=("agent_prompt_stalled", "no working state observed") if waited else None,
+                 result=reply(name))
         if name in state["deaf"]:  # nothing happens: herdr sees no working state
             done(error=("agent_prompt_stalled", "no working state observed") if waited else None,
                  result=reply(name))
@@ -185,11 +204,13 @@ def herdr_log(tmp_path_factory, monkeypatch):
         (bindir / name).chmod((bindir / name).stat().st_mode | stat.S_IEXEC)
     monkeypatch.setenv("PATH", f"{bindir}:{os.environ['PATH']}")
     for key, value in (("HERDR_ENV", "1"), ("HERDR_PANE_ID", "w1:p99"), ("HERDR_TAB_ID", "w1:t99"),
+                       ("HERDR_WORKSPACE_ID", "w1"),
                        ("FAKE_HERDR_STATE", str(bindir / "state.json")), ("FAKE_HERDR_LOG", str(bindir / "log.jsonl")),
                        ("GIT_AUTHOR_NAME", "t"), ("GIT_AUTHOR_EMAIL", "t@example.org"),
                        ("GIT_COMMITTER_NAME", "t"), ("GIT_COMMITTER_EMAIL", "t@example.org")):
         monkeypatch.setenv(key, value)
-    for key in ("SMOOTH_RESEARCH_ROLE", "SMOOTH_RESEARCH_SESSION", "SMOOTH_RESEARCH_CHECKOUT", "FAKE_HERDR_BLOCKED"):
+    for key in ("SMOOTH_RESEARCH_ROLE", "SMOOTH_RESEARCH_SESSION", "SMOOTH_RESEARCH_CHECKOUT", "FAKE_HERDR_BLOCKED",
+                "FAKE_HERDR_STARTING"):
         monkeypatch.delenv(key, raising=False)
     return bindir / "log.jsonl"
 
@@ -220,6 +241,7 @@ def test_a_researcher_works_in_its_own_worktree_with_a_branch_per_task(project, 
     log = calls(herdr_log)
     tab = next(c for c in log if c[:2] == ["tab", "create"])
     assert tab[tab.index("--cwd") + 1] == str(wt) and f"SMOOTH_RESEARCH_PROJECT={tmp_path}" in tab
+    assert tab[tab.index("--workspace") + 1] == "w1"  # the coordinator's workspace, not the one the screen shows
     start = next(c for c in log if c[:2] == ["agent", "start"])
     args = start[start.index("--") + 1:]
     assert args[:2] == ["--model", "claude-opus-5-5"] and args[args.index("--effort") + 1] == "high"
@@ -348,6 +370,52 @@ def test_reviewer_and_advisor_sessions_answer_and_talk_through_messages(project,
     assert agents.list_sessions(project)["summary"].startswith(f"{opened['id']} reviewer-1 [reviewer, idle]")
 
 
+def test_of_two_advisors_answering_together_the_first_keeps_its_answer(project, herdr_log, tmp_path, monkeypatch):
+    tasks.start_session(project, "coordinator", "claude")
+    ad = reviews.prepare_advice(project, "which route?", "H-0001")
+    first = agents.open_session(project, "advisor", ticket=ad["ids"][0])
+    agents.open_session(project, "advisor", ticket=ad["ids"][1])
+    mine, theirs = tmp_path / "mine.md", tmp_path / "theirs.md"
+    mine.write_text(PROPOSALS)
+    theirs.write_text(STOP)
+    real, arrived = project.write, []
+
+    def write():  # advisor-1's answer is recorded after advisor-2's answer was checked, before it is written
+        if not arrived:
+            arrived.append(True)
+            reviews.answer_live(project, ad["ids"][0], str(mine), "advisor-1")
+        return real()
+    monkeypatch.setattr(project, "write", write)
+    with pytest.raises(RLError, match="only that advisor revises it"):
+        reviews.answer_live(project, ad["ids"][0], str(theirs), "advisor-2")
+    with project.read() as tx:
+        t = tx.require(ad["ids"][0])
+    assert arrived and t["answered_by"] == first["id"] and not t.get("earlier_answers")
+    assert not list((tmp_path / "research/advice").glob("*.revision-*"))  # no file of the refused answer
+    assert "recommends stop" in reviews.answer_live(project, ad["ids"][0], str(theirs), "advisor-1")["summary"]
+
+
+def test_a_cleared_codex_session_takes_its_next_assignment(project, herdr_log):
+    tasks.start_session(project, "coordinator", "claude")
+    ad = reviews.prepare_advice(project, "which route?", "H-0001")
+    assert agents.open_session(project, "advisor", ticket=ad["ids"][0])["entry"].startswith("codex:")
+    out = agents.reset(project, "advisor-1", "clear")
+    assert "ready for `rl agent assign advisor-1" in out["summary"] and not out["waiting"]
+    keys = [c for c in calls(herdr_log) if c[:2] == ["agent", "send-keys"]]
+    assert keys == [["agent", "send-keys", "advisor-1", "enter"]]  # the new conversation runs in its own folder
+    assert agents.assign(project, "advisor-1", ticket=ad["ids"][0])["summary"].endswith("; told to read its brief")
+
+
+def test_a_codex_session_without_an_id_from_herdr_is_reported(project, herdr_log, monkeypatch):
+    tasks.start_session(project, "coordinator", "claude")
+    ad = reviews.prepare_advice(project, "which route?", "H-0001")
+    assert "herdr reports no Codex session id" not in agents.open_session(project, "advisor", ticket=ad["ids"][0])["summary"]
+    monkeypatch.setenv("FAKE_HERDR_NO_CODEX_ID", "1")  # herdr's Codex integration is not installed
+    out = agents.open_session(project, "advisor", ticket=ad["ids"][1], entry_text="codex:gpt-6-astra@max")
+    assert "advisor-2: herdr reports no Codex session id" in out["summary"]
+    assert "herdr integration install codex" in out["summary"]
+
+
 def test_a_session_waiting_at_another_dialog_is_left_to_the_coordinator(project, herdr_log, monkeypatch):
     for n, (dialog, said) in enumerate((("mcp", "waits at a dialog (New MCP server found"),
                                         ("claude-other", "a folder trust question that does not name")), 1):
@@ -376,6 +444,17 @@ def test_the_trust_question_for_the_folder_rl_opened_the_session_in_is_answered(
     assert any(c[:2] == ["agent", "prompt"] and "agent brief researcher-1" in c[3] for c in log)
     with project.read() as tx:
         assert any(e["type"] == "session.trusted" for e in tx.all("Event"))
+
+
+def test_the_first_assignment_waits_until_codex_has_started(project, herdr_log, monkeypatch):
+    monkeypatch.setenv("FAKE_HERDR_STARTING", "3")  # it shows "Waiting for startup" for three more looks
+    task = tasks.create_task(project, "implement", "implement", ["E-0001"], to_role="researcher")["id"]
+    out = agents.open_session(project, "researcher", "researcher-1", entry_text="codex:m", task=task, worktree=False)
+    assert "assigned " + task in out["summary"] and "not confirmed" not in out["summary"]
+    log = calls(herdr_log)
+    reads = [i for i, c in enumerate(log) if c[:3] == ["agent", "read", "researcher-1"]]
+    first = next(i for i, c in enumerate(log) if c[:3] == ["agent", "prompt", "researcher-1"])
+    assert len(reads) == 4 and reads[-1] < first  # typed only once Codex had started
 
 
 def test_the_coordinator_answers_a_dialog_in_a_session_and_records_why(project, herdr_log, tmp_path, monkeypatch):

@@ -54,8 +54,8 @@ def test_the_page_follows_the_commands_and_is_written_only_when_it_changes(proje
     code, _, _ = rl("hypothesis", "add", "--title", "Second", "--statement", "s2", "--derived-from", "H1")
     text = page(tmp_path)
     assert '<li class="node h" id="H-0002">' in text and "<b>2</b> hypotheses: 2 untested; 2 active" in text
-    code, _, _ = rl("hypothesis", "set", "H1", "--reason", "seen", "--evidence-status", "supported")
-    assert code == 0 and "<b>2</b> hypotheses: 1 untested, 1 supported; 2 active" in page(tmp_path)
+    code, _, _ = rl("hypothesis", "set", "H1", "--reason", "seen", "--evidence-status", "inconclusive")
+    assert code == 0 and "<b>2</b> hypotheses: 1 untested, 1 inconclusive; 2 active" in page(tmp_path)
     att = ran(project, "r1")
     assert "<b>0</b> runs" in page(tmp_path)  # runs and observations are frequent: the next render shows them
     code, _, _ = rl("run", "import-result", "--attempt", att, "--manifest", '{"status": "complete", "metrics": '
@@ -236,6 +236,17 @@ def test_rows_keep_conditions_apart_and_each_run_counts_once(project, tmp_path):
     assert any(line.startswith("Resource use: unknown for 6 attempt(s) (ATT-0001-1, ATT-0001-2, ATT-0002-1, "
                                "ATT-0003-1, …).") for line in lines)
     assert late
+
+
+def test_runs_in_different_environments_are_not_averaged_together(project):
+    cpu = {**SPEC, "environment_ref": "uv.lock 1a2b3c4d5e6f, extra cpu"}
+    result(project, ran(project, "c0", cpu), {"acc": 0.8}, "rc0")
+    result(project, ran(project, "c1", {**cpu, "seed": 1}), {"acc": 0.6}, "rc1")
+    result(project, ran(project, "g0", {**cpu, "environment_ref": "uv.lock 1a2b3c4d5e6f, extra cuda"}), {"acc": 0.2},
+           "rg0")
+    assert [(r["condition"], r["seeds"], r["cells"]) for r in rows(project)[1]] == [
+        ("environment uv.lock 1a2b3c4d5e6f, extra cpu", "0,1", ["0.7 (n=2)"]),
+        ("environment uv.lock 1a2b3c4d5e6f, extra cuda", "0", ["0.2 (n=1)"])]
 
 
 def test_resource_use_is_reported_shared_or_unknown(project):

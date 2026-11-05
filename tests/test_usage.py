@@ -118,6 +118,15 @@ def test_a_host_is_low_at_its_threshold_and_earlier_on_the_coordinators_host(pro
                       "'ten'; using 10"]
 
 
+def test_two_windows_used_up_alike_make_a_host_low_once(project, rl):
+    later = int(time.time() + 3600)
+    usage.statusline(json.dumps({"rate_limits": {"five_hour": {"used_percentage": 100, "resets_at": later},
+                                                 "seven_day": {"used_percentage": 100, "resets_at": later}}}))
+    low = usage.low_hosts(project)
+    assert list(low) == ["claude"] and low["claude"]["left"] == 0 and low["claude"]["window"] == "5h"
+    assert rl("agent", "list")[0] == 0
+
+
 def test_a_stale_reading_is_shown_but_does_not_make_a_host_low(project, rl):
     codex_left(5, age_minutes=20)  # Codex has not run a turn here for 20 minutes
     assert usage.reading("codex")["windows"][0]["used"] == 95 and usage.low_hosts(project) == {}

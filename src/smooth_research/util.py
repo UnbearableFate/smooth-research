@@ -85,6 +85,19 @@ def atomic_write(path: Path, data: bytes) -> None:
         os.close(dir_fd)
 
 
+# How the plugin's launcher runs rl: a project's environment has rl's dependencies but not the package, so the
+# package's directory goes on sys.path first (-I: nothing from the current directory or PYTHON* variables)
+BOOT = ("import sys\nsys.path.insert(0, sys.argv.pop(1))\nsys.argv[0] = 'rl'\nfrom smooth_research.cli import main\n"
+        "sys.exit(main())")
+
+
+def rl_process(*args: str) -> list[str]:
+    """The command line of a worker process (a background review, advice or delegation) that runs rl with this code on
+    this interpreter, as the launcher does: `python -m smooth_research` would not find the package there."""
+    import sys
+    return [sys.executable, "-I", "-c", BOOT, str(Path(__file__).resolve().parent.parent), *args]
+
+
 def estimate_tokens(text: str) -> int:
     """Rough estimate, labelled as such wherever it is shown: ASCII chars / 4 plus one per other character."""
     ascii_chars = sum(1 for c in text if ord(c) < 128)

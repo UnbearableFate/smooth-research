@@ -31,6 +31,13 @@ def problem() -> str | None:
     return None
 
 
+def new_tab(*args: str) -> dict:
+    """herdr tab create in the caller's workspace (that of the coordinator, or of the watcher it started): without
+    --workspace herdr uses the workspace the user's screen shows, which may be another project's."""
+    here = os.environ.get("HERDR_WORKSPACE_ID")
+    return call("tab", "create", *(["--workspace", here] if here else []), *args)
+
+
 def call(*args: str, timeout: int = 90) -> dict:
     """Run one herdr command and return its JSON result; herdr errors become RLError("HERDR") with the code."""
     try:

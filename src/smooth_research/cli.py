@@ -55,7 +55,7 @@ def _check_read_only(args) -> None:
 
 
 def _store(args) -> Store:
-    project = find_project(args.project)
+    project = find_project(args.project, read_only=args.read_only)
     args.config_warnings = project.warnings
     args.store = Store(project, args.actor or "agent", read_only=args.read_only)
     _resolve_labels(args, args.store)
@@ -691,7 +691,8 @@ def build_parser() -> argparse.ArgumentParser:
     s = ss.add_parser("set")
     s.add_argument("id")
     s.add_argument("--reason", required=True)
-    s.add_argument("--evidence-status", choices=ENUMS["evidence_status"])
+    s.add_argument("--evidence-status", choices=ENUMS["evidence_status"],
+                   help="supported and challenged are key conclusions: rl decide --set-evidence-status")
     s.add_argument("--disposition", choices=ENUMS["disposition"])
     s.add_argument("--rechecked", action="store_true", help="clear a needs-recheck flag after checking")
     s = ss.add_parser("list", help="the hypotheses by label (rl --json hypothesis list: the records)")
@@ -1074,10 +1075,12 @@ def main(argv: list[str] | None = None) -> int:
         for warning in getattr(args, "config_warnings", None) or []:  # they may explain the error
             print(f"warning: {warning}", file=sys.stderr)
         return 3 if exc.code in CONFLICT_CODES else 1
-    refreshed = _refresh_page(args)
-    if getattr(args, "config_warnings", None) or _upgrade_notice(args) or refreshed:
-        result["warnings"] = [*(result.get("warnings") or []), *(getattr(args, "config_warnings", None) or []),
-                              *_upgrade_notice(args), *refreshed]
+    warnings = [*(getattr(args, "config_warnings", None) or []), *_upgrade_notice(args), *_refresh_page(args)]
+    if args.command == "export" and args.records_only:  # the output is the records themselves, kept as they are
+        for warning in warnings:
+            print(f"warning: {warning}", file=sys.stderr)
+    elif warnings:
+        result["warnings"] = [*(result.get("warnings") or []), *warnings]
     if args.command == "hook" or args.json:
         print(json.dumps(result, ensure_ascii=False, default=str, indent=None if args.command == "hook" else 1))
     else:

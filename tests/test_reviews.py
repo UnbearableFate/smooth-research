@@ -337,6 +337,64 @@ def test_an_imported_review_answer_is_final_too(project, fakes, tmp_path):
     assert (t["verdict"], t["open_severity"], t.get("earlier_answers")) == ("issues", "medium", None)
 
 
+def test_of_two_answers_that_arrive_together_the_first_recorded_stands(project, fakes, tmp_path, monkeypatch):
+    code(tmp_path)
+    rv = request(project)["id"]
+    (tmp_path / "pass.md").write_text(PASS)
+    (tmp_path / "blocking.md").write_text('```json\n{"verdict": "blocking", "findings": []}\n```')
+    real, arrived = reviews.changed_since_request, []
+
+    def first_one_arrives(t):  # between the second answer's first look and its write, the first one is recorded
+        if not arrived:
+            arrived.append(t["id"])
+            reviews.import_answer(project, rv, str(tmp_path / "pass.md"), "gpt-6-astra", "first")
+        return real(t)
+    monkeypatch.setattr(reviews, "changed_since_request", first_one_arrives)
+    with pytest.raises(RLError) as exc:
+        reviews.import_answer(project, rv, str(tmp_path / "blocking.md"), "gpt-6-astra", "second")
+    assert exc.value.code == "CONFLICT" and f"--recheck-of {rv}" in exc.value.message
+    with project.read() as tx:
+        t = tx.require(rv)
+    assert (t["verdict"], t["requested_entry"], t.get("earlier_answers")) == ("pass", "manual:first", None)
+    assert "blocking" not in (tmp_path / f"research/reviews/{rv}.md").read_text()  # the refused one wrote nothing
+
+
+def test_an_answer_recorded_while_a_worker_calls_its_models_stands(project, fakes, tmp_path, monkeypatch):
+    code(tmp_path)
+    rv = request(project)["id"]
+    (tmp_path / "pass.md").write_text(PASS)
+    real, answered = adapters.call, []
+
+    def answer_once(ticket):  # a reviewer session answers while the worker waits for its first model
+        if ticket not in answered:
+            answered.append(ticket)
+            reviews.import_answer(project, ticket, str(tmp_path / "pass.md"), "gpt-6-astra", "reviewer session")
+
+    def a_session_answers(entry, *args, **kwargs):
+        answer_once(rv)
+        return adapters.Call(entry.entry, entry.model, error="model service error")
+    monkeypatch.setattr(adapters, "call", a_session_answers)
+    assert "answered while this worker ran (pass): that answer stands" in reviews.run_ticket(project, rv)["summary"]
+    with project.read() as tx:
+        t = tx.require(rv)
+    assert (t["status"], t["verdict"], t.get("error")) == ("answered", "pass", None) and research.review_passes(t)
+    assert [c for c in t["calls"] if "pid" in c] == [] and t["calls"][-1]["error"] == "model service error"
+
+    code(tmp_path, body="def f(x):\n    return 2 * x\n")  # the worker's own call answers too, but later
+    rv = request(project)["id"]
+
+    def a_session_answers_first(entry, *args, **kwargs):
+        answer_once(rv)
+        return real(entry, *args, **kwargs)
+    monkeypatch.setattr(adapters, "call", a_session_answers_first)
+    out = reviews.run_ticket(project, rv)
+    assert "answered while this worker ran" in out["summary"] and "its answer, not recorded, is in" in out["summary"]
+    with project.read() as tx:
+        t = tx.require(rv)
+    assert (t["status"], t["requested_entry"]) == ("answered", "manual:reviewer session")
+    assert [c for c in t["calls"] if "pid" in c] == [] and t["calls"][-1].get("ok") is True
+
+
 PROPOSALS = 'Proposals.\n```json\n{"proposals": [{"title": "x"}, {"title": "y"}], "pause_recommended": false}\n```'
 
 
@@ -794,7 +852,7 @@ def test_a_background_run_keeps_the_entry_it_was_given(project, fakes, tmp_path,
         with monkeypatch.context() as m:
             m.setattr(subprocess, "Popen", lambda cmd, **kw: started.append(cmd) or SimpleNamespace(pid=4242))
             assert rl(kind, "run", tid, "--background", "--entry", "manual:chosen-model")[0] == 0
-        worker = started[0][3:]  # the worker's rl arguments, without the interpreter
+        worker = started[0][started[0].index("--project"):]  # the worker's rl arguments, without the interpreter
         assert worker[-2:] == ["--entry", "manual:chosen-model"]
         assert "to chosen-model yourself" in rl(*worker)[1]  # not to the configured reviewer or advisor
 

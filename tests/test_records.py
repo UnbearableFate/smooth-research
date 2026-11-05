@@ -330,6 +330,18 @@ def test_decisions_need_reopen_conditions_and_explicit_reopening(project):
                     evidence_scope="exploratory signal on toy data")
 
 
+def test_a_key_conclusion_is_set_only_by_a_decision(project, rl):
+    code, _, err = rl("hypothesis", "set", "H1", "--reason", "looks good", "--evidence-status", "supported")
+    assert code == 1 and "key conclusion" in err and "rl decide --targets H-0001" in err
+    with project.read() as tx:
+        assert tx.require("H-0001")["evidence_status"] == "untested"
+    assert rl("hypothesis", "set", "H1", "--reason", "mixed", "--evidence-status", "inconclusive")[0] == 0
+    research.decide(project, ["H-0001"], "continue", "the evidence says so", set_evidence_status="supported")
+    with project.read() as tx:
+        assert tx.require("H-0001")["evidence_status"] == "supported"
+        assert any("D-0001 key conclusion on H1: no conclusion review" in item for item in research.attention(tx))
+
+
 def test_a_decision_takes_its_reason_from_its_file_and_may_rest_on_an_earlier_one(project, tmp_path, rl):
     (tmp_path / "why.md").write_text("\n## Pause: no signal at three seeds\n\nThe details.\n", encoding="utf-8")
     first = research.decide(project, ["H-0001"], "pause", None, reopen_condition="a better writer exists",
@@ -451,6 +463,12 @@ def test_export_of_the_records_only_prints_them_and_writes_nothing(project, rl, 
     assert files() == before
     code, _, err = rl("export", "--records-only", "--out", "snap")
     assert code == 1 and "writes no directory" in err and not (tmp_path / "snap").exists()
+    with open(tmp_path / "smooth-research.yaml", "a") as config:  # a warning goes to stderr, not into the records
+        config.write("\nmodels:\n  reviewer: [not-an-entry]\n")
+    code, out, err = rl("export", "--records-only")
+    assert code == 0 and json.loads(out)["nodes"] == payload["nodes"] and "not-an-entry" in err
+    code, out, err = rl("--json", "export", "--records-only")
+    assert code == 0 and "warnings" not in json.loads(out) and "not-an-entry" in err
 
 
 def test_hypotheses_and_evidence_are_listed_by_label_and_filtered(project, rl):

@@ -28,6 +28,13 @@ from .util import RLError
 TRUST_QUESTIONS = {"claude": ("Quick safety check", "Yes, I trust this folder"),
                    "codex": ("Trust this folder?", "Trust and continue")}
 SELECTED = ("❯", "›", "▶", ">")
+# What a host shows while it still starts (Codex: its MCP servers) though herdr already sees it ready: a prompt typed
+# then only waits in its queue, and shows no working state herdr could confirm
+STARTING = {"codex": "Waiting for startup"}
+# The question a host asks after /new in a git checkout before it starts the new conversation, and the option that
+# keeps the folder rl opened the session in. herdr sees the agent idle there: a prompt typed then only answers the
+# question, and is lost
+NEW_CONVERSATION = {"codex": ("Where should the new conversation run?", "Use current Git worktree")}
 
 
 def launch_args(store: Store, entry: adapters.Entry, kind: str, name: str, host_session: str | None) -> list[str]:
@@ -54,8 +61,8 @@ def new_tab(store: Store, s: dict) -> dict:
     """A herdr tab for a session, in its folder, with the environment that names its project, session and checkout."""
     env = {ENV_PROJECT: str(store.project.root), "SMOOTH_RESEARCH_RL": rl_command(), ENV_SESSION: s["id"],
            ENV_ROLE: s["role_id"], **({ENV_CHECKOUT: s["cwd"]} if s.get("worktree") else {})}
-    return herdr.call("tab", "create", "--cwd", s["cwd"], "--label", s["role_id"], "--no-focus",
-                      *[a for k, v in env.items() for a in ("--env", f"{k}={v}")])
+    return herdr.new_tab("--cwd", s["cwd"], "--label", s["role_id"], "--no-focus",
+                         *[a for k, v in env.items() for a in ("--env", f"{k}={v}")])
 
 
 def start_agent(store: Store, s: dict, timeout: int = 90, tab: str | None = None, pane: str | None = None) -> dict:
@@ -83,9 +90,47 @@ def start_agent(store: Store, s: dict, timeout: int = 90, tab: str | None = None
             trusted = f"answered {entry.entry}'s folder trust question for {s['cwd']}: trusted"
             with store.write() as tx:
                 tx.event("session.trusted", s["id"], trusted)
+    if not waiting:
+        _until_started(name, entry.entry, timeout)
     # the id herdr reports (Codex chooses its own): the watcher reads the session's log by it, and keeps it current
     host_session = herdr.session_id(name) or host_session
     return {"tab": tab, "pane": pane, "host_session": host_session, "waiting": waiting, "trusted": trusted}
+
+
+def _until_started(name: str, host: str, timeout: int) -> None:
+    """Wait, at most timeout seconds, while the host shows that it still starts, so the first prompt starts a turn."""
+    marker, deadline = STARTING.get(host), time.monotonic() + timeout
+    while marker and marker in herdr.read(name) and time.monotonic() < deadline:
+        time.sleep(0.5)
+
+
+def answer_new(name: str, host: str, timeout: int = 30, asked: float = 5.0) -> str | None:
+    """After /new: answer the host's question where the new conversation runs with the session's own folder, and
+    wait until the new conversation takes prompts. None once it does, else why it still waits (the coordinator's to
+    decide). A host that does not ask within `asked` seconds (another version, a folder outside git) has started it."""
+    question, keep = NEW_CONVERSATION.get(host, (None, None))
+    if not question:
+        return None
+    ask = f"decide it: `rl agent dialog {name}` shows it, `rl agent answer {name} \"<option>\" --reason ..` answers it"
+    deadline, until = time.monotonic() + timeout, time.monotonic() + asked
+    try:
+        while question not in (screen := herdr.read(name)):
+            if time.monotonic() >= until:
+                break
+            time.sleep(0.25)
+        else:
+            problem = select(name, keep, screen)
+            if problem:
+                return f"{name} asks where its new conversation runs; {problem}: {ask}"
+            herdr.keys(name, "enter")
+            while question in herdr.read(name):
+                if time.monotonic() >= deadline:
+                    return f"{name} still asks where its new conversation runs: {ask}"
+                time.sleep(0.25)
+    except RLError as exc:
+        return f"{name} may still ask where its new conversation runs ({exc.message}): {ask}"
+    _until_started(name, host, max(1, int(deadline - time.monotonic())))
+    return None
 
 
 def answer_trust(name: str, host: str, folder: Path, timeout: int) -> str | None:

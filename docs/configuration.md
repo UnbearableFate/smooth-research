@@ -16,7 +16,7 @@
   - `--json` 结果里的 `warnings`；
   - 会话开始时的 hook 提示。
 - 下面这些情况会警告：
-  - **文件解析不了**（YAML 写错，或者顶层不是键值对）：沿用上一次成功读取的设置，直到文件改好。这份设置由 CLI 自动保存在 `research/state/config.last-read.json`；从没读成功过时用默认值；
+  - **文件解析不了**（YAML 写错，或者顶层不是键值对）：沿用上一次成功读取的设置，直到文件改好。这份设置由 CLI 自动保存在 `research/state/config.last-read.json`（`--read-only` 时不更新）；从没读成功过时用默认值；
   - `version` 不是 `1`：按版本 1 读取；
   - 不认识的键（拼错了？）：没有作用；
   - 某一节（如 `models`、`context`）不是键值对：这一节全用默认值；
@@ -97,9 +97,9 @@
   - **空闲未完成**：空闲、任务没做完、又没在等什么。连续两拍 `state_change_seq` 不变才提醒它继续；同一项任务最多提醒 2 次，之后报告协调者；
   - **其他**：在工作，或者正常的暂停：任务记为 waiting（`rl task wait`，比如等集群作业）或 blocked；在等自己申请的审查；任务所测实验的 run 还处于 queued 或 running；发出的消息还没有回复（发给协调者的，以协调者还没读为准）。回合出错的会话不算在等回复。
 
-  日志说回合已经结束时，以日志为准，不看 herdr 的 working。Claude Code 和 pi 的会话只看 herdr（Claude 的日志还没有错误样本，不定规则）；没有会话 id 时也只看 herdr，不按目录去猜日志，`rl agent list` 显示“log unavailable”。
+  日志说回合已经结束时，以日志为准，不看 herdr 的 working。Claude Code 和 pi 的会话只看 herdr（Claude 的日志还没有错误样本，不定规则）；没有会话 id 时也只看 herdr，不按目录去猜日志，`rl agent list` 显示“log unavailable”。Codex 的会话 id 由它自己生成，herdr 只有装了 Codex 集成（`herdr integration install codex`，会在用户的 Codex 配置里加一个 hook）才上报；没装时 `rl agent open` 会说明，协调者请用户安装，之后启动的会话才有 id。
 
-  非斜杠命令的提示用 `herdr agent prompt <目标> <文字> --wait --until working --until blocked --timeout 20000` 发送：herdr 看到 working 或 blocked 才算送达；Codex 会话的日志在发送之后出现新的 `task_started` 也算。确认不了的报告“delivery not confirmed”（附屏幕末尾；屏幕上像是 Codex 的 Hooks 面板时注明可能被面板挡住），不计数，在会话有动静之前不再输入；只有确定没送出去（对话框挡着、agent 不在）才在下一拍重发。斜杠命令照旧。提醒、重试、重启的次数分别记在 `Session.watch` 里，只在确认送达后加一；写入时在写事务里重新读出再合并。“已经告诉过协调者”的标记和那一拍的 NOTE 在同一个事务里写入。
+  非斜杠命令的提示用 `herdr agent prompt <目标> <文字> --wait --until working --until blocked --timeout 20000` 发送：herdr 看到 working 或 blocked 才算送达；Codex 会话的日志在发送之后出现新的 `task_started` 也算。确认不了的报告“delivery not confirmed”（附屏幕末尾；屏幕上像是 Codex 的 Hooks 面板时注明可能被面板挡住），不计数，在会话有动静之前不再输入；只有确定没送出去（对话框挡着、agent 不在）才在下一拍重发。斜杠命令照旧；`rl agent reset --clear` 给 Codex 输入 `/new` 后，Codex 会问新对话在哪里运行（herdr 把这个问题看成 idle，这时输入的提示只会回答它然后丢失），rl 选“Use current Git worktree”（会话自己的目录），等问题消失再返回。提醒、重试、重启的次数分别记在 `Session.watch` 里，只在确认送达后加一；写入时在写事务里重新读出再合并。“已经告诉过协调者”的标记和那一拍的 NOTE 在同一个事务里写入。
 
   每一拍的发现汇成一条来自 `watch` 的 NOTE 发给协调者。协调者自己的回合以暂时性错误结束、又空闲了一整拍时，按同样的规则重试；协调者空闲、又有消息一整拍没读时，提醒一次。所以协调者不需要自己轮询会话。监视程序的一拍和 `rl agent check` 用同一把锁（`research/state/watch.lock`），锁被占着时这一拍跳过并说明。监视程序的 tab 只打印发现了什么的那些拍。没有打开的会话时，监视程序自己退出。正常结束一个会话要用 `rl agent close`；用别的方式关掉的会话算作意外停止，会被重新启动。
 - **审查轮次。** 每轮最多两次审查（第一次加一次复查），是写死的常量，见第 5 节。

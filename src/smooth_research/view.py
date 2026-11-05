@@ -105,11 +105,13 @@ def _value(value) -> str:
 
 def condition(run: dict) -> dict:
     """What makes runs of an experiment one comparison: the contract revision they were registered under, the
-    arm, the data and model versions and the configuration. Seeds, code commits and output places may differ."""
+    arm, the data and model versions, the configuration and the environment (runs with a different
+    environment_ref are not the same comparison). Seeds, code commits and output places may differ."""
     spec = run["spec"]
     return {"contract": int(run["experiment_ref"].rpartition("@")[2] or 0), "arm": str(spec.get("arm")),
             "data": spec.get("data_revision"), "model": spec.get("model_revision"),
-            "config": spec.get("config_ref") or spec.get("config_digest"), "params": spec.get("params") or {}}
+            "config": spec.get("config_ref") or spec.get("config_digest"), "params": spec.get("params") or {},
+            "environment": spec.get("environment_ref")}
 
 
 def run_result(tx: Tx, run: dict) -> tuple[dict | None, list[dict]]:
@@ -153,7 +155,7 @@ def arm_rows(tx: Tx, store: Store, exp: dict) -> tuple[list[str], list[dict]]:
     found = sorted({k for g in groups.values() for k in g["values"]})
     keys = [str(m) for m in declared] or list(dict.fromkeys(
         [m for m in (front.get("metric"), *named) if m in found] + found))[:MAX_METRICS]
-    varying = [k for k in ("data", "model", "config", "params")
+    varying = [k for k in ("data", "model", "config", "params", "environment")
                if len({canonical_json(g["condition"][k]) for g in groups.values()}) > 1]
     rows = []
     for g in sorted(groups.values(), key=lambda g: (g["condition"]["arm"], g["condition"]["contract"],

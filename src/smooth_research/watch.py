@@ -67,6 +67,11 @@ MAX_RETRIES = 3  # per streak of transient turn errors
 RETRY_BEATS = (0, 2, 4)  # beats before each retry: the next beat, then 2 more, then 4 more
 TOOL_STALLS = 4  # a tool call pending this many times agents.stall_minutes is reported
 OPEN_TICKET = ("pending", "running")
+# Codex chooses its session's id, and herdr reports it only through its Codex integration: without it rl sees the
+# session through herdr alone, and does not guess its log
+NO_ID = ("herdr reports no Codex session id, so rl reads no log of it (no turn errors or retries, no log progress, "
+         "its model unverified); herdr's Codex integration reports it: ask the user to install it (`herdr "
+         "integration install codex`; it adds a hook to their Codex configuration) for the sessions started after")
 IN_PROGRESS = ("queued", "running")
 NOT_USER = "(from the watcher, not from the user)"
 CONFIRM_S = 5.0  # how long the log of a Codex session that herdr already saw working is given to show a new turn
@@ -226,7 +231,7 @@ def describe(s: dict, p: dict, c: dict, every: float, now: datetime | None = Non
     if s.get("host") != "codex":
         seen = "herdr only"  # no rule for the other hosts' logs yet
     elif not p.get("sid"):
-        seen = "log unavailable (no session id)"
+        seen = "log unavailable (no session id: herdr integration install codex)"
     else:
         seen = None if (log or {}).get("path") else "log not found"
     quiet = _minutes(view.get("progress_at"), now) if view else None
@@ -784,8 +789,8 @@ def start(store: Store, every: float | None = None) -> dict:
             return {"tab": tab, "started": False, "summary": f"the watcher runs in tab {tab} (a beat every {step:g} min)"}
         herdr.call("tab", "close", tab, timeout=30)  # it stopped reporting
     root = store.project.root
-    made = herdr.call("tab", "create", "--cwd", str(root), "--label", LABEL, "--no-focus", "--env",
-                      f"{ENV_PROJECT}={root}", "--env", f"SMOOTH_RESEARCH_RL={rl_command()}")
+    made = herdr.new_tab("--cwd", str(root), "--label", LABEL, "--no-focus", "--env", f"{ENV_PROJECT}={root}",
+                         "--env", f"SMOOTH_RESEARCH_RL={rl_command()}")
     tab, pane = made["tab"]["tab_id"], made["root_pane"]["pane_id"]
     with store.write() as tx:
         tx.set_meta(watch_tab=tab, watch_pane=pane, watch_beat=now_utc(), watch_every=every)
@@ -851,10 +856,14 @@ def run(store: Store, every: float | None = None, own_tab: bool = False) -> dict
             continue
         if out["news"] or out["reminder"]:
             print(out["summary"], flush=True)
+        watched = bool(out["sessions"])
         if own_tab:
             with store.write() as tx:
-                tx.set_meta(watch_beat=now_utc(), **({"watch_tab": None, "watch_pane": None} if not out["sessions"] else {}))
-        if not out["sessions"]:
+                # decided where no session can be recorded in between: `rl agent open` finds this watcher registered
+                # and starts none, so one recorded since the beat read the sessions keeps it
+                watched = watched or any(s.get("herdr_agent") for s in tx.all("Session", status="active"))
+                tx.set_meta(watch_beat=now_utc(), **({} if watched else {"watch_tab": None, "watch_pane": None}))
+        if not watched:
             break
     print(f"{now_utc()} {end}; the watcher stops", flush=True)
     if own_tab and here:

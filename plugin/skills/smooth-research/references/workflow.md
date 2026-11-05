@@ -121,7 +121,7 @@ which is what ties the run to its package versions.
   `git rev-parse <sha>:uv.lock` (the same for every commit with the same lock). The job script loads the same
   modules, runs that environment's `python`, and writes the torch and CUDA versions it sees into its manifest.
 - Record it: `{{rl}} run register ... --environment-ref "uv.lock <lock id>, extra <extra>, modules <list>"`. Runs
-  with a different environment_ref are not the same comparison.
+  with a different environment_ref are not the same comparison: the arm tables keep them in separate rows.
 - Exception: a package that must match the site's own build (mpi4py for the site's MPI, a torch the site compiled
   for its CUDA) stays out of the lock. Use the site's module or prepared environment, read-only, and name it and
   its versions in `--environment-ref`.
@@ -278,7 +278,8 @@ several `--attempts`; never split it into invented per-run numbers. Different un
 - Key conclusions (`--set-evidence-status supported|challenged`, `--action stop`, a stage `recommend_formal`):
   `{{rl}} review conclusion --target H-x --proposal .. --author-model ..` first, then `{{rl}} decide ...
   --based-on EV-x,RV-x` (skill research-review). A review covers the hypotheses it targets: a decision on H-x
-  and H-y needs a passing review of each.
+  and H-y needs a passing review of each. `{{rl}} hypothesis set` changes the other statuses and dispositions;
+  supported and challenged are recorded only by `{{rl}} decide`.
 - A conclusion review counts for the revision of each hypothesis it reviewed. After `{{rl}} hypothesis revise`,
   have the conclusion reviewed again, or state in the decision's rationale why the revision does not change it.
   Evidence linked to the hypothesis after the review is pointed out (decide, `{{rl}} status`); it is not a gap.

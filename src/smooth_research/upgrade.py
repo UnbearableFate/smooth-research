@@ -215,13 +215,26 @@ def move(store: "Store", old: str, new: str) -> dict:
     src, dst = (project.abs(p).resolve() for p in (old, new))
     for path in (src, dst):
         rel = path.relative_to(root).as_posix() if path.is_relative_to(root) else None
-        if not rel or rel == "." or any(rel == x or rel.startswith(x + "/") for x in PROTECTED):
+        inside = rel and any(rel == x or rel.startswith(x + "/") for x in PROTECTED)
+        holding = rel and path == src and any(x.startswith(rel + "/") for x in PROTECTED)  # it would take them along
+        if not rel or rel == "." or inside or holding:
             raise RLError("INVALID", f"{path} is not a movable path inside the project (the database and the sealed "
                                      "objects stay where they are)")
     if not src.exists():
         raise RLError("NOT_FOUND", f"{old} does not exist")
     pairs = [(src, dst)] if src.is_file() else \
         [(f, dst / f.relative_to(src)) for f in sorted(src.rglob("*")) if f.is_file()]
+
+    def lands(d: Path) -> str | None:
+        """Where a file renamed to d really goes, relative to the project: its folder with every link in it
+        resolved (a link inside the destination may lead elsewhere); None outside the project."""
+        at = d.parent.resolve() / d.name
+        return at.relative_to(root).as_posix() if at.is_relative_to(root) else None
+    into = [project.rel(d) for _, d in pairs
+            if (at := lands(d)) is None or any(at.startswith(x + "/") for x in PROTECTED)]
+    if into:
+        raise RLError("INVALID", f"{', '.join(into[:5])} would land among the database and the sealed objects, which "
+                                 "hold only what rl writes there, or outside the project")
     clashes = [project.rel(d) for _, d in pairs if d.exists()]
     if clashes:
         raise RLError("CONFLICT", f"already there: {', '.join(clashes[:5])}; move or merge those first")

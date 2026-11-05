@@ -147,9 +147,13 @@ def call_claude(entry: Entry, prompt: str, cwd: Path, read_only: bool, timeout: 
     return result
 
 
+def codex_home() -> Path:
+    """Codex's own directory (config.toml, sessions/): $CODEX_HOME when set, else ~/.codex."""
+    return Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex").expanduser()
+
+
 def _codex_rollout_model(thread_id: str) -> tuple[str | None, str | None]:
-    home = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex"))
-    for path in sorted((home / "sessions").glob(f"*/*/*/rollout-*{thread_id}.jsonl"), reverse=True):
+    for path in sorted((codex_home() / "sessions").glob(f"*/*/*/rollout-*{thread_id}.jsonl"), reverse=True):
         try:
             for line in path.open(encoding="utf-8"):
                 event = json.loads(line)
@@ -164,7 +168,7 @@ def _codex_rollout_model(thread_id: str) -> tuple[str | None, str | None]:
 def codex_write_sandbox() -> str:
     """Writable sessions keep workspace-write unless the user chose full access for Codex themselves
     (some hosts cannot run the bubblewrap sandbox at all)."""
-    config = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")) / "config.toml"
+    config = codex_home() / "config.toml"
     try:
         with config.open("rb") as source:
             if tomllib.load(source).get("sandbox_mode") == "danger-full-access":
