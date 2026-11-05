@@ -14,4 +14,7 @@
 
 ## 关于miyabi
 
-- 使用pi-env-mcp 访问miyabi-g, 工作目录应该放置于`/work/xg24i002/x10041/`之下,为临时任务创建临时文件夹
+- 位于miyabi之外的环境时, 使用pi-env-mcp 访问miyabi-g login node, 使用miyabi-mcp访问计算资源, 工作目录应该放置于`/work/xg24i002/x10041/`之下,为临时任务创建临时文件夹
+- 位于miyabi环境时, 使用miyabi-mcp访问计算资源, 工作目录应该放置于`/work/xg24i002/x10041/`之下,为临时任务创建临时文件夹
+- 不要直接使用miyabi-g* 系列login node进行测试.
+
