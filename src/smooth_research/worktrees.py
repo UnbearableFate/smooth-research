@@ -96,6 +96,18 @@ def remove(store: Store, worktree: str) -> None:
     _git(_top(store), "worktree", "remove", worktree)
 
 
+def branch_head(store: Store, branch: str) -> tuple[str | None, int]:
+    """The commit a task branch points at and how many commits it has that the base lacks; (None, 0) when git
+    cannot say."""
+    try:
+        top = _top(store)
+        head = _git(top, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}", check=False)
+        ahead = _git(top, "rev-list", "--count", f"{base_ref(top)}..{branch}") if head else "0"
+    except RLError:
+        return None, 0
+    return head or None, int(ahead or 0)
+
+
 def branch_status(store: Store, branch: str) -> str:
     """What the coordinator merges after accepting a task worked on its own branch."""
     try:

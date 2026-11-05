@@ -101,9 +101,9 @@ def reset_passed(window: dict, now: float | None = None) -> bool:
 # -- readings -------------------------------------------------------------------------------------------------
 
 
-def statusline(raw: str) -> str:
-    """Claude Code's status line: keep the reading of its windows for rl and show the model and what is left.
-    It never fails (a status line that errors shows nothing)."""
+def statusline(raw: str, keep: bool = True) -> str:
+    """Claude Code's status line: keep the reading of its windows for rl (not with keep=False: rl --read-only)
+    and show the model and what is left. It never fails (a status line that errors shows nothing)."""
     try:
         data = json.loads(raw) if raw.strip() else {}
     except ValueError:
@@ -111,7 +111,7 @@ def statusline(raw: str) -> str:
     data = data if isinstance(data, dict) else {}
     windows = claude_windows(data.get("rate_limits"))
     held = reading("claude")
-    if windows and not (held and held["windows"] == windows and _minutes_since(held["at"]) < 1):
+    if keep and windows and not (held and held["windows"] == windows and _minutes_since(held["at"]) < 1):
         try:  # the status line runs after every message: an unchanged reading is written once a minute
             atomic_write(claude_cache(), json.dumps({"at": now_utc(), "windows": windows}).encode("utf-8"))
         except OSError:

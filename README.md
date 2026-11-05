@@ -115,7 +115,7 @@ paths -> `rl run register --resource ..` -> `rl compute steps` -> run with your 
 `rl run import-result` ->
 `rl evidence add` -> `rl decide` -> `rl report` -> `rl manuscript`. `rl resume` rebuilds the working context in a new
 session; `rl export` / `rl restore` back up and restore the records (`rl export --records-only` prints them as
-JSON). See
+JSON); `rl --read-only <command>` reads a project without changing anything (no upgrade, no environment update). See
 `plugin/skills/smooth-research/references/workflow.md` for formats.
 
 Hypotheses and experiments have a label besides their id, given at creation and never changed: H2.1 is a

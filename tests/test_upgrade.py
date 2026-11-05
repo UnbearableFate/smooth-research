@@ -271,3 +271,32 @@ def test_a_move_refuses_clashes_and_protected_paths_and_rolls_back(project, tmp_
     monkeypatch.undo()
     with project.read() as tx:
         assert tx.require("E-0001")["contract_path"] == "docs/experiments/E-0001.md"
+
+
+def test_read_only_reads_without_upgrading_writing_or_creating_anything(project, tmp_path, rl):
+    research.decide(project, ["H-0001"], "continue", "go on")
+    (tmp_path / "research/state/write.lock").unlink()  # a project no writer has locked yet (a copy, say)
+
+    def files():
+        return {p.relative_to(tmp_path): p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+
+    before = files()
+    for args in (("status",), ("show", "H1"), ("hypothesis", "list"), ("evidence", "list"), ("history",),
+                 ("inbox", "--role", "coordinator"), ("view", "--todo"), ("export", "--records-only"), ("run", "show")):
+        code, _, err = rl("--read-only", *args)
+        assert code == 0, (args, err)
+    code, out, _ = rl("show", "H1", "--read-only", "--json")  # also after the command, as --json is
+    assert code == 0 and json.loads(out)["record"]["id"] == "H-0001"
+    for args in (("hypothesis", "add", "--title", "t", "--statement", "s"), ("view",), ("view", "--stamp", "H1"),
+                 ("export",), ("inbox", "--role", "coordinator", "--ack"), ("upgrade",), ("report",)):
+        code, _, err = rl("--read-only", *args)
+        assert code == 1 and "error[READ_ONLY]" in err and "--read-only writes nothing" in err, (args, err)
+    assert files() == before
+    with pytest.raises(RLError, match="--read-only writes nothing: nothing was written"):  # the store refuses too
+        research.add_hypothesis(Store(find_project(), "test", read_only=True), "t", "s")
+    _make_old(project, 3)
+    before = files()
+    code, _, err = rl("--read-only", "status")
+    assert code == 1 and "error[READ_ONLY]: the records are in format 3 and this CLI reads format " \
+        f"{SCHEMA_VERSION}, after upgrading them in place, which --read-only does not do" in err
+    assert files() == before and not list((tmp_path / "research/state").glob("*backup*"))

@@ -7,12 +7,13 @@ RESULT, WAIT, BLOCKED, HANDOFF, CANCEL; see messages.py), so a role can read its
 from __future__ import annotations
 
 import os
+import re
 
 from . import documents, messages
 from .research import prepare_contracts, seal_referenced
 from .store import Store, Tx
 from .util import RLError, now_utc
-from .worktrees import branch_status
+from .worktrees import branch_head, branch_status
 
 COORDINATOR = "coordinator"
 OPEN_STATES = ("ready", "active", "waiting", "blocked", "delivered")
@@ -121,14 +122,30 @@ def _owner_write(store: Store, tid: str, docs: list[str], doc_type: str, from_ro
         return fn(tx, task, [documents.register(tx, p) for p in preps])
 
 
+VERIFIED = re.compile(r"^(?P<command>.+?) @(?P<commit>[0-9a-fA-F]{7,40}): (?P<outcome>pass|fail)(?:,? log (?P<log>\S.*))?$")
+
+
+def parse_verified(text: str) -> dict:
+    """A test run that a delivery records: "<command> @<commit>: pass|fail, log <path>"."""
+    m = VERIFIED.match(text.strip())
+    if not m:
+        raise RLError("INVALID", f"--verified is \"<command> @<commit>: pass|fail, log <path>\", for example "
+                                 f"\"uv run pytest -q tests @3f2c9a1: pass, log research/notes/T-0035-tests.log\"; "
+                                 f"got {text!r}")
+    return {"command": m["command"].strip(), "commit": m["commit"].lower(), "outcome": m["outcome"],
+            "log": m["log"].strip() if m["log"] else None}
+
+
 def progress(store: Store, tid: str, state: str, from_role: str, summary: str | None = None,
              outputs: list[str] = (), next_action: str | None = None, attempts: list[str] = (),
-             reason: str | None = None) -> dict:
-    """deliver (RESULT), wait (WAIT on attempts), block (BLOCKED with a reason) or resume work (active)."""
+             reason: str | None = None, verified: list[str] = ()) -> dict:
+    """deliver (RESULT, with the test runs that verified changed code), wait (WAIT on attempts), block (BLOCKED
+    with a reason) or resume work (active)."""
     if state == "blocked" and not reason:
         raise RLError("INVALID", "blocked needs --reason engineering|model_unavailable|budget|science")
     if state == "waiting" and not next_action:
         raise RLError("INVALID", "waiting needs --next-action: what to do when the awaited facts arrive")
+    checks = [parse_verified(v) for v in verified]
 
     def apply(tx: Tx, task: dict, refs: list[str]) -> dict:
         changes = {"state": state, "revision": task["revision"] + 1, "note": summary or task.get("note")}
@@ -136,6 +153,8 @@ def progress(store: Store, tid: str, state: str, from_role: str, summary: str | 
             changes["next_action"] = next_action
         if refs:
             changes["output_refs"] = (task.get("output_refs") or []) + refs
+        if checks:
+            changes["verified"] = (task.get("verified") or []) + checks
         if state == "waiting":
             for a in attempts:
                 tx.require(a, "Attempt")
@@ -148,7 +167,8 @@ def progress(store: Store, tid: str, state: str, from_role: str, summary: str | 
                               base_revision=changes["revision"]) if mtype else None
         tx.event(f"task.{state}", tid, summary or next_action or reason or "")
         return {"id": tid, "outputs": refs, "message": msg,
-                "summary": f"{tid} -> {state}" + (f" outputs {', '.join(refs)}" if refs else "")}
+                "summary": f"{tid} -> {state}" + (f" outputs {', '.join(refs)}" if refs else "")
+                           + "".join(f"\nverified: {_check_line(c)}" for c in checks)}
 
     out = _owner_write(store, tid, list(outputs), "task_output", from_role, apply)
     out["summary"] += messages.notice(store, out.pop("message"))
@@ -190,7 +210,31 @@ def review_task(store: Store, tid: str, verdict: str, reason: str) -> dict:
     merge = ""
     if verdict == "accept" and task.get("branch"):
         merge = "; " + branch_status(store, task["branch"])
-    return {"id": tid, "summary": f"{tid} -> {state}{merge}" + messages.notice(store, msg)}
+    checked = verification_lines(store, task) if verdict == "accept" else []
+    return {"id": tid, "summary": f"{tid} -> {state}{merge}" + messages.notice(store, msg)
+                                  + "".join(f"\n{line}" for line in checked)}
+
+
+def _check_line(c: dict) -> str:
+    return f"{c['command']} @{c['commit'][:12]}: {c['outcome']}" + (f", log {c['log']}" if c.get("log") else "")
+
+
+def verification_lines(store: Store, task: dict) -> list[str]:
+    """What task accept says about the tests the delivery ran: the last recorded runs, and a note (never a
+    refusal) when the task's branch has commits but none of its passing runs was of the branch's head."""
+    checks = task.get("verified") or []
+    lines = [f"verified: {_check_line(c)}" for c in checks[-3:]]
+    head, ahead = branch_head(store, task["branch"]) if task.get("branch") else (None, 0)
+    if head and ahead:
+        passed = [c["commit"] for c in checks if c["outcome"] == "pass"]
+        if not checks:
+            lines.append(f"note: {task['branch']} has {ahead} commit(s) and the delivery recorded no test run "
+                         "(rl task deliver --verified \"<command> @<commit>: pass|fail, log <path>\"); ask for one "
+                         "before merging, or merge knowing it")
+        elif not any(head.startswith(c) for c in passed):
+            lines.append(f"note: the head of {task['branch']} ({head[:12]}) is not a commit whose recorded tests "
+                         "passed: the code changed after the run, or the run failed")
+    return lines
 
 
 def open_tasks(tx: Tx) -> list[dict]:

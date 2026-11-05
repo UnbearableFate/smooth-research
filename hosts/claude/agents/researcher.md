@@ -38,6 +38,7 @@ decisions; you own the execution of this task.
 7. If you cannot continue: `rl task block <task id> --role <role> --reason
    engineering|model_unavailable|budget|science --summary "<why>"`. Otherwise deliver:
    `rl task deliver <task id> --role <role> --summary "<what changed, results with ids, what is still
-   open>" --output <files>`.
+   open>" --output <files>`; when you changed code, add the test run that checked it: `--verified "<command>
+   @<commit>: pass|fail, log <path>"`.
 8. Final message, at most six lines: task id and state, the record ids you created (RUN/ATT/RES/EV/RV), the
    key numbers, and open issues. Decisions about the route stay with the coordinator.

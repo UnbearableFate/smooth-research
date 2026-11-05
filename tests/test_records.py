@@ -96,6 +96,57 @@ def test_handoff_releases_the_task_for_the_next_owner(project, tmp_path):
     assert [m["type"] for m in messages.inbox(project, "coordinator")["messages"]] == ["RESULT"]
 
 
+def test_a_delivery_records_its_test_runs_and_accept_notes_a_head_they_did_not_pass_on(project, tmp_path):
+    def git(*args):
+        return subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.org", *args], cwd=tmp_path,
+                              check=True, capture_output=True, text=True).stdout.strip()
+
+    def branch_with_commit(tid, text):
+        git("checkout", "-q", "-B", f"sr/researcher-1/{tid}", "main")
+        (tmp_path / "src/model.py").write_text(text)
+        git("commit", "-qam", text)
+        head = git("rev-parse", "HEAD")
+        git("checkout", "-q", "main")
+        return head
+
+    (tmp_path / "src").mkdir(exist_ok=True)
+    (tmp_path / "src/model.py").write_text("v0")
+    git("init", "-q", "-b", "main")
+    git("add", "-A")
+    git("commit", "-qm", "start")
+
+    def delivered(tid, verified=()):
+        with project.read() as tx:
+            exists = tx.get(tid, "Task")
+        if not exists:
+            tasks.create_task(project, f"fix {tid}", "experiment", to_role="researcher")
+            tasks.claim(project, tid, "researcher")
+            with project.write() as tx:
+                tx.update(tid, {"branch": f"sr/researcher-1/{tid}"})
+        return tasks.progress(project, tid, "delivered", "researcher", "fixed", verified=list(verified))
+
+    head = branch_with_commit("T-0001", "v1")
+    run = f"uv run pytest -q tests @{head[:9]}: pass, log research/notes/T-0001-tests.log"
+    with pytest.raises(RLError, match="--verified is "):
+        delivered("T-0001", ["the tests passed"])
+    assert f"\nverified: {run}" in delivered("T-0001", [run])["summary"]
+    accepted = tasks.review_task(project, "T-0001", "accept", "fixed")["summary"]
+    assert f"\nverified: {run}" in accepted and "note:" not in accepted
+    branch_with_commit("T-0002", "v2")
+    assert "note: sr/researcher-1/T-0002 has 1 commit(s) and the delivery recorded no test run" in \
+        (delivered("T-0002") and tasks.review_task(project, "T-0002", "accept", "fine")["summary"])
+    old = branch_with_commit("T-0003", "v3")
+    git("checkout", "-q", "sr/researcher-1/T-0003")
+    (tmp_path / "src/model.py").write_text("v3 after the run")
+    git("commit", "-qam", "after the run")
+    git("checkout", "-q", "main")
+    delivered("T-0003", [f"uv run pytest -q @{old}: pass"])
+    assert "is not a commit whose recorded tests passed" in tasks.review_task(project, "T-0003", "accept", "ok")["summary"]
+    with project.read() as tx:
+        assert tx.require("T-0001")["verified"] == [{"command": "uv run pytest -q tests", "commit": head[:9],
+                                                    "outcome": "pass", "log": "research/notes/T-0001-tests.log"}]
+
+
 def test_only_the_owner_updates_a_task_and_not_after_the_coordinator_closed_it(project, tmp_path):
     tasks.create_task(project, "analysis", "analysis", ["H-0001"], to_role="researcher")
     tasks.claim(project, "T-0001", "researcher-a")
@@ -449,6 +500,46 @@ def test_context_packs_respect_their_budget_and_list_what_they_omit(project):
     pack = context.work_pack(project, "T-0001", budget=600)
     assert pack["tokens"] <= 900 and pack["omitted"]
     assert "estimate" in pack["token_method"]
+
+
+def test_the_advice_pack_starts_with_the_constraints_and_the_artifacts_gone_and_shortens_old_evidence(project,
+                                                                                                         tmp_path):
+    runs.register(project, "E-0001", dict(SPEC), "r1")
+    out = tmp_path / "research/artifacts/ATT-0001-1"
+    out.mkdir(parents=True)
+    (out / "metrics.json").write_text('{"acc": 0.9}')
+    (out / "ckpt.pt").write_text("weights")
+    res = runs.import_result(project, "ATT-0001-1", {
+        "status": "complete", "metrics": {"acc": 0.9},
+        "artifacts": [{"path": "research/artifacts/ATT-0001-1/metrics.json", "role": "metrics"},
+                      {"path": "research/artifacts/ATT-0001-1/ckpt.pt", "role": "checkpoint"},
+                      {"uri": "cluster:/work/g/u/runs/ATT-0001-1/ckpt-final.pt", "role": "checkpoint"}]}, "res1")
+    (out / "ckpt.pt").unlink()  # cleaned up since
+    secret = tmp_path / "research/artifacts/shared"
+    secret.mkdir()
+    (secret / "probe.log").write_text("x")
+    secret.chmod(0)
+    (tmp_path / "docs/constraints.md").write_text("# Constraints\nOnly the toy data; no new GPU budget.\n")
+    research.add_evidence(project, "wd wins", "screening", "valid", supports=["H-0001"], results=[res["result"]],
+                          artifacts=["research/artifacts/shared/probe.log"])
+    try:
+        pack = context.advice_pack(project, None, "what next?")["summary"]
+    finally:
+        secret.chmod(0o755)
+    heads = [line for line in pack.splitlines() if line.startswith("## ")]
+    assert heads[:4] == ["## Question", "## Constraints", "## Artifacts not available here (results resting on them "
+                         "cannot be re-checked from files)", "## Key valid evidence (positive and negative)"]
+    assert "Only the toy data; no new GPU budget." in pack
+    assert f"from {res['result']} (checkpoint): research/artifacts/ATT-0001-1/ckpt.pt (absent)" in pack
+    assert "research/artifacts/shared/probe.log (no permission to read)" in pack
+    assert f"from {res['result']} (metrics): research/artifacts/ATT-0001-1/metrics.json\n" in pack
+    assert "cluster:/work/g/u/runs/ATT-0001-1/ckpt-final.pt (remote, not checked)" in pack
+    for i in range(40):
+        research.add_evidence(project, f"seed {i} agrees " + "detail " * 30, "screening", "valid", supports=["H-0001"])
+    small = context.advice_pack(project, None, "what next?", budget=1500)
+    assert "Only the toy data" in small["summary"] and "older item(s) left out)\n" in small["summary"]
+    assert "seed 39 agrees" in small["summary"] and "seed 0 agrees" not in small["summary"]
+    assert small["omitted"][0].startswith("Key valid evidence (positive and negative): the ")
 
 
 def test_cli_summary_json_and_error_codes(project, rl):

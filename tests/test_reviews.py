@@ -468,6 +468,25 @@ def test_a_key_conclusion_is_checked_against_the_records_behind_it(project, fake
     assert "reused_from" not in reviews.request_conclusion_review(project, ["H-0001"], claim, ["claude-opus-5-5"])
 
 
+def test_a_conclusion_package_shows_the_nearest_work_of_the_reviewed_revision(project, fakes):
+    asked = iter(range(10))
+
+    def package():
+        rv = reviews.request_conclusion_review(project, ["H-0001"], f"claim {next(asked)}", ["claude-opus-5-5"])["id"]
+        return (project.project.research_root / "packages" / f"{rv}.request.md").read_text()
+
+    gap = "Nearest work: none linked to this revision of the hypothesis, so its novelty and the closest prior " \
+          "results are unchecked here"
+    assert gap + "\n" in package()
+    paper = literature.add_paper(project, title="Decay under noise", authors=["A. Author"], year=2024)["id"]
+    literature.link_paper(project, "H-0001", paper, "nearest_work", "checked", locator="section 2",
+                          note="same update rule, clean labels only")
+    assert f"Nearest work (literature linked to this revision):\n- {paper} Decay under noise (2024) [checked] at " \
+           "section 2: same update rule, clean labels only" in package()
+    research.revise_hypothesis(project, "H-0001", "narrow", scope="toy, 20% noise only", base_revision=1)
+    assert gap + " (1 link(s) to earlier revisions, not carried over)" in package()
+
+
 def test_key_conclusions_without_a_passing_review_stay_in_attention(project, fakes, monkeypatch):
     from smooth_research import view
     ev = evidence(project)

@@ -148,3 +148,20 @@ def test_init_help_makes_nothing(tmp_path):
     done = rl(root, "init", "--help")
     assert done.returncode == 0 and "--python" in done.stdout, done.stderr
     assert list(root.iterdir()) == []
+
+
+def test_read_only_neither_updates_nor_makes_the_project_environment(tmp_path):
+    root = tmp_path / "p"
+    assert init(root).returncode == 0
+    stamp = root / ".venv/.smooth-research-deps"
+    stamp.write_text("latticedb==0.14.0", encoding="utf-8")  # what an older plugin needed
+    kept = {name: (root / name).read_bytes() for name in ("pyproject.toml", "uv.lock")}
+    done = rl(root, "--read-only", "status")
+    assert done.returncode == 0, done.stderr
+    assert "--read-only: " in done.stderr and "is not updated for this plugin version" in done.stderr
+    assert stamp.read_text() == "latticedb==0.14.0"
+    assert {name: (root / name).read_bytes() for name in kept} == kept
+    for args in (("init", "--dir", "elsewhere", "--plan", "p/plan.md", "--read-only"), ("setup", "--read-only")):
+        refused = rl(tmp_path, *args)
+        assert refused.returncode == 2 and "--read-only changes nothing" in refused.stderr
+    assert not (tmp_path / "elsewhere").exists()

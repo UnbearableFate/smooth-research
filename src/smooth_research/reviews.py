@@ -694,6 +694,25 @@ def _result_line(res: dict) -> str:
             + (f" ({'; '.join(flags)})" if flags else ""))
 
 
+def _nearest_work(tx: Tx, h: dict) -> list[str]:
+    """The nearest work linked to this revision of the hypothesis, with how far each was checked; a gap is said."""
+    edges = sorted(tx.out(h["id"], "nearest_work"), key=lambda e: _sort_key(e["id"]))
+    current = [e for e in edges if e.get("source_revision") == h["revision"]]
+    lines = ["", "Nearest work (literature linked to this revision):" if current else
+             "Nearest work: none linked to this revision of the hypothesis, so its novelty and the closest prior "
+             "results are unchecked here" + (f" ({len(edges)} link(s) to earlier revisions, not carried over)"
+                                             if edges else "")]
+    for e in current:
+        paper = tx.require(e["id"], "Paper")
+        where = ", ".join(x for x in (f"arXiv:{paper['arxiv_id']}" if paper.get("arxiv_id") else "",
+                                      f"doi:{paper['doi']}" if paper.get("doi") else "",
+                                      str(paper["year"]) if paper.get("year") else "") if x)
+        lines.append(f"- {paper['id']} {paper['title']}" + (f" ({where})" if where else "")
+                     + f" [{e.get('assessment') or 'unassessed'}]" + (f" at {e['locator']}" if e.get("locator") else "")
+                     + (f": {e['note']}" if e.get("note") else ""))
+    return lines
+
+
 def _conclusion_body(tx: Tx, store: Store, targets: list[str], proposal: str, question: str, prior: str) -> str:
     """Everything the records hold behind the conclusion; deterministic, so its digest is the reuse key."""
     parts = ["Independent check of a research conclusion before it is recorded. The records below are what the "
@@ -729,6 +748,7 @@ def _conclusion_body(tx: Tx, store: Store, targets: list[str], proposal: str, qu
             experiments.setdefault(e["id"], tx.require(e["id"]))
         decisions = [brief(tx.require(e["id"])) for e in tx.inc(hid, "decides")]
         lines += ["", "Decisions so far: " + ("; ".join(decisions) if decisions else "none")]
+        lines += _nearest_work(tx, h)
         parts.append("\n".join(lines) + "\n")
     for exp in experiments.values():
         lines = [f"## Experiment {contract_summary(tx, store, exp)}"]

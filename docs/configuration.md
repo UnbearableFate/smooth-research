@@ -157,7 +157,14 @@ Claude Code 和 Codex 一般用订阅，有 5 小时和每周两个窗口。某�
 - **每次运行只刷新标记之间的内容。** 标记以外的文字原样保留，包括正文和 LaTeX 导言区。删掉某一块的标记，这一块就不再生成。输出会列出还有占位的节。
 - **事实错了改记录，不改块。** 块里的内容下次运行会被覆盖。
 - **编译。** 命令里没有 `.tex` 参数时，CLI 在末尾加上 `manuscript.tex`。命令的标准输入是空的，超时 300 秒。编译失败时报 BUILD，给出 LaTeX 的错误行和日志路径；命令找不到时报 UNAVAILABLE。两种情况下 `.tex` 都已经写好。`docs/manuscript/.gitignore` 让 `.aux`、`.log` 这类辅助文件不进 git。
-- **中文和日文。** 默认的导言区在 pdflatex 下用 T1 编码和 Latin Modern 字体，在 xelatex 和 lualatex 下用 fontspec，都不带 CJK 字体。正文是中文或日文时，用 xelatex 或 lualatex 编译，并在导言区加载 xeCJK 或 luatexja。
+- **编译在哪里跑。** `rl manuscript` 在当前 shell 里直接运行编译命令，在集群的登录节点上也一样，不经过作业执行器。小篇幅的 LaTeX 编译很轻，但站点规定登录节点不许跑这类程序时，在允许的地方运行 `rl manuscript`（例如交互节点上），或者把 `manuscript.latex` 留空，只写草稿。
+- **中文和日文。** 默认的导言区在 pdflatex 下用 T1 编码和 Latin Modern 字体，在 xelatex 和 lualatex 下用 fontspec，都不带 CJK 字体。正文是中文或日文时，用 xelatex 或 lualatex 编译，在导言区设定一个含中日文字形的字体。下面这套在 Miyabi 的计算节点上测过（TeX Live 带 fontspec，没有 xeCJK、ctex 和 luatexja，系统里只有 Droid Sans Fallback 一个中文字体），抽取检查能通过：
+  - `manuscript.latex: xelatex -interaction=nonstopmode -halt-on-error`
+  - 导言区（在 `\begin{document}` 之前）：`\setmainfont{DroidSansFallbackFull.ttf}[Path=/usr/share/fonts/google-droid-sans-fonts/]` 和 `\XeTeXlinebreaklocale "zh"`（让中文能在字间断行）。
+  - 字体按文件指定。`fc-list :lang=zh file` 列出带中文字形的字体文件。按族名指定可能找错：这台机器上 `Droid Sans` 也是这个文件的族名之一，xelatex 按 `Droid Sans` 找到的却是只有拉丁字母的那个文件，PDF 里的中文全成了缺字。字体路径因机器而异，这里只是例子，不是默认值。
+  - 装了 xeCJK 时，改用 `\usepackage{xeCJK}` 加 `\setCJKmainfont{...}`，西文仍用原来的字体。
+  - 全角引号：“”在 Unicode 里属于西文标点，没有 xeCJK 时由主字体来排。Droid Sans Fallback 没有这两个字形，排出来是缺字（日志里有 Missing character）。可以改用「」，或者换一个带这两个字形的字体；有 xeCJK 时它按中文标点处理。
+- **编译后的文字检查。** 源文件正文里有中文或日文时，编译成功后用 pypdf 抽出 PDF 的文字，从 `.tex` 正文（去掉注释）里均匀取最多 8 段、每段至少 4 个字的连续中日文字，去掉空白后在抽出的文字里查找，找不到的超过一半就报 BUILD。这能挡住“PDF 看着对、文字是乱码或缺字”的情况，比如上面字体找错的例子。源文件里没有中日文字时不查。
 - **从 Markdown 换到 LaTeX。** 已有的 `docs/manuscript.md` 不会被转换，正文要自己搬过去。
 
 ### 计算资源
@@ -249,7 +256,8 @@ compute:
 
 ## 4. 命令行选项
 
-- **全局选项：** `--project`、`--json`（输出完整 JSON）、`--actor`（写进事件日志的名字）。`--project` 和 `--json` 也可以写在子命令后面。
+- **全局选项：** `--project`、`--json`（输出完整 JSON）、`--actor`（写进事件日志的名字）、`--read-only`。`--project`、`--json` 和 `--read-only` 也可以写在子命令后面。
+- **只读：** `rl --read-only <命令>` 什么都不改：不升级旧格式的记录（记录格式比 CLI 旧时说明要先升级，然后退出），不更新项目的 Python 环境（launcher 不跑 uv add，用现有的 `.venv`，没有时用插件自己的环境），不写记录、文件和缓存，锁文件不存在时也不创建。会写东西的命令直接拒绝（READ_ONLY）。能用的有 status、resume、show、history、graph、context、doctor、digest、inbox（不带 `--ack`）、hypothesis/evidence/task/paper list、run/review/advise show、agent brief/list、compute steps、`view --todo` 和 `export --records-only`。用来查看别人的项目或者项目的副本。
 - **单次覆盖：**
   - `--budget`：`rl context` 和 `rl resume` 的 token 目标；
   - `--entry`：`rl review run`、`rl advise run`（只能给一个工单）、`rl delegate` 和 `rl agent open` 只用这一个模型；

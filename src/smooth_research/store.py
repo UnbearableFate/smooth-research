@@ -293,10 +293,11 @@ def _sort_key(ref: str) -> tuple:
 
 
 class Store:
-    def __init__(self, project: Project, actor: str = "agent"):
+    def __init__(self, project: Project, actor: str = "agent", read_only: bool = False):
         self.project = project
         self.path = project.db_path
         self.actor = actor
+        self.read_only = read_only  # rl --read-only: no upgrade, no write, and nothing created for the lock
         self.newer: int | None = None  # the schema of a project written by a newer plugin (read only here)
         self.upgraded: dict | None = None  # what the automatic upgrade did when this store opened an older one
         self._checked = False
@@ -319,12 +320,25 @@ class Store:
                     "created_at": stamp, "updated_at": stamp, "title": title or project.root.name})
                 txn.commit()
 
+    def _lock_file(self) -> int | None:
+        """The lock file, opened. --read-only creates nothing: an existing one is opened for reading, which a shared
+        lock needs, and a missing one is not made (no writer has used it)."""
+        if self.read_only:
+            try:
+                return os.open(self.project.lock_path, os.O_RDONLY)
+            except FileNotFoundError:
+                return None
+        self.project.state_dir.mkdir(parents=True, exist_ok=True)
+        return os.open(self.project.lock_path, os.O_RDWR | os.O_CREAT, 0o644)
+
     @contextmanager
     def _lock(self, exclusive: bool) -> Iterator[None]:
         """The process lock: shared for reads, exclusive for writes. The writer holding it notes itself in the lock
         file (process, host, command, since when), so one that waits in vain can say who held it."""
-        self.project.state_dir.mkdir(parents=True, exist_ok=True)
-        fd = os.open(self.project.lock_path, os.O_RDWR | os.O_CREAT, 0o644)
+        fd = self._lock_file()
+        if fd is None:
+            yield
+            return
         held = False
         try:
             start = time.monotonic()
@@ -380,6 +394,11 @@ class Store:
         if not isinstance(version, int):
             raise RLError("CORRUPT", f"the research database has no schema version: {self.path}")
         if version < SCHEMA_VERSION:
+            if self.read_only:
+                raise RLError("READ_ONLY", f"the records are in format {version} and this CLI reads format "
+                                           f"{SCHEMA_VERSION}, after upgrading them in place, which --read-only does "
+                                           "not do. Run rl upgrade without --read-only (it keeps a copy of the old "
+                                           "database), or read them with the plugin version that wrote them")
             self.upgraded = migrate(self)
         elif version > SCHEMA_VERSION:
             self.newer = version
@@ -394,6 +413,9 @@ class Store:
     @contextmanager
     def write(self) -> Iterator[Tx]:
         """One atomic write: everything inside commits together or not at all."""
+        if self.read_only:
+            raise RLError("READ_ONLY", "this command records something, and --read-only writes nothing: nothing was "
+                                       "written")
         self._ready()
         if self.newer:
             raise RLError("UNSUPPORTED", f"this project was written by a newer smooth-research (record format "

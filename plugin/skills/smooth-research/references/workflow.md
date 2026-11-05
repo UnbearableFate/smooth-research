@@ -294,7 +294,9 @@ several `--attempts`; never split it into invented per-run numbers. Different un
   - When the contract is revised later, the task goes on. Its work pack (`{{rl}} agent brief`,
     `{{rl}} context --purpose work`) shows both revisions and what changed. Runs registered earlier keep their revision.
 - Owner: `{{rl}} task claim T-x --role researcher` (one claimant wins); then `{{rl}} task deliver T-x
-  --role researcher --summary .. --output <files>`, `task wait .. --attempts ATT-x --next-action ..`,
+  --role researcher --summary .. --output <files>` (a task that changed code adds the test run that checked it,
+  `--verified "<command> @<commit>: pass|fail, log <path>"`; `task accept` shows it and notes a branch head that no
+  passing run was of), `task wait .. --attempts ATT-x --next-action ..`,
   `task block .. --reason engineering|model_unavailable|budget|science`, `task resume` (also to continue a
   task your role already owns, for example after a WAIT),
   `task handoff .. --doc research/tasks/T-x-handoff.md` (the task is then ready to claim again). Only the
@@ -325,6 +327,15 @@ writes nothing), `{{rl}} restore <snapshot> --into <new dir>`, `{{rl}} doctor`.
 A command that finds the records busy waits up to 60 s, then stops with LOCKED, saying how long it waited and which
 process held them. Nothing was written: run it again. It is not retried for you, since running a command twice can
 record twice.
+
+`{{rl}} --read-only <command>` changes nothing: no upgrade of older records (it says to upgrade first), no update
+of the project's environment, no record, file or cache written; a command that would write is refused. Use it to
+look at someone else's project or a copy.
+
+Attention items (`{{rl}} status`) are of two kinds. A condition still to meet (a review gap, a re-check, an open
+review round, an attempt to check) leaves when it is met. A fact (a contract revised after results, evidence linked
+after a review) shows a key: `{{rl}} attention ack <key> --reason "<how it was taken into account>"` takes it out
+of attention, records an event and leaves the fact in the records and reports; it comes back when the fact changes.
 
 ## The research page
 
@@ -395,4 +406,7 @@ delete a block's markers to drop it. With `manuscript.latex` set in `smooth-rese
 e.g. `latexmk -pdf -interaction=nonstopmode`) it writes `docs/manuscript/manuscript.tex` instead (blocks
 between `% rl:begin X` and `% rl:end X`, placeholders `\towrite{...}`) and builds the PDF beside it; a failed
 build prints the LaTeX errors. The preamble is yours: for Chinese or Japanese text build with xelatex or
-lualatex and load a CJK package there.
+lualatex and set a font with those glyphs there, by file (docs/configuration.md has a tested setup). After such a
+build the PDF's text is checked for the source's Chinese or Japanese text: a PDF that looks right but whose text
+is garbled or missing fails with BUILD. The build runs in your shell, also on a login node: run `{{rl}} manuscript`
+where the site allows a LaTeX build.

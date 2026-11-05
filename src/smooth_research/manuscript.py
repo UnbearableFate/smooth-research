@@ -24,6 +24,10 @@ from .util import RLError
 from .view import arm_table, conclusion_checks, costs, decision_line, evidence_line
 
 BUILD_TIMEOUT = 300  # seconds for one LaTeX build
+# Chinese and Japanese text: kana, CJK ideographs and halfwidth katakana (punctuation is left out: fonts and
+# extractors render it variously)
+CJK = re.compile(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uff66-\uff9f]+")
+CJK_SAMPLES = 8  # runs of CJK text looked up in the PDF's text after a build
 METHOD_FIELDS = ("question", "intervention", "comparator", "metric", "scope")
 
 # (heading, what the writer adds there, the record blocks that follow)
@@ -330,6 +334,10 @@ def _build(command: list[str], tex: Path, project) -> Path:
         raise RLError("BUILD", f"wrote {project.rel(tex)}, but `{' '.join(args)}` did not finish in "
                                f"{BUILD_TIMEOUT} s") from None
     if done.returncode == 0 and pdf.exists() and pdf.stat().st_mtime >= start - 1:
+        source = tex.read_text(encoding="utf-8", errors="replace")
+        problem = cjk_text_problem(source, _pdf_text(pdf, project)) if cjk_samples(source) else None
+        if problem:
+            raise RLError("BUILD", f"built {project.rel(pdf)}, but {problem}")
         return pdf
     out = (done.stdout + "\n" + done.stderr).splitlines()
     errors = [i for i, line in enumerate(out) if line.startswith("!")][:3]
@@ -337,3 +345,39 @@ def _build(command: list[str], tex: Path, project) -> Path:
     log = tex.with_suffix(".log")
     raise RLError("BUILD", f"wrote {project.rel(tex)}, but `{' '.join(args)}` failed (exit {done.returncode})"
                            + (f"; full log {project.rel(log)}" if log.exists() else "") + ":\n" + "\n".join(shown))
+
+
+def cjk_samples(tex_text: str, n: int = CJK_SAMPLES) -> list[str]:
+    """Up to n runs of at least four consecutive CJK characters from the body of a .tex (comments removed), spread
+    over the text."""
+    body = tex_text.split("\\begin{document}", 1)[-1]
+    body = re.sub(r"(?<!\\)%.*", "", body)
+    runs = [r for r in CJK.findall(body) if len(r) >= 4]
+    return runs if len(runs) <= n else [runs[i * len(runs) // n] for i in range(n)]
+
+
+def cjk_text_problem(tex_text: str, pdf_text: str) -> str | None:
+    """The check after a build: a PDF can look right while its text is garbage (glyphs drawn without a map back to
+    the characters), so runs of CJK text from the source are looked up in the PDF's text, whitespace removed. More
+    than half missing is a problem; a source without CJK text is not checked."""
+    samples = cjk_samples(tex_text)
+    if not samples:
+        return None
+    text = "".join(pdf_text.split())
+    missing = [s for s in samples if s not in text]
+    if len(missing) * 2 <= len(samples):
+        return None
+    return (f"{len(missing)} of {len(samples)} runs of Chinese or Japanese text from the source are not in the "
+            f"PDF's text (for example {missing[0]!r}): it may look right while its text is garbled, which search, copy "
+            "and screen readers see. Build with xelatex or lualatex and a CJK font set up as docs/configuration.md "
+            "describes (manuscript)")
+
+
+def _pdf_text(pdf: Path, project) -> str:
+    """The text of a PDF as pypdf extracts it."""
+    try:
+        from pypdf import PdfReader
+        return "\n".join(page.extract_text() or "" for page in PdfReader(str(pdf)).pages)
+    except Exception as exc:  # noqa: BLE001 - whatever failed, the text was not checked: say so
+        raise RLError("BUILD", f"built {project.rel(pdf)}, but its text could not be read to check its Chinese or "
+                               f"Japanese text ({type(exc).__name__}: {exc})") from None

@@ -88,7 +88,7 @@ ENTITIES: dict[str, Entity] = {e.label: e for e in [
        state=F(required=True, enum="task_state"), to_role=F(), owner_role=F(), owner_session=F(),
        request_ref=F(), output_refs=F("json"), handoff_ref=F(), next_action=F(),
        blocked_reason=F(enum="blocked_reason"), wait_attempts=F("json"), note=F(), revision=F("int", True),
-       branch=F()),
+       branch=F(), verified=F("json")),
     _e("Document", "DOC", path=F(required=True), doc_type=F(required=True), latest_revision=F("int", True),
        latest_digest=F(required=True)),
     _e("DocRevision", "DOC", document_id=F(required=True), revision=F("int", True), digest=F(required=True),

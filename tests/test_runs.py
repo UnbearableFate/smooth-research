@@ -86,6 +86,36 @@ def test_contract_edit_after_results_is_flagged_exploratory(project):
         assert tx.require("E-0001")["revised_after_results"] is True
 
 
+def test_a_fact_in_attention_is_acknowledged_until_it_changes_and_a_condition_is_not(project, rl):
+    import re
+    from smooth_research import research
+    register(project)
+    runs.import_result(project, "ATT-0001-1", {"status": "complete", "metrics": {"acc": 0.8}}, "res1")
+    with project.read() as tx:
+        path = project.project.abs(tx.require("E-0001")["contract_path"])
+
+    def revise(note):
+        path.write_text(path.read_text() + f"\n{note}\n")
+        research.seal_experiment(project, "E-0001")
+        _, out, _ = rl("status")
+        return out
+
+    item = re.search(r"EH1/1@2 contract revised after results: later comparisons are exploratory \(once taken into "
+                     r"account: rl attention ack ([0-9a-f]{8}) --reason \.\.\)", revise("a new threshold"))
+    assert item, "the fact and its key"
+    runs.record(project, {"attempt_id": "ATT-0001-1", "source": "t", "observed_at": "2026-10-30T00:00:00Z",
+                          "execution_state": "unknown"})  # a condition: checking the attempt clears it
+    code, out, _ = rl("attention", "ack", item[1], "--reason", "the later comparisons are reported as exploratory")
+    assert code == 0 and out.startswith(f"acknowledged {item[1]}: EH1/1@2 contract revised after results")
+    _, out, _ = rl("status")
+    assert "contract revised after results" not in out and "ATT-0001-1 execution state unknown" in out
+    _, history, _ = rl("history", "E-0001")
+    assert f"attention.ack E-0001 {item[1]}: E-0001@2 contract revised after results" in history
+    assert "EH1/1@3 contract revised after results" in revise("another threshold")  # a changed fact comes back
+    code, _, err = rl("attention", "ack", "0000beef", "--reason", "x")
+    assert code == 1 and "error[NOT_FOUND]: no attention item that states a fact has the key 0000beef" in err
+
+
 def test_duplicate_and_out_of_order_observations(project):
     register(project)
     first = runs.record(project, obs(state="running", at="2026-10-30T01:00:00Z", record_id="o1"))

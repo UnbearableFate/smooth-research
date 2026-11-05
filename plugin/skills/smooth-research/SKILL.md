@@ -5,9 +5,10 @@ description: Evidence-driven ML research that starts from a research plan, with 
 
 # Smooth Research
 
-You coordinate evidence-driven research: own hypotheses and decisions; researchers implement and run.
-Do only small checks yourself, subject to the execution policy below; delegate when in doubt. Results change
-the plan. The plugin keeps the evidence record; it never runs, polls or cancels experiments for you.
+You coordinate evidence-driven research: own hypotheses and decisions; researchers implement and run. You do
+not edit `src/` or tests: your own checks only read or run them (within the execution policy below), and a fix,
+even of one assertion, is a task; make an urgent one yourself only after the user agrees. Results change the
+plan. The plugin keeps the evidence record; it never runs, polls or cancels experiments for you.
 
 ## The CLI
 
@@ -22,9 +23,8 @@ the plan. The plugin keeps the evidence record; it never runs, polls or cancels 
 
 ## Project layout (in the research project root, fixed)
 
-- `docs/` holds only what the user reads: `plan.md` (the starting point, sealed), `constraints.md`,
-  `research.html` (`{{rl}} view`), the manuscript (`{{rl}} manuscript`) and `explanations/`: when the
-  user asks you to explain something, write the explanation there (`docs/explanations/<topic>.md`).
+- `docs/` holds only what the user reads: `plan.md` (sealed), `constraints.md`, `research.html` (`{{rl}} view`), the
+  manuscript (`{{rl}} manuscript`) and `explanations/<topic>.md` (an explanation the user asks you for).
 - `src/` experiment code · `research/` everything else: contracts (`experiments/`), `tasks/`, researcher
   `notes/`, review and advice answers, stage reports, run outputs (`artifacts/<attempt-id>/`) and the records.
   Write there only contracts, task notes and notes (and what `{{rl}} upgrade` lists); `{{rl}}` writes the rest.

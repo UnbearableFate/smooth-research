@@ -7,6 +7,8 @@ rest is listed as an index to read on demand. Nothing here queries external syst
 from __future__ import annotations
 
 import difflib
+import os
+import re
 
 from . import compute, documents, explain, labels
 from .project import Project, context_target
@@ -85,19 +87,32 @@ def _papers_for(tx: Tx, hid: str) -> list[str]:
     return out
 
 
-def _assemble(title: str, sections: list[tuple[str, str]], budget: int, known: dict[str, str]) -> dict:
+def _assemble(title: str, sections: list[tuple[str, str]], budget: int, known: dict[str, str],
+              required: tuple[str, ...] = (), shortened: tuple[str, ...] = ()) -> dict:
     """The sections in order until the budget is used (the rest listed by name), hypotheses and experiments named
-    by their labels (known)."""
+    by their labels (known). A required section is never left out; one that may be shortened keeps its newest
+    lines that fit (a list in record order) before it is left out."""
     used, parts, omitted = estimate_tokens(title), [title], []
     for name, text in sections:
-        name, text = labels.relabel(name, known), labels.relabel(text, known)
+        key, name, text = name, labels.relabel(name, known), labels.relabel(text, known)
         if not text.strip():
             continue
         block = f"\n## {name}\n{text.rstrip()}\n"
         cost = estimate_tokens(block)
-        if used + cost > budget and parts[1:]:
-            omitted.append(name)
-            continue
+        if used + cost > budget and parts[1:] and key not in required:
+            lines = text.rstrip().splitlines()
+            room, kept = budget - used - estimate_tokens(f"\n## {name}\n({len(lines)} older item(s) left out)\n"), []
+            for line in reversed(lines if key in shortened else []):
+                room -= estimate_tokens(line + "\n")
+                if room < 0:
+                    break
+                kept.insert(0, line)
+            if not kept:
+                omitted.append(name)
+                continue
+            block = f"\n## {name}\n({len(lines) - len(kept)} older item(s) left out)\n" + "\n".join(kept) + "\n"
+            omitted.append(f"{name}: the {len(lines) - len(kept)} oldest item(s)")
+            cost = estimate_tokens(block)
         parts.append(block)
         used += cost
     if omitted:
@@ -260,16 +275,16 @@ def advice_pack(store: Store, target: str | None, question: str, budget: int | N
                 text += "\n" + "\n".join(_evidence_for(tx, focus["id"], focus["revision"]))
             sections.append(("Bottleneck focus", text))
         evidence = [ev for ev in tx.all("Evidence") if ev["validity"] == "valid"]
-        sections.append(("Key valid evidence (positive and negative)",
+        sections.append((EVIDENCE_SECTION,
                          "\n".join(f"{brief(ev)} -> " + ", ".join(f"{e['rel']} {e['id']}" for e in tx.out(ev['id'])
                                                                     if e["rel"] in ("supports", "challenges"))
                                    for ev in evidence) or "none yet"))
         diag = [ev for ev in tx.all("Evidence") if ev["evidence_level"] == "diagnostic" or ev["validity"] == "invalid"]
         if diag:
-            sections.append(("Diagnostics and invalidated results (not mechanism evidence)",
+            sections.append((DIAGNOSTICS_SECTION,
                              "\n".join(brief(ev) for ev in diag)))
         tried = [h for h in hyps if h["disposition"] in ("paused", "retired")]
-        sections.append(("Routes tried and stopped or paused",
+        sections.append((ROUTES_SECTION,
                          "\n".join(brief(h) + "".join(f"\n  {brief(tx.require(e['id']))}" for e in tx.inc(h["id"], "decides"))
                                    for h in tried) or "none"))
         sections.append(("Surviving explanations",
@@ -277,12 +292,64 @@ def advice_pack(store: Store, target: str | None, question: str, budget: int | N
         papers = [p for h in hyps for p in _papers_for(tx, h["id"])]
         if papers:
             sections.append(("Nearest literature", "\n".join(sorted(set(papers)))))
-        artifacts = [f"{ev['id']}: {ev.get('doc_ref') or ''} {', '.join(ev.get('artifact_refs') or [])}".strip()
-                     for ev in tx.all("Evidence") if ev.get("doc_ref") or ev.get("artifact_refs")]
-        if artifacts:
-            sections.append(("Raw artifact index (challenge the interpretation if they disagree)", "\n".join(artifacts)))
-        sections.append(("Constraints", _read_constraints(store)))
-    return _assemble("# Advice pack\n", sections, budget, known)
+        refs = _artifact_refs(tx)
+    # whether each artifact is still there: local paths only, never read, digested or fetched
+    found = {ref: artifact_status(store.project, ref) for _, ref in refs}
+    gone = [f"{owner}: {ref} ({found[ref]})" for owner, ref in refs if found[ref] in (ABSENT, NO_PERMISSION)]
+    index = [f"{owner}: {ref}" + ("" if found[ref] == PRESENT else f" ({found[ref]})")
+             for owner, ref in refs if found[ref] not in (ABSENT, NO_PERMISSION)]
+    if index:
+        sections.append(("Raw artifact index (challenge the interpretation if they disagree)", "\n".join(index)))
+    # first what bounds the advice: the constraints and the artifacts no longer there; the evidence history is
+    # shortened first when the budget runs out, and the constraints are never left out
+    first = [("Constraints", _read_constraints(store))]
+    if gone:
+        first.append(("Artifacts not available here (results resting on them cannot be re-checked from files)",
+                      "\n".join(gone)))
+    return _assemble("# Advice pack\n", sections[:1] + first + sections[1:], budget, known,
+                     required=("Question", "Constraints"),
+                     shortened=(EVIDENCE_SECTION, DIAGNOSTICS_SECTION, ROUTES_SECTION))
+
+
+PRESENT, ABSENT, NO_PERMISSION, REMOTE = "present", "absent", "no permission to read", "remote, not checked"
+EVIDENCE_SECTION = "Key valid evidence (positive and negative)"
+DIAGNOSTICS_SECTION = "Diagnostics and invalidated results (not mechanism evidence)"
+ROUTES_SECTION = "Routes tried and stopped or paused"
+
+
+def artifact_status(project, ref: str) -> str:
+    """present, absent, no permission to read, or remote (a <resource>:<path> or URL is not checked from here).
+    A path that cannot be read for lack of permission is not reported as deleted."""
+    if re.match(r"^DOC-\d+@\d+$", ref):  # a sealed document: rl keeps it
+        return PRESENT
+    if re.match(r"^[A-Za-z][\w.+-]*:", ref):
+        return REMOTE
+    path = project.abs(ref)
+    try:
+        path.stat()
+    except FileNotFoundError:
+        return ABSENT
+    except (PermissionError, OSError):
+        return NO_PERMISSION
+    return PRESENT if os.access(path, os.R_OK) else NO_PERMISSION
+
+
+def _artifact_refs(tx: Tx) -> list[tuple[str, str]]:
+    """The artifacts behind the evidence, each with what names it: the evidence's own references and sealed
+    document, and the files of the results it was drawn from (checkpoints too)."""
+    out: dict[str, str] = {}
+    for ev in tx.all("Evidence"):
+        if ev.get("doc_ref"):
+            out.setdefault(ev["doc_ref"], f"{ev['id']} (sealed document)")
+        for ref in ev.get("artifact_refs") or []:
+            out.setdefault(ref, ev["id"])
+        for e in tx.out(ev["id"], "from_result"):
+            res = tx.require(e["id"], "Result")
+            for a in (res.get("manifest") or {}).get("artifacts") or []:
+                ref = a.get("path") or a.get("uri") if isinstance(a, dict) else None
+                if ref:
+                    out.setdefault(str(ref), f"{ev['id']} from {res['id']}" + (f" ({a['role']})" if a.get("role") else ""))
+    return [(owner, ref) for ref, owner in out.items()]
 
 
 def _read_constraints(store: Store) -> str:

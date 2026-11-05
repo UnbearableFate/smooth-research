@@ -93,3 +93,52 @@ def test_the_latex_scaffold_builds_with_pdflatex(project, tmp_path):
     literature.add_paper(project, title="A study_of noise", authors=["A. Author", "B. Author"], year=2024)
     out = manuscript.write(project)
     assert (tmp_path / "docs/manuscript/manuscript.pdf").stat().st_size > 1000 and out["pdf"]
+
+
+def test_cjk_text_missing_from_the_pdf_text_is_a_problem_and_other_sources_are_not_checked():
+    sentences = ["权重衰减提高测试准确率", "噪声标签降低训练稳定性", "三个种子的结果一致", "学习率过大时损失发散",
+                 "数据增强缓解过拟合", "批量大小影响收敛速度", "早停避免验证集退化", "正则化强度需要调节",
+                 "模型宽度改变泛化误差", "梯度裁剪稳定训练过程", "混合精度节省显存占用", "标签平滑改善校准误差"]
+    tex = "\\documentclass{article}\n% 注释里的中文不算\n\\begin{document}\n" + "。\n".join(sentences) + \
+        "。\n\\end{document}\n"
+    samples = manuscript.cjk_samples(tex)
+    assert len(samples) == manuscript.CJK_SAMPLES and "注释里的中文不算" not in samples
+    clean = "".join(samples)
+    assert manuscript.cjk_text_problem(tex, " ".join(clean)) is None  # whitespace in the PDF's text is ignored
+    half = "".join(samples[:4])
+    assert manuscript.cjk_text_problem(tex, half) is None  # half found: fine
+    problem = manuscript.cjk_text_problem(tex, "".join(samples[:3]) + "\x00\x01 garbled")
+    assert problem.startswith("5 of 8 runs of Chinese or Japanese text from the source are not in the PDF's text")
+    assert manuscript.cjk_text_problem("\\begin{document}\nonly English, 3 Kanji 漢字\n", "") is None
+
+
+def _cjk_font():
+    """A font file with Chinese glyphs (by file: a family name may also name a Latin-only face)."""
+    if not shutil.which("fc-list"):
+        return None
+    import subprocess
+    from pathlib import Path
+    out = subprocess.run(["fc-list", ":lang=zh", "file"], capture_output=True, text=True).stdout
+    files = sorted(Path(line.split(":")[0].strip()) for line in out.splitlines() if line.strip())
+    return files[0] if files else None
+
+
+@pytest.mark.skipif(not shutil.which("xelatex") or not _cjk_font(), reason="xelatex or a Chinese font is missing")
+def test_a_chinese_manuscript_built_with_xelatex_is_checked_against_its_pdf_text(project, tmp_path):
+    project.project.config["manuscript"]["latex"] = "xelatex -interaction=nonstopmode -halt-on-error"
+    manuscript.write(project, title="噪声标签下的权重衰减")
+    tex = tmp_path / "docs/manuscript/manuscript.tex"
+    font = _cjk_font()
+    setup = f"\\setmainfont{{{font.name}}}[Path={font.parent}/]\n\\XeTeXlinebreaklocale \"zh\"\n"
+    prose = "权重衰减在百分之二十的噪声标签下提高了测试准确率，三个种子的结果一致。「引号」用这种括号。"
+    text = tex.read_text().replace("\\begin{document}", setup + "\\begin{document}", 1)
+    text = text.replace("\\section{Introduction}", "\\section{Introduction}\n" + prose, 1)
+    tex.write_text(text, encoding="utf-8")
+    out = manuscript.write(project)
+    assert out["pdf"] and "built docs/manuscript/manuscript.pdf (xelatex)" in out["summary"]
+    hidden = "\\iffalse\n" + "\n".join(f"第{i}节没有排进版面的中文文字" for i in range(20)) + "\n\\fi\n"
+    tex.write_text(text.replace("\\section{Introduction}", hidden + "\\section{Introduction}", 1), encoding="utf-8")
+    with pytest.raises(RLError) as exc:
+        manuscript.write(project)
+    assert exc.value.code == "BUILD" and "runs of Chinese or Japanese text from the source are not in the PDF's " \
+        "text" in exc.value.message

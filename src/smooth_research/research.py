@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import shutil
 from pathlib import Path
 
@@ -12,7 +13,7 @@ from .project import CONFIG_NAME, DOCS_DIRS, RESEARCH_DIRS, Project, load_config
 from .schema import ENUMS, LINKABLE, RELATIONS
 from .store import Store, Tx, _sort_key, label_of
 from .upgrade import build, environment
-from .util import RLError, digest_file
+from .util import RLError, digest_file, digest_json, now_utc, short
 
 CONSTRAINTS_TEMPLATE = """# Constraints
 
@@ -691,27 +692,30 @@ def show(store: Store, entity_id: str) -> dict:
     return {"record": rec, "out": out, "in": inc, "summary": "\n".join(lines)}
 
 
-def attention(tx: Tx) -> list[str]:
-    items = []
+def _attention_items(tx: Tx) -> list[tuple[str, bool]]:
+    """What needs attention, in record ids, each with whether it states a fact (which the coordinator may
+    acknowledge, rl attention ack) rather than a condition still to meet (cleared by meeting it)."""
+    items: list[tuple[str, bool]] = []
     last = tx.meta().get("last_build")
     if last != build():
-        items.append(f"the plugin changed since this project was last used (build {last or 'unknown'} -> {build()}): "
-                     "run rl upgrade and adjust the old research assets to this version as it lists")
+        items.append((f"the plugin changed since this project was last used (build {last or 'unknown'} -> {build()}): "
+                      "run rl upgrade and adjust the old research assets to this version as it lists", False))
     for h in tx.all("Hypothesis"):
         if h.get("needs_recheck"):
-            items.append(f"{h['id']} needs re-check: {h.get('recheck_reason')}")
+            items.append((f"{h['id']} needs re-check: {h.get('recheck_reason')}", False))
     for d in tx.all("Decision"):
         if d.get("needs_recheck"):
-            items.append(f"{d['id']} needs re-check: {d.get('recheck_reason')}")
+            items.append((f"{d['id']} needs re-check: {d.get('recheck_reason')}", False))
     for a in tx.all("Attempt"):
         if a.get("needs_check"):
-            items.append(f"{a['id']} has conflicting observations: {(a.get('issues') or ['?'])[-1]}")
+            items.append((f"{a['id']} has conflicting observations: {(a.get('issues') or ['?'])[-1]}", False))
         elif a["execution_state"] == "unknown":
-            items.append(f"{a['id']} execution state unknown since {a.get('last_observed_at')}; "
-                         f"last trusted {a.get('last_trusted_state')} — check with the execution tool")
+            items.append((f"{a['id']} execution state unknown since {a.get('last_observed_at')}; "
+                          f"last trusted {a.get('last_trusted_state')} — check with the execution tool", False))
     for e in tx.all("Experiment"):
-        if e.get("revised_after_results"):
-            items.append(f"{e['id']} contract revised after results: later comparisons are exploratory")
+        if e.get("revised_after_results"):  # the revision is part of the fact: the next one comes back
+            items.append((f"{e['id']}@{e['revision']} contract revised after results: later comparisons are "
+                          "exploratory", True))
     review_tickets = tx.all("Ticket", kind="review")
     rechecked = passing_rechecks(review_tickets)
     for t in review_tickets:
@@ -719,12 +723,12 @@ def attention(tx: Tx) -> list[str]:
             head = (f"{t['id']} review round {t.get('round_of') or t['id']} used its two reviews with "
                     f"{t.get('open_severity')} findings open")
             if later := rechecked.get(t["id"]):  # a re-check does not show that every finding was looked at
-                items.append(f"{head}; {', '.join(later)} re-checked it and passed: when that resolved the findings, "
-                             f"rl review resolve {t['id']} --by {later[-1]} --reason ..; to accept findings that "
-                             f"remain, rl review approve {t['id']} --rationale ..")
+                items.append((f"{head}; {', '.join(later)} re-checked it and passed: when that resolved the "
+                              f"findings, rl review resolve {t['id']} --by {later[-1]} --reason ..; to accept "
+                              f"findings that remain, rl review approve {t['id']} --rationale ..", False))
             else:
-                items.append(f"{head}: the coordinator approves it (rl review approve {t['id']} --rationale ..) or "
-                             "returns the work")
+                items.append((f"{head}: the coordinator approves it (rl review approve {t['id']} --rationale ..) or "
+                              "returns the work", False))
     standing: dict[str, tuple[dict, int | None]] = {}  # hypothesis -> the latest decision stating a key conclusion
     for d in tx.all("Decision"):                      # on it, and the revision it decided on
         for hid, rev in key_hypotheses(tx, d).items():
@@ -734,10 +738,54 @@ def attention(tx: Tx) -> list[str]:
         reviews = conclusion_reviews(tx, [e["id"] for e in tx.out(did, "based_on")])
         gap = review_gap(tx, reviews, hyps)
         if gap:
-            items.append(f"{did} key conclusion on {', '.join(hyps)}: {gap} — {_review_hint(list(hyps), did)}")
-        items += [f"{did} key conclusion: {hint}" for hint in review_hints(tx, reviews, hyps)]
+            items.append((f"{did} key conclusion on {', '.join(hyps)}: {gap} — {_review_hint(list(hyps), did)}", False))
+        items += [(f"{did} key conclusion: {hint}", True) for hint in review_hints(tx, reviews, hyps)]
+    return items
+
+
+def attention_key(fact: str) -> str:
+    """The key of an attention item that states a fact: it names the fact as it stands (ids, revisions, evidence),
+    so a changed fact has a new key and comes back after an acknowledgement."""
+    return short(digest_json(fact), 8)
+
+
+def acknowledged(tx: Tx) -> dict:
+    """The facts taken into account (rl attention ack): key -> the item, the reason, when and by whom."""
+    return json.loads(tx.meta().get("attention_acks") or "{}")
+
+
+def attention(tx: Tx) -> list[str]:
+    noted, out = acknowledged(tx), []
+    for text, fact in _attention_items(tx):
+        if fact:
+            key = attention_key(text)
+            if key in noted:
+                continue
+            text += f" (once taken into account: rl attention ack {key} --reason ..)"
+        out.append(text)
     known = labels.names(tx)
-    return [labels.relabel(item, known) for item in items]
+    return [labels.relabel(item, known) for item in out]
+
+
+def ack_attention(store: Store, key: str, reason: str) -> dict:
+    """rl attention ack: an item that states a fact leaves attention once the coordinator has taken it into
+    account; the fact stays in the records and reports, and comes back when it changes (a new key). An item that
+    is a condition still to meet (a review gap, a re-check, an open review round) leaves only when it is met."""
+    if not (reason or "").strip():
+        raise RLError("INVALID", "say how it was taken into account: --reason ..")
+    with store.write() as tx:
+        facts = {attention_key(text): text for text, fact in _attention_items(tx) if fact}
+        if key not in facts:
+            raise RLError("NOT_FOUND", f"no attention item that states a fact has the key {key}: rl status shows "
+                                       "the keys of those it lists. An item without one is a condition, and leaves "
+                                       "when it is met")
+        noted = acknowledged(tx)
+        noted[key] = {"item": facts[key], "reason": reason.strip(), "at": now_utc(), "by": tx.actor}
+        tx.set_meta(attention_acks=json.dumps(noted, ensure_ascii=False, sort_keys=True))
+        tx.event("attention.ack", facts[key].split()[0].split("@")[0],
+                 f"{key}: {facts[key]} — taken into account: {reason.strip()}")
+        text = labels.relabel(facts[key], labels.names(tx))
+    return {"key": key, "item": text, "summary": f"acknowledged {key}: {text}\nreason: {reason.strip()}"}
 
 
 def list_hypotheses(store: Store, status: str | None = None, disposition: str | None = None) -> dict:

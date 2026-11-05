@@ -63,6 +63,13 @@ option() {  # the value of option $1 (--opt VALUE or --opt=VALUE) among the rema
   return 1
 }
 
+flag() {  # option $1 is among the remaining arguments
+  opt=$1
+  shift
+  for arg in "$@"; do [ "$arg" = "$opt" ] && return 0; done
+  return 1
+}
+
 at_least() {  # version $1 >= version $2 (major.minor)
   awk -v a="$1" -v b="$2" 'BEGIN { split(a, x, "."); split(b, y, ".")
     exit !(x[1] + 0 > y[1] + 0 || (x[1] + 0 == y[1] + 0 && x[2] + 0 >= y[2] + 0)) }'
@@ -180,6 +187,16 @@ sys.exit(main())' "$package/src" "$@"
 
 # -- commands ---------------------------------------------------------------------------------------------------
 
+# rl --read-only changes nothing: it neither makes nor updates an environment in the project (uv init, uv add)
+case ${1-} in
+  init|setup)
+    if flag --read-only "$@"; then
+      say "rl $1 makes environments and records; --read-only changes nothing, so it did not run"
+      exit 2
+    fi
+    ;;
+esac
+
 case ${1-} in
   init)
     for arg in "$@"; do  # help builds nothing in the directory
@@ -225,9 +242,15 @@ if own_env; then
         ;;
       usage) [ "${2-}" = statusline ] && exit 0 ;;  # the status line never waits for a build
     esac
-    project_env auto
+    if ! flag --read-only "$@"; then
+      project_env auto
+    elif [ -x "$target/.venv/bin/python" ]; then
+      say "--read-only: $target/.venv is not updated for this plugin version (uv add); reading with it as it is"
+    else
+      no_env=1  # --read-only and no environment made yet: read with the plugin's (below)
+    fi
   fi
-  run_project "$@"
+  [ -n "${no_env-}" ] || run_project "$@"
 fi
 
 if ! plugin_ready; then

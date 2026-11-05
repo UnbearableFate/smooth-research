@@ -33,10 +33,31 @@ PAGE_COMMANDS = {"hypothesis": ("add", "revise", "set"), "experiment": ("add", "
                  "decide": None, "link": None, "run": ("import-result", "reject-result")}
 
 
+# what rl --read-only runs: the commands that read the records and write no file (None: every action); view only
+# with --todo, export only with --records-only, inbox without --ack
+READ_ONLY = {"status": None, "resume": None, "show": None, "history": None, "graph": None, "digest": None,
+             "doctor": None, "context": None, "inbox": None, "view": None, "export": None, "usage": None,
+             "hypothesis": ("list",), "evidence": ("list",), "task": ("list",), "run": ("show",), "review": ("show",),
+             "advise": ("show",), "paper": ("list",), "agent": ("brief", "list"), "compute": ("steps",)}
+
+
+def _check_read_only(args) -> None:
+    """rl --read-only refuses up front a command that would write records, files or caches; the ones it runs open
+    the records without upgrading them or creating anything (Store.read_only)."""
+    actions = READ_ONLY.get(args.command, ())
+    action = getattr(args, "action", None)
+    if (actions is not None and action not in actions) or (args.command == "view" and (args.stamp or not args.todo)) \
+            or (args.command == "export" and not args.records_only) or (args.command == "inbox" and args.ack):
+        what = " ".join(x for x in (args.command, action) if x)
+        raise RLError("READ_ONLY", f"rl {what} writes (records, files or caches), and --read-only writes nothing. "
+                                   "It reads with status, resume, show, history, graph, context, doctor, inbox, the "
+                                   "list, show and brief subcommands, view --todo and export --records-only")
+
+
 def _store(args) -> Store:
     project = find_project(args.project)
     args.config_warnings = project.warnings
-    args.store = Store(project, args.actor or "agent")
+    args.store = Store(project, args.actor or "agent", read_only=args.read_only)
     _resolve_labels(args, args.store)
     return args.store
 
@@ -102,6 +123,10 @@ def cmd_status(args):
 
 def cmd_resume(args):
     return context.resume_pack(_store(args), args.role, args.budget)
+
+
+def cmd_attention(args):
+    return research.ack_attention(_store(args), args.key, args.reason)
 
 
 def cmd_show(args):
@@ -232,7 +257,8 @@ def cmd_task(args):
         state = {"deliver": "delivered", "wait": "waiting", "block": "blocked", "resume": "active"}[a]
         return tasks.progress(store, args.id, state, args.role, args.summary,
                               _list(getattr(args, "output", None)), args.next_action,
-                              _list(getattr(args, "attempts", None)), getattr(args, "reason", None))
+                              _list(getattr(args, "attempts", None)), getattr(args, "reason", None),
+                              getattr(args, "verified", None) or [])
     if a == "handoff":
         return tasks.handoff(store, args.id, args.doc, args.role, args.to_role)
     if a == "list":
@@ -472,7 +498,7 @@ def cmd_usage(args):
             raw = "" if sys.stdin.isatty() else sys.stdin.read()
         except (OSError, ValueError):
             raw = ""
-        return {"summary": usage.statusline(raw)}
+        return {"summary": usage.statusline(raw, keep=not args.read_only)}
     raise RLError("INVALID", "rl usage only runs as Claude Code's status line now (rl usage statusline): the hosts' "
                              "usage windows, their reading times and which hosts are low are shown by rl agent list")
 
@@ -535,6 +561,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--project", help="project directory (default: nearest smooth-research.yaml above cwd)")
     p.add_argument("--json", action="store_true", help="print the full JSON result")
     p.add_argument("--actor", help="name recorded in the event log")
+    p.add_argument("--read-only", action="store_true",
+                   help="change nothing: no record upgrade, no dependency sync, no write or cache; a command that "
+                        "would write is refused")
     sub = p.add_subparsers(dest="command", required=True, metavar="command")
 
     def add(name, fn, help_, **kw):
@@ -551,6 +580,11 @@ def build_parser() -> argparse.ArgumentParser:
                          "plugin's rl makes it before the records: uv init --python (an existing pyproject.toml is "
                          "kept), then uv add of rl's dependencies, and runs init on it")
     add("status", cmd_status, "short project status and attention items")
+    sp = add("attention", cmd_attention, "take an attention item that states a fact into account")
+    ss = sp.add_subparsers(dest="action", required=True)
+    s = ss.add_parser("ack", help="the item leaves attention until its fact changes; the records and reports keep it")
+    s.add_argument("key", help="the key rl status shows with the item")
+    s.add_argument("--reason", required=True, help="how it was taken into account")
     sp = add("resume", cmd_resume, "resume pack: roles, unfinished tasks and attempts, last observations")
     sp.add_argument("--role")
     sp.add_argument("--budget", type=int)
@@ -743,6 +777,8 @@ def build_parser() -> argparse.ArgumentParser:
         s.add_argument("--next-action")
         if name == "deliver":
             s.add_argument("--output", action="append")
+            s.add_argument("--verified", action="append", metavar="\"<command> @<commit>: pass|fail, log <path>\"",
+                           help="a test run of the changed code (repeatable); task accept shows it")
         if name == "wait":
             s.add_argument("--attempts", action="append")
         if name == "block":
@@ -1018,12 +1054,15 @@ def _accept_global_options_everywhere(parser: argparse.ArgumentParser) -> None:
             for sub in set(action.choices.values()):
                 sub.add_argument("--project", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
                 sub.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
+                sub.add_argument("--read-only", action="store_true", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
                 _accept_global_options_everywhere(sub)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
+        if args.read_only:
+            _check_read_only(args)
         result = args.fn(args)
     except RLError as exc:
         if args.command == "hook":  # a hook must never break the host session
