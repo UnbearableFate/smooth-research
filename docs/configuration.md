@@ -257,7 +257,13 @@ compute:
   - `--background`：在后台进程运行。
 - **一轮建议一起运行。** `rl advise run AD-x AD-y ...` 给每个工单开一个进程，同时运行。
 - **超出建议轮数：** `rl advise prepare --user-approved "<用户的原话>"`，见第 1 节。
-- **审查轮次：** `rl review request ... --recheck-of RV-x` 是同一轮的第二次审查；第三次报 LIMIT，要开新一轮写 `--new-round "<原因>"`。`rl review approve RV-x --rationale ..` 由协调者批准还有中等以上问题的一轮。
+- **审查轮次：** `rl review request ... --recheck-of RV-x` 是同一轮的第二次审查；第三次报 LIMIT，要开新一轮写 `--new-round "<原因>"`。`rl review approve RV-x --rationale ..` 由协调者批准还有中等以上问题的一轮：接受剩下的问题，这次审查从此算通过，它看过的文件都算审过。
+- **被复查解决的轮次：** `rl review resolve RV-x --by RV-y --reason ..` 记下 RV-x 的问题已由通过的复查 RV-y 解决。RV-y 必须沿 `--recheck-of` 链在 RV-x 之后（新一轮的复查也算），并且通过。RV-x 从 attention 移走，结论不变，仍然不算通过，它看过的文件不因它算审过。这类轮次的 attention 条目会写出已通过的复查和 resolve 的写法；对这样的轮次 approve 时，输出提示改用 resolve。只有协调者能 resolve。
+- **run 的审查覆盖：** `rl run register` 检查通过的代码审查看过的每个路径，在这次 run 执行的代码（提交，没有提交时是工作树）里是否还和某次通过的审查看过的版本一致。对不上的路径各有原因，`rl run register` 和 `rl run show ATT-x` 逐行列出：
+  - **changed。** 内容变了，只有这一种让状态变成 stale。项目里另一个实验的通过审查看过现在这份内容时，写出它的编号：确认它回答的也是这个实验的问题后，加 `--review RV-x` 再登记。不自动算作覆盖。
+  - **absent。** 代码里没有这个路径，run 执行不到，只列出。
+  - **test。** 测试文件（在 `tests/` 目录下，或名为 `test_*.py`、`*_test.py`、`conftest.py`）改了，run 计算的东西不变，只列出。只按名字判断，所以逐个写出文件名，名字像测试的生产文件一眼能看出来。
+  - **其他。** 通过的审查看过的路径都不在代码里或都是测试文件时，记为没有审查。覆盖来自多次审查、没有一次看过全部文件时注明“file by file”，表示这些文件的组合没有一起审过。这个实验没有通过、之后也没有通过的复查的审查，单独列为 not passed。
 - **契约随引用封存：**
   - **封存。** `rl task create --targets E-x` 和 `rl review request --target E-x` 封存实验现在的契约草稿，并把修订和封存的文档记在关系上。草稿里还有空字段或 TODO 时，命令报错，列出要填的字段，什么也不封存。只指向假设的任务不封存它下面的实验。
   - **之后的修订。** 契约之后有了新修订，任务照常进行。任务的工作包（`rl agent brief`、`rl context --purpose work`）列出任务绑定的修订、现在的修订、两者正文的差异（最多 80 行，`DIFF_LINES`）和草稿路径。已经登记的 run 仍绑定登记时的修订。

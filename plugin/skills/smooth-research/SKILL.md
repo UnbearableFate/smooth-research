@@ -81,7 +81,7 @@ controls) · E2 minimal real model · E3 limited confirmation (pre-fixed compari
 5. Before a key conclusion (a hypothesis set supported or challenged, a route stopped, a formal experiment
    recommended), get a conclusion review (skill `research-review`) and cite it with `--based-on RV-x`. A
    review round that ends with medium or higher findings open comes to you: approve it with your reason
-   (`{{rl}} review approve RV-x --rationale ..`) or return the work.
+   (`{{rl}} review approve RV-x --rationale ..`), resolve it by a passing re-check (`review resolve`) or return it.
 6. Decide what changes: `{{rl}} decide --targets H-x --action continue|expand|modify|diagnose|consult|pause|stop|reopen
    --rationale .. --based-on EV-x,RV-x [--set-evidence-status supported|challenged|inconclusive]
    [--reopen-condition ..]`. Every open or uncertain result gets a default next action.
@@ -106,7 +106,7 @@ judge them; only what only the user can decide goes to the user (team.md). Witho
    --data-revision .. --metric .. --output-spec .. --resource <where it runs>` -> RUN and ATT ids. Write `unknown`
    for facts you do not have; never guess. Its `code review` line says whether answered reviews still cover the code
    it executes (the commit, else the working tree): covered, stale (a reviewed file changed: re-check before a costly
-   run) or not reviewed. Nothing is blocked; say why a run needs none: `--no-review "smoke test"`.
+   run; absent and test files only listed) or not reviewed. Nothing is blocked; else `--no-review "smoke test"`.
 3. Run it with your own tools (shell, background jobs, remote or HPC tools). Record facts as you observe them:
    `{{rl}} run record --attempt ATT --source <tool> --state running|ended [--outcome success|failed|cancelled]
    --exec-namespace host:<hostname> --exec-id <pid or job id> --source-ref <log>`. A remote run (registered with

@@ -10,7 +10,8 @@ use the cluster recipe below even for tiny checks.
 
 ```bash
 # 1. register (nothing starts); keep the printed RUN / ATT ids. Its "code review" line says whether an
-#    answered review still covers this code; add --no-review "<reason>" when the run needs none
+#    answered review still covers this code, with a reason for each reviewed path that no longer matches
+#    (changed, absent, test file); add --no-review "<reason>" when the run needs none
 {{rl}} run register --experiment E-0001 --request-id E-0001-wd-s0 --arm wd1e-2 --seed 0 \
   --code-digest "$({{rl}} digest src/ | cut -d' ' -f1)" --config-digest unknown \
   --data-revision "synthetic-v1 (generator in src/data.py, n=2000)" --metric "test accuracy" \
@@ -34,7 +35,8 @@ Short runs can be recorded after the fact with one `--state ended` record (give 
 fact was observed earlier). A crash is `--state ended --outcome failed`; a lost process you cannot check is
 `--state unknown`. A re-execution of the same RunSpec is a new attempt: `{{rl}} run register --experiment E-0001
 --run RUN-0001 --request-id <new>`. A changed config or code is a new run. `--review RV-x` adds a code review
-that targets something other than E-0001 (or the experiment its code comes from) to the coverage check.
+that targets something other than E-0001 (or the experiment its code comes from) to the coverage check; the
+check names such a review when it saw a changed file as this run executes it, and leaves the choice to you.
 
 ## Compute resources and remote runs
 

@@ -427,13 +427,31 @@ def review_passes(t: dict) -> bool:
 
 
 def review_mark(t: dict) -> str:
-    """A review's outcome in a few words: verdict, open severity, approval."""
+    """A review's outcome in a few words: verdict, open severity, approval or resolution."""
     out = t.get("verdict") or t["status"]
     if t.get("open_severity") not in (None, "none", "low"):
         out += f", {t['open_severity']} open"
     if t.get("changed_during_review"):
         out += ", not counted: the files changed during the review"
+    if t.get("resolved_by"):
+        out += f", resolved by {t['resolved_by']}"
     return out + (", approved by the coordinator" if t.get("approved") else "")
+
+
+def passing_rechecks(reviews: list[dict]) -> dict[str, list[str]]:
+    """For each review among reviews, the passing reviews that re-check it (--recheck-of), directly or further down
+    a chain of re-checks, in id order."""
+    by_id = {t["id"]: t for t in reviews}
+    out: dict[str, list[str]] = {}
+    for t in sorted(reviews, key=lambda t: _sort_key(t["id"])):
+        if not review_passes(t):
+            continue
+        prev, walked = t.get("recheck_of"), set()
+        while prev and prev not in walked:
+            walked.add(prev)
+            out.setdefault(prev, []).append(t["id"])
+            prev = by_id.get(prev, {}).get("recheck_of")
+    return out
 
 
 def _reviewed(tx: Tx, reviews: list[dict]) -> dict[str, list[tuple[dict, dict]]]:
@@ -660,11 +678,19 @@ def attention(tx: Tx) -> list[str]:
     for e in tx.all("Experiment"):
         if e.get("revised_after_results"):
             items.append(f"{e['id']} contract revised after results: later comparisons are exploratory")
-    for t in tx.all("Ticket", kind="review"):
-        if t.get("escalated") and not t.get("approved"):
-            items.append(f"{t['id']} review round {t.get('round_of') or t['id']} used its two reviews with "
-                         f"{t.get('open_severity')} findings open: the coordinator approves it (rl review approve "
-                         f"{t['id']} --rationale ..) or returns the work")
+    review_tickets = tx.all("Ticket", kind="review")
+    rechecked = passing_rechecks(review_tickets)
+    for t in review_tickets:
+        if t.get("escalated") and not t.get("approved") and not t.get("resolved_by"):
+            head = (f"{t['id']} review round {t.get('round_of') or t['id']} used its two reviews with "
+                    f"{t.get('open_severity')} findings open")
+            if later := rechecked.get(t["id"]):  # a re-check does not show that every finding was looked at
+                items.append(f"{head}; {', '.join(later)} re-checked it and passed: when that resolved the findings, "
+                             f"rl review resolve {t['id']} --by {later[-1]} --reason ..; to accept findings that "
+                             f"remain, rl review approve {t['id']} --rationale ..")
+            else:
+                items.append(f"{head}: the coordinator approves it (rl review approve {t['id']} --rationale ..) or "
+                             "returns the work")
     standing: dict[str, tuple[dict, int | None]] = {}  # hypothesis -> the latest decision stating a key conclusion
     for d in tx.all("Decision"):                      # on it, and the revision it decided on
         for hid, rev in key_hypotheses(tx, d).items():

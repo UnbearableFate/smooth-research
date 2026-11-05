@@ -578,6 +578,118 @@ def test_a_run_from_a_commit_is_checked_against_that_commit(project, fakes, tmp_
     assert elsewhere["status"] == "unchecked" and "not in this repository" in elsewhere["reason"]
 
 
+def another_experiment(project, title):
+    return research.add_experiment(project, title, "q?", ["H-0001"], "E1", intervention="i", comparator="c",
+                                   metric="acc", scope="s", outcome_actions="a", budget="b", stop="c")["id"]
+
+
+def test_a_path_that_matches_no_passing_review_says_why(project, fakes, tmp_path, rl):
+    from conftest import SPEC
+    code(tmp_path)
+    (tmp_path / "src/helper.py").write_text("H = 1\n")
+    (tmp_path / "src/test_model.py").write_text("def test_f():\n    pass\n")  # a test by its name, in src/
+    rv = reviews.request_review(project, "E-0001", ["src/model.py", "src/helper.py", "src/test_model.py"], "right?",
+                                ["claude-sonnet-5-5"], configs=["configs/run.yaml"], ignore_keys=["seed"])["id"]
+    reviews.run_ticket(project, rv)
+
+    def check(n, experiment="E-0001", **kw):
+        return runs.register(project, experiment, {**SPEC, "seed": n}, f"why{n}", **kw)
+
+    (tmp_path / "src/test_model.py").write_text("def test_f():\n    assert True\n")
+    (tmp_path / "src/helper.py").unlink()  # not in the code the run executes
+    out = check(1)
+    assert out["code_review"] == {"status": "covered", "source": "working tree", "reviews": [f"{rv} pass"],
+                                  "absent": {"src/helper.py": [rv]}, "tests": {"src/test_model.py": [rv]}}
+    assert f"\n  not in this code, so not executed: src/helper.py ({rv})\n" in out["summary"]
+    assert f"\n  test file, changed: src/test_model.py ({rv}); a test does not change" in out["summary"]
+    other = another_experiment(project, "another question")  # its code does not come from E-0001
+    code(tmp_path, body="def f(x):\n    return 2 * x\n")
+    seen = reviews.request_review(project, other, ["src/model.py"], "right?", ["claude-sonnet-5-5"])["id"]
+    reviews.run_ticket(project, seen)
+    stale = check(2)
+    assert stale["code_review"]["status"] == "stale" and stale["code_review"]["changed"] == {"src/model.py": [rv]}
+    assert stale["code_review"]["seen_by"] == {"src/model.py": [seen]}  # named, not counted
+    assert f"\n  changed: src/model.py (since {rv})\n    as run here, it was seen by {seen}" in stale["summary"]
+    code_, shown, _ = rl("run", "show", stale["attempt"])
+    assert code_ == 0 and "code review: stale: 1 path(s) changed since a passing review saw them\n" in shown
+    assert f"\n    changed: src/model.py (since {rv})\n" in shown and f"--review {seen} counts it" in shown
+    assert f"\n    still matching: {rv} pass" in shown
+    both = check(3, reviews=[seen])["code_review"]  # each saw a part: the combination was not reviewed
+    assert both["status"] == "covered" and both["reviews"] == [f"{rv} pass", f"{seen} pass"] and both["per_file"]
+    assert runs.code_review_note(both).startswith(f"covered by {rv} pass, {seen} pass (file by file); test files")
+    tests_only = another_experiment(project, "the tests")
+    only = reviews.request_review(project, tests_only, ["src/test_model.py"], "tests right?", ["claude-sonnet-5-5"])["id"]
+    reviews.run_ticket(project, only)
+    (tmp_path / "src/test_model.py").write_text("def test_f():\n    assert 1\n")
+    none = check(4, tests_only)
+    assert none["code_review"] == {"status": "none", "source": "working tree", "tests": {"src/test_model.py": [only]}}
+    assert "code review (working tree): not reviewed: what the passing reviews saw is not in this code, or is tests. " \
+           "A costly run" in none["summary"]
+
+
+def test_the_reviews_that_did_not_pass_are_listed_apart_from_the_passing_ones(project, fakes, tmp_path, monkeypatch):
+    code(tmp_path)
+    (tmp_path / "src/stage_b.py").write_text("B = 1\n")
+    rv = request(project)["id"]
+    reviews.run_ticket(project, rv)
+    monkeypatch.setenv("FAKE_ANSWER", finding("medium"))
+    b = reviews.request_review(project, "E-0001", ["src/stage_b.py"], "stage B right?", ["claude-sonnet-5-5"])["id"]
+    reviews.run_ticket(project, b)
+    checked = scope.code_coverage(project, "E-0001", {"content_digest": "x"})
+    assert checked == {"status": "covered", "source": "working tree", "reviews": [f"{rv} pass"],
+                       "not_passed": [f"{b} issues, medium open"]}
+    assert runs.code_review_note(checked) == f"covered by {rv} pass; not passed: {b} issues, medium open"
+    monkeypatch.setenv("FAKE_ANSWER", PASS)
+    (tmp_path / "src/stage_b.py").write_text("B = 2\n")
+    fixed = reviews.request_review(project, "E-0001", ["src/stage_b.py"], "stage B right?", ["claude-sonnet-5-5"],
+                                   recheck_of=b)["id"]
+    reviews.run_ticket(project, fixed)
+    checked = scope.code_coverage(project, "E-0001", {"content_digest": "x"})  # the passing re-check follows it
+    assert checked == {"status": "covered", "source": "working tree", "reviews": [f"{rv} pass", f"{fixed} pass"],
+                       "per_file": True}
+
+
+def test_a_round_its_recheck_resolved_leaves_attention_without_passing(project, fakes, tmp_path, monkeypatch, rl):
+    code(tmp_path)
+    monkeypatch.setenv("FAKE_ANSWER", finding("medium"))
+    first = request(project)["id"]
+    reviews.run_ticket(project, first)
+    code(tmp_path, body="def f(x):\n    return 2 * x\n")
+    second = request(project, recheck_of=first)["id"]
+    assert reviews.run_ticket(project, second)["escalated"]
+    monkeypatch.setenv("FAKE_ANSWER", PASS)
+    third = reviews.request_review(project, "E-0001", ["src/model.py"], "is the fix right?", ["claude-sonnet-5-5"],
+                                   recheck_of=second, new_round="the fix needs its own look")["id"]  # not the config
+    reviews.run_ticket(project, third)
+    with project.read() as tx:
+        item = next(i for i in research.attention(tx) if i.startswith(second))
+    assert item == (f"{second} review round {first} used its two reviews with medium findings open; {third} "
+                    f"re-checked it and passed: when that resolved the findings, rl review resolve {second} --by "
+                    f"{third} --reason ..; to accept findings that remain, rl review approve {second} --rationale ..")
+    for args, why in (((second, third, " "), "--reason"), ((second, first, "r"), f"{first} is not a re-check of"),
+                      ((first, second, "r"), f"{second} does not pass"), ((third, third, "r"), "nothing to resolve")):
+        with pytest.raises(RLError, match=why):
+            reviews.resolve(project, *args)
+    monkeypatch.setenv("SMOOTH_RESEARCH_ROLE", "researcher-1")
+    with pytest.raises(RLError, match="the coordinator's decision"):
+        reviews.resolve(project, second, third, "r")
+    monkeypatch.delenv("SMOOTH_RESEARCH_ROLE")
+    code_, out, _ = rl("review", "resolve", second, "--by", third, "--reason", "the re-check looked at the fix")
+    assert code_ == 0 and out.startswith(f"{second} resolved by {third}: the re-check looked at the fix. Its verdict "
+                                         "stays (issues, medium open)")
+    with project.read() as tx:
+        assert not any(i.startswith(second) for i in research.attention(tx))
+        assert research.review_mark(tx.require(second)) == f"issues, medium open, resolved by {third}"
+    with pytest.raises(RLError) as err:
+        reviews.resolve(project, second, third, "again")
+    assert err.value.code == "CONFLICT"
+    code(tmp_path, body="def f(x):\n    return 2 * x\n", config={"lr": 0.5, "seed": 0})  # only the old round saw it
+    assert scope.code_coverage(project, "E-0001", {"content_digest": "x"}) == {
+        "status": "covered", "source": "working tree", "reviews": [f"{third} pass"]}
+    approved = reviews.approve(project, first, "the remaining finding is a documented choice")["summary"]
+    assert f"\nnote: {third} re-checked it and passed. Approving accepts the findings that remain" in approved
+
+
 DATED = "lr: 0.1\nseed: {seed}\nsnapshot: {day}\nstarted: 2026-10-01T08:00:00Z\n3: three\n"
 
 

@@ -365,6 +365,8 @@ def cmd_review(args):
         return reviews.answer_live(store, args.id, args.answer, args.session)
     if a == "approve":
         return reviews.approve(store, args.id, args.rationale)
+    if a == "resolve":
+        return reviews.resolve(store, args.id, args.by, args.reason)
     if a == "run":
         if args.background:
             return reviews.start_background(store, args.id, args.timeout, args.entry)
@@ -854,6 +856,11 @@ def build_parser() -> argparse.ArgumentParser:
             s = ss.add_parser("approve", help="the coordinator accepts a review's remaining findings")
             s.add_argument("id")
             s.add_argument("--rationale", required=True)
+            s = ss.add_parser("resolve", help="the coordinator records that a passing re-check resolved a "
+                                              "review's findings (the review leaves attention and still does not pass)")
+            s.add_argument("id")
+            s.add_argument("--by", required=True, help="the passing re-check (--recheck-of it, or down the chain)")
+            s.add_argument("--reason", required=True)
         else:
             s = ss.add_parser("prepare")
             s.add_argument("--question", required=True)

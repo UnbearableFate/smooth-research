@@ -129,6 +129,7 @@ ENTITIES: dict[str, Entity] = {e.label: e for e in [
        subject=F(enum="review_subject"), code_scope=F("json"), advice_round=F("int"), user_approved=F(),
        round_of=F(), round_index=F("int"), round_reason=F(), requested_by=F(), assigned_session=F(), answered_by=F(),
        open_severity=F(enum="severity"), escalated=F("bool"), approved=F(), approved_at=F(),
+       resolved_by=F(), resolved_reason=F(), resolved_at=F(),
        earlier_answers=F("json"), code_checkout=F(), changed_during_review=F("json")),
     _e("Event", "EVT", width=6, seq=F("int", True), type=F(required=True), entity_id=F(), actor=F(), summary=F()),
     _e("Request", "REQ", op=F(required=True), request_id=F(required=True), digest=F(required=True),

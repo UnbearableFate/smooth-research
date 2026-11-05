@@ -84,7 +84,10 @@ A round holds at most two reviews. Findings carry a severity (high, medium, low)
 findings remain after the second review, the round comes to you as a NOTE and an attention item: read the
 answer and the changes, then approve it with your reason (`{{rl}} review approve RV-x --rationale ..`) or
 return the work with `{{rl}} task reopen`. A further review needs a new round: `--new-round "<reason>"`.
-Approving is yours; a session that `{{rl}} agent open` started cannot approve.
+When a passing re-check of the round (`--recheck-of RV-x --new-round ..`) resolved its findings, the attention
+item names it: record that with `{{rl}} review resolve RV-x --by RV-y --reason ..`, not with approve. Approving
+accepts the findings that remain and makes everything RV-x saw count as reviewed, though the re-check may have
+looked at less. Approving and resolving are yours; a session that `{{rl}} agent open` started can do neither.
 
 A run registered before you approve keeps the code review check it recorded; `{{rl}} run show` adds the reviews
 you approved since.

@@ -19,7 +19,10 @@ smooth-research skill: {{rl_short}}
 - A round holds at most two reviews: the first, and one re-check (`--recheck-of RV-x`). When medium or higher
   findings remain after the second, the CLI hands the round to the coordinator (a NOTE and an attention
   item), who approves it with a reason (`{{rl}} review approve RV-x --rationale ..`) or returns the work.
-  Approving is the coordinator's decision; a session that `{{rl}} agent open` started cannot approve.
+  Approving accepts the findings that remain, and the review then counts as passing. When a passing re-check
+  (`--recheck-of`, also in a new round) resolved them, the coordinator records that instead:
+  `{{rl}} review resolve RV-x --by RV-y --reason ..`; RV-x leaves attention and still does not pass.
+  Approving and resolving are the coordinator's; a session that `{{rl}} agent open` started can do neither.
 - A third request in the same round stops with LIMIT, whichever review of the round it names. A further
   review starts a new round, with the reason: `--recheck-of RV-x --new-round "<why the code needs another
   review>"`.
@@ -63,7 +66,13 @@ smooth-research skill: {{rl_short}}
    the run executes, a version that a passing review saw (configs without the ignored keys).
    The result (covered, stale with the changed paths, not reviewed, or `--no-review` with its reason) is
    recorded on the attempt and shown in conclusion review packages and `{{rl}} report`, with the reviews the
-   coordinator approved after the registration. A review requested
+   coordinator approved after the registration. Each path that matches no passing review has a reason, and
+   only `changed` makes the check stale: a path absent from the code is not executed, and a changed test file
+   (in tests/, test_*.py, *_test.py, conftest.py) does not change what the run computes; both are listed by
+   name. For a changed path, the passing review of another experiment that saw that content is named:
+   `--review RV-x` counts it when it answers this experiment's question. Coverage pieced together from several
+   reviews is marked file by file, and the experiment's reviews that did not pass are listed apart (unless a
+   passing re-check followed). `{{rl}} run show ATT-x` prints it path by path. A review requested
    before scopes were recorded cannot be checked: request it again with the same scope (the answer is reused).
 
 ## Conclusion

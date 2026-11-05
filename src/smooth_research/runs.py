@@ -108,10 +108,12 @@ def register(store: Store, experiment: str, spec: dict, request_id: str, run_id:
         tx.event("run.register", attempt, f"{run_id} attempt {index} prepared")
     unknown = sorted(k for k, v in spec.items() if v == "unknown")
     source = f" ({check['source']})" if check.get("source") else ""
+    status, *paths = code_review_lines(check)
     return {**result, "summary": f"{run_id} {attempt} prepared (spec {short(spec_digest)})"
                                  + (f"; unknown: {', '.join(unknown)}" if unknown else "")
                                  + ". Nothing was started: run it with your own tool, then `rl run record`."
-                                 + f"\ncode review{source}: {code_review_note(check)}{_review_hint(check)}"
+                                 + f"\ncode review{source}: {status}{_review_hint(check)}"
+                                 + "".join(f"\n  {line}" for line in paths)
                                  + (_placement_note(res, placed, attempt) if res else "")}
 
 
@@ -136,32 +138,78 @@ def _review_hint(check: dict) -> str:
     return ""
 
 
-def code_review_note(check: dict, tx: Tx | None = None) -> str:
-    """The code review check recorded when an attempt was registered, in one line. With tx it also names the
-    reviews that did not pass then and that the coordinator has approved since (the recorded check stays)."""
+def _status(check: dict) -> str:
     status = check["status"]
     if status == "waived":
-        text = f"not needed: {check['reason']}"
-    elif status == "covered":
-        text = f"covered by {', '.join(check['reviews'])}"
-    elif status == "stale":
+        return f"not needed: {check['reason']}"
+    if status == "covered":
+        return f"covered by {', '.join(check['reviews'])}" + (" (file by file)" if check.get("per_file") else "")
+    if status == "stale":
         paths = [f"{p} changed since {', '.join(ids)}" for p, ids in check["changed"].items()]
-        text = "stale: " + "; ".join(paths[:3]) + (f"; {len(paths) - 3} more" if len(paths) > 3 else "")
-    elif status == "unchecked":
-        text = f"unchecked: {check['reason']}"
-    elif status == "not_passed":
-        text = f"no passing review ({', '.join(check['open'])})"
-    else:
-        text = "not reviewed"
-    if status in ("covered", "stale") and check.get("open"):
+        return "stale: " + "; ".join(paths[:3]) + (f"; {len(paths) - 3} more" if len(paths) > 3 else "")
+    if status == "unchecked":
+        return f"unchecked: {check['reason']}"
+    if status == "not_passed":
+        return f"no passing review ({', '.join(check['open'])})"
+    if check.get("absent") or check.get("tests"):
+        return "not reviewed: what the passing reviews saw is not in this code, or is tests"
+    return "not reviewed"
+
+
+def _names(paths: dict) -> str:
+    names = list(paths)
+    return ", ".join(names[:3]) + (f" and {len(names) - 3} more" if len(names) > 3 else "")
+
+
+def code_review_note(check: dict, tx: Tx | None = None) -> str:
+    """The code review check recorded when an attempt was registered, in one line: the paths that only call for
+    a look are counted or named in short (code_review_lines lists them). With tx it also names the reviews that
+    did not pass then and that the coordinator has approved since (the recorded check stays)."""
+    text = _status(check)
+    if check["status"] in ("covered", "stale") and check.get("open"):
         text += f" ({', '.join(check['open'])})"
+    if check.get("seen_by"):
+        text += f"; a passing review of another experiment saw {_names(check['seen_by'])} as run here (--review)"
+    if check.get("tests"):
+        text += f"; test files changed: {_names(check['tests'])}"
+    if check.get("absent"):
+        text += f"; not in this code: {_names(check['absent'])}"
+    if check.get("not_passed"):
+        text += f"; not passed: {', '.join(check['not_passed'])}"
     if tx is not None and (later := _approved_since(tx, check)):
         text += f"; approved by the coordinator since: {', '.join(later)}"
     return text
 
 
+def code_review_lines(check: dict, tx: Tx | None = None) -> list[str]:
+    """The code review check of an attempt for run register and run show: the status, then one line for each
+    path that no longer matches what a passing review saw, by its reason, and the reviews that did not pass."""
+    lines = [_status(check) if check["status"] != "stale" else
+             f"stale: {len(check['changed'])} path(s) changed since a passing review saw them"]
+    if check["status"] in ("covered", "stale") and check.get("open"):
+        lines[0] += f" ({', '.join(check['open'])})"
+    if tx is not None and (later := _approved_since(tx, check)):
+        lines[0] += f"; approved by the coordinator since: {', '.join(later)}"
+    for path, ids in (check.get("changed") or {}).items():
+        lines.append(f"changed: {path} (since {', '.join(ids)})")
+        if others := (check.get("seen_by") or {}).get(path):
+            lines.append(f"  as run here, it was seen by {', '.join(others)} (a review of another experiment, not "
+                         f"counted): --review {','.join(others)} counts it when it answers this experiment's question")
+    lines += [f"not in this code, so not executed: {path} ({', '.join(ids)})"
+              for path, ids in (check.get("absent") or {}).items()]
+    lines += [f"test file, changed: {path} ({', '.join(ids)}); a test does not change what the run computes"
+              for path, ids in (check.get("tests") or {}).items()]
+    if check["status"] == "stale" and check.get("reviews"):
+        lines.append(f"still matching: {', '.join(check['reviews'])}")
+    if check.get("per_file"):
+        lines.append("file by file: each file matches a passing review, but no review saw these files together")
+    if check.get("not_passed"):
+        lines.append(f"not passed: {', '.join(check['not_passed'])}")
+    return lines
+
+
 def _approved_since(tx: Tx, check: dict) -> list[str]:
-    marks = [*check.get("open", []), *check.get("reviews", [])]
+    marks = [*check.get("open", []), *check.get("reviews", []), *check.get("not_passed", [])]
     ids = [m.split()[0] for m in marks if "approved" not in m]
     return [i for i in ids if (t := tx.get(i, "Ticket")) and t.get("approved")]
 
@@ -519,7 +567,8 @@ def _age_h(stamp: str | None) -> float | None:
     return (datetime.now(timezone.utc) - parse_time(stamp)).total_seconds() / 3600
 
 
-def describe_attempt(tx: Tx, att: dict) -> str:
+def describe_attempt(tx: Tx, att: dict, detail: bool = False) -> str:
+    """An attempt in one line; with detail, its code review check follows path by path on further lines."""
     refs = [tx.require(e["id"]) for e in tx.out(att["id"], "bound_to")]
     on = f" on {att['resource']['name']}" if att.get("resource") else ""
     ref_text = ", ".join(f"{r['kind']} {r['executor_namespace']}/{r['opaque_id']}" for r in refs) or "no external ref yet"
@@ -528,8 +577,9 @@ def describe_attempt(tx: Tx, att: dict) -> str:
         " (stale? refresh with your execution tool)" if age > STALE_AFTER_H and att["execution_state"] != "ended" else "")
     trusted = (f"; last trusted {att['last_trusted_state']} at {att['last_trusted_at']}"
                if att.get("last_trusted_state") and att["execution_state"] == "unknown" else "")
-    return (f"{brief(att)}{on} {ref_text}; {fresh}{trusted}; code review: "
-            f"{code_review_note(att['code_review'], tx)}")
+    review = code_review_lines(att["code_review"], tx) if detail else [code_review_note(att["code_review"], tx)]
+    return (f"{brief(att)}{on} {ref_text}; {fresh}{trusted}; code review: {review[0]}"
+            + "".join(f"\n    {line}" for line in review[1:]))
 
 
 def show(store: Store, entity_id: str | None = None, active: bool = False) -> dict:
@@ -546,7 +596,8 @@ def show(store: Store, entity_id: str | None = None, active: bool = False) -> di
                 for att in tx.all("Attempt", run_id=run["id"]):
                     if rec["_label"] == "Attempt" and att["id"] != entity_id:
                         continue
-                    lines.append(f"  {describe_attempt(tx, att)}")
+                    # one run or attempt: its code review check path by path; an experiment's: in one line each
+                    lines.append(f"  {describe_attempt(tx, att, detail=rec['_label'] != 'Experiment')}")
                     for issue in att.get("issues") or []:
                         lines.append(f"    issue: {issue}")
                     for o in sorted(tx.all("Observation", attempt_id=att["id"]), key=lambda o: o["received_at"])[-5:]:

@@ -10,12 +10,12 @@ from __future__ import annotations
 
 import json
 import subprocess
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import yaml
 
-from .research import review_mark, review_passes
-from .store import Store, Tx
+from .research import passing_rechecks, review_mark, review_passes
+from .store import Store, Tx, _sort_key
 from .util import RLError, digest_bytes, digest_file, digest_json
 
 
@@ -139,12 +139,40 @@ def _code_reader(store: Store, code_ref) -> tuple:
     return read_commit, f"commit {commit[:12]}"
 
 
+def is_test_path(path: str) -> bool:
+    """A test file by the usual conventions: in a tests/ folder, or named test_*.py, *_test.py or conftest.py. Only
+    the name is looked at, so the reports list such files by name: a production file named like a test shows."""
+    parts = PurePosixPath(path).parts
+    name = parts[-1] if parts else path
+    return ("tests" in parts[:-1] or name == "conftest.py"
+            or (name.endswith(".py") and (name.startswith("test_") or name.endswith("_test.py"))))
+
+
+def _scope_items(t: dict):
+    """(path, kind, digest, ignored keys) for each path a code review saw; a review from before code scopes were
+    recorded saw none."""
+    scope = t.get("code_scope") or {}
+    for kind in ("files", "deps", "configs"):
+        for path, digest in (scope.get(kind) or {}).items():
+            yield path, kind, digest, scope.get("ignored_keys") or []
+
+
 def code_coverage(store: Store, experiment: str, code_ref, named: list[str] = (), waived: str | None = None) -> dict:
     """Do answered code reviews still cover the code a run of this experiment executes?
 
     Every path a passing review covered must still match, in that code, the version at least one passing
-    review saw (configs compared without the keys that review allowed to vary). The result is recorded on the
-    attempt; nothing is blocked, because only the researcher knows whether the run needs a review.
+    review saw (configs compared without the keys that review allowed to vary). A path that matches none has a
+    reason, and only one makes the check stale:
+      changed  the content differs (the passing code reviews of other experiments that saw this content are
+               named: --review RV-x counts one, when it answers this experiment's question; it is not counted
+               by itself)
+      absent   the path is not in that code, so the run cannot execute it
+      tests    a test file (is_test_path) changed: what the run computes is the same
+    When the files are covered by several reviews and none of them saw all of them, the coverage is per file: the
+    combination was not reviewed. Reviews of the experiment that did not pass, and that no passing re-check
+    followed, are listed apart from the passing ones. When the passing reviews saw nothing that is in that code
+    except tests, the run is not reviewed. The result is recorded on the attempt; nothing is blocked, because only
+    the researcher knows whether the run needs a review.
     """
     if waived is not None:
         if not waived.strip():
@@ -152,6 +180,7 @@ def code_coverage(store: Store, experiment: str, code_ref, named: list[str] = ()
         return {"status": "waived", "reason": waived.strip()}
     with store.read() as tx:
         tickets = _code_reviews(tx, experiment, list(named))
+        everyone = [t for t in tx.all("Ticket", kind="review") if t.get("subject") != "conclusion"]
     if not tickets:
         return {"status": "none"}
     passing = [t for t in tickets if review_passes(t)]
@@ -161,31 +190,56 @@ def code_coverage(store: Store, experiment: str, code_ref, named: list[str] = ()
     read, source = _code_reader(store, code_ref)
     if read is None:
         return {"status": "unchecked", "reviews": [f"{t['id']} {review_mark(t)}" for t in passing], "reason": source}
+    contents: dict[str, bytes | None] = {}
 
     def current(path: str, kind: str, ignored: list[str]) -> str | None:
-        data = read(path)
+        if path not in contents:
+            contents[path] = read(path)
+        data = contents[path]
         if data is None:
             return None
         return _config_digest(path, data, ignored) if kind == "configs" else digest_bytes(data)
 
     seen: dict[str, list[str]] = {}  # path -> passing reviews that saw the version this run executes
     older: dict[str, list[str]] = {}  # path -> passing reviews that saw another version
+    seen_by: dict[str, list[str]] = {}  # changed path -> passing reviews of other experiments that saw this version
     try:
         for t in passing:
-            scope = t.get("code_scope") or {}  # a review from before code scopes were recorded covers no file
-            for kind in ("files", "deps", "configs"):
-                for path, digest in (scope.get(kind) or {}).items():
-                    now = current(path, kind, scope.get("ignored_keys") or [])
-                    (seen if now == digest else older).setdefault(path, []).append(t["id"])
+            for path, kind, digest, ignored in _scope_items(t):
+                (seen if current(path, kind, ignored) == digest else older).setdefault(path, []).append(t["id"])
+        reasons: dict[str, dict[str, list[str]]] = {"changed": {}, "absent": {}, "tests": {}}
+        for path, ids in sorted(older.items()):
+            if path not in seen:
+                reason = "absent" if contents[path] is None else "tests" if is_test_path(path) else "changed"
+                reasons[reason][path] = ids
+        mine = {t["id"] for t in tickets}
+        for t in everyone:
+            if t["id"] not in mine and review_passes(t):
+                for path, kind, digest, ignored in _scope_items(t):
+                    if path in reasons["changed"] and current(path, kind, ignored) == digest:
+                        seen_by.setdefault(path, []).append(t["id"])
     except (OSError, subprocess.SubprocessError) as exc:
         return {"status": "unchecked", "reviews": [f"{t['id']} {review_mark(t)}" for t in passing],
                 "reason": f"could not read the {source}: {exc}"}
-    changed = {p: ids for p, ids in sorted(older.items()) if p not in seen}
     used = {i for ids in seen.values() for i in ids}
-    out = {"status": "stale" if changed else "covered", "source": source,
-           "reviews": [f"{t['id']} {review_mark(t)}" for t in passing if t["id"] in used]}
-    if changed:
-        out["changed"] = changed
+    if reasons["changed"]:
+        status = "stale"
+    elif not seen and (reasons["absent"] or reasons["tests"]):
+        status = "none"
+    else:
+        status = "covered"
+    out: dict = {"status": status, "source": source}
+    if status != "none":
+        out["reviews"] = [f"{t['id']} {review_mark(t)}" for t in passing if t["id"] in used]
+    out.update({key: paths for key, paths in reasons.items() if paths})
+    if seen_by:
+        out["seen_by"] = {p: sorted(ids, key=_sort_key) for p, ids in seen_by.items()}
+    if len(used) > 1 and not any({p for p, ids in seen.items() if i in ids} == set(seen) for i in used):
+        out["per_file"] = True
+    rechecked = passing_rechecks(everyone)
+    failed = [f"{t['id']} {review_mark(t)}" for t in others if t["status"] == "answered" and t["id"] not in rechecked]
+    if failed:
+        out["not_passed"] = failed
     pending = [f"{t['id']} {t['status']}" for t in others if t["status"] in ("pending", "running")]
     if pending:
         out["open"] = pending

@@ -31,7 +31,7 @@ from .agents import assign
 from .context import advice_pack, contract_summary
 from .herdr import caller_role
 from .project import advice_limit, usable_entries
-from .research import brief, prepare_contracts, review_mark, review_passes, seal_referenced
+from .research import brief, passing_rechecks, prepare_contracts, review_mark, review_passes, seal_referenced
 from .runs import code_review_summary, evidence_attempts
 from .schema import ENUMS
 from .scope import changed_since_request, fingerprint
@@ -431,7 +431,8 @@ def answer_live(store: Store, ticket_id: str, answer: str, session_name: str | N
 
 
 def approve(store: Store, ticket_id: str, rationale: str) -> dict:
-    """The coordinator accepts a review's remaining findings, with its reason; the review then passes."""
+    """The coordinator accepts a review's remaining findings, with its reason; the review then passes, and the code
+    it saw counts as reviewed. Findings that a later passing re-check resolved are recorded with resolve instead."""
     if not (rationale or "").strip():
         raise RLError("INVALID", "say why the remaining findings are accepted: --rationale")
     if caller_role():
@@ -440,14 +441,50 @@ def approve(store: Store, ticket_id: str, rationale: str) -> dict:
         t = tx.require(ticket_id, "Ticket")
         if t["kind"] != "review" or t["status"] != "answered":
             raise RLError("INVALID", f"{ticket_id} is not an answered review")
+        later = passing_rechecks(tx.all("Ticket", kind="review")).get(ticket_id)
         tx.update(ticket_id, {"approved": rationale.strip(), "approved_at": now_utc()})
         tx.event("review.approved", ticket_id, rationale.strip())
         msg = messages.record(tx, "NOTE", "coordinator", t["requested_by"], None, None, [],
                               f"{ticket_id} approved by the coordinator: {rationale.strip()}") \
             if t.get("requested_by") not in (None, "coordinator") else None
     target = messages.notify(store, msg) if msg else None
+    note = (f"\nnote: {', '.join(later)} re-checked it and passed. Approving accepts the findings that remain, and "
+            f"what {ticket_id} saw now counts as reviewed; when the re-check resolved them, `rl review resolve "
+            f"{ticket_id} --by {later[-1]} --reason ..` says so instead" if later else "")
     return {"id": ticket_id, "summary": f"{ticket_id} approved: {rationale.strip()} ({review_mark({**t, 'approved': 1})})"
-                                        + (f"; notice sent to {target}" if target else "")}
+                                        + (f"; notice sent to {target}" if target else "") + note}
+
+
+def resolve(store: Store, ticket_id: str, by: str, reason: str) -> dict:
+    """The coordinator records that a passing re-check (--recheck-of, directly or down the chain) resolved a review's
+    findings. The review leaves attention; its verdict stays and it still does not pass, so the code it saw does not
+    count as reviewed by it (approve accepts the findings instead)."""
+    if not (reason or "").strip():
+        raise RLError("INVALID", "say how the re-check resolved the findings: --reason")
+    if caller_role():
+        raise RLError("INVALID", f"resolving a review is the coordinator's decision, not {caller_role()}'s")
+    with store.write() as tx:
+        t, other = tx.require(ticket_id, "Ticket"), tx.require(by, "Ticket")
+        if t["kind"] != "review" or t["status"] != "answered":
+            raise RLError("INVALID", f"{ticket_id} is not an answered review")
+        if review_passes(t):
+            raise RLError("INVALID", f"{ticket_id} passes ({review_mark(t)}): it has nothing to resolve")
+        if t.get("resolved_by"):
+            raise RLError("CONFLICT", f"{ticket_id} was resolved by {t['resolved_by']} already")
+        chain, prev = [], other.get("recheck_of")
+        while prev and prev not in chain:
+            chain.append(prev)
+            prev = (tx.get(prev, "Ticket") or {}).get("recheck_of")
+        if ticket_id not in chain:
+            raise RLError("INVALID", f"{by} is not a re-check of {ticket_id}: a review is resolved by a review "
+                                     f"requested with --recheck-of {ticket_id}, or with --recheck-of a re-check of it")
+        if not review_passes(other):
+            raise RLError("INVALID", f"{by} does not pass ({review_mark(other)}): only a passing re-check resolves")
+        tx.update(ticket_id, {"resolved_by": by, "resolved_reason": reason.strip(), "resolved_at": now_utc()})
+        tx.event("review.resolved", ticket_id, f"by {by}: {reason.strip()}")
+    return {"id": ticket_id, "resolved_by": by,
+            "summary": f"{ticket_id} resolved by {by}: {reason.strip()}. Its verdict stays ({review_mark(t)}); the code "
+                       f"it saw counts as reviewed only where {by} or another passing review saw it"}
 
 
 def show(store: Store, ticket_id: str | None, kind: str) -> dict:
@@ -459,7 +496,8 @@ def show(store: Store, ticket_id: str | None, kind: str) -> dict:
         lines.append(f"{brief(t)}{alive}")
         for key in ("target_id", "relation", "requested_entry", "observed_model", "host_session_id", "summary",
                     "round_of", "round_index", "round_reason", "requested_by", "assigned_session", "answered_by",
-                    "escalated", "approved", "changed_during_review", "request_ref", "answer_ref",
+                    "escalated", "approved", "resolved_by", "resolved_reason", "changed_during_review",
+                    "request_ref", "answer_ref",
                     "earlier_answers", "reused_from", "error",
                     "cost_usd"):
             if t.get(key) not in (None, ""):

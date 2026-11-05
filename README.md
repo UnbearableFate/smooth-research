@@ -40,7 +40,9 @@ tabs (`rl agent open`, see `src/smooth_research/agents.py`). Each researcher ses
 worktree at `<project>/../<project>-worktrees/<name>`, on one branch per task, and the coordinator merges
 accepted branches with a merge commit. Sessions exchange recorded messages; a live recipient also gets a
 one-line notice. A review round holds two reviews; findings of medium or higher severity left after the
-second go to the coordinator, who approves them with a reason or returns the work. Questions, requests for
+second go to the coordinator, who approves them with a reason, resolves them by a passing re-check
+(`rl review resolve`) or returns the work. A run's code review check gives each reviewed path that no longer
+matches a reason: changed (stale), absent from the code, or a test file. Questions, requests for
 permission and dialogs from the sessions also go to the coordinator, which decides what it can judge and asks
 the user only what only the user can decide. A watcher in its own tab
 looks at the sessions and the coordinator every 5 minutes (`agents.watch_minutes`), through herdr and the
