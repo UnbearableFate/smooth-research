@@ -134,10 +134,13 @@ actions outside the project that cannot be undone.
 `{{rl}} agent open` also starts the watcher in its own tab (`sr-watch`). Every `agents.watch_minutes`
 minutes (default 5) it looks at each open session and at you: once through herdr and, for a Codex session,
 through what its own log gained since the last beat. It finds that log by the session id herdr reports through its
-Codex integration; when `{{rl}} agent open` says herdr reports none, ask the user to install it (`herdr integration
-install codex`); until then such sessions are seen through herdr only. Codex asks to review that hook when it is new
-or changed: trusting it is the user's decision (it runs outside the sandbox); until the user has trusted it, answer
-"Continue without trusting". A session gets the first class that applies:
+Codex integration (from each conversation's first turn on), or by the id Codex's `/status` shows: rl types `/status`
+(a local command that calls no model) into a Codex session when it opens and after `reset --clear`. When `{{rl}} agent
+open` says it found no id, ask the user to install the integration (`herdr integration install codex`) unless
+`herdr integration status` lists codex as installed; until then such sessions are seen through herdr only. Codex
+asks to review that hook when it is new or changed: trusting it is the user's decision (it runs outside the
+sandbox); until the user has trusted it, answer "Continue without trusting". A session gets the first class that
+applies:
 
 | Session | Watcher |
 | --- | --- |

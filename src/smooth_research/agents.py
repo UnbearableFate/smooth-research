@@ -21,7 +21,7 @@ from pathlib import Path
 from . import adapters, herdr, messages, usage, watch, worktrees
 from .delegate import SUBAGENTS, WAITING, prompt_for, rl_command
 from .herdr import caller_role
-from .launch import SELECTED, answer_new, excerpt, option_line, select, start_agent, unseen
+from .launch import SELECTED, answer_new, excerpt, option_line, redact, select, start_agent, status_id, unseen
 from .project import stall_minutes, usable_entries, watch_minutes
 from .store import Store
 from .util import RLError, now_utc
@@ -149,7 +149,7 @@ def dialog(store: Store, name: str) -> dict:
     """What a session's agent shows now, for the coordinator to judge a dialog or a question in it."""
     s = _session(store, name)
     state = herdr.status(s["herdr_agent"])
-    screen = herdr.read(s["herdr_agent"])
+    screen = redact(herdr.read(s["herdr_agent"]))
     shown = [x.rstrip() for x in screen.splitlines() if x.strip()][-40:]
     at = state == "blocked" or unseen(s["host"], screen)
     head = f"{name} is {state}" + (" at a dialog" if state == "blocked" else " at a dialog herdr does not see" if at else "")
@@ -277,20 +277,29 @@ def tell(store: Store, to: str, text: str, sender: str | None = None, task: str 
 def reset(store: Store, name: str, mode: str) -> dict:
     """Prepare a session for its next assignment: compact keeps a summary of the conversation, clear starts a
     new one (/clear in Claude Code, /new in Codex and pi; Codex asks where the new one runs: in the session's own
-    folder)."""
+    folder). herdr reports the old conversation's id until the new one's first turn: that id is kept as stale, so
+    the watcher does not go back to it; a Codex session's new id is read from its /status."""
     s = _session(store, name)
     command = SLASH[s["host"]][mode]
     problem = herdr.prompt(s["herdr_agent"], command, wait_ms=600_000 if mode == "compact" else None)
     if problem:
         raise RLError("HERDR", f"{name}: {command} not sent: {problem}")
     waiting = answer_new(s["herdr_agent"], s["host"]) if mode == "clear" else None
+    stale = herdr.session_id(s["herdr_agent"]) if mode == "clear" else None
+    sid = status_id(s["herdr_agent"], s["host"]) if mode == "clear" and not waiting else None
     with store.write() as tx:
-        tx.update(s["id"], {"assignment": None, **({"host_session_id": None} if mode == "clear" else {})})
+        fresh = {}
+        if mode == "clear":  # a new conversation: what the watcher noted about the old one no longer applies
+            memo = {k: v for k, v in (tx.require(s["id"]).get("watch") or {}).items()
+                    if k not in ("log", "retries", "unconfirmed", "idle", "stale")}
+            fresh = {"host_session_id": sid, "watch": {**memo, **({"stale": stale} if stale and stale != sid else {})}}
+        tx.update(s["id"], {"assignment": None, **fresh})
         tx.event("session.reset", s["id"], f"{name} {command} after {s.get('assignment') or 'no assignment'}"
                  + (f"; {waiting}" if waiting else ""))
-    return {"id": s["id"], "waiting": waiting,
+    known = f"a new host conversation: {sid}" if sid else "a new host conversation: its id is not known"
+    return {"id": s["id"], "waiting": waiting, "host_session": sid,
             "summary": f"{s['id']} {name}: sent {command}; {waiting or f'ready for `rl agent assign {name} ...`'}"
-                       + (" (a new host conversation: its id is not known)" if mode == "clear" else "")}
+                       + (f" ({known})" if mode == "clear" else "")}
 
 
 def _close_tab(s: dict) -> list[str]:

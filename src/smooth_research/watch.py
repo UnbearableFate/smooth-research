@@ -67,11 +67,13 @@ MAX_RETRIES = 3  # per streak of transient turn errors
 RETRY_BEATS = (0, 2, 4)  # beats before each retry: the next beat, then 2 more, then 4 more
 TOOL_STALLS = 4  # a tool call pending this many times agents.stall_minutes is reported
 OPEN_TICKET = ("pending", "running")
-# Codex chooses its session's id, and herdr reports it only through its Codex integration: without it rl sees the
-# session through herdr alone, and does not guess its log
-NO_ID = ("herdr reports no Codex session id, so rl reads no log of it (no turn errors or retries, no log progress, "
-         "its model unverified); herdr's Codex integration reports it: ask the user to install it (`herdr "
-         "integration install codex`; it adds a hook to their Codex configuration) for the sessions started after")
+# Codex chooses its session's id; herdr reports it through its Codex integration (from the first turn of each
+# conversation on), and Codex's /status shows it. Without either rl sees the session through herdr alone, and does
+# not guess its log
+NO_ID = ("rl found no Codex session id (herdr reports none, and /status showed none), so rl reads no log of it (no "
+         "turn errors or retries, no log progress, its model unverified); herdr's Codex integration reports it: if "
+         "`herdr integration status` does not list codex as installed, ask the user to install it (`herdr "
+         "integration install codex`; it adds a hook to their Codex configuration)")
 IN_PROGRESS = ("queued", "running")
 NOT_USER = "(from the watcher, not from the user)"
 CONFIRM_S = 5.0  # how long the log of a Codex session that herdr already saw working is given to show a new turn
@@ -88,8 +90,9 @@ def target(s: dict) -> str | None:
 
 def probe(s: dict) -> dict:
     """How a session is now: herdr's status ("gone" when no agent answers; "blocked" also at a dialog herdr does
-    not see, named in "dialog"), state_change_seq and the host's session id (the one herdr reports, else the
-    recorded one), and what its log says. Raises RLError when herdr fails."""
+    not see, named in "dialog"), state_change_seq and the host's session id (the one herdr reports, unless it is
+    the stale one of a conversation reset left; else the recorded one), and what its log says. Raises RLError
+    when herdr fails."""
     info = herdr.agent(target(s))
     memo = s.get("watch") or {}
     if info is None:
@@ -97,6 +100,7 @@ def probe(s: dict) -> dict:
                 "log": memo.get("log"), "view": None, "dialog": None}
     given = info.get("agent_session")
     reported = str(given["value"]) if isinstance(given, dict) and given.get("value") else None
+    reported = None if reported == memo.get("stale") else reported  # an old conversation's, after a reset
     sid = reported or s.get("host_session_id")
     log = agentlog.follow(s.get("host") or "", sid, memo.get("log"))
     status, dialog = info.get("agent_status") or "unknown", None
@@ -366,6 +370,8 @@ class _Beat:
         conversation and its log no longer applies), the log's place, the end of a streak of errors, and a prompt
         whose delivery was not confirmed but which the session has since reacted to."""
         memo, fields, changes, event = s.get("watch") or {}, {}, {}, None
+        if p["reported"] and memo.get("stale"):
+            changes["stale"] = None  # herdr reports the new conversation now
         if p["reported"] and p["reported"] != s.get("host_session_id"):
             fields["host_session_id"] = p["reported"]
             changes.update(retries=None, unconfirmed=None, idle=None)
@@ -746,8 +752,8 @@ def deliver(s: dict, p: dict, text: str) -> tuple[str, str | None]:
             return "delivered", None
     if outcome == "refused":
         return outcome, why
-    if codex and _started(s, p, sent, 0):
-        return "delivered", None
+    if s.get("host") == "codex" and (p.get("log") or {}).get("id") and _started(s, p, sent, 0):
+        return "delivered", None  # its log, found now if the prompt began its first turn
     screen = herdr.read(where)
     panel = "possibly held by a panel, " if "hooks" in screen.lower() else ""
     return "unconfirmed", f"delivery not confirmed ({why}); {panel}its screen ends: {excerpt(screen, SCREEN_CHARS)}"

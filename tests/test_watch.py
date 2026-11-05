@@ -507,11 +507,25 @@ def test_a_turn_too_short_for_herdr_counts_when_the_log_shows_it_started(project
     assert len(reminders(herdr_log, "researcher-1")) == 1  # not typed again: it arrived
 
 
+def test_a_first_turn_counts_as_delivered_when_its_new_log_shows_it(project, herdr_log, monkeypatch):
+    tasks.start_session(project, "coordinator", "claude")
+    monkeypatch.setenv("FAKE_HERDR_NO_CODEX_ID", "1")  # the id comes from /status
+    agents.open_session(project, "researcher", "researcher-1", entry_text="codex:m", worktree=False)
+    with project.read() as tx:
+        sid = next(s for s in tx.all("Session") if s["role_id"] == "researcher-1")["host_session_id"]
+    path = Path(os.environ["CODEX_HOME"]) / "sessions" / "2026" / "11" / "05" / f"rollout-2026-11-05T17-17-53-{sid}.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)  # Codex writes it when the first turn starts
+    fake(herdr_log, lambda st: (st["quick"].append("researcher-1"), st["logs"].update({"researcher-1": str(path)})))
+    task = tasks.create_task(project, "task 1", "implement", [], to_role="researcher")["id"]
+    out = agents.assign(project, "researcher-1", task=task)  # herdr sees no working state: the log shows the turn
+    assert out["summary"].endswith("; told to read its brief") and path.is_file()
+
+
 def test_slash_commands_are_sent_as_before_and_a_dialog_after_a_prompt_counts_as_taken(project, herdr_log):
     tasks.start_session(project, "coordinator", "claude")
     researcher(project, 1)
     agents.reset(project, "researcher-1", "clear")
-    assert calls(herdr_log)[-1] == ["agent", "prompt", "researcher-1", "/clear"]
+    assert [c for c in calls(herdr_log) if c[:2] == ["agent", "prompt"]][-1] == ["agent", "prompt", "researcher-1", "/clear"]
     agents.reset(project, "researcher-1", "compact")
     assert calls(herdr_log)[-1] == ["agent", "prompt", "researcher-1", "/compact", "--wait", "--timeout", "600000"]
 

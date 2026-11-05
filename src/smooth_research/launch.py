@@ -40,6 +40,41 @@ NEW_CONVERSATION = {"codex": ("Where should the new conversation run?", "Use cur
 UNSEEN = {"codex": ("Hooks need review", NEW_CONVERSATION["codex"][0])}
 
 
+# The command that shows a host's session id on its screen without calling its model, and the line that holds it:
+# for a Codex session herdr reports no id for (without herdr's Codex integration, or before the first turn of a
+# conversation, when the integration's hook reports it)
+STATUS = {"codex": ("/status", re.compile(r"^\s*Session:\s+([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})\s*$", re.MULTILINE))}
+# Lines of Codex's /status that name the signed-in user: not quoted from a screen into notes and records
+PRIVATE = re.compile(r"^(\s*(?:Account|ChatGPT workspace):).*$", re.MULTILINE)
+
+
+def status_id(name: str, host: str, wait: float = 10.0, every: float = 2.0) -> str | None:
+    """The session id the host's status command shows (Codex: /status), typed into an agent that is ready and at no
+    dialog; None for a host without one, or when it showed none within wait seconds. A Codex that herdr already
+    sees ready may not have set up its session yet: its status then shows no id, and is asked again every few
+    seconds."""
+    command, pattern = STATUS.get(host, (None, None))
+    if not command:
+        return None
+    deadline = time.monotonic() + wait
+    while time.monotonic() < deadline:
+        before = len(pattern.findall(herdr.read(name)))  # an earlier status on the screen does not count
+        if herdr.prompt(name, command):
+            return None
+        again = min(deadline, time.monotonic() + every)
+        while time.monotonic() < again:
+            found = pattern.findall(herdr.read(name))
+            if len(found) > before:
+                return found[-1]
+            time.sleep(0.25)
+    return None
+
+
+def redact(screen: str) -> str:
+    """A screen without the lines that name the signed-in user."""
+    return PRIVATE.sub(r"\1 (not quoted)", screen)
+
+
 def unseen(host: str | None, screen: str) -> str | None:
     """The dialog on the screen that herdr does not recognize as one, if any."""
     return next((d for d in UNSEEN.get(host or "", ()) if d in screen), None)
@@ -108,8 +143,11 @@ def start_agent(store: Store, s: dict, timeout: int = 90, tab: str | None = None
         screen = _until_started(name, entry.entry, timeout)
         if unseen(entry.entry, screen):
             waiting = f"{name} waits at a dialog herdr does not see ({excerpt(screen)}): {decide(name)}"
-    # the id herdr reports (Codex chooses its own): the watcher reads the session's log by it, and keeps it current
+    # the id herdr reports (Codex chooses its own), else the one its /status shows: the watcher reads the session's
+    # log by it, and keeps it current
     host_session = herdr.session_id(name) or host_session
+    if not host_session and not waiting:
+        host_session = status_id(name, entry.entry)
     return {"tab": tab, "pane": pane, "host_session": host_session, "waiting": waiting, "trusted": trusted}
 
 
@@ -229,6 +267,6 @@ def _moved(target: str, before: str, wait: float = 2.0) -> str:
 
 
 def excerpt(screen: str, chars: int = 600) -> str:
-    """The bottom of a screen, where a dialog sits, as one line."""
-    shown = " / ".join(" ".join(x.split()) for x in screen.splitlines() if x.strip())
+    """The bottom of a screen, where a dialog sits, as one line (without the lines that name the signed-in user)."""
+    shown = " / ".join(" ".join(x.split()) for x in redact(screen).splitlines() if x.strip())
     return ("…" + shown[-chars:]) if len(shown) > chars else shown or "an empty screen"
