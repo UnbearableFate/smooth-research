@@ -31,11 +31,11 @@ from .agents import assign
 from .context import advice_pack, contract_summary
 from .herdr import caller_role
 from .project import advice_limit, usable_entries
-from .research import brief, review_mark, review_passes
+from .research import brief, prepare_contracts, review_mark, review_passes, seal_referenced
 from .runs import code_review_summary, evidence_attempts
 from .schema import ENUMS
 from .scope import changed_since_request, fingerprint
-from .store import Store, Tx
+from .store import Store, Tx, _sort_key
 from .util import RLError, digest_json, now_utc, short
 from .view import _arm_table
 
@@ -470,9 +470,10 @@ def show(store: Store, ticket_id: str | None, kind: str) -> dict:
 # -- reviews --------------------------------------------------------------------------------------------------
 
 
-def _reuse(tx: Tx, key: str, target_text: str | None, targets: list[str], author_models: list[str],
+def _reuse(tx: Tx, key: str, target_text: str | None, targets: dict[str, dict], author_models: list[str],
            subject: str, extra: dict | None = None) -> dict | None:
-    """An answered review (pass or issues) with the same key answers this request too."""
+    """An answered review (pass or issues) with the same key answers this request too. targets: each target with the
+    properties of its targets edge (the revision the review is of)."""
     for old in tx.all("Ticket", dedupe_key=key):
         if old["kind"] == "review" and review_passes(old):
             rid = tx.next_id("Ticket", "RV")
@@ -483,8 +484,8 @@ def _reuse(tx: Tx, key: str, target_text: str | None, targets: list[str], author
                                  "id": rid, "kind": "review", "subject": subject, "status": "answered",
                                  "target_id": target_text, "dedupe_key": key, "author_models": list(author_models),
                                  "reused_from": old.get("reused_from") or old["id"], **(extra or {})})
-            for t in targets:
-                tx.link("targets", rid, t)
+            for t, props in targets.items():
+                tx.link("targets", rid, t, **props)
             tx.event("review.reused", rid, f"{subject} key {short(key)} unchanged since {old['id']}")
             return {"id": rid, "reused_from": old["id"], "verdict": old.get("verdict"),
                     "summary": f"{rid} reuses {old['id']} ({review_mark(old)}): {subject} unchanged"}
@@ -501,13 +502,15 @@ def request_review(store: Store, target: str | None, files: list[str], question:
                                  "review)")
     fp, detail = fingerprint(store, files, list(configs), list(deps), list(ignore_keys), scope or question)
     eligible = _entries(store, "review")
+    contracts = prepare_contracts(store, [target] if target else [])  # a targeted experiment's contract is sealed
     with store.write() as tx:
         if target:
             tx.require(target)
-        reused = None if recheck_of else _reuse(tx, fp, target, [target] if target else [], author_models, "code",
-                                                {"code_scope": detail})
+        bound, sealed = seal_referenced(tx, contracts, store.project)
+        targets = {target: bound.get(target, {})} if target else {}
+        reused = None if recheck_of else _reuse(tx, fp, target, targets, author_models, "code", {"code_scope": detail})
         if reused:
-            return reused
+            return {**reused, "summary": reused["summary"] + "".join(f"; {note}" for note in sealed)}
         rid = tx.next_id("Ticket", "RV")
         rounds = _round(tx, recheck_of, new_round)
         contract = ""
@@ -527,7 +530,7 @@ def request_review(store: Store, target: str | None, files: list[str], question:
                              "requested_by": caller_role(),
                              "error": None if eligible else "no reviewer configured (models.reviewer is empty)"})
         if target:
-            tx.link("targets", rid, target)
+            tx.link("targets", rid, target, **targets[target])
         tx.event("review.requested", rid, f"{target or '-'} fingerprint {short(fp)}")
     note = (f"candidates {', '.join(str(e) for e in eligible)}; run it: rl review run {rid} [--background], or "
             "in herdr by a reviewer session. The reviewer reads the files where they are: leave them unchanged "
@@ -535,7 +538,7 @@ def request_review(store: Store, target: str | None, files: list[str], question:
             if eligible else "no reviewer configured: recorded unavailable (not a pass)")
     route = _route(store, rid, recheck_of, caller_role()) if eligible else ""
     return {"id": rid, "request_ref": ref, "fingerprint": fp,
-            "summary": f"{rid} {_round_note(store, rid)}{note}{route}"}
+            "summary": f"{rid} {_round_note(store, rid)}{note}{route}" + "".join(f"; {n}" for n in sealed)}
 
 
 def _round_note(store: Store, rid: str) -> str:
@@ -602,11 +605,16 @@ def request_conclusion_review(store: Store, targets: list[str], proposal: str, a
     with store.read() as tx:
         prior = brief(tx.require(recheck_of, "Ticket")) if recheck_of else ""
         body = _conclusion_body(tx, store, targets, proposal, question, prior)
+        # what the package shows of each hypothesis: the review counts for that revision only (research.review_gap),
+        # and evidence linked later is pointed out (research.review_hints)
+        bound = {h: {"revision": tx.require(h, "Hypothesis")["revision"],
+                     "evidence": sorted({e["id"] for e in tx.inc(h) if e["rel"] in ("supports", "challenges")},
+                                        key=_sort_key)} for h in targets}
     key = digest_json({"subject": "conclusion", "body": body})
     target_text = ", ".join(targets)
     error = None if eligible else "no reviewer configured (models.reviewer is empty)"
     with store.write() as tx:
-        reused = None if recheck_of else _reuse(tx, key, target_text, targets, author_models, "conclusion")
+        reused = None if recheck_of else _reuse(tx, key, target_text, bound, author_models, "conclusion")
         if reused:
             return reused
         rid = tx.next_id("Ticket", "RV")
@@ -619,8 +627,8 @@ def request_conclusion_review(store: Store, targets: list[str], proposal: str, a
                              "question": question, "dedupe_key": key, "candidates": [str(e) for e in eligible],
                              "author_models": list(author_models), "recheck_of": recheck_of, "error": error,
                              "request_ref": ref, "round_of": rid, **rounds, "requested_by": caller_role()})
-        for t in targets:
-            tx.link("targets", rid, t)
+        for t, props in bound.items():
+            tx.link("targets", rid, t, **props)
         tx.event("review.requested", rid, f"conclusion on {target_text} key {short(key)}")
     note = (f"candidates {', '.join(str(e) for e in eligible)}; run it: rl review run {rid} [--background] (or "
             f"assign it to a reviewer session in herdr), then cite it: rl decide ... --based-on {rid}"

@@ -8,7 +8,8 @@ import stat
 import pytest
 import yaml
 
-from smooth_research import adapters, delegate, documents, literature, messages, research, reviews, runs, scope, tasks
+from smooth_research import (adapters, delegate, documents, literature, messages, research, reviews, runs, scope,
+                            tasks, view)
 from smooth_research.util import RLError
 
 FAKE_CODEX = r"""#!{python}
@@ -667,6 +668,49 @@ def test_a_request_whose_package_cannot_be_sealed_leaves_no_ticket(project, fake
     monkeypatch.setattr(documents, "prepare", sealed)
     assert reviews.prepare_advice(project, "which route?")["round"] == 1  # the failed round neither counts nor blocks
     assert request(project)["id"] == "RV-0001"
+
+
+def test_a_code_review_of_an_experiment_seals_its_contract(project, fakes, tmp_path):
+    code(tmp_path)
+    rv = request(project)
+    with project.read() as tx:
+        exp, edge = tx.require("E-0001"), tx.out(rv["id"], "targets")[0]
+        package = documents.read(project.project, documents.resolve(tx, rv["request_ref"]))
+    assert (exp["revision"], edge["revision"], edge["contract_ref"]) == (1, 1, exp["contract_ref"])
+    assert rv["summary"].endswith(f"; contract E-0001@1 ({exp['contract_ref']}) sealed now")
+    assert f"(contract {exp['contract_ref']}: research/experiments/E-0001.md)" in package
+
+
+def test_a_conclusion_review_counts_for_the_revision_it_reviewed_and_points_out_later_evidence(project, fakes):
+    ev = evidence(project)
+    rv = reviews.request_conclusion_review(project, ["H-0001"], "H-0001 is supported", ["claude-opus-5-5"])["id"]
+    reviews.run_ticket(project, rv)
+    first = research.decide(project, ["H-0001"], "continue", "x", [ev, rv], set_evidence_status="supported")
+    assert first["conclusion_review_gap"] is None and first["review_hints"] == []
+    later = research.add_evidence(project, "a third seed agrees", "screening", "valid", supports=["H-0001"],
+                                  experiment="E-0001")["id"]
+    second = research.decide(project, ["H-0001"], "continue", "y", [ev, later, rv], set_evidence_status="supported")
+    hint = f"{later} was linked to H-0001 after {rv} reviewed it: check that it does not change the conclusion"
+    assert second["conclusion_review_gap"] is None and second["review_hints"] == [hint]
+    assert f"\nnote: {hint}" in second["summary"]
+    with project.read() as tx:
+        assert f"{second['id']} key conclusion: {later} was linked to H1 after {rv} reviewed it" in \
+            "\n".join(research.attention(tx))
+    research.revise_hypothesis(project, "H-0001", "sharper", statement="weight decay raises test accuracy under "
+                                                                        "20% and 40% noise")
+    third = research.decide(project, ["H-0001"], "continue", "z", [ev, later, rv], set_evidence_status="supported")
+    assert third["conclusion_review_gap"] == (
+        f"{rv} was of H-0001@1, the conclusion is on @2: have the conclusion reviewed at this revision, or state in "
+        "the decision's rationale why the revision does not change it")
+    with project.read() as tx:
+        items = research.attention(tx)
+        checks = view.conclusion_checks(tx, [tx.require(d["id"]) for d in (first, third)])
+    assert [i for i in items if "key conclusion" in i] == [
+        f"{third['id']} key conclusion on H1: {rv} was of H1@1, the conclusion is on @2: have the conclusion reviewed "
+        "at this revision, or state in the decision's rationale why the revision does not change it — rl review "
+        f"conclusion --target H1 --proposal .. --author-model .., then rl link {third['id']} based_on RV-x"]
+    assert checks[first["id"]].startswith(f"conclusion review {rv} pass")  # it was of the revision decided on
+    assert checks[third["id"]].startswith(f"{rv} was of H-0001@1")
 
 
 def test_a_conclusion_review_covers_only_the_hypotheses_it_reviewed(project, fakes):

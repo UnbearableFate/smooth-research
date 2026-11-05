@@ -10,7 +10,7 @@ import yaml
 from . import documents, labels
 from .project import CONFIG_NAME, DOCS_DIRS, RESEARCH_DIRS, Project, load_config, write_default_config
 from .schema import ENUMS, LINKABLE, RELATIONS
-from .store import Store, Tx, label_of
+from .store import Store, Tx, _sort_key, label_of
 from .upgrade import build, environment
 from .util import RLError, digest_file
 
@@ -263,6 +263,45 @@ def seal_contract(tx: Tx, eid: str, prep: documents.Prepared, project: Project) 
     return f"{eid}@{changes['revision']}"
 
 
+def contract_gaps(front: dict) -> list[str]:
+    """The contract fields still to fill in: absent, empty or TODO."""
+    return [k for k in CONTRACT_FIELDS if front.get(k) in (None, [], {})
+            or (isinstance(front.get(k), str) and front[k].strip() in ("", "TODO"))]
+
+
+def prepare_contracts(store: Store, refs: list[str]) -> dict[str, documents.Prepared]:
+    """The contracts of the experiments among refs, read and checked before the write lock (seal_referenced): a task
+    or a code review that names an experiment seals its contract, and only a complete one."""
+    eids = [r for r in dict.fromkeys(refs) if label_of(r) == "Experiment"]
+    if not eids:
+        return {}
+    with store.read() as tx:
+        exps = [tx.require(eid, "Experiment") for eid in eids]
+    for exp in exps:  # all checked before any is sealed: a refused command leaves no sealed object behind
+        path = store.project.abs(exp["contract_path"])
+        missing = contract_gaps(_front_matter(path)) if path.is_file() else []  # a missing one: prepare says so
+        if missing:
+            raise RLError("INVALID", f"the contract of {labels.name(exp)} ({exp['contract_path']}) is not complete: "
+                                     f"fill in {', '.join(missing)}. A task or a code review that names an experiment "
+                                     "seals its contract, and the work follows that revision")
+    return {exp["id"]: documents.prepare(store.project, store.project.abs(exp["contract_path"]), "experiment_contract")
+            for exp in exps}
+
+
+def seal_referenced(tx: Tx, preps: dict[str, documents.Prepared], project: Project) -> tuple[dict[str, dict], list[str]]:
+    """Seal the contracts prepare_contracts read: for each experiment, the properties of the targets edge that bind
+    the task or review to the revision (and the sealed document), and a note."""
+    bound, notes = {}, []
+    for eid, prep in preps.items():
+        before = tx.require(eid, "Experiment")["revision"]
+        seal_contract(tx, eid, prep, project)
+        exp = tx.require(eid)
+        bound[eid] = {"revision": exp["revision"], "contract_ref": exp["contract_ref"]}
+        notes.append(f"contract {eid}@{exp['revision']} ({exp['contract_ref']})"
+                     + (" sealed now" if exp["revision"] != before else ""))
+    return bound, notes
+
+
 def seal_experiment(store: Store, eid: str) -> dict:
     prep = prepare_contract(store, eid)
     with store.write() as tx:
@@ -364,11 +403,12 @@ def _is_key(kind: str, action: str, evidence_status: str | None) -> bool:
     return evidence_status in KEY_STATUSES or action == "stop" or (kind == "stage" and action == "recommend_formal")
 
 
-def key_hypotheses(tx: Tx, d: dict) -> list[str]:
-    """The hypotheses on which decision d states a key conclusion; empty when it states none."""
+def key_hypotheses(tx: Tx, d: dict) -> dict[str, int | None]:
+    """The hypotheses on which decision d states a key conclusion, each with the revision it decided on; empty when
+    it states none."""
     if not _is_key(d["kind"], d["action"], d.get("evidence_status_set")):
-        return []
-    return [e["id"] for e in tx.out(d["id"], "decides") if e["label"] == "Hypothesis"]
+        return {}
+    return {e["id"]: e.get("revision") for e in tx.out(d["id"], "decides") if e["label"] == "Hypothesis"}
 
 
 def conclusion_reviews(tx: Tx, refs: list[str]) -> list[dict]:
@@ -396,21 +436,63 @@ def review_mark(t: dict) -> str:
     return out + (", approved by the coordinator" if t.get("approved") else "")
 
 
-def review_gap(tx: Tx, reviews: list[dict], hyps: list[str]) -> str | None:
-    """Why a key conclusion on hyps has no passing independent check, or None when each of them has one: a cited
-    conclusion review of that hypothesis that passes."""
-    passing = [t for t in reviews if review_passes(t)]
-    covered = {e["id"] for t in passing for e in tx.out(t["id"], "targets")}
-    missing = [h for h in hyps if h not in covered]
+def _reviewed(tx: Tx, reviews: list[dict]) -> dict[str, list[tuple[dict, dict]]]:
+    """For each hypothesis, the passing reviews among reviews that were of it, in id order, each with its targets
+    edge: the revision it was of, and the evidence it saw (recorded since conclusion reviews are bound to them)."""
+    out: dict[str, list[tuple[dict, dict]]] = {}
+    for t in sorted((t for t in reviews if review_passes(t)), key=lambda t: _sort_key(t["id"])):
+        for e in tx.out(t["id"], "targets"):
+            out.setdefault(e["id"], []).append((t, e))
+    return out
+
+
+def _of(edge: dict, revision: int | None) -> bool:
+    """Whether a review edge was of this revision. One whose revision is unknown (an older review the upgrade could not
+    place) counts for any, as it did before."""
+    return revision is None or edge.get("revision") in (None, revision)
+
+
+def review_gap(tx: Tx, reviews: list[dict], hyps: dict[str, int | None]) -> str | None:
+    """Why a key conclusion on hyps (each at the revision it is about) has no passing independent check, or None when
+    each of them has one: a cited conclusion review of that hypothesis at that revision that passes."""
+    reviewed = _reviewed(tx, reviews)
+    missing = [h for h, rev in hyps.items() if not any(_of(e, rev) for _, e in reviewed.get(h, []))]
     if not missing:
         return None
-    if passing:
-        return (f"no passing conclusion review covers {', '.join(missing)} ({', '.join(t['id'] for t in passing)} "
-                f"reviewed {', '.join(sorted(covered)) or 'no hypothesis'})")
-    if reviews:
-        last = reviews[-1]
-        return f"conclusion review {last['id']} is {review_mark(last)}, not a pass"
-    return "no conclusion review"
+    parts = []
+    unreviewed = [h for h in missing if h not in reviewed]
+    passing = [t for t in reviews if review_passes(t)]
+    if unreviewed and passing:
+        parts.append(f"no passing conclusion review covers {', '.join(unreviewed)} "
+                     f"({', '.join(t['id'] for t in passing)} reviewed {', '.join(sorted(reviewed)) or 'no hypothesis'})")
+    elif unreviewed and reviews:
+        parts.append(f"conclusion review {reviews[-1]['id']} is {review_mark(reviews[-1])}, not a pass")
+    elif unreviewed:
+        parts.append("no conclusion review")
+    older = [f"{t['id']} was of {h}@{e.get('revision')}, the conclusion is on @{hyps[h]}"
+             for h in missing for t, e in reviewed.get(h, [])]
+    if older:
+        parts.append(f"{'; '.join(older)}: have the conclusion reviewed at this revision, or state in the "
+                     "decision's rationale why the revision does not change it")
+    return "; ".join(parts)
+
+
+def review_hints(tx: Tx, reviews: list[dict], hyps: dict[str, int | None]) -> list[str]:
+    """Evidence linked to a hypothesis after the latest passing review of its revision saw it: worth a look before
+    relying on the conclusion, not a gap. Older reviews did not record what they saw, and give none."""
+    out = []
+    reviewed = _reviewed(tx, reviews)
+    for h, rev in hyps.items():
+        last = [(t, e) for t, e in reviewed.get(h, []) if _of(e, rev)][-1:]
+        if not last or last[0][1].get("evidence") is None:
+            continue
+        t, e = last[0]
+        new = sorted({x["id"] for x in tx.inc(h) if x["rel"] in ("supports", "challenges")} - set(e["evidence"]),
+                     key=_sort_key)
+        if new:
+            out.append(f"{', '.join(new)} {'was' if len(new) == 1 else 'were'} linked to {h} after {t['id']} reviewed "
+                       f"it: check that {'it does' if len(new) == 1 else 'they do'} not change the conclusion")
+    return out
 
 
 def _review_hint(hyps: list[str], did: str) -> str:
@@ -461,12 +543,15 @@ def decide(store: Store, targets: list[str], action: str, rationale: str, based_
         for ref in based_on:
             tx.link("based_on", did, ref)
         key = _is_key(kind, action, set_evidence_status)
-        hyps = [r["id"] for r in records if r["_label"] == "Hypothesis"] if key else []
-        gap = review_gap(tx, conclusion_reviews(tx, list(based_on)), hyps) if hyps else None
+        hyps = {r["id"]: r["revision"] for r in records if r["_label"] == "Hypothesis"} if key else {}
+        reviews = conclusion_reviews(tx, list(based_on))
+        gap = review_gap(tx, reviews, hyps) if hyps else None
+        hints = review_hints(tx, reviews, hyps) if hyps else []
         tx.event("decision", did, f"{action} {', '.join(targets)}: {rationale}")
     note = (f"\nkey conclusion on {', '.join(hyps)}: {gap}; before relying on it: {_review_hint(hyps, did)}"
-            if gap else "")
-    return {"id": did, "conclusion_review_gap": gap, "summary": f"{did} {kind}:{action} on {', '.join(targets)}{note}"}
+            if gap else "") + "".join(f"\nnote: {hint}" for hint in hints)
+    return {"id": did, "conclusion_review_gap": gap, "review_hints": hints,
+            "summary": f"{did} {kind}:{action} on {', '.join(targets)}{note}"}
 
 
 def link(store: Store, source: str, rel: str, target: str, note: str | None = None, locator: str | None = None,
@@ -580,15 +665,17 @@ def attention(tx: Tx) -> list[str]:
             items.append(f"{t['id']} review round {t.get('round_of') or t['id']} used its two reviews with "
                          f"{t.get('open_severity')} findings open: the coordinator approves it (rl review approve "
                          f"{t['id']} --rationale ..) or returns the work")
-    standing: dict[str, dict] = {}  # hypothesis -> the latest decision stating a key conclusion on it
-    for d in tx.all("Decision"):
-        for hid in key_hypotheses(tx, d):
-            standing[hid] = d
-    for did in sorted({d["id"] for d in standing.values()}):
-        hyps = sorted(h for h, d in standing.items() if d["id"] == did)
-        gap = review_gap(tx, conclusion_reviews(tx, [e["id"] for e in tx.out(did, "based_on")]), hyps)
+    standing: dict[str, tuple[dict, int | None]] = {}  # hypothesis -> the latest decision stating a key conclusion
+    for d in tx.all("Decision"):                      # on it, and the revision it decided on
+        for hid, rev in key_hypotheses(tx, d).items():
+            standing[hid] = (d, rev)
+    for did in sorted({d["id"] for d, _ in standing.values()}):
+        hyps = {h: rev for h, (d, rev) in sorted(standing.items()) if d["id"] == did}
+        reviews = conclusion_reviews(tx, [e["id"] for e in tx.out(did, "based_on")])
+        gap = review_gap(tx, reviews, hyps)
         if gap:
-            items.append(f"{did} key conclusion on {', '.join(hyps)}: {gap} — {_review_hint(hyps, did)}")
+            items.append(f"{did} key conclusion on {', '.join(hyps)}: {gap} — {_review_hint(list(hyps), did)}")
+        items += [f"{did} key conclusion: {hint}" for hint in review_hints(tx, reviews, hyps)]
     known = labels.names(tx)
     return [labels.relabel(item, known) for item in items]
 

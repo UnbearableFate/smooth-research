@@ -264,11 +264,20 @@ several `--attempts`; never split it into invented per-run numbers. Different un
   `{{rl}} review conclusion --target H-x --proposal .. --author-model ..` first, then `{{rl}} decide ...
   --based-on EV-x,RV-x` (skill research-review). A review covers the hypotheses it targets: a decision on H-x
   and H-y needs a passing review of each.
+- A conclusion review counts for the revision of each hypothesis it reviewed. After `{{rl}} hypothesis revise`,
+  have the conclusion reviewed again, or state in the decision's rationale why the revision does not change it.
+  Evidence linked to the hypothesis after the review is pointed out (decide, `{{rl}} status`); it is not a gap.
 
 ## Tasks, messages, sessions
 
 - `{{rl}} task create --title .. --kind framework|implement|experiment|analysis|literature|review|advice|other
   --targets E-x --request research/tasks/T-brief.md --to-role researcher --next-action ..`
+- Contract binding:
+  - The task seals the contract of each experiment it targets, and is bound to that revision. It refuses a contract
+    with fields still empty or TODO, and lists them. A task on a hypothesis seals nothing under it.
+  - `{{rl}} review request --target E-x` seals the contract the same way.
+  - When the contract is revised later, the task goes on. Its work pack (`{{rl}} agent brief`,
+    `{{rl}} context --purpose work`) shows both revisions and what changed. Runs registered earlier keep their revision.
 - Owner: `{{rl}} task claim T-x --role researcher` (one claimant wins); then `{{rl}} task deliver T-x
   --role researcher --summary .. --output <files>`, `task wait .. --attempts ATT-x --next-action ..`,
   `task block .. --reason engineering|model_unavailable|budget|science`, `task resume` (also to continue a

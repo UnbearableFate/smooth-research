@@ -6,6 +6,8 @@ rest is listed as an index to read on demand. Nothing here queries external syst
 
 from __future__ import annotations
 
+import difflib
+
 from . import compute, documents, explain, labels
 from .project import Project, context_target
 from .research import CONTRACT_FIELDS, attention, brief, contract_front
@@ -30,6 +32,35 @@ def contract_summary(tx: Tx, store: Store, exp: dict) -> str:
     front = contract_front(tx, store, exp)
     fields = "\n".join(f"  {k}: {front.get(k)}" for k in CONTRACT_FIELDS if front.get(k) not in (None, "TODO"))
     return f"{brief(exp)} (contract {exp.get('contract_ref') or 'draft'}: {exp.get('contract_path')})\n{fields}"
+
+
+DIFF_LINES = 80  # lines of a contract diff in a work pack; rl show prints both revisions in full
+
+
+def _bound_contract(tx: Tx, store: Store, exp: dict, edge: dict) -> str:
+    """The contract revision a task is bound to (task create sealed it) and, when the contract was revised since,
+    both revisions and what changed. The task goes on; runs already registered keep the revision they were
+    registered under."""
+    ref, rev = edge.get("contract_ref"), edge.get("revision")
+    if not ref:  # a task created before tasks were bound to contract revisions
+        return ""
+    eid = exp["id"]
+    if ref == exp.get("contract_ref"):
+        return f"\nThis task is bound to contract {eid}@{rev} ({ref}), the current revision."
+    try:
+        old, new = (documents.read(store.project, documents.resolve(tx, r)).splitlines()
+                    for r in (ref, exp["contract_ref"]))
+        diff = list(difflib.unified_diff(old, new, f"{eid}@{rev} ({ref})",
+                                         f"{eid}@{exp['revision']} ({exp['contract_ref']})", lineterm=""))
+    except RLError as exc:
+        diff = [f"(no diff: {exc.message})"]
+    if len(diff) > DIFF_LINES:
+        diff = diff[:DIFF_LINES] + [f"… {len(diff) - DIFF_LINES} more lines: rl show {ref}, rl show "
+                                    f"{exp['contract_ref']}"]
+    return (f"\nThis task was created on contract {eid}@{rev} ({ref}); the contract has been revised since, to "
+            f"{eid}@{exp['revision']} ({exp['contract_ref']}; draft {exp.get('contract_path')}). New runs are "
+            "registered under the latest revision, runs registered before keep theirs. What changed:\n"
+            + "\n".join(diff))
 
 
 def _evidence_for(tx: Tx, hid: str, current_rev: int) -> list[str]:
@@ -105,14 +136,16 @@ def work_pack(store: Store, task_id: str, budget: int | None = None) -> dict:
             sections.append((f"Request {task['request_ref']}", _doc_text(tx, store, task["request_ref"])))
         if task.get("handoff_ref"):
             sections.append((f"Handoff {task['handoff_ref']}", _doc_text(tx, store, task["handoff_ref"])))
-        targets = [tx.require(e["id"]) for e in tx.out(task_id, "targets")]
+        edges = {e["id"]: e for e in tx.out(task_id, "targets")}
+        targets = [tx.require(tid) for tid in edges]
         hyps = {t["id"]: t for t in targets if t["_label"] == "Hypothesis"}
         exps = [t for t in targets if t["_label"] == "Experiment"]
         for exp in exps:
             for e in tx.out(exp["id"], "tests"):
                 hyps.setdefault(e["id"], tx.require(e["id"]))
         for exp in exps:
-            sections.append((f"Experiment {exp['id']}", contract_summary(tx, store, exp)))
+            sections.append((f"Experiment {exp['id']}", contract_summary(tx, store, exp)
+                             + _bound_contract(tx, store, exp, edges[exp["id"]])))
         for h in hyps.values():
             body = [brief(h), f"  statement: {h['statement']}"] + ([f"  scope: {h['scope']}"] if h.get("scope") else [])
             sections.append((f"Hypothesis {h['id']}", "\n".join(body + _evidence_for(tx, h["id"], h["revision"]))))

@@ -258,6 +258,13 @@ compute:
 - **一轮建议一起运行。** `rl advise run AD-x AD-y ...` 给每个工单开一个进程，同时运行。
 - **超出建议轮数：** `rl advise prepare --user-approved "<用户的原话>"`，见第 1 节。
 - **审查轮次：** `rl review request ... --recheck-of RV-x` 是同一轮的第二次审查；第三次报 LIMIT，要开新一轮写 `--new-round "<原因>"`。`rl review approve RV-x --rationale ..` 由协调者批准还有中等以上问题的一轮。
+- **契约随引用封存：**
+  - **封存。** `rl task create --targets E-x` 和 `rl review request --target E-x` 封存实验现在的契约草稿，并把修订和封存的文档记在关系上。草稿里还有空字段或 TODO 时，命令报错，列出要填的字段，什么也不封存。只指向假设的任务不封存它下面的实验。
+  - **之后的修订。** 契约之后有了新修订，任务照常进行。任务的工作包（`rl agent brief`、`rl context --purpose work`）列出任务绑定的修订、现在的修订、两者正文的差异（最多 80 行，`DIFF_LINES`）和草稿路径。已经登记的 run 仍绑定登记时的修订。
+- **结论审核绑定修订：**
+  - **记录。** `rl review conclusion` 记下每个假设在审核材料里的修订，以及它看到的证据。
+  - **判断缺口。** `rl decide` 和 attention 只认修订与决定所针对的修订一致的通过审核。不一致时，缺口写明审核针对的修订和现在的修订：重新审核，或者在决定的理由里说明为什么这次修订不改变结论。
+  - **之后的证据。** 审核之后才挂到假设上的证据只提示（decide 的输出和 attention），不算缺口。
 - **agent 会话：** `rl agent open [名字] --role researcher|reviewer|advisor [--task T-x | --ticket RV-x/AD-x] [--entry ..] [--no-worktree] [--base ..]`，以及 `assign`、`tell`、`reset --compact|--clear`、`close [--remove-worktree]`、`switch <名字> [--entry ..] [--now]`（换一个模型继续这个会话的工作，见第 1 节“订阅额度”；`--now` 连还在工作的会话也换）、`brief`、`list [--all]`、`dialog <名字>`（会话现在显示的对话框和选项）、`answer <名字> <选项编号或文字> --reason ..`（协调者回答对话框）。
 - **订阅额度：** `rl agent list` 显示各宿主的窗口；`rl usage statusline` 是 Claude Code 的状态栏命令，从标准输入读状态栏的 JSON，任何输入都不会让它失败。不带参数的 `rl usage` 报错并指向 `rl agent list`。
 - **层次编号：** 假设和实验除了内部编号（H-0013、E-0016）还有创建时定下、以后不变的层次编号。`rl hypothesis add` 默认挂在最晚创建的假设来源下（H2.1 在 H2 下），`--parent <来源之一>` 指定另一个，`--root` 开一个新的顶层编号（开启新研究线时用，来源关系照常记录）；只源自论文或顾问回答的是顶层。`rl experiment add` 挂在所检验假设的最深共同祖先下（EH2.1/3 是锚在 H2.1 的第三个实验），没有共同祖先时取 `--hypotheses` 的第一个，`--anchor` 指定另一个假设。凡是接受假设或实验编号的参数都接受两种写法，也可以写在逗号列表里或带 `@修订`；未知的层次编号报 NOT_FOUND。`rl status`、各类列表、报告和草稿的记录块只用层次编号，`rl show` 两种都显示，`--json` 有 `label` 字段；路径、作业名和提交信息用内部编号。
@@ -298,6 +305,7 @@ compute:
 | `SUBMIT_MS` | 20 秒 | 发送提示后等 herdr 看到 working 或 blocked 的上限（`herdr.py`） |
 | `CELL_CHARS` | 60 字符 | 实验表格里单元格的长度上限，超出的截断；完整内容见 `rl run show`（`view.py`） |
 | `MAX_METRICS` | 6 个 | 契约没有声明 `metrics:` 时，实验表格最多列几个指标（`view.py`） |
+| `DIFF_LINES` | 80 行 | 工作包里契约差异的行数上限，超出的部分用 `rl show` 看两个修订（`context.py`） |
 | `STALE_MINUTES` | 15 分钟 | 比这更旧的额度读数算过期，不让宿主算作额度低（`usage.py`） |
 
 ## 6. 插件升级
@@ -309,6 +317,7 @@ compute:
 - **旧项目。** 在 `pyproject.toml` 里没有 rl 依赖的项目（这个版本之前建的）照常在插件自己的环境上运行；`rl upgrade` 的 `environment:` 一行会说明。在项目根目录运行 `rl init` 就给它建项目环境（没有 `pyproject.toml` 时先 `uv init`），记录不变。
 - **记录自动升级。** 新版本的 CLI 第一次打开旧项目时，在写锁下先把数据库文件复制到 `research/state/backups/schema-<旧格式>-<时间>/`，再在一个事务里运行旧格式到当前格式之间的全部迁移，记一条 `project.upgrade` 事件。迁移只补充和填写，不删除记录，不改记录下来的事实，不碰封存的文档。做了升级的那条命令会给出一条警告。`rl restore` 也接受旧版本的快照，恢复后同样自动升级。
 - **层次编号的迁移（记录格式 3）。** 按内部编号顺序用新建记录的默认规则补上层次编号：假设只看比它先建的假设来源，实验只看建它时已有的被检验假设，没有共同祖先时取编号最小的那个。迁移不知道哪些假设开过新研究线（`--root`），所以旧项目的编号会偏深。这次升级还留在 `rl upgrade` 的历史里时，`rl upgrade` 打印对照表。
+- **结论审核的修订（记录格式 4）。** 迁移按事件日志补上旧结论审核所审的假设修订，也就是请求审核时的修订。旧审核看到了哪些证据没有记录，所以它们不给“之后的新证据”提示。旧任务没有绑定契约修订，工作包只列现在的修订。
 - **旧的图页面。** 以前的 `rl view` 写 `docs/research-graph.html`（mermaid 图，从 CDN 加载）。现在 `rl view` 写 `docs/research.html`，旧文件不删也不再更新，`rl upgrade` 会提示，不需要时手动删掉。
 - **更新的项目只读。** 项目由更新的插件写过（记录格式比 CLI 新）时，CLI 照常读取，但拒绝写入（UNSUPPORTED），提示更新插件。
 - **`rl upgrade`。** 插件 build 和项目记下的不同时，`rl status`、`rl resume` 和会话开始的提示都会提醒。`rl upgrade` 补建新布局要的目录，列出旧布局放在别处的文件、配置警告、找不到的合同文件和记录问题，并说明 agent 可以自己调整什么；运行后记下当前 build，提醒消失。

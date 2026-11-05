@@ -133,4 +133,6 @@ def test_the_brief_names_its_records_once_by_label_and_id(project):
     tasks.create_task(project, "seeds", "experiment", ["E-0001"], to_role="researcher")
     text = delegate.prompt_for(project, "T-0001", "researcher-1")
     assert "names them so: EH1/1 is E-0001; H1 is H-0001. Use the ids in paths, job names" in text
-    assert "## Experiment EH1/1\nEH1/1@0 [E1] WD smoke (contract draft: research/experiments/E-0001.md)" in text
+    with project.read() as tx:
+        ref = tx.require("E-0001")["contract_ref"]  # the task sealed it
+    assert f"## Experiment EH1/1\nEH1/1@1 [E1] WD smoke (contract {ref}: research/experiments/E-0001.md)" in text

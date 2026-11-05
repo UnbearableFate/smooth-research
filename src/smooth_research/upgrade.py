@@ -89,10 +89,43 @@ def _v3(tx: "Tx") -> list[str]:
     return out
 
 
+def _v4(tx: "Tx") -> list[str]:
+    """The revision each conclusion review was of, on its targets edges: a review now counts only for the revision
+    of the hypothesis it reviewed. It is the revision when the review was requested (or reused), read from the
+    event log, where every revision of a hypothesis wrote 'rev N: ..'. Which evidence a review saw was not recorded,
+    so older reviews point out no evidence linked after them."""
+    import re
+    revised: dict[str, list[tuple[int, int]]] = {}  # hypothesis -> (event seq, revision from then on)
+    asked: dict[str, int] = {}  # review ticket -> the event seq of its request
+    for ev in tx.all("Event"):
+        if ev["type"] == "hypothesis.revised" and (m := re.match(r"rev (\d+):", ev.get("summary") or "")):
+            revised.setdefault(ev["entity_id"], []).append((ev["seq"], int(m[1])))
+        elif ev["type"] in ("review.requested", "review.reused") and ev.get("entity_id"):
+            asked.setdefault(ev["entity_id"], ev["seq"])
+    bound, unknown = 0, []
+    for t in tx.all("Ticket", kind="review"):
+        if t.get("subject") != "conclusion":
+            continue
+        for e in tx.out(t["id"], "targets"):
+            if e["label"] != "Hypothesis" or e.get("revision") is not None:
+                continue
+            if t["id"] not in asked:
+                unknown.append(t["id"])
+                continue
+            rev = max((r for seq, r in revised.get(e["id"], []) if seq < asked[t["id"]]), default=1)
+            tx.link("targets", t["id"], e["id"], revision=rev)
+            bound += 1
+    out = [f"{bound} hypothesis target(s) of conclusion reviews bound to the revision reviewed"] if bound else []
+    out += [f"{', '.join(sorted(set(unknown)))}: no request in the event log, so the revision reviewed is unknown "
+            "and the review counts for any"] if unknown else []
+    return out
+
+
 MIGRATIONS = [
     Migration(2, "fill in fields that records written before them lack (attempt code review check, advice round)",
               _v2),
     Migration(3, "labels for hypotheses and experiments (H2.1, EH2.1/3)", _v3),
+    Migration(4, "conclusion reviews bound to the revision of each hypothesis they reviewed", _v4),
 ]
 
 

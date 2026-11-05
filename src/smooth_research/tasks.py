@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 
 from . import documents, messages
+from .research import prepare_contracts, seal_referenced
 from .store import Store, Tx
 from .util import RLError, now_utc
 from .worktrees import branch_status
@@ -59,14 +60,19 @@ def end_session(store: Store, sid: str) -> dict:
 def create_task(store: Store, title: str, kind: str, targets: list[str] = (), request: str | None = None,
                 to_role: str | None = None, next_action: str | None = None, depends_on: list[str] = (),
                 from_role: str = COORDINATOR) -> dict:
+    """A new task. The contract of each experiment it targets is sealed now (a complete one), and the task is bound
+    to that revision: its work pack shows what changed when the contract is revised later. A task on a hypothesis
+    seals nothing below it."""
     prep = documents.prepare(store.project, request, "task_request") if request else None
+    contracts = prepare_contracts(store, list(targets))
     with store.write() as tx:
         tid = tx.next_id("Task")
         ref = documents.register(tx, prep) if prep else None
         tx.create("Task", {"id": tid, "title": title, "kind": kind, "state": "ready", "to_role": to_role,
                            "request_ref": ref, "next_action": next_action, "revision": 1})
+        bound, sealed = seal_referenced(tx, contracts, store.project)
         for target in targets:
-            tx.link("targets", tid, target)
+            tx.link("targets", tid, target, **bound.get(target, {}))
         for dep in depends_on:
             tx.link("depends_on", tid, dep)
         msg = messages.record(tx, "TASK", from_role, to_role, tid, next_action, [ref] if ref else [], title,
@@ -74,7 +80,7 @@ def create_task(store: Store, title: str, kind: str, targets: list[str] = (), re
         tx.event("task.created", tid, title)
     return {"id": tid, "request_ref": ref,
             "summary": f"{tid} ready: {title}" + (f" (request {ref})" if ref else "") + (f" -> {to_role}" if to_role else "")
-                       + messages.notice(store, msg)}
+                       + "".join(f"; {note}" for note in sealed) + messages.notice(store, msg)}
 
 
 def claim(store: Store, tid: str, role: str, session: str | None = None) -> dict:

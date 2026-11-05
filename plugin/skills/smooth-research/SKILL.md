@@ -65,8 +65,8 @@ controls) · E2 minimal real model · E3 limited confirmation (pre-fixed compari
 
 1. Contract: `{{rl}} experiment add --title .. --question .. --hypotheses H-x --stage E1 --intervention ..
    --comparator .. --metric .. --scope .. --outcome-actions "<result -> next step>" --budget .. --stop ..`.
-   Edit `research/experiments/E-x.md` freely until the first run, review or task references it; it is then
-   sealed. Later edits become a new revision; edits after seeing results are recorded as exploratory.
+   Edit `research/experiments/E-x.md` freely until a run, review or task references it, which seals it; a task or
+   review refuses empty or TODO fields. Later edits become new revisions (after results: recorded as exploratory).
 2. Delegate: `{{rl}} task create --title .. --kind implement|experiment|analysis --targets E-x --to-role researcher
    --next-action ..`, then start a researcher with the task id and a role name such as `researcher-1`: in herdr a
    session in its own tab and worktree (next section), otherwise a native subagent or `{{rl}} delegate` (host.md).

@@ -143,6 +143,24 @@ def test_a_plugin_update_is_flagged_until_rl_upgrade_records_it(project, tmp_pat
             ["by build b2: moved old notes into research/notes/"]
 
 
+def test_the_upgrade_binds_older_conclusion_reviews_to_the_revision_they_reviewed(project, tmp_path):
+    before = reviews.request_conclusion_review(project, ["H-0001"], "H1 holds", ["claude-opus-5-5"])["id"]
+    research.revise_hypothesis(project, "H-0001", "sharper", statement="weight decay raises test accuracy a lot")
+    after = reviews.request_conclusion_review(project, ["H-0001"], "H1 holds", ["claude-opus-5-5"])["id"]
+    with project.write() as tx:  # as a plugin before reviews were bound to revisions wrote them
+        for rv in (before, after):
+            tx.txn.delete_edge(tx._node("Ticket", rv), tx._node("Hypothesis", "H-0001"), "TARGETS")
+            tx.link("targets", rv, "H-0001")
+        tx.set_meta(schema_version=3)
+    store = Store(find_project(), "test")
+    with store.read() as tx:
+        edges = [tx.out(rv, "targets")[0] for rv in (before, after)]
+    assert [e.get("revision") for e in edges] == [1, 2] and "evidence" not in edges[0]
+    assert store.upgraded["changes"] == ["schema 4: conclusion reviews bound to the revision of each hypothesis "
+                                         "they reviewed", "  2 hypothesis target(s) of conclusion reviews bound to "
+                                         "the revision reviewed"]
+
+
 def test_the_hook_says_the_records_were_upgraded(project, tmp_path):
     _older_project(project, tmp_path)
     text = hooks.session_start("claude", "{}")["hookSpecificOutput"]["additionalContext"]

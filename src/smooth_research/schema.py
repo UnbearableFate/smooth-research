@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 # The record format. A change that older records do not already satisfy (a field every record of a type is read
 # with, a renamed field or enum value) raises it and adds a migration to upgrade.MIGRATIONS; tests open a frozen
 # project of every earlier version (tests/fixtures/projects/).
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 ENUMS: dict[str, tuple[str, ...]] = {
     "evidence_status": ("untested", "supported", "challenged", "inconclusive"),

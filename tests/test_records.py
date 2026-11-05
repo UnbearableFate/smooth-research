@@ -44,6 +44,40 @@ def test_two_sessions_claiming_at_once_get_one_owner(project, tmp_path):
     assert task["owner_role"] == winner[1]
 
 
+def test_a_task_seals_the_contract_it_targets_and_its_pack_shows_a_later_revision(project, tmp_path):
+    out = tasks.create_task(project, "seeds", "experiment", ["E-0001"], to_role="researcher")
+    with project.read() as tx:
+        exp, edge = tx.require("E-0001"), tx.out("T-0001", "targets")[0]
+    assert (exp["revision"], edge["revision"], edge["contract_ref"]) == (1, 1, exp["contract_ref"])
+    assert f"; contract E-0001@1 ({exp['contract_ref']}) sealed now" in out["summary"]
+    assert f"This task is bound to contract EH1/1@1 ({exp['contract_ref']}), the current revision." in \
+        context.work_pack(project, "T-0001")["summary"]
+    contract = tmp_path / "research/experiments/E-0001.md"
+    contract.write_text(contract.read_text().replace("budget: b\n", "budget: two GPU-hours\n"))
+    research.seal_experiment(project, "E-0001")  # revision 2: the task goes on, its pack shows what changed
+    pack = context.work_pack(project, "T-0001")["summary"]
+    assert f"This task was created on contract EH1/1@1 ({exp['contract_ref']}); the contract has been revised " \
+           "since, to EH1/1@2" in pack and "; draft research/experiments/E-0001.md)" in pack
+    assert "-budget: b\n+budget: two GPU-hours" in pack
+    again = tasks.create_task(project, "more seeds", "experiment", ["E-0001"], to_role="researcher")
+    assert "; contract E-0001@2 (" in again["summary"] and "sealed now" not in again["summary"]
+
+
+def test_a_task_on_an_incomplete_contract_says_what_to_fill_in_and_one_on_a_hypothesis_seals_nothing(project,
+                                                                                                    tmp_path):
+    research.add_experiment(project, "draft", "q?", ["H-0001"], metric="acc")  # E-0002
+    objects = sorted(project.project.objects_dir.glob("*"))
+    with pytest.raises(RLError) as exc:
+        tasks.create_task(project, "both", "implement", ["E-0001", "E-0002"], to_role="researcher")
+    assert exc.value.code == "INVALID" and "the contract of EH1/2 (research/experiments/E-0002.md) is not " \
+        "complete: fill in intervention, comparator, scope, outcome_actions, budget, stop." in exc.value.message
+    assert sorted(project.project.objects_dir.glob("*")) == objects  # nothing sealed, not even E-0001
+    tasks.create_task(project, "analysis", "analysis", ["H-0001"], to_role="researcher")
+    with project.read() as tx:
+        assert [e["revision"] for e in tx.all("Experiment")] == [0, 0]
+        assert [t["id"] for t in tx.all("Task")] == ["T-0001"] and "revision" not in tx.out("T-0001", "targets")[0]
+
+
 def test_handoff_releases_the_task_for_the_next_owner(project, tmp_path):
     tasks.create_task(project, "analysis", "analysis", ["H-0001"], to_role="researcher")
     tasks.claim(project, "T-0001", "researcher-a")
