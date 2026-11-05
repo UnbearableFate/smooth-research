@@ -17,7 +17,8 @@ from smooth_research import adapters, launch
 from smooth_research.adapters import Entry
 
 # The herdr commands rl runs (launch.py, watch.py, herdr.py) and what it gives them besides ids and text.
-HERDR = {"agent": {"get": [], "read": ["--source", "visible"], "send-keys": [], "prompt": ["--wait", "--timeout"],
+HERDR = {"agent": {"get": [], "read": ["--source", "visible"], "send-keys": [],
+                   "prompt": ["--wait", "--until", "--timeout"],
                    "start": ["--kind", "--pane", "--timeout", "--"]},
          "tab": {"create": ["--cwd", "--label", "--env", "--no-focus"], "get": [], "close": []},
          "pane": {"get": [], "run": []}}

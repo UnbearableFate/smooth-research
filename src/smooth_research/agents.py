@@ -22,7 +22,7 @@ from . import adapters, herdr, messages, usage, watch, worktrees
 from .delegate import SUBAGENTS, WAITING, prompt_for, rl_command
 from .herdr import caller_role
 from .launch import SELECTED, excerpt, option_line, select, start_agent
-from .project import usable_entries
+from .project import stall_minutes, usable_entries, watch_minutes
 from .store import Store
 from .util import RLError, now_utc
 from .worktrees import branch_status, prepare_worktree, switch_task
@@ -188,10 +188,21 @@ def answer(store: Store, name: str, option: str, reason: str, timeout: int = 30)
     elif state in ("idle", "done") and s.get("assignment"):
         stopped, desc, _ = watch.assignment_state(store, s)
         if stopped:
-            told = herdr.prompt(target, f"[smooth-research] {name}: your assignment is {s['assignment']}. Run "
-                                        f"`{rl_command()} agent brief {name}` and follow it.")
-            summary += f"; {desc}: " + (f"not told ({told})" if told else "told to read its brief")
+            summary += f"; {desc}: " + _told(s, f"[smooth-research] {name}: your assignment is {s['assignment']}. "
+                                                f"Run `{rl_command()} agent brief {name}` and follow it.")
     return {"id": s["id"], "chosen": chosen, "state": state, "summary": summary}
+
+
+def _told(s: dict, text: str) -> str:
+    """Type a prompt into a session and say whether it arrived (herdr saw it working, or its log a new turn)."""
+    try:
+        p = watch.probe(s)
+    except RLError:
+        p = {"status": "unknown", "seq": None, "log": None, "view": None}
+    outcome, why = watch.deliver(s, p, text)
+    if outcome == "delivered":
+        return "told to read its brief"
+    return f"not told ({why})" if outcome == "refused" else f"told to read its brief, but {why}"
 
 
 def _end(store: Store, sid: str, note: str) -> None:
@@ -237,10 +248,9 @@ def assign(store: Store, name: str, task: str | None = None, ticket: str | None 
     line = f"{name} assigned {what}" + (f" on branch {branch}" if task and branch else "")
     if not deliver:
         return {"id": s["id"], "assignment": what, "summary": line + " (not yet told: the session is not ready)"}
-    problem = herdr.prompt(s["herdr_agent"], f"[smooth-research] {name}: your assignment is {what}. Run "
-                                              f"`{rl_command()} agent brief {name}` and follow it.")
-    return {"id": s["id"], "assignment": what,
-            "summary": line + (f"; not told: {problem}" if problem else "; told to read its brief")}
+    told = _told(s, f"[smooth-research] {name}: your assignment is {what}. Run `{rl_command()} agent brief "
+                    f"{name}` and follow it.")
+    return {"id": s["id"], "assignment": what, "summary": f"{line}; {told}"}
 
 
 def tell(store: Store, to: str, text: str, sender: str | None = None, task: str | None = None) -> dict:
@@ -328,8 +338,11 @@ def switch(store: Store, name: str, entry_text: str | None = None, now: bool = F
     if kind == "advisor":
         raise RLError("INVALID", f"{name} is an advisor: advisors keep their model (the rest of a low subscription "
                                  "window is left for them)")
-    state = herdr.status(s["herdr_agent"]) if s.get("herdr_agent") else "gone"
-    if state == "working" and not now:
+    try:
+        still = bool(s.get("herdr_agent")) and watch.working(watch.probe(s))
+    except RLError:
+        still = False  # herdr cannot tell: as before, the coordinator decides
+    if still and not now:
         raise RLError("CONFLICT", f"{name} is still working (a session on a low host is told to finish and hand "
                                   f"over); switch it when it is idle, or with --now to stop it mid-turn")
     with store.read() as tx:
@@ -360,21 +373,43 @@ def switch(store: Store, name: str, entry_text: str | None = None, now: bool = F
 
 
 def list_sessions(store: Store, include_all: bool = False) -> dict:
+    """The sessions as the watcher sees them, without acting or writing: herdr's status, the class, what a session
+    waits for, how long since its log showed progress, its last turn error, its retries and what the watcher does
+    next; then the hosts' usage (also when no session is open) and the watcher."""
     sessions = _sessions(store, active=not include_all)
     live = herdr.problem() is None
+    found = usage.hosts(store)
+    low = {host: info["low"] for host, info in found.items() if info["low"]}
+    stall, every = stall_minutes(store.project.config), watch_minutes(store.project.config)
     lines = []
     for s in sessions:
-        state = herdr.status(s["herdr_agent"]) if live and s["status"] == "active" and s.get("herdr_agent") else s["status"]
+        state, detail = s["status"], ""
+        if live and s["status"] == "active" and s.get("herdr_agent"):
+            try:
+                p = watch.probe(s)
+                d = watch.describe(s, p, watch.classify(store, s, p, low, stall), every)
+                state = p["status"]
+                detail = (f"\n  {d['class']}" + (f": {d['desc']}" if d["desc"] else "")
+                          + (f"; progress {d['progress']}" if d["progress"] else "")
+                          + (f"; {d['log']}" if d["log"] else "")
+                          + (f"; last error {d['error']['kind']}: {d['error']['message']}" if d["error"] else "")
+                          + (f"; retries {d['retries']} of {watch.MAX_RETRIES}" if d["retries"] else "")
+                          + f"; next: {d['next']}")
+            except RLError as exc:
+                state = "not checked"
+                detail = f"\n  not checked: {exc.message}"
         lines.append(f"{s['id']} {s['role_id']} [{s['role_kind']}, {state}] {s.get('entry') or s['host']}"
                      + (f" tab {s['herdr_tab']}" if s.get("herdr_tab") else "")
                      + (f" assignment {s['assignment']}" if s.get("assignment") else "")
-                     + (f" branch {s['branch']}" if s.get("branch") else ""))
+                     + (f" branch {s['branch']}" if s.get("branch") else "") + detail)
+    lines = lines or ["no agent sessions open"]
+    lines += ["usage:", *(f"  {x}" for x in usage.rows(store, found))]
     with store.read() as tx:
         meta = tx.meta()
     if meta.get("watch_tab"):
-        lines.append(f"watcher: tab {meta['watch_tab']}, a round every {meta.get('watch_every') or '?'} min, "
+        lines.append(f"watcher: tab {meta['watch_tab']}, a beat every {meta.get('watch_every') or '?'} min, "
                      f"last {meta.get('watch_beat') or 'never'}")
-    return {"sessions": sessions, "summary": "\n".join(lines) or "no agent sessions open"}
+    return {"sessions": sessions, "summary": "\n".join(lines)}
 
 
 # -- briefs ---------------------------------------------------------------------------------------------------

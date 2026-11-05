@@ -407,7 +407,8 @@ def cmd_usage(args):
         except (OSError, ValueError):
             raw = ""
         return {"summary": usage.statusline(raw)}
-    return usage.show(_store(args))
+    raise RLError("INVALID", "rl usage only runs as Claude Code's status line now (rl usage statusline): the hosts' "
+                             "usage windows, their reading times and which hosts are low are shown by rl agent list")
 
 
 def cmd_models(args):
@@ -526,9 +527,9 @@ def build_parser() -> argparse.ArgumentParser:
                                                  "compute.default; sync: default every resource that uses git)")
     sp.add_argument("--commit", help="full commit id (default: the attempt's, else HEAD of your checkout)")
     sp.add_argument("--attempt", help="an attempt: its resource, commit and output directory")
-    sp = add("usage", cmd_usage, "the Claude and Codex subscription windows, and the hosts that are low (their "
-                                 "researchers and reviewers hand over to another model)")
-    sp.add_argument("action", nargs="?", choices=["show", "statusline"], default="show",
+    sp = add("usage", cmd_usage, "Claude Code's status line command, which keeps Claude's usage windows for rl "
+                                 "(rl agent list shows the hosts' usage)")
+    sp.add_argument("action", nargs="?", choices=["statusline"],
                     help="statusline: Claude Code's status line command (reads its input on stdin)")
     sp = add("link", cmd_link, "relate two records: " + ", ".join(LINKABLE))
     sp.add_argument("source")
@@ -877,7 +878,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--timeout", type=int, default=90, help="seconds to wait for the new agent to start")
     s = ss.add_parser("brief", help="what the session does now (read by the session itself)")
     s.add_argument("name", nargs="?")
-    s = ss.add_parser("list")
+    s = ss.add_parser("list", help="the sessions as the watcher sees them (herdr status, class, waits, progress, "
+                                   "last error, retries, next action) and the hosts' usage; it acts on nothing")
     s.add_argument("--all", action="store_true", help="closed sessions too")
     s = ss.add_parser("dialog", help="what a session's agent shows now: a dialog with its options, or a question")
     s.add_argument("name")
@@ -886,11 +888,12 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("name")
     s.add_argument("option", help="the option's number or the start of its text, as `rl agent dialog` shows it")
     s.add_argument("--reason", required=True, help="why this option (recorded)")
-    ss.add_parser("check", help="one watcher round now: restart agents that exited, remind idle sessions of an "
+    ss.add_parser("check", help="one watcher beat now (skipped while the watcher's own beat runs): restart agents "
+                                "that exited, retry turns cut off by a service error, remind idle sessions of an "
                                 "unfinished assignment, report the rest to the coordinator")
-    s = ss.add_parser("watch", help="the watcher: a round every agents.watch_minutes over the open sessions (rl "
-                                    "agent open starts it in its own herdr tab)")
-    s.add_argument("--every", type=float, help="minutes between rounds (default: agents.watch_minutes, 20)")
+    s = ss.add_parser("watch", help="the watcher: a beat every agents.watch_minutes over the open sessions and the "
+                                    "coordinator (rl agent open starts it in its own herdr tab)")
+    s.add_argument("--every", type=float, help="minutes between beats (default: agents.watch_minutes, 5)")
     g = s.add_mutually_exclusive_group()
     g.add_argument("--start", action="store_true", help="run it in its own herdr tab unless it already runs")
     g.add_argument("--stop", action="store_true", help="stop it and close its tab")

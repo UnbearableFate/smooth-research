@@ -6,6 +6,7 @@ import itertools
 import json
 import os
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -20,13 +21,19 @@ from smooth_research.util import RLError
 LOGS = itertools.count(1)
 
 
-def codex_left(percent, minutes=10080, resets_in=3600, day="31"):
-    """Codex logs a reading with this percent left of one window, in a session log written after the others."""
+def stamp(seconds=0.0):
+    at = datetime.now(timezone.utc) + timedelta(seconds=seconds)
+    return at.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def codex_left(percent, minutes=10080, resets_in=3600, day="31", age_minutes=0.0):
+    """Codex logs a reading with this percent left of one window, in a session log written after the others (and
+    taken after them, unless it is age_minutes old)."""
     n = next(LOGS)
     folder = Path(os.environ["CODEX_HOME"]) / "sessions" / "2026" / "10" / day
     folder.mkdir(parents=True, exist_ok=True)
     window = {"used_percent": 100 - percent, "window_minutes": minutes, "resets_at": int(time.time() + resets_in)}
-    event = {"timestamp": "2026-10-31T10:00:00.000Z", "type": "event_msg",
+    event = {"timestamp": stamp(n / 1000 - age_minutes * 60), "type": "event_msg",
              "payload": {"type": "token_count", "info": None, "rate_limits": {"limit_id": "codex", "primary": window,
                                                                               "secondary": None}}}
     path = folder / f"rollout-2026-10-{day}T00-00-{n:02d}-x.jsonl"
@@ -41,24 +48,28 @@ def claude_left(percent, window="seven_day", resets_in=3600):
                                                           "resets_at": int(time.time() + resets_in)}}}))
 
 
-def test_codex_usage_is_the_last_reading_in_the_log_written_last():
-    codex_left(50, day="30")
+def test_codex_usage_is_the_newest_reading_by_the_time_it_was_taken():
+    first = codex_left(50, day="30")
     folder = Path(os.environ["CODEX_HOME"]) / "sessions" / "2026" / "10" / "29"  # a session across midnight
     folder.mkdir(parents=True)
     limits = {"primary": {"used_percent": 70.0, "window_minutes": 300, "resets_at": 1793811568},
               "secondary": {"used_percent": 20.0, "window_minutes": 10080, "resets_at": 1794000000}}
-    lines = [{"timestamp": "2026-10-31T11:00:00Z", "type": "event_msg",
+    lines = [{"timestamp": stamp(-60), "type": "event_msg",
               "payload": {"type": "token_count", "info": None, "rate_limits": limits}},
-             {"timestamp": "2026-10-31T11:01:00Z", "type": "event_msg",
+             {"timestamp": stamp(-50), "type": "event_msg",
               "payload": {"type": "token_count", "info": None, "rate_limits": None}},
-             {"timestamp": "2026-10-31T11:02:00Z", "type": "response_item", "payload": {"type": "message"}}]
+             {"timestamp": stamp(-40), "type": "response_item", "payload": {"type": "message"}}]
     log = folder / "rollout-2026-10-29T23-59-00-y.jsonl"
     log.write_text("".join(json.dumps(x) + "\n" for x in lines))
-    os.utime(log, (time.time() + 1000, time.time() + 1000))
+    os.utime(log, (time.time() + 1000, time.time() + 1000))  # written last, but its reading is older
+    found = usage.reading("codex")
+    assert (found["source"], found["windows"][0]["used"]) == (str(first), 50.0)
+    lines[0]["timestamp"] = stamp(60)  # now its reading is the newer one
+    log.write_text("".join(json.dumps(x) + "\n" for x in lines))
     found = usage.reading("codex")
     assert found["windows"] == [{"name": "5h", "used": 70.0, "resets_at": 1793811568},
                                 {"name": "week", "used": 20.0, "resets_at": 1794000000}]
-    assert (found["source"], found["at"]) == (str(log), "2026-10-31T11:00:00Z")
+    assert (found["source"], found["at"]) == (str(log), lines[0]["timestamp"])
     assert usage.reading("pi") is None
 
 
@@ -84,21 +95,37 @@ def test_a_host_is_low_at_its_threshold_and_earlier_on_the_coordinators_host(pro
     assert list(low) == ["claude"] and low["claude"]["reason"] == (
         "the claude subscription has 15% of its week window left (its sessions hand over at 20%, the "
         "coordinator's host)")
-    code, out, _ = rl("usage")
-    assert code == 0 and "claude: week 15% left (resets " in out and "(the coordinator's host): LOW" in out
-    assert "codex: week 15% left" in out and "sessions hand over at 10% left\n" in out
-    assert "pi: reports no windows" in out
+    code, out, _ = rl("agent", "list")
+    assert code == 0 and "  claude: week 15% left (resets " in out
+    assert "sessions hand over at 20% left (the coordinator's host); LOW: its researchers and reviewers hand over" in out
+    assert "  codex: week 15% left" in out and "sessions hand over at 10% left; not low\n" in out
+    assert "  pi: reports no windows" in out
+    code, out, err = rl("usage")
+    assert code != 0 and "rl agent list" in err
     codex_left(9)
     assert set(usage.low_hosts(project)) == {"claude", "codex"}
     codex_left(5, resets_in=-60)  # that window has reset since
     claude_left(15, window="five_hour", resets_in=-60)
     assert set(usage.low_hosts(project)) == set()
+    assert "  codex: week reset " in rl("agent", "list")[1] and ", no reading since; read 0 min ago" in rl("agent", "list")[1]
+    codex_left(1, age_minutes=10)  # a log written later, with a reading older than the last one
+    assert set(usage.low_hosts(project)) == set()
     project.project.config["usage"] = {"switch_left_percent": 50, "coordinator_host_left_percent": 5}
-    codex_left(40, minutes=300)
+    codex_left(40, minutes=300, age_minutes=-2)
     assert usage.low_hosts(project)["codex"]["window"] == "5h"
     warned = config_warnings({**DEFAULT_CONFIG, "usage": {"switch_left_percent": "ten"}})
     assert warned == ["smooth-research.yaml: usage.switch_left_percent must be a percentage from 0 to 100, not "
                       "'ten'; using 10"]
+
+
+def test_a_stale_reading_is_shown_but_does_not_make_a_host_low(project, rl):
+    codex_left(5, age_minutes=20)  # Codex has not run a turn here for 20 minutes
+    assert usage.reading("codex")["windows"][0]["used"] == 95 and usage.low_hosts(project) == {}
+    out = rl("agent", "list")[1]
+    assert "  codex: week 5% left (resets " in out and "; read 20 min ago; sessions hand over at 10% left; stale: not " \
+                                                      "counted as low until a new reading" in out
+    codex_left(5)
+    assert set(usage.low_hosts(project)) == {"codex"}
 
 
 def test_new_researchers_and_reviewers_avoid_a_low_host_but_advisors_do_not(project, herdr_log):
@@ -150,22 +177,21 @@ def test_sessions_on_a_low_host_are_told_to_finish_and_the_coordinator_to_switch
     agents.open_session(project, "advisor", "advisor-1", entry_text="claude:claude-fable-5-1@high")
     agents.open_session(project, "reviewer", "reviewer-1")  # on codex, which is not low
     claude_left(8)
-    out = watch.check(project, usage_only=True)
+    out = watch.check(project)
     told = reminders(herdr_log, "researcher-1")
     assert len(told) == 1 and "the claude subscription has 8% of its week window left" in told[0]
     assert f"`rl task handoff {task} --role researcher-1 --doc <note>`. Then end your turn." in told[0]
     assert not reminders(herdr_log, "advisor-1") and not reminders(herdr_log, "reviewer-1")
     with project.read() as tx:
         note = tx.require(out["note"])["text"]
-    assert note == ("watch round: researcher-1 (claude:claude-opus-5-5@high): the claude subscription has 8% of its "
+    assert note == ("watch beat: researcher-1 (claude:claude-opus-5-5@high): the claude subscription has 8% of its "
                     f"week window left (its sessions hand over at 10%); told to finish {task}; when it is idle: rl "
                     "agent switch researcher-1")
-    again = watch.check(project, usage_only=True)
-    assert (again["summary"], again["note"], len(reminders(herdr_log, "researcher-1"))) == ("", None, 1)
-
-    nudged = watch.check(project)  # idle with its task unfinished, but not reminded to go on with it
-    assert len(reminders(herdr_log, "researcher-1")) == 1 and nudged["note"] is None
-    assert f"told to finish {task}; when it is idle: rl agent switch researcher-1" in nudged["summary"]
+    again = watch.check(project)  # idle with its task unfinished, but not reminded to go on with it
+    assert (again["note"], len(reminders(herdr_log, "researcher-1"))) == (None, 1)
+    assert f"told to finish {task}; when it is idle: rl agent switch researcher-1" in again["summary"]
+    watch.check(project)
+    assert len(reminders(herdr_log, "researcher-1")) == 1
     starts = len([c for c in calls(herdr_log) if c[:2] == ["agent", "start"]])
     fake(herdr_log, lambda st: st["agents"].pop("researcher-1"))
     gone = watch.check(project)
@@ -175,21 +201,22 @@ def test_sessions_on_a_low_host_are_told_to_finish_and_the_coordinator_to_switch
         in gone["summary"]
 
 
-def test_a_notice_that_cannot_be_delivered_is_given_at_the_next_look(project, herdr_log, tmp_path):
+def test_a_session_at_a_dialog_is_told_to_finish_once_the_dialog_is_gone(project, herdr_log, tmp_path):
     tasks.start_session(project, "coordinator", "claude")
     (tmp_path / "src/model.py").write_text("def f(x):\n    return x\n")
     rv = reviews.request_review(project, "E-0001", ["src/model.py"], "right?", ["claude-opus-5-5"], scope="op")["id"]
     agents.open_session(project, "reviewer", "reviewer-1", ticket=rv)  # on codex
     fake(herdr_log, lambda st: st["dialog"].update({"reviewer-1": {"kind": "approval", "sel": 0, "cwd": ""}}))
     codex_left(5)
-    first = watch.check(project, usage_only=True)
-    assert f"not yet told to finish {rv} (reviewer-1 waits at a dialog" in first["summary"] and first["note"]
+    first = watch.check(project)
+    assert "reviewer-1 waits at a dialog (Bash command" in first["summary"] and first["note"]
+    assert not reminders(herdr_log, "reviewer-1")  # nothing is typed at a dialog
     fake(herdr_log, lambda st: st["dialog"].clear())
-    second = watch.check(project, usage_only=True)
-    told = reminders(herdr_log, "reviewer-1")  # the log holds the attempt that the dialog refused, too
-    assert second["note"] is None and len(told) == 2 and f"Stop now without answering {rv}" in told[-1]
-    watch.check(project, usage_only=True)
-    assert len(reminders(herdr_log, "reviewer-1")) == 2  # delivered once
+    second = watch.check(project)
+    told = reminders(herdr_log, "reviewer-1")
+    assert second["note"] and len(told) == 1 and f"Stop now without answering {rv}" in told[-1]
+    watch.check(project)
+    assert len(reminders(herdr_log, "reviewer-1")) == 1  # delivered once
 
 
 def test_switch_continues_a_researchers_task_on_the_next_model_in_its_worktree(project, herdr_log, tmp_path,

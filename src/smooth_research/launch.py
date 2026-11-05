@@ -83,6 +83,8 @@ def start_agent(store: Store, s: dict, timeout: int = 90, tab: str | None = None
             trusted = f"answered {entry.entry}'s folder trust question for {s['cwd']}: trusted"
             with store.write() as tx:
                 tx.event("session.trusted", s["id"], trusted)
+    # the id herdr reports (Codex chooses its own): the watcher reads the session's log by it, and keeps it current
+    host_session = herdr.session_id(name) or host_session
     return {"tab": tab, "pane": pane, "host_session": host_session, "waiting": waiting, "trusted": trusted}
 
 

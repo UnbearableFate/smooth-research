@@ -43,10 +43,12 @@ one-line notice. A review round holds two reviews; findings of medium or higher 
 second go to the coordinator, who approves them with a reason or returns the work. Questions, requests for
 permission and dialogs from the sessions also go to the coordinator, which decides what it can judge and asks
 the user only what only the user can decide. A watcher in its own tab
-looks at the sessions every 20 minutes (`agents.watch_minutes`): it starts an agent that exited again and
-reminds an idle session whose assignment is unfinished, and leaves recorded waits alone (a task waiting on
-cluster jobs, a pending review, a run still running). When a Claude Code or Codex subscription window is
-nearly used up (`rl usage`; 10% left, or 20% on the coordinator's own host), the researchers and reviewers on
+looks at the sessions and the coordinator every 5 minutes (`agents.watch_minutes`), through herdr and the
+Codex session logs: it starts an agent that exited again, retries a turn cut off by a model service error,
+reports a turn that stopped making progress, reminds a session that stayed idle with its assignment unfinished,
+and leaves recorded waits alone (a task waiting on cluster jobs, a pending review, a run still running); the
+coordinator need not poll. When a Claude Code or Codex subscription window is nearly used up (`rl agent list`;
+10% left, or 20% on the coordinator's own host), the researchers and reviewers on
 that host hand their work over and the coordinator continues it on the next model of their list
 (`rl agent switch`); the coordinator and the advisors keep their models. Without herdr, the same roles run
 headless (`rl delegate`, `rl review run`, `rl advise run`).

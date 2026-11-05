@@ -14,8 +14,9 @@ default is `--permission-mode auto`); rl adds no sandbox, approval or permission
 
 ## Subscription usage
 
-Claude Code and Codex usually run on subscriptions with a 5-hour and a weekly window. `{{rl}} usage` shows what
-is left of each window and how old the reading is. Codex logs its windows itself; Claude Code reports them
+Claude Code and Codex usually run on subscriptions with a 5-hour and a weekly window. `{{rl}} agent list` shows
+what is left of each window and when it was read; a reading older than 15 minutes is stale and never makes a
+host low, and a window that has reset since shows no figure until the next reading. Codex logs its windows itself; Claude Code reports them
 through rl's status line, which the sessions rl starts run, and so does your own Claude Code session through the
 project's `.claude/settings.local.json` (`{{rl}} session start` adds it, unless you have a status line of your
 own). A host is low when a window has 10% or less left, or 20% or less on your own host, which you keep using
@@ -23,8 +24,8 @@ own). A host is low when a window has 10% or less left, or 20% or less on your o
 
 - new researcher and reviewer sessions, `{{rl}} delegate` and `{{rl}} review run` take the next entry of their
   role (`--entry` still uses the entry you name);
-- the watcher, which looks every 5 minutes, tells its researchers to commit and hand their task over
-  (`{{rl}} task handoff`), its reviewers to stop, and you once;
+- the watcher tells its researchers to commit and hand their task over (`{{rl}} task handoff`), its reviewers
+  to stop, and you once;
 - when a session is idle (a researcher's HANDOFF has reached you), `{{rl}} agent switch <name>` closes it, keeps
   its worktree, and opens one of the same name on the next entry with the same assignment; the new session
   reads the handoff in its brief. `--entry` picks the entry; `--now` also switches a session that still works;
@@ -127,20 +128,28 @@ actions outside the project that cannot be undone.
 ## Watcher
 
 `{{rl}} agent open` also starts the watcher in its own tab (`sr-watch`). Every `agents.watch_minutes`
-minutes (default 20) it looks at each open session:
+minutes (default 5) it looks at each open session and at you: once through herdr and, for a Codex session,
+through what its own log gained since the last beat. A session gets the first class that applies:
 
 | Session | Watcher |
 | --- | --- |
-| Its agent exited, or its tab was closed | starts it again in its folder, in a new conversation that reads its brief (at most 3 times an hour) |
-| Idle, assignment unfinished, waiting for nothing | reminds it to continue (at most twice per assignment), then reports it to you |
-| Waiting: task recorded as waiting or blocked, a review it asked for, runs of its experiments queued or running, a message without an answer | leaves it alone |
+| Its agent exited, or its tab was closed | starts it again in its folder, in a new conversation that reads its brief (at most 3 times an hour; on a low host it asks you to switch it instead) |
 | At a dialog | answers only the trust question for the session's own folder; reports any other dialog to you once |
-| A researcher or reviewer on a low host (checked every 5 minutes) | tells it to finish and you to switch it; does not remind it to continue or start it again on that host |
+| A researcher or reviewer on a low host | tells it to finish and you to switch it; no reminder, retry or restart on that host |
+| Its last turn ended with a model service error (its Codex log) | types a fixed "continue" prompt at the next beat, then after 2 and 4 more beats (at most 3 times), then reports it to you: switch a researcher or reviewer; an advisor keeps its model. A used-up subscription counts as a low host |
+| Its turn shows no progress for `agents.stall_minutes` (30) and no tool call is pending | sends you the end of its screen once; types nothing |
+| Idle, assignment unfinished, waiting for nothing | reminds it to continue once it stayed so for two beats (at most twice per assignment), then reports it to you |
+| Waiting: task recorded as waiting or blocked, a review it asked for, runs of its experiments queued or running, a message without an answer | leaves it alone |
 
-What it did or found reaches you as one NOTE from `watch` per round. When you are idle with messages unread
-for a whole round, it reminds you once. End sessions with `{{rl}} agent close`: a session closed any other way
-counts as an unexpected stop. `{{rl}} agent check` runs one round now; `{{rl}} agent watch --stop` stops the
-watcher and `--start` starts it again. It ends by itself when no session is open.
+A prompt counts only when it arrived (herdr saw the agent take it, or its log shows a new turn); one that is
+not confirmed is reported to you and not typed again. What the watcher did or found reaches you as one NOTE
+from `watch` per beat. Your own turn cut off by a service error is retried the same way, and when you are idle
+with messages unread for a whole beat it reminds you once. So do not poll the sessions or wait for them in
+loops: end your turn and act on the notes. `{{rl}} agent list` shows each session's class, what it waits for,
+its last progress, error and retries, and the hosts' usage, and acts on nothing; `{{rl}} agent check` runs one
+beat now (it skips while the watcher's beat runs). End sessions with `{{rl}} agent close`: a session closed any
+other way counts as an unexpected stop. `{{rl}} agent watch --stop` stops the watcher and `--start` starts it
+again. It ends by itself when no session is open.
 
 ## Subagents
 

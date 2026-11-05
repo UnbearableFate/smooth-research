@@ -14,6 +14,7 @@ import subprocess
 from .util import RLError
 
 ENV_SESSION, ENV_ROLE = "SMOOTH_RESEARCH_SESSION", "SMOOTH_RESEARCH_ROLE"
+SUBMIT_MS = 20_000  # how long a prompt waits for the agent to show it took it
 
 
 def caller_role() -> str | None:
@@ -50,8 +51,32 @@ def call(*args: str, timeout: int = 90) -> dict:
     return data.get("result") or {}
 
 
+def submit(target: str, text: str, timeout_ms: int = SUBMIT_MS) -> tuple[str, str | None]:
+    """Type a prompt (not a slash command) and wait until the agent shows it took it: ("delivered", None) when herdr
+    saw it working or at a dialog afterwards; ("refused", why) when nothing was typed (a dialog was open, or no
+    agent answers); ("unconfirmed", why) when it was typed but herdr saw no reaction (stalled, timed out, another
+    error). An agent that was already working matches at once: whoever needs more checks its log."""
+    try:
+        call("agent", "prompt", target, text, "--wait", "--until", "working", "--until", "blocked", "--timeout",
+             str(timeout_ms), timeout=timeout_ms // 1000 + 30)
+        return "delivered", None
+    except RLError as exc:
+        code = exc.details.get("herdr_code")
+        if code == "agent_blocked":
+            return "refused", (f"{target} waits at a dialog (an approval or a question), so nothing was typed; the "
+                               f"coordinator decides it (`rl agent dialog {target}`)")
+        if code == "agent_not_found":
+            return "refused", f"no agent answers to {target}"
+        if code == "agent_prompt_stalled":
+            return "unconfirmed", "herdr saw no working state after it"
+        if code == "timeout":
+            return "unconfirmed", f"herdr saw no working state within {timeout_ms // 1000}s"
+        return "unconfirmed", exc.message
+
+
 def prompt(target: str, text: str, wait_ms: int | None = None) -> str | None:
-    """Type text into a live agent's input; None when it was submitted, else why not."""
+    """Type text into a live agent's input without waiting for it to react (a notice, or a slash command, which
+    shows no working state); None when it was submitted, else why not."""
     try:
         call("agent", "prompt", target, text, *(["--wait", "--timeout", str(wait_ms)] if wait_ms else []),
              timeout=(wait_ms // 1000 + 30) if wait_ms else 30)
@@ -82,14 +107,24 @@ def keys(target: str, *names: str) -> None:
 
 
 def agent(target: str) -> dict | None:
-    """A live agent as herdr sees it (agent_status, state_change_seq, pane_id, ...); None when no agent answers to
-    target (it exited, or its tab was closed)."""
+    """A live agent as herdr sees it (agent_status, state_change_seq, agent_session: the host's session id in
+    .value, pane_id, ...); None when no agent answers to target (it exited, or its tab was closed)."""
     try:
         return call("agent", "get", target, timeout=15).get("agent") or {}
     except RLError as exc:
         if exc.details.get("herdr_code") == "agent_not_found":
             return None
         raise
+
+
+def session_id(target: str) -> str | None:
+    """The host's session id herdr reports for a live agent, or None."""
+    try:
+        found = agent(target) or {}
+    except RLError:
+        return None
+    given = found.get("agent_session")
+    return str(given["value"]) if isinstance(given, dict) and given.get("value") else None
 
 
 def status(target: str) -> str:

@@ -4,8 +4,10 @@ Both hosts run on subscriptions with a 5-hour and a weekly window. Codex writes 
 logs ($CODEX_HOME/sessions/**/rollout-*.jsonl, token_count events); Claude Code gives them only to a status line
 command, so the Claude sessions rl starts (and the coordinator's, through the project's
 .claude/settings.local.json) run `rl usage statusline`, which keeps the latest reading in
-<rl home>/usage/claude.json. A reading is as fresh as the host's last turn on this machine; a window whose reset
-time has passed counts as unused.
+<rl home>/usage/claude.json. The reading of a host is its newest by the time it was taken (not by which log file
+was written last); one older than STALE_MINUTES is stale. A stale or missing reading never makes a host low, but
+it is shown as such (rl agent list); a window whose reset time has passed with no reading since is shown as reset,
+with no reading yet, and is not low.
 
 A host is low when one of its windows has usage.switch_left_percent (10) or less left, or
 usage.coordinator_host_left_percent (20) on the host the coordinator runs on, which keeps working on it. Then
@@ -29,7 +31,8 @@ from .util import RLError, atomic_write, now_utc, parse_time
 HOSTS = ("claude", "codex")
 WINDOW_NAMES = {300: "5h", 10080: "week"}
 TAIL_BYTES = 2 << 20  # the end of a Codex session log that is searched for its last reading
-LOGS_SEARCHED = 5  # Codex session logs, newest first
+LOGS_SEARCHED = 5  # Codex session logs written last; the newest reading among them counts
+STALE_MINUTES = 15  # a reading older than this does not make a host low
 OURS = "usage statusline"  # how rl's status line command is recognized in a settings file
 
 
@@ -83,11 +86,16 @@ def codex_windows(rate_limits) -> list[dict]:
 
 
 def left(window: dict, now: float | None = None) -> float:
-    """Percent left in a window; one whose reset time has passed is unused again."""
-    reset = window.get("resets_at")
-    if reset and reset <= (time.time() if now is None else now):
+    """Percent left in a window; one whose reset time has passed is unused again (for deciding what is low; it is
+    shown as reset, with no reading since)."""
+    if reset_passed(window, now):
         return 100.0
     return max(0.0, 100.0 - window["used"])
+
+
+def reset_passed(window: dict, now: float | None = None) -> bool:
+    reset = window.get("resets_at")
+    return bool(reset and reset <= (time.time() if now is None else now))
 
 
 # -- readings -------------------------------------------------------------------------------------------------
@@ -141,29 +149,41 @@ def _mtime(path: Path) -> float:
 
 
 def _codex_reading() -> dict | None:
-    """The last rate limits Codex logged: in the session log written last (a session that runs across midnight
-    keeps writing to the day it started in)."""
+    """The newest rate limits Codex logged, by the time of the event: the last reading of each of the session logs
+    written last is compared (a log written later may hold an older reading, and a session that runs across
+    midnight keeps writing to the day it started in)."""
     logs = sorted(codex_sessions().glob("*/*/*/rollout-*.jsonl"), key=_mtime, reverse=True)
-    for path in logs[:LOGS_SEARCHED]:
-        try:
-            with open(path, "rb") as log:
-                size = log.seek(0, os.SEEK_END)
-                log.seek(max(0, size - TAIL_BYTES))
-                lines = log.read().split(b"\n")[1 if size > TAIL_BYTES else 0:]  # the first may be cut
-        except OSError:
+    found = [r for r in (_last_reading(path) for path in logs[:LOGS_SEARCHED]) if r]
+    return max(found, key=lambda r: _epoch(r["at"]), default=None)
+
+
+def _last_reading(path: Path) -> dict | None:
+    try:
+        with open(path, "rb") as log:
+            size = log.seek(0, os.SEEK_END)
+            log.seek(max(0, size - TAIL_BYTES))
+            lines = log.read().split(b"\n")[1 if size > TAIL_BYTES else 0:]  # the first may be cut
+    except OSError:
+        return None
+    for line in reversed(lines):
+        if b'"token_count"' not in line or b'"rate_limits"' not in line:
             continue
-        for line in reversed(lines):
-            if b'"token_count"' not in line or b'"rate_limits"' not in line:
-                continue
-            try:
-                event = json.loads(line)
-            except ValueError:
-                continue
-            payload = event.get("payload") if isinstance(event, dict) else None
-            windows = codex_windows(payload.get("rate_limits")) if isinstance(payload, dict) else []
-            if windows:
-                return {"at": event.get("timestamp"), "windows": windows, "source": str(path)}
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        payload = event.get("payload") if isinstance(event, dict) else None
+        windows = codex_windows(payload.get("rate_limits")) if isinstance(payload, dict) else []
+        if windows:
+            return {"at": event.get("timestamp"), "windows": windows, "source": str(path)}
     return None
+
+
+def _epoch(at: str | None) -> float:
+    try:
+        return parse_time(at).timestamp()
+    except RLError:
+        return 0.0
 
 
 # -- low hosts ------------------------------------------------------------------------------------------------
@@ -180,7 +200,9 @@ def hosts(store) -> dict[str, dict]:
         found = reading(host)
         mine = host == coordinator
         limit = usage_percent(store.project.config, "coordinator_host_left_percent" if mine else "switch_left_percent")
-        short = sorted((left(w, now), w) for w in (found or {}).get("windows", []) if left(w, now) <= limit)
+        stale = bool(found) and _minutes_since(found["at"]) > STALE_MINUTES
+        short = [] if stale else sorted((left(w, now), w) for w in (found or {}).get("windows", [])
+                                        if left(w, now) <= limit)
         low = None
         if short:
             rest, w = short[0][0], short[0][1]
@@ -188,7 +210,7 @@ def hosts(store) -> dict[str, dict]:
                    "key": f"{host} {w['name']} {w.get('resets_at')}",
                    "reason": f"the {host} subscription has {rest:.0f}% of its {w['name']} window left (its sessions "
                              f"hand over at {limit:g}%" + (", the coordinator's host" if mine else "") + ")"}
-        out[host] = {"reading": found, "limit": limit, "coordinator": mine, "low": low}
+        out[host] = {"reading": found, "limit": limit, "coordinator": mine, "low": low, "stale": stale}
     return out
 
 
@@ -215,11 +237,10 @@ def _age(at: str | None) -> str:
     return f"{minutes:.0f} min ago" if minutes < 120 else f"{minutes / 60:.1f} h ago"
 
 
-def show(store) -> dict:
-    """rl usage: each host's windows, how old the reading is, when its sessions hand over, and its sessions."""
-    found = hosts(store)
-    with store.read() as tx:
-        sessions = [s for s in tx.all("Session", status="active") if s.get("role_kind")]
+def rows(store, found: dict | None = None) -> list[str]:
+    """One line per host for rl agent list: its windows, when they were read, whether the reading is stale, and
+    whether the host is low (shown whether or not a session is open)."""
+    found = found or hosts(store)
     lines = []
     for host, info in found.items():
         r, low = info["reading"], info["low"]
@@ -227,17 +248,19 @@ def show(store) -> dict:
             where = ("Claude sessions that rl starts report it through their status line"
                      if host == "claude" else f"Codex has logged none in {codex_sessions()}")
             lines.append(f"{host}: no reading yet ({where})")
-        else:
-            windows = " · ".join(f"{w['name']} {left(w):.0f}% left"
-                                 + (f" (resets {_when(w['resets_at'])})" if w.get("resets_at") else "")
-                                 for w in r["windows"])
-            lines.append(f"{host}: {windows}; read {_age(r['at'])}; sessions hand over at {info['limit']:g}% left"
-                         + (" (the coordinator's host)" if info["coordinator"] else "")
-                         + (": LOW, its researchers and reviewers hand over; advisors keep the rest" if low else ""))
-        on = [f"{s['role_id']} ({s['role_kind']})" for s in sessions if s.get("host") == host]
-        lines += [f"  sessions: {', '.join(on)}"] if on else []
+            continue
+        now = time.time()
+        windows = " · ".join(
+            (f"{w['name']} reset {_when(w['resets_at'])}, no reading since" if reset_passed(w, now)
+             else f"{w['name']} {left(w, now):.0f}% left" + (f" (resets {_when(w['resets_at'])})"
+                                                              if w.get("resets_at") else ""))
+            for w in r["windows"])
+        state = ("stale: not counted as low until a new reading" if info["stale"]
+                 else "LOW: its researchers and reviewers hand over; advisors keep the rest" if low else "not low")
+        lines.append(f"{host}: {windows}; read {_age(r['at'])}; sessions hand over at {info['limit']:g}% left"
+                     + (" (the coordinator's host)" if info["coordinator"] else "") + f"; {state}")
     lines.append("pi: reports no windows")
-    return {"hosts": found, "summary": "\n".join(lines)}
+    return lines
 
 
 # -- the coordinator's own Claude session ---------------------------------------------------------------------
@@ -279,4 +302,4 @@ def install_statusline(root: Path, rl: str) -> str | None:
         atomic_write(local, (json.dumps({**data, "statusLine": statusline_setting(rl)}, indent=2) + "\n").encode())
     except OSError as exc:
         return f"no status line was added to {local}: {exc}"
-    return f"{local} runs rl's status line, which reports Claude's usage (rl usage)"
+    return f"{local} runs rl's status line, which reports Claude's usage (rl agent list)"

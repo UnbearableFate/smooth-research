@@ -13,15 +13,19 @@ from smooth_research.store import Store
 from smooth_research.util import RLError
 
 FAKE_HERDR = r"""#!{python}
-import json, os, sys, pathlib
+import datetime, json, os, sys, pathlib
 args = sys.argv[1:]
 state_path = pathlib.Path(os.environ["FAKE_HERDR_STATE"])
 state = json.loads(state_path.read_text()) if state_path.exists() else {}
 state.setdefault("n", 0)
-for key in ("agents", "cwd", "dialog", "status", "labels", "kinds", "seq"):
+# sessions: the host session id herdr reports per agent; logs: a Codex session log the fake appends a turn to when
+# the agent takes a prompt; asks: a dialog the next prompt opens (a request for permission)
+for key in ("agents", "cwd", "dialog", "status", "labels", "kinds", "seq", "sessions", "logs", "asks"):
     state.setdefault(key, {})
-state.setdefault("closed", [])
-state.setdefault("deaf", [])
+# deaf: takes no prompt (herdr sees nothing); quick: its turn is too short for herdr to see it working; fail: its
+# turns end with the service's overload error
+for key in ("closed", "deaf", "quick", "fail"):
+    state.setdefault(key, [])
 with open(os.environ["FAKE_HERDR_LOG"], "a") as log:
     log.write(json.dumps(args) + "\n")
 # As in the hosts, a key shows on the screen a moment later (here: from the second read on) and the options wrap
@@ -56,6 +60,31 @@ def screen(name):
 def open_tab(tab):  # the coordinator's tab w1:t99 and the tabs created here, until closed
     return tab not in state["closed"] and (tab == "w1:t99" or tab in state["labels"])
 
+def reply(name, status=None):
+    out = {"agent_status": status or state["status"].get(name, "idle"), "state_change_seq": state["seq"].get(name, 1)}
+    if state["sessions"].get(name):
+        kind = state["kinds"].get(name, "claude")
+        out["agent_session"] = {"agent": kind, "kind": "id", "source": "herdr:" + kind, "value": state["sessions"][name]}
+    return {"agent": out}
+
+def turn(name):  # the agent's Codex log, if it has one, shows the turn the prompt started
+    if not state["logs"].get(name):
+        return
+    at = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    n = state["seq"][name]
+    end = {"type": "task_complete", "turn_id": f"turn-{n}"}
+    if name in state["fail"]:
+        end["error"] = {"message": "Selected model is at capacity. Please try a different model.",
+                        "codex_error_info": "server_overloaded"}
+    events = [("event_msg", {"type": "task_started", "turn_id": f"turn-{n}"}),
+              ("response_item", {"type": "message", "role": "user"}),
+              ("response_item", {"type": "function_call", "call_id": f"call-{n}", "name": "exec"}),
+              ("response_item", {"type": "function_call_output", "call_id": f"call-{n}"}),
+              ("event_msg", end)]
+    with open(state["logs"][name], "a") as log:
+        for kind, payload in events:
+            log.write(json.dumps({"timestamp": at, "type": kind, "payload": payload}) + "\n")
+
 group, action = args[0], args[1]
 if (group, action) == ("tab", "create"):
     state["n"] += 1
@@ -84,6 +113,14 @@ if (group, action) == ("agent", "start"):
     state["agents"][name] = "w1:t" + pane.split(":p")[1]
     state["kinds"][name] = args[args.index("--kind") + 1]
     state["seq"][name] = state["seq"].get(name, 0) + 1
+    launched = args[args.index("--") + 1:] if "--" in args else []
+    if "--session-id" in launched:  # Claude Code and pi take the id rl chose
+        state["sessions"][name] = launched[launched.index("--session-id") + 1]
+    elif state["kinds"][name] == "codex":  # Codex chooses its own
+        state["sessions"][name] = f"cx-{name}-{state['seq'][name]}"
+    else:
+        state["sessions"].pop(name, None)
+    state["logs"].pop(name, None)
     blocked = os.environ.get("FAKE_HERDR_BLOCKED")
     if blocked:  # 1 or mcp: another dialog; claude, codex: their trust question; claude-other: for another folder
         kind = {"1": "mcp"}.get(blocked, blocked).replace("-other", "")
@@ -106,18 +143,27 @@ if (group, action) == ("agent", "send-keys"):
                 state["agents"].pop(args[2], None)
     done({"type": "ok"})
 if (group, action) in (("agent", "prompt"), ("agent", "get")):
-    if args[2] not in state["agents"] and not args[2].startswith("w1:p"):
-        done(error=("agent_not_found", f"agent target {args[2]} not found"))
-    if args[2] in state["dialog"]:
+    name = args[2]
+    if name not in state["agents"] and not name.startswith("w1:p"):
+        done(error=("agent_not_found", f"agent target {name} not found"))
+    if name in state["dialog"]:
         if action == "prompt":
             done(error=("agent_blocked", "the agent waits at a dialog"))
-        done({"agent": {"agent_status": "blocked", "state_change_seq": state["seq"].get(args[2], 1)}})
-    if action == "prompt" and "--wait" in args and args[3].startswith("/"):
-        done(error=("agent_prompt_stalled", "no working state observed"))
-    if action == "prompt" and args[2] not in state["deaf"]:  # it works on the prompt and becomes idle again
-        state["seq"][args[2]] = state["seq"].get(args[2], 1) + 2
-    done({"agent": {"agent_status": state["status"].get(args[2], "idle"),
-                    "state_change_seq": state["seq"].get(args[2], 1)}})
+        done(reply(name, "blocked"))
+    if action == "prompt":
+        waited = "--wait" in args
+        if waited and args[3].startswith("/"):
+            done(error=("agent_prompt_stalled", "no working state observed"))
+        if name in state["deaf"]:  # nothing happens: herdr sees no working state
+            done(error=("agent_prompt_stalled", "no working state observed") if waited else None,
+                 result=reply(name))
+        state["seq"][name] = state["seq"].get(name, 1) + 2  # it works on the prompt and becomes idle again
+        turn(name)
+        if name in state["asks"]:  # the prompt makes it ask for permission: herdr sees it blocked
+            state["dialog"][name] = {"kind": state["asks"].pop(name), "sel": 0, "cwd": ""}
+        if waited and name in state["quick"]:
+            done(error=("agent_prompt_stalled", "no working state observed"))
+    done(reply(name))
 done(error=("unknown", " ".join(args)))
 """
 

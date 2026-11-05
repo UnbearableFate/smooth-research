@@ -22,7 +22,7 @@
   - 某一节（如 `models`、`context`）不是键值对：这一节全用默认值；
   - 模型列表不是列表（一个字符串当作只有一个条目的列表）：用默认列表；某个条目格式不对：跳过这一条，用列表里其余的条目；
   - `advice.max_rounds` 不是非负整数：按 3 计算；
-  - `agents.watch_minutes` 不是分钟数：按 20 分钟计算；
+  - `agents.watch_minutes` 不是分钟数：按 5 分钟计算；`agents.stall_minutes` 不是正的分钟数：按 30 分钟计算；
   - `usage.switch_left_percent`、`usage.coordinator_host_left_percent` 不是 0 到 100 的数：用默认值 10 和 20；
   - `agents.args.<宿主>` 不是参数列表：用默认参数（写成一个字符串时，按 shell 的规则拆开，不警告）；
   - `context` 的 token 目标不是正整数：用默认值；
@@ -77,7 +77,8 @@
 | `agents.args.claude` | `["--permission-mode", "auto"]` | 追加给交互式 Claude Code 会话的参数。三个宿主都可以写成列表，也可以写成一个字符串（按 shell 的规则拆开） |
 | `agents.args.codex` | `[]` | 追加给交互式 Codex 会话的参数。沙箱和审批方式要用户自己写在这里，比如 `["-s", "workspace-write"]` |
 | `agents.args.pi` | `[]` | 追加给交互式 pi 会话的参数 |
-| `agents.watch_minutes` | `20` | 监视程序每隔几分钟查看一次各个会话；`0` 表示关闭 |
+| `agents.watch_minutes` | `5` | 监视程序每隔几分钟走一拍（查看一次各个会话和协调者）；`0` 表示关闭。还写着旧默认值 20 的项目，监视程序启动时和 `rl upgrade` 会提示改成 5 |
+| `agents.stall_minutes` | `30` | 一个回合在会话日志里多久没有进展算作停滞，报告给协调者 |
 
 - **CLI 自己加的参数只有模型、effort、会话 id、名字和订阅额度的两项。**
   - Claude：`--model`、`--effort`、`--session-id`、`-n`，以及运行 `rl usage statusline` 的状态栏（`--settings`，见下面的“订阅额度”）；reviewer 另加 `--disallowedTools Edit,Write,NotebookEdit`。
@@ -87,14 +88,20 @@
 - **researcher 的 worktree。** 每个 researcher 会话一个 git worktree，在 `<项目目录>/../<项目名>-worktrees/<会话名>`。每个任务一个分支 `sr/<会话名>/<任务>`，从主 checkout 当前的分支建（`--base` 可以改）。项目必须是至少有一次提交的 git 仓库，否则用 `--no-worktree`。研究记录总是写进主项目的 `research/`。
 - **信任文件夹的问题由 CLI 回答，其他询问由协调者判断。** Claude Code 和 Codex 在新目录里会先问是否信任这个文件夹。如果问的正是 `rl agent open` 开会话的目录（会话的 worktree，或者用户启动协调者时已经信任的项目目录），CLI 就替协调者选“信任”，并记一条 `session.trusted` 事件。Codex 把信任记在主仓库的根目录下（`~/.codex/config.toml` 的 `[projects]`），之后同一项目的 worktree 不再问。
 - **各角色的询问和许可请求交给协调者，不转给用户。** 角色会话用 `rl agent tell coordinator` 提问或请求许可；会话里的其他对话框（审查 hooks、启用 MCP 服务器、审批、问别的目录的信任问题）由 `rl agent open`、没能送达的通知或监视程序报告给协调者。协调者能判断的就直接判断并回答：问题用 `rl agent tell` 回答；对话框用 `rl agent dialog <名字>` 查看选项，用 `rl agent answer <名字> <选项> --reason ..` 选择并记下理由（`session.answered` 事件）。记录不足以判断时选稳妥的选项。只有协调者不能判断的才问用户：超出范围、预算或约束文件留给用户的动作，超过 `advice.max_rounds` 的建议轮，用户的账户和凭据（登录、安全密钥、付款），以及项目以外不可撤销的操作。角色会话不能回答对话框。
-- **监视程序。** `rl agent open` 同时在单独的 tab（`sr-watch`）里启动监视程序，每 `agents.watch_minutes` 分钟查看一次所有打开的会话：
-  - agent 退出了，或者 tab 被关掉了：在原来的目录里重新启动，开一个新对话，从 `rl agent brief` 读回任务。一小时最多重启 3 次；
-  - 空闲、任务没做完、又没在等什么：提醒它继续。同一项任务最多提醒 2 次，之后报告协调者；
-  - 正常的暂停不唤醒：任务记为 waiting（`rl task wait`，比如等集群作业）或 blocked；在等自己申请的审查；任务所测实验的 run 还处于 queued 或 running；发出的消息还没有回复（发给协调者的，以协调者还没读为准）；
-  - 停在对话框：只回答该会话自己目录的信任问题，其他对话框报告一次；
-  - 订阅额度低的宿主上的 researcher 和 reviewer：通知它结束工作、通知协调者换模型；不提醒它继续，也不在这个宿主上重启（见下面的“订阅额度”，额度每 5 分钟看一次）。
+- **监视程序。** `rl agent open` 同时在单独的 tab（`sr-watch`）里启动监视程序。它启动时先走一拍，之后每 `agents.watch_minutes` 分钟走一拍。每一拍对每个会话用一次 `herdr agent get`（状态、`state_change_seq`、宿主的会话 id，id 写回 `Session.host_session_id`），对 Codex 会话再读它的会话日志（`$CODEX_HOME/sessions/*/*/*/rollout-*-<id>.jsonl`）上次之后新写的部分；额度低的宿主每拍算一次。每个会话归入下面第一个符合的类别：
+  - **退出**：agent 退出了，或者 tab 被关掉了。在原来的目录里重新启动，开一个新对话，从 `rl agent brief` 读回任务；一小时最多重启 3 次。额度低的宿主上不重启，请协调者换模型；
+  - **对话框**：只回答该会话自己目录的信任问题，其他对话框报告一次；
+  - **额度低**：额度低的宿主上的 researcher 和 reviewer。通知它结束工作、通知协调者换模型；这个宿主上不提醒、不重试、不重启（见下面的“订阅额度”）；
+  - **回合出错**：日志显示最后一个回合以错误结束（`task_complete` 带 `error`）。暂时性错误（`codex_error_info` 为 `server_overloaded`）在下一拍重试，之后隔 2 拍、再隔 4 拍，一串错误最多重试 3 次；只有一个回合正常结束并且做了事，这一串才算结束（herdr 显示 working 不算）。3 次之后报告协调者：researcher 和 reviewer 建议 `rl agent switch`，advisor 只报告。额度用完（`usage_limit_exceeded`）按额度低处理；其他错误报告一次。回合内部的重连不算错误；
+  - **停滞**：回合没结束、没有未完成的工具调用、超过 `agents.stall_minutes` 没有进展。读一次屏幕，把末尾附在报告里，不输入任何东西。一个工具调用挂起超过 4 倍的停滞时间也报告一次。进展指回合事件、工具调用及其输出、回复和推理；设置事件、token 计数和输入进会话的提示（包括监视程序自己的）不算；
+  - **空闲未完成**：空闲、任务没做完、又没在等什么。连续两拍 `state_change_seq` 不变才提醒它继续；同一项任务最多提醒 2 次，之后报告协调者；
+  - **其他**：在工作，或者正常的暂停：任务记为 waiting（`rl task wait`，比如等集群作业）或 blocked；在等自己申请的审查；任务所测实验的 run 还处于 queued 或 running；发出的消息还没有回复（发给协调者的，以协调者还没读为准）。回合出错的会话不算在等回复。
 
-  每轮的发现汇成一条来自 `watch` 的 NOTE 发给协调者。协调者空闲、又有消息一整轮没读时，提醒一次。没有打开的会话时，监视程序自己退出。正常结束一个会话要用 `rl agent close`；用别的方式关掉的会话算作意外停止，会被重新启动。
+  日志说回合已经结束时，以日志为准，不看 herdr 的 working。Claude Code 和 pi 的会话只看 herdr（Claude 的日志还没有错误样本，不定规则）；没有会话 id 时也只看 herdr，不按目录去猜日志，`rl agent list` 显示“log unavailable”。
+
+  非斜杠命令的提示用 `herdr agent prompt <目标> <文字> --wait --until working --until blocked --timeout 20000` 发送：herdr 看到 working 或 blocked 才算送达；Codex 会话的日志在发送之后出现新的 `task_started` 也算。确认不了的报告“delivery not confirmed”（附屏幕末尾；屏幕上像是 Codex 的 Hooks 面板时注明可能被面板挡住），不计数，在会话有动静之前不再输入；只有确定没送出去（对话框挡着、agent 不在）才在下一拍重发。斜杠命令照旧。提醒、重试、重启的次数分别记在 `Session.watch` 里，只在确认送达后加一；写入时在写事务里重新读出再合并。“已经告诉过协调者”的标记和那一拍的 NOTE 在同一个事务里写入。
+
+  每一拍的发现汇成一条来自 `watch` 的 NOTE 发给协调者。协调者自己的回合以暂时性错误结束、又空闲了一整拍时，按同样的规则重试；协调者空闲、又有消息一整拍没读时，提醒一次。所以协调者不需要自己轮询会话。监视程序的一拍和 `rl agent check` 用同一把锁（`research/state/watch.lock`），锁被占着时这一拍跳过并说明。监视程序的 tab 只打印发现了什么的那些拍。没有打开的会话时，监视程序自己退出。正常结束一个会话要用 `rl agent close`；用别的方式关掉的会话算作意外停止，会被重新启动。
 - **审查轮次。** 每轮最多两次审查（第一次加一次复查），是写死的常量，见第 5 节。
 
 ### 订阅额度
@@ -106,14 +113,14 @@ Claude Code 和 Codex 一般用订阅，有 5 小时和每周两个窗口。某�
 | `usage.switch_left_percent` | `10` | 某个窗口只剩这么多（百分比）或更少时，这个宿主算作额度低 |
 | `usage.coordinator_host_left_percent` | `20` | 协调者自己所在的宿主用这个阈值，因为协调者还要接着用它 |
 
-- **额度从哪里读。** `rl usage` 显示每个宿主的窗口、还剩多少、读数是多久以前的、阈值和它上面的会话。
-  - Codex 自己把窗口写进会话日志（`$CODEX_HOME/sessions/**/rollout-*.jsonl` 里的 `token_count` 事件）。CLI 读最后写入的那个日志里的最后一条。
+- **额度从哪里读。** `rl agent list` 在会话之后为每个宿主列一行：窗口、还剩多少、读数是什么时候的、阈值、是否额度低；没有打开的会话时也列出。
+  - Codex 自己把窗口写进会话日志（`$CODEX_HOME/sessions/**/rollout-*.jsonl` 里的 `token_count` 事件）。CLI 比较最后写入的 5 个日志各自的最后一条读数，取事件时间最新的那条（文件写得晚不等于读数新）。
   - Claude Code 只把额度交给状态栏命令。`rl agent open` 启动的 Claude 会话的状态栏运行 `rl usage statusline`：它把最新读数存进 `$SMOOTH_RESEARCH_HOME/usage/claude.json`，并显示模型和各窗口还剩多少。
   - 协调者用 Claude Code 时，`rl session start --role coordinator --host claude` 在项目的 `.claude/settings.local.json` 里加上同一个状态栏（第一次写时同时写 `.claude/.gitignore`）。用户自己已经设了状态栏（在 `$CLAUDE_CONFIG_DIR/settings.json`，默认 `~/.claude/settings.json`，或者项目的 `.claude/settings.json`、`.claude/settings.local.json`）时不动它，只给出提示。
-  - 读数只有这台机器上这个宿主最后一次调用那么新。重置时间已经过了的窗口，按没用过计算。pi 不报告窗口。
+  - 读数只有这台机器上这个宿主最后一次调用那么新。超过 15 分钟的读数算过期：照样显示，但不让宿主算作额度低；没有读数也一样。重置时间已经过了、之后又没有新读数的窗口，显示“reset …, no reading since”，不算额度低。pi 不报告窗口。
 - **额度低时。** 协调者不换自己的模型。
   - 新开的 researcher 和 reviewer 会话、`rl delegate`、`rl review run` 跳过额度低的宿主上的条目，用角色列表里的下一个。审查跳过的条目记在工单的 `calls` 里。`--entry` 指定的条目照常使用。
-  - 监视程序在两轮之间每 5 分钟看一次额度。额度低的宿主上的 researcher 收到通知：在安全的地方停下，在任务分支上提交，写交接说明，运行 `rl task handoff`，然后结束这一轮。reviewer 收到通知：不交答案，马上停下。每个窗口只通知一次（没送达时下一次再送）。协调者收到一条 NOTE。这些会话不会被提醒继续；它们的 agent 退出了，也不在这个宿主上重启。
+  - 监视程序每一拍看一次额度。额度低的宿主上的 researcher 收到通知：在安全的地方停下，在任务分支上提交，写交接说明，运行 `rl task handoff`，然后结束这一轮。reviewer 收到通知：不交答案，马上停下。每个窗口只通知一次（确定没送出去时下一拍再送）。协调者收到一条 NOTE。这些会话不会被提醒继续；它们的 agent 退出了，也不在这个宿主上重启。
   - 会话空闲以后（researcher 的 HANDOFF 已经到了），协调者运行 `rl agent switch <名字>`。它关掉这个会话但保留 worktree，在下一个不在额度低的宿主上的条目上开一个同名的新会话，带上同一个任务或工单；新会话从 brief 里读到交接说明。reviewer 从工单的候选条目里选。之后的复查（`--recheck-of`）交给替换后的同名会话。
   - advisor 不换模型，也不收通知：留下的额度给 advisor 用。
 - **Codex 不弹换模型的对话框。** 额度快用完时，Codex 会弹出 "Approaching rate limits" 对话框，问要不要换一个更便宜的模型。CLI 启动的 Codex 会话加了 `-c notice.hide_rate_limit_model_nudge=true`，不弹这个对话框，交接由 CLI 来做。协调者自己的 Codex 会话不受这个参数影响：在对话框里选 "Keep current model (never show again)"，或者在 `~/.codex/config.toml` 里写 `[notice]` 和 `hide_rate_limit_model_nudge = true`。
@@ -252,7 +259,7 @@ compute:
 - **超出建议轮数：** `rl advise prepare --user-approved "<用户的原话>"`，见第 1 节。
 - **审查轮次：** `rl review request ... --recheck-of RV-x` 是同一轮的第二次审查；第三次报 LIMIT，要开新一轮写 `--new-round "<原因>"`。`rl review approve RV-x --rationale ..` 由协调者批准还有中等以上问题的一轮。
 - **agent 会话：** `rl agent open [名字] --role researcher|reviewer|advisor [--task T-x | --ticket RV-x/AD-x] [--entry ..] [--no-worktree] [--base ..]`，以及 `assign`、`tell`、`reset --compact|--clear`、`close [--remove-worktree]`、`switch <名字> [--entry ..] [--now]`（换一个模型继续这个会话的工作，见第 1 节“订阅额度”；`--now` 连还在工作的会话也换）、`brief`、`list [--all]`、`dialog <名字>`（会话现在显示的对话框和选项）、`answer <名字> <选项编号或文字> --reason ..`（协调者回答对话框）。
-- **订阅额度：** `rl usage` 显示各宿主的窗口；`rl usage statusline` 是 Claude Code 的状态栏命令，从标准输入读状态栏的 JSON，任何输入都不会让它失败。
+- **订阅额度：** `rl agent list` 显示各宿主的窗口；`rl usage statusline` 是 Claude Code 的状态栏命令，从标准输入读状态栏的 JSON，任何输入都不会让它失败。不带参数的 `rl usage` 报错并指向 `rl agent list`。
 - **论文草稿：** `rl manuscript [--title ..]` 写或刷新草稿，`--title` 只用于新建的草稿，见第 1 节"论文草稿"。
 - **插件升级：** `rl upgrade` 显示项目的记录格式和插件 build、做过的升级、新版本读法不同的地方和可以自己调整的范围；`--note "<改了什么>"` 记下 agent 手工做的调整；`--move <旧> <新>` 移动旧布局里的文件或目录，并在同一个事务里改写记录里的路径。见第 6 节。
 - **`rl init [--python 3.13]`：** 记录由项目自己的 Python 环境生成，所以顺序是（与 research-tree 的 prepare + init 相同）：
@@ -262,7 +269,7 @@ compute:
 
   前两步在 `bin/rl` 启动器里用 shell 完成，不需要 Python。`--python` 低于 rl 要求的版本（3.13）时拒绝。uv 失败时 init 停下，不生成记录。之后把新项目提交一次（包括 `pyproject.toml` 和 `uv.lock`），`rl session start` 才有东西可推送。
 - **计算资源：** `rl compute [--commit <sha>]` 列出资源和本地检查；`rl compute steps [<资源>] [--attempt ATT] [--commit <sha>]` 给出同步、运行和取回结果的步骤；`rl compute sync [<资源>]` 推送当前分支并打印 clone 步骤（见第 1 节“开始时同步”）；`rl session start --no-sync` 跳过它；`rl run register ... --resource <资源>` 把资源记到 attempt 上。见第 1 节“计算资源”。
-- **监视程序：** `rl agent check` 立刻查看一轮；`rl agent watch --start` 在单独的 tab 里启动（已经在运行就不重复启动），`--stop` 停止并关掉它的 tab；`--every <分钟>` 改间隔，不写就用 `agents.watch_minutes`。不带 `--start` 或 `--stop` 时在当前终端前台运行。
+- **监视程序：** `rl agent list` 只查看，不动作（每个会话的 herdr 状态、类别、在等什么、多久没有进展、最后的错误、重试次数、下一步，以及各宿主的额度）；`rl agent check` 立刻走一拍（监视程序正在走一拍时跳过）；`rl agent watch --start` 在单独的 tab 里启动（已经在运行就不重复启动），`--stop` 停止并关掉它的 tab；`--every <分钟>` 改间隔，不写就用 `agents.watch_minutes`。不带 `--start` 或 `--stop` 时在当前终端前台运行。
 
 ## 5. 写死的常量（不能配置）
 
@@ -274,8 +281,11 @@ compute:
 | `NOTICE_CHARS` | 600 字符 | 发给 herdr 会话的一行通知里，消息正文最多保留多少字符；完整消息在 `rl inbox`（`herdr.py`） |
 | `MAX_RESTARTS` | 一小时 3 次 | 监视程序一小时内最多重启同一个会话几次，再退出就交给协调者（`watch.py`） |
 | `BUILD_TIMEOUT` | 300 秒 | `rl manuscript` 运行一次 LaTeX 编译命令的上限（`manuscript.py`） |
-| `MAX_REMINDERS` | 2 次 | 同一项任务，监视程序最多提醒几次；之后，或者提醒后会话毫无反应，就报告协调者（`watch.py`） |
-| `USAGE_MINUTES` | 5 分钟 | 监视程序在两轮之间看订阅额度的间隔；`agents.watch_minutes` 更短时按它（`watch.py`） |
+| `MAX_REMINDERS` | 2 次 | 同一项任务，监视程序最多提醒几次；之后就报告协调者（`watch.py`） |
+| `MAX_RETRIES` | 3 次 | 一串暂时性的回合错误最多重试几次，分别在下一拍、隔 2 拍、隔 4 拍（`RETRY_BEATS`，`watch.py`） |
+| `TOOL_STALLS` | 4 倍 | 一个工具调用挂起超过 `agents.stall_minutes` 的这么多倍时报告一次（`watch.py`） |
+| `SUBMIT_MS` | 20 秒 | 发送提示后等 herdr 看到 working 或 blocked 的上限（`herdr.py`） |
+| `STALE_MINUTES` | 15 分钟 | 比这更旧的额度读数算过期，不让宿主算作额度低（`usage.py`） |
 
 ## 6. 插件升级
 

@@ -251,6 +251,8 @@ def report(store: "Store", note: str | None = None) -> dict:
     warnings = project.warnings  # printed after the summary as warning: lines
     lines.append(f"configuration: {len(warnings)} warning(s) below: fix them in smooth-research.yaml" if warnings
                  else "configuration: read as written")
+    from .watch import config_hint
+    lines += [f"configuration: {hint}" for hint in [config_hint(store)] if hint]
     check = snapshot.doctor(store)
     problems = check["problems"] + check["record_problems"]
     lines += [f"records: {p}" for p in problems] or [f"records: {check['documents']} sealed object(s) verified"]
