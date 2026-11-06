@@ -1722,3 +1722,27 @@ pi-env-mcp 一侧（476e15d，按用户决定照搬上游 pi 的做法）：
   - 不接受 `-a`，所以 rl 去掉审批参数；
   - 重复的 `--sandbox` 会报错，所以 `agents.args` 写了沙箱时，用它代替 rl 的默认值；
   - 它不等 MCP 服务启动就开始第一轮，pi-env-mcp 的工具约 10 s 后才出现。`-c mcp_servers.<名字>.required=true` 让它先等这个服务就绪，第一次调用就能看到全部工具。
+
+### 21.24 herdr 里不用 headless 会话（2026-11-06）
+
+用户指出：标准流程里不需要 Claude 的 headless 会话。在 herdr 里，研究员、审查者和顾问都应该是 herdr 会话（`rl agent open`）；`rl delegate`、`rl review run`、`rl advise run` 是没有 herdr 时的做法。§21.23 的 B' 重测里，Codex 协调者在 herdr 里先用了 `rl delegate`，约一分钟后才改用 `rl agent open`。SKILL.md 和 host.md 都写了 herdr 里该怎么做，但有三处没能拦住它：
+
+- host.md 写明的命令是 Researchers 条目里的 `rl delegate T-x --background`；
+- `rl resume` 不说会话在 herdr 里；
+- `rl delegate` 不检查 `HERDR_ENV`。
+
+修改：
+
+- `rl delegate`、`rl review run`、`rl advise run` 在 herdr 里（`HERDR_ENV=1`）拒绝执行（INVALID），并给出该用的命令：
+  - 研究员：`rl agent open <--role 的值> --role researcher --task T-x`；
+  - 审查：协调者开一个 reviewer 会话，或把工单派给空闲的 reviewer；
+  - 建议：每个工单开一个 advisor 会话。
+- 确实要用 headless 时，加 `--headless`。
+- 后台 worker（`--background`、多个建议工单）继承了 `HERDR_ENV`，所以 rl 给它们的命令行加上 `--headless`。它们的调用方已经通过了检查。
+- rl 启动的 headless 会话也继承 `HERDR_ENV`，但不在 herdr 的 pane 里。adapters 给它们设 `SMOOTH_RESEARCH_HEADLESS=1`，`herdr.inside()` 因此不把它们当作在 herdr 里。用 `--headless` 委派出去的研究员，自己还能 `rl review run`。
+- `herdr.problem()` 不变：这些会话照样能经 herdr 给协调者发通知。
+- 两个 host.md 的 Researchers 条目直接写明"herdr 里总是 herdr 会话，不用 `rl delegate`"。Codex host.md 里作业结束后"再 delegate 一次"改为"按同一角色再启动研究员"。
+- team.md 写明这三个命令在 herdr 里的行为。research-review 的结论审查步骤补上 herdr 的做法（原来只写了 `rl review run`）。
+- configuration.md 同步更新。
+
+可选、未做：`rl resume` 在 herdr 里时提示研究员用 `rl agent open` 开。

@@ -9,8 +9,8 @@ import subprocess
 import pytest
 import yaml
 
-from smooth_research import (adapters, delegate, documents, literature, messages, research, reviews, runs, scope,
-                            tasks, view)
+from smooth_research import (adapters, delegate, documents, herdr, literature, messages, research, reviews, runs,
+                            scope, tasks, view)
 from smooth_research.util import RLError
 
 FAKE_CODEX = r"""#!{python}
@@ -905,6 +905,47 @@ def test_a_background_run_keeps_the_entry_it_was_given(project, fakes, tmp_path,
         worker = started[0][started[0].index("--project"):]  # the worker's rl arguments, without the interpreter
         assert worker[-2:] == ["--entry", "manual:chosen-model"]
         assert "to chosen-model yourself" in rl(*worker)[1]  # not to the configured reviewer or advisor
+
+
+def test_inside_herdr_the_headless_commands_refuse_unless_asked_for(project, fakes, tmp_path, monkeypatch, rl):
+    """Inside herdr a researcher, reviewer or advisor is a herdr session (rl agent open): rl delegate, review run
+    and advise run refuse there and name the command to use. --headless runs them anyway, and so do their background
+    workers and the headless sessions rl starts, which inherit HERDR_ENV but have no pane."""
+    import sys
+    from types import SimpleNamespace
+    code(tmp_path)
+    tasks.create_task(project, "implement", "implement", ["E-0001"], to_role="researcher")
+    rv = request(project)["id"]
+    ads = reviews.prepare_advice(project, "which route?")["ids"]
+    monkeypatch.setenv("HERDR_ENV", "1")
+    started = []
+    with monkeypatch.context() as m:
+        m.setattr(subprocess, "Popen", lambda cmd, **kw: started.append(cmd) or SimpleNamespace(pid=4242))
+        for args, instead in ((("delegate", "T-0001", "--background"),
+                               "`rl agent open researcher --role researcher --task T-0001`"),
+                              (("review", "run", rv), f"`rl agent open --role reviewer --ticket {rv}`"),
+                              (("advise", "run", *ads, "--background"),
+                               ", ".join(f"`rl agent open --role advisor --ticket {t}`" for t in ads))):
+            exit_code, _, err = rl(*args)
+            assert exit_code == 1 and instead in err and "add --headless" in err
+        assert started == []
+        with project.read() as tx:
+            assert tx.all("Session") == [] and not any(t.get("calls") for t in tx.all("Ticket"))
+        for args in (("delegate", "T-0001"), ("review", "run", rv), ("advise", "run", *ads)):
+            assert rl(*args, "--background", "--headless")[0] == 0
+    assert len(started) == 2 + len(ads) and all("--headless" in cmd for cmd in started)
+    monkeypatch.setenv("FAKE_ANSWER", "claimed and delivered")
+    delegated, reviewed = (cmd[cmd.index("--project"):] for cmd in started[:2])
+    assert rl(*delegated)[0] == 0  # the workers, which still see HERDR_ENV, run
+    monkeypatch.delenv("FAKE_ANSWER")
+    assert rl(*reviewed)[0] == 0
+    with project.read() as tx:
+        assert len(tx.all("Session")) == 1 and tx.require(rv)["status"] == "answered"
+    shown = adapters._run([sys.executable, "-c", f"import os; print(os.environ.get('{herdr.ENV_HEADLESS}'))"], "",
+                          tmp_path, 30)
+    assert shown.stdout.strip() == "1"  # a session rl starts is headless, in herdr or not
+    monkeypatch.setenv(herdr.ENV_HEADLESS, "1")
+    assert not herdr.inside()  # so a delegated researcher can ask for its review with rl review run
 
 
 def test_a_request_whose_package_cannot_be_sealed_leaves_no_ticket(project, fakes, tmp_path, monkeypatch):

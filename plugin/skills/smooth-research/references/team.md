@@ -4,6 +4,8 @@ When the coordinator runs inside herdr (`HERDR_ENV=1`), researchers, reviewers a
 in their own tabs of the coordinator's herdr workspace. The coordinator opens them, gives each one assignment at a time, and resets or closes
 them afterwards. Without herdr, the headless forms in host.md do the same work (a native subagent or
 `{{rl}} delegate`, `{{rl}} review run`, `{{rl}} advise run`); review rounds and advice rounds count the same way.
+Inside herdr those three commands refuse and name the `{{rl}} agent open` command to use instead; `--headless`
+runs one anyway.
 
 ## Models
 

@@ -11,14 +11,15 @@ import json
 import sys
 from pathlib import Path
 
-from . import (adapters, agents, compute, context, delegate, explain, hooks, labels, literature, manuscript,
-               messages, research, reviews, runs, snapshot, tasks, upgrade, usage, view, watch)
+from . import (adapters, agents, compute, context, delegate, explain, herdr, hooks, labels, literature,
+               manuscript, messages, research, reviews, runs, snapshot, tasks, upgrade, usage, view, watch)
 from .project import advice_limit, find_project, model_entries
 from .schema import ENUMS, LINKABLE, PAPER_ASSESSMENTS
 from .store import Store
 from .util import LABEL_RE, RLError, load_json_arg, load_json_records, now_utc, split_list
 
 CONFLICT_CODES = {"CONFLICT", "STALE_REVISION"}
+HEADLESS_HELP = "run it in a headless session even inside herdr, where the role is a herdr session (rl agent open)"
 
 
 # The arguments that name hypotheses or experiments (among other records): a label in them (H2.1, EH2.1/3, also in
@@ -401,6 +402,9 @@ def cmd_review(args):
     if a == "resolve":
         return reviews.resolve(store, args.id, args.by, args.reason)
     if a == "run":
+        _outside_herdr(args, "review run", f"a reviewer session answers {args.id}: the coordinator opens one "
+                                           f"(`rl agent open --role reviewer --ticket {args.id}{_entry(args)}`) or "
+                                           f"assigns an idle one (`rl agent assign <reviewer> --ticket {args.id}`)")
         if args.background:
             return reviews.start_background(store, args.id, args.timeout, args.entry)
         return reviews.run_ticket(store, args.id, args.timeout, args.entry)
@@ -418,6 +422,8 @@ def cmd_advise(args):
     if a == "answer":
         return reviews.answer_live(store, args.id, args.answer, args.session)
     if a == "run":
+        _outside_herdr(args, "advise run", "each advice ticket gets its own advisor session: " + ", ".join(
+            f"`rl agent open --role advisor --ticket {t}{_entry(args)}`" for t in args.id))
         if len(args.id) > 1:
             if args.entry:
                 raise RLError("INVALID", "--entry overrides the model of one ticket; name one ticket")
@@ -449,7 +455,21 @@ def cmd_paper(args):
     return {"papers": papers, "summary": "\n".join(research.brief(p) for p in papers) or "no papers"}
 
 
+def _entry(args) -> str:
+    return f" --entry {args.entry}" if args.entry else ""
+
+
+def _outside_herdr(args, command: str, instead: str) -> None:
+    """rl delegate, review run and advise run start headless sessions, the forms without herdr: inside herdr the
+    role is a herdr session (team.md), and they run only when asked for with --headless."""
+    if not args.headless and herdr.inside():
+        raise RLError("INVALID", f"inside herdr {instead} (team.md); `rl {command}` would use a headless session "
+                                 "instead. To do that anyway, add --headless.")
+
+
 def cmd_delegate(args):
+    _outside_herdr(args, "delegate", f"a researcher works in a herdr session: `rl agent open {args.role} --role "
+                                     f"researcher --task {args.task}{_entry(args)}`")
     store = _store(args)
     if args.background:
         return delegate.start_background(store, args.task, args.entry, args.role, args.timeout)
@@ -932,6 +952,7 @@ def build_parser() -> argparse.ArgumentParser:
         s.add_argument("--background", action="store_true")
         s.add_argument("--timeout", type=int, default=1800)
         s.add_argument("--entry", help="override: one model entry <claude|codex|pi>:<model>[@effort]")
+        s.add_argument("--headless", action="store_true", help=HEADLESS_HELP)
         s = ss.add_parser("answer", help="the answer of a reviewer or advisor session opened with rl agent open")
         s.add_argument("id")
         s.add_argument("--answer", required=True, help="file with the answer, ending with its JSON block")
@@ -1040,6 +1061,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--role", default="researcher")
     sp.add_argument("--timeout", type=int, default=3600)
     sp.add_argument("--background", action="store_true")
+    sp.add_argument("--headless", action="store_true", help=HEADLESS_HELP)
 
     sp = add("hook", cmd_hook, "host hook handler (reads the hook event JSON on stdin)")
     sp.add_argument("event", choices=["session-start"])

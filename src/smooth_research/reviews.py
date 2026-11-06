@@ -220,8 +220,9 @@ def _worker(ticket: dict) -> int | None:
 
 def _spawn(store: Store, ticket_id: str, timeout: int, entry: str | None = None) -> tuple[subprocess.Popen, Path]:
     log = store.project.dir("calls") / f"{ticket_id}.worker.log"
+    # --headless: the caller passed the herdr check (cli._outside_herdr), which the worker would meet again
     cmd = rl_process("--project", str(store.project.root), "review" if ticket_id.startswith("RV") else "advise", "run",
-                     ticket_id, "--timeout", str(timeout), *(["--entry", entry] if entry else []))
+                     ticket_id, "--timeout", str(timeout), "--headless", *(["--entry", entry] if entry else []))
     with open(log, "ab") as out:  # the worker claims the ticket itself (run_ticket)
         proc = subprocess.Popen(cmd, stdout=out, stderr=out, stdin=subprocess.DEVNULL, start_new_session=True,
                                 cwd=store.project.root)

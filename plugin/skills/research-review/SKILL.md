@@ -85,8 +85,10 @@ smooth-research skill: {{rl_short}}
    adopt. The package is built from the records: the hypothesis, each linked evidence with its attempts
    and results, the contracts and per-arm numbers, code reviews, earlier decisions and the competing open
    hypotheses. Unchanged records and wording reuse an earlier answer.
-2. `{{rl}} review run RV-x` (or `--background`), then read `research/reviews/RV-x.md`: verdict and findings
-   (overclaim, wrong_level, out_of_scope, unruled_alternative, data_mismatch).
+2. In herdr, open a reviewer session for it (`{{rl}} agent open --role reviewer --ticket RV-x`, or `{{rl}} agent
+   assign` an idle one); otherwise `{{rl}} review run RV-x` (or `--background`). Then read
+   `research/reviews/RV-x.md`: verdict and findings (overclaim, wrong_level, out_of_scope, unruled_alternative,
+   data_mismatch).
 3. Act on it: weaken the wording, run the missing control, or keep the conclusion with a recorded reason.
    Then `{{rl}} decide ... --based-on EV-x,RV-x`. A finding you dispute stays in the record; ask for one
    re-check (`--recheck-of RV-x`) if it matters. When medium or higher findings remain after the re-check,

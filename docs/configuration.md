@@ -50,7 +50,7 @@
 - **`pi`**：用 `pi -p --mode json` 调用。模型写成 `<provider>/<模型>`，比如 `pi:openai/gpt-6-astra@high`。审查和建议只开放 read 工具。
 - **`manual`**：不自动调用。CLI 给出请求包的路径，由人提交给模型（代码审查要连同包里列出的文件一起提交），再用 `rl review import` 或 `rl advise import` 导入回答。
 - **`@effort`**：传给 Claude 的 `--effort`、Codex 的 `model_reasoning_effort`，或 pi 的 `--thinking`。
-- **headless 和 herdr 会话。** 上面说的 `claude -p`、`codex exec`、`pi -p` 是 headless 调用（`rl delegate`、`rl review run`、`rl advise run`）。协调者在 herdr 里时，`rl agent open` 把同一个条目开成交互会话，放在单独的 tab 里，见下面的“agent 会话”。`rl delegate` 的可写会话也加上 `agents.args.<宿主>`，这样它和同一角色的 herdr 会话有同样的 MCP 服务和权限方式；审查和建议是独立的只读调用，不加。
+- **headless 和 herdr 会话。** 上面说的 `claude -p`、`codex exec`、`pi -p` 是 headless 调用（`rl delegate`、`rl review run`、`rl advise run`）。协调者在 herdr 里时，`rl agent open` 把同一个条目开成交互会话，放在单独的 tab 里，见下面的“agent 会话”。在 herdr 里（`HERDR_ENV=1`），这三个命令拒绝执行，并给出该用的 `rl agent open` 命令；确实要用 headless 时加 `--headless`。rl 启动的 headless 会话不受这个限制：它们继承了 `HERDR_ENV`，但不在 herdr 的 pane 里，rl 给它们设 `SMOOTH_RESEARCH_HEADLESS=1`。所以从 herdr 里用 `--headless` 委派出去的研究员，自己还能用 `rl review run` 请求审查。`rl delegate` 的可写会话也加上 `agents.args.<宿主>`，这样它和同一角色的 herdr 会话有同样的 MCP 服务和权限方式；审查和建议是独立的只读调用，不加。
 - **模型家族**：先按模型名的最后一段判断：`claude`、`opus`、`sonnet`、`haiku`、`fable` 开头的属于 anthropic，`gpt`、`o1`–`o9`、`codex`、`chatgpt` 开头的属于 openai。deepseek、google（gemini、gemma）、alibaba（qwen、qwq）、moonshot（kimi）、zhipu（glm）、xai（grok）、mistral、meta（llama）也认得。名字判断不了时看 pi 的 provider 前缀（如 `deepseek/`），再不行按入口推断（`claude` 是 anthropic，`codex` 是 openai）。审查者和作者的模型名相同时，不论家族表认不认得，都算同一家族。从 `rl agent open` 开的会话发起审查（环境里有 `SMOOTH_RESEARCH_SESSION`）时，如果 `--author-model` 里没有 rl 为这个会话记录的模型（观测到的，或者请求的），rl 把它补进作者模型并在输出里说明：作者是谁以记录为准，不只听会话自己说；多一个作者只会让关系判断更严，不会更松。
 
 | 键 | 默认值 | 怎样使用 |
@@ -259,7 +259,8 @@ compute:
 | `SMOOTH_RESEARCH_BUILD` | `bin/rl` 启动器设成插件的 build id（源码里运行时没有，按 `dev` 计算）。build id 的形式是 `<源码>-<构建>`：前一段是共享源码（未填入宿主占位符时）的摘要，同一份源码构建出的 Claude 版和 Codex 版这一段相同；后一段是这个宿主构建的全部文件的摘要。项目记下最后一次 `rl upgrade` 时的 build；前一段不同时，`rl status`、`rl resume` 和会话开始的提示会说插件变了，要运行 `rl upgrade`。所以 Codex 协调者和 Claude 研究员共用一个项目时，不会因为两边的构建不同而互相提示（没有 `-` 的旧 build id 整个比较）。一般不用手动设 |
 | `SMOOTH_RESEARCH_CHECKOUT` | `rl agent open` 给 researcher 会话设成它的 worktree。代码路径、代码审查的指纹和 `rl run register` 的代码检查都按这个 checkout 读；研究记录仍写进 `SMOOTH_RESEARCH_PROJECT` 指向的项目。不设时从当前目录判断：在项目的 linked worktree 里就用这个 worktree |
 | `SMOOTH_RESEARCH_SESSION`、`SMOOTH_RESEARCH_ROLE` | `rl agent open` 给每个会话设成它的会话记录（S-x）和会话名（如 `reviewer-1`）。设了 `SMOOTH_RESEARCH_ROLE` 的会话不能批准审查轮次（`rl review approve`），发消息时默认以这个名字发送 |
-| `HERDR_ENV`、`HERDR_PANE_ID` | herdr 设置，CLI 只读。`HERDR_ENV=1` 时才能开 agent 会话、发通知；协调者 `rl session start` 时记下 `HERDR_PANE_ID`，通知发到这个 pane |
+| `SMOOTH_RESEARCH_HEADLESS` | rl 启动的 headless 会话（`claude -p`、`codex exec`、`pi -p`）里设成 `1`。这些会话继承了 `HERDR_ENV`，但不在 herdr 的 pane 里，所以 `rl delegate`、`rl review run`、`rl advise run` 在其中照常执行。一般不用手动设 |
+| `HERDR_ENV`、`HERDR_PANE_ID` | herdr 设置，CLI 只读。`HERDR_ENV=1` 时才能开 agent 会话、发通知，`rl delegate`、`rl review run`、`rl advise run` 拒绝执行，除非加 `--headless`（见第 1 节）；协调者 `rl session start` 时记下 `HERDR_PANE_ID`，通知发到这个 pane |
 | `CODEX_HOME` | 默认 `~/.codex`。CLI 从其中的 `sessions/` 读 Codex 实际使用的模型和订阅额度。如果其中的 `config.toml` 设了 `sandbox_mode = "danger-full-access"`，`rl delegate` 启动的可写 Codex 会话也用这个模式，否则用 `workspace-write` |
 | `CLAUDE_CONFIG_DIR` | 默认 `~/.claude`。`rl session start --role coordinator --host claude` 看其中的 `settings.json` 里有没有用户自己的状态栏 |
 
@@ -272,6 +273,7 @@ compute:
   - `--entry`：`rl review run`、`rl advise run`（只能给一个工单）、`rl delegate` 和 `rl agent open` 只用这一个模型；
   - `--timeout`：模型调用超时，审查和建议默认 1800 秒，`rl delegate` 默认 3600 秒；`rl agent open` 等会话启动，默认 90 秒；
   - `--background`：在后台进程运行。
+  - `--headless`：`rl delegate`、`rl review run`、`rl advise run` 在 herdr 里也用 headless 会话（默认拒绝，见第 1 节“headless 和 herdr 会话”）。
 - **一轮建议一起运行。** `rl advise run AD-x AD-y ...` 给每个工单开一个进程，同时运行。
 - **超出建议轮数：** `rl advise prepare --user-approved "<用户的原话>"`，见第 1 节。
 - **审查轮次：** `rl review request ... --recheck-of RV-x` 是同一轮的第二次审查；第三次报 LIMIT，要开新一轮写 `--new-round "<原因>"`。`rl review approve RV-x --rationale ..` 由协调者批准还有中等以上问题的一轮：接受剩下的问题，这次审查从此算通过，它看过的文件都算审过。

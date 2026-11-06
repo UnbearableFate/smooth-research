@@ -177,8 +177,10 @@ def start_background(store: Store, task_id: str, entry_text: str | None, role: s
     if entry_text:
         adapters.Entry.parse(entry_text)
     log = store.project.dir("calls") / f"{task_id}.delegate.worker.log"
+    # the caller passed the herdr check (cli._outside_herdr), which the worker would meet again with HERDR_ENV
     cmd = rl_process("--project", str(store.project.root), "delegate", task_id,
-                     *(["--entry", entry_text] if entry_text else []), "--role", role, "--timeout", str(timeout))
+                     *(["--entry", entry_text] if entry_text else []), "--role", role, "--timeout", str(timeout),
+                     "--headless")
     with open(log, "ab") as out:
         proc = subprocess.Popen(cmd, stdout=out, stderr=out, stdin=subprocess.DEVNULL, start_new_session=True,
                                 cwd=store.project.root, env={**os.environ, "SMOOTH_RESEARCH_RL": rl_command()})

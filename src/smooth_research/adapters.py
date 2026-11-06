@@ -19,6 +19,7 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+from .herdr import ENV_HEADLESS
 from .util import RLError
 
 ENTRY_RE = re.compile(r"^(?P<entry>claude|codex|pi|manual):(?P<model>[^@\s]+)(?:@(?P<effort>[a-z]+))?$")
@@ -100,6 +101,7 @@ def available(entry: Entry) -> str | None:
 
 def _run(cmd: list[str], prompt: str, cwd: Path, timeout: int) -> subprocess.CompletedProcess:
     env = {k: v for k, v in os.environ.items() if k not in ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT")}
+    env[ENV_HEADLESS] = "1"  # no herdr pane, even when started from one (herdr.inside)
     try:
         return subprocess.run(cmd, input=prompt, cwd=cwd, capture_output=True, text=True, timeout=timeout, env=env)
     except subprocess.TimeoutExpired:

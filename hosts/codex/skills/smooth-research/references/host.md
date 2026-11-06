@@ -15,7 +15,9 @@ directories above the smooth-research SKILL.md). Write the absolute path in each
   other dialogs (hooks to review, an approval) and the sessions' questions are yours to decide (`rl agent
   dialog`, `rl agent answer`); only what only the user can decide goes to the user. A watcher tab restarts
   sessions that stopped unexpectedly (team.md). The bullets below are the forms without herdr.
-- Researchers: for each implementation or run task, use a Codex subagent if they are enabled, or
+- Researchers: inside herdr, a researcher is always a herdr session (`rl agent open researcher-1 --role
+  researcher --task T-x`), never `rl delegate`, which refuses there unless given `--headless`. Without herdr:
+  for each implementation or run task, use a Codex subagent if they are enabled, or
   `rl delegate T-x --background` for an independent session with the first available entry of
   models.researcher in `smooth-research.yaml` (`--entry codex:<model>@high` or `--entry claude:<model>` picks
   one); its thread id and model are recorded. It gets that host's `agents.args`, so it has the MCP servers a
@@ -37,7 +39,7 @@ directories above the smooth-research SKILL.md). Write the absolute path in each
   choose a delivery mechanism that can reach the coordinator's session (the work pack names its thread id and,
   in herdr, its herdr target: use exactly that, not a role name). Start the listener/daemon it requires; a
   researcher then ends with WAIT. Check that the target it reports is you (`rl resume` shows yours).
-  When the notice arrives, inspect completion and delegate again with the same role. With
+  When the notice arrives, inspect completion and start the researcher again with the same role. With
   `compute.coordinator: login`, all workloads, including short checks, use the executor, never local nohup.
 - Context: at a natural task boundary with a heavy context, write a handoff note in `research/tasks/`, end the
   session record (`rl session end S-x`) and continue in a new session that starts from `rl resume`.

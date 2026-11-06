@@ -13,13 +13,15 @@ the absolute path from SKILL.md.
   folder it opened the session in. Other dialogs and the sessions' questions are yours to decide (`rl agent
   dialog`, `rl agent answer`); only what only the user can decide goes to the user. A watcher tab restarts
   sessions that stopped unexpectedly (team.md). The bullets below are the forms without herdr.
-- Researchers: for each implementation or run task, start the native subagent `smooth-research:researcher`
+- Researchers: inside herdr, a researcher is always a herdr session (`rl agent open researcher-1 --role
+  researcher --task T-x`), never `rl delegate`, which refuses there unless given `--headless`. Without herdr:
+  for each implementation or run task, start the native subagent `smooth-research:researcher`
   (Agent tool) with the task id and a role name such as `researcher-1`. Give a short brief; it reads its own
   work pack and has your tools, including the configured transport and job MCP servers. When it reports
   back, read `rl inbox --role coordinator`, check the outputs and records, then `rl task accept` or
   `rl task reopen` with what to change. Start several at once only for tasks that can proceed
   independently; do not split work that needs constant coordination.
-- Cross-session work (another model, or long isolated work): `rl delegate T-x --background` starts an
+- Cross-session work without herdr (another model, or long isolated work): `rl delegate T-x --background` starts an
   independent session with the work pack, using the first available entry of models.researcher in
   `smooth-research.yaml` (`--entry codex:<model>@high` picks one); its session id and model are recorded.
   It gets that host's `agents.args`, so it has the MCP servers a herdr session of the role has.

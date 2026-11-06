@@ -14,12 +14,19 @@ import subprocess
 from .util import RLError
 
 ENV_SESSION, ENV_ROLE = "SMOOTH_RESEARCH_SESSION", "SMOOTH_RESEARCH_ROLE"
+ENV_HEADLESS = "SMOOTH_RESEARCH_HEADLESS"  # set in the headless sessions rl starts (adapters)
 SUBMIT_MS = 20_000  # how long a prompt waits for the agent to show it took it
 
 
 def caller_role() -> str | None:
     """The session name of the caller when it runs in a session that `rl agent open` started."""
     return os.environ.get(ENV_ROLE) or None
+
+
+def inside() -> bool:
+    """Whether the caller runs in a herdr pane. A headless session that rl started from one inherits HERDR_ENV but
+    has no pane of its own."""
+    return os.environ.get("HERDR_ENV") == "1" and not os.environ.get(ENV_HEADLESS)
 
 
 def problem() -> str | None:
