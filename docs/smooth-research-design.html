@@ -142,7 +142,7 @@
   .rec { fill: var(--text); font: 600 14px var(--font-mono); text-anchor: middle; }
   .note { fill: var(--text-dim); font: 500 14px var(--font-mono); text-anchor: middle; }
 
-  /* ledger replay (Fig. 9) */
+  /* ledger replay (Fig. 12) */
   .lg text { font: 500 14px var(--font-mono); fill: var(--text); dominant-baseline: central; }
   .lg .num, .lg .hdr { fill: var(--text-dim); }
   .lg .hdr { font-weight: 600; }
@@ -169,7 +169,7 @@
   .ev { fill: var(--accent); }
   .ev-d { fill: var(--surface); stroke: var(--text-dim); stroke-width: 1.5; }
 
-  /* roles and the task protocol (Fig. 10, Fig. 11) */
+  /* roles and the task protocol (Fig. 14, Fig. 16) */
   .ve-n.ro .sh { stroke-dasharray: 6 4; }
   .lane-s { fill: var(--text-dim); font: 500 13px var(--font-mono); }
   .st rect { fill: url(#ve-node); stroke: var(--border-bright); stroke-width: 1.5; }
@@ -184,7 +184,7 @@
   .ve-key .dash { stroke-dasharray: 6 5; }
   .ve-key .bx { fill: var(--surface); stroke: var(--border-bright); stroke-width: 1.5; }
 
-  /* strip plot (Fig. 20) */
+  /* strip plot (Fig. 29) */
   .gridv { stroke: var(--border); stroke-width: 1; }
   .dot { fill: var(--text-dim); stroke: var(--bg); stroke-width: 1.5; }
   .dot.hot { fill: var(--accent); }
@@ -193,7 +193,7 @@
   .row-t { fill: var(--text); font: 500 14px var(--font-mono); dominant-baseline: central; }
   .lbl { fill: var(--text-dim); font: 500 14px var(--font-mono); }
 
-  /* bar charts (Fig. 24) */
+  /* bar charts (Fig. 46) */
   .bars text { fill: var(--text-dim); font: 500 14px var(--font-mono); dominant-baseline: central; }
   .bars .lab { text-anchor: end; fill: var(--text); }
   .bars .hd2 { font: 600 13px var(--font-mono); }
@@ -324,6 +324,52 @@
   .sources { border-top: 1px solid var(--border); padding-top: var(--s-4); display: grid; gap: var(--s-2); }
   .sources ul { padding-left: 1.1em; display: grid; gap: var(--s-1); color: var(--text-dim); }
 
+  /* label tree */
+  .tree .lb { fill: var(--text); font: 600 16px var(--font-mono); dominant-baseline: central; }
+  .tree .id { fill: var(--text-dim); font: 500 14px var(--font-mono); dominant-baseline: central; }
+  .tree .an { fill: var(--text-dim); font: 500 15px var(--font-body); dominant-baseline: central; }
+  .tree .an.key { fill: var(--text); }
+  .tree .br { fill: none; stroke: var(--border-bright); stroke-width: 1.5; }
+  .tree .gh { fill: var(--surface); stroke: var(--text-dim); stroke-width: 1.5; }
+  .tree .gh.is-key { fill: var(--accent); stroke: var(--accent); }
+  .tree .hdr, .tm .hdr { fill: var(--text-dim); font: 600 13px var(--font-mono); letter-spacing: .06em; }
+  .ve-n text.s { font: 500 15px var(--font-body); }
+
+  /* watcher ladder */
+  .lad .t { fill: var(--text); font: 600 16px var(--font-body); dominant-baseline: central; }
+  .lad .c { fill: var(--text-dim); font: 500 14px var(--font-body); dominant-baseline: central; }
+  .lad .a { fill: var(--text); font: 500 15px var(--font-body); dominant-baseline: central; }
+  .lad .a.dim { fill: var(--text-dim); font-size: 14px; }
+  .lad .sq { fill: var(--text-dim); }
+  .lad .bt { fill: var(--text-dim); font: 500 13px var(--font-mono); text-anchor: middle; }
+  .lad .bt.on { fill: var(--accent); font-weight: 600; }
+
+  /* thresholds and time axis */
+  .trk { fill: none; stroke: var(--border-bright); stroke-width: 1; }
+  .zone { fill: color-mix(in srgb, var(--risk) 16%, transparent); stroke: var(--risk); stroke-width: 1; stroke-dasharray: 4 3; }
+  .rd { fill: var(--accent); stroke: var(--bg); stroke-width: 1.5; }
+  .rd.old { fill: var(--surface); stroke: var(--text-dim); stroke-width: 1.75; stroke-dasharray: 3 2; }
+  .tm .c { fill: var(--surface); stroke: var(--accent); stroke-width: 2.25; }
+  .tm .o { fill: var(--surface); stroke: var(--text-dim); stroke-width: 1.75; }
+  .tm .f { fill: var(--text-dim); }
+  .tm text { fill: var(--text); font: 500 14px var(--font-mono); dominant-baseline: central; }
+  .tm text.d { fill: var(--text-dim); }
+  .big { fill: var(--text); font: 600 28px var(--font-mono); text-anchor: middle; dominant-baseline: central; }
+  .big.dim { fill: var(--text-dim); }
+
+  /* cases, code and file maps */
+  .case[data-st=info] { --st: var(--info); }
+  .case pre { margin-top: var(--s-1); }
+  pre { font: 500 var(--t-small)/1.6 var(--font-mono); color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-1); padding: var(--s-3) var(--s-4); overflow-x: auto; margin: 0; font-variant-ligatures: none; }
+  .mrg { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s-1); margin: 0; }
+  .mrg dt { font: 500 var(--t-label) var(--font-mono); color: var(--text-dim); }
+  .mrg dd { margin: 0 0 var(--s-2); min-width: 0; }
+  .files { list-style: none; padding: 0; display: grid; gap: var(--s-3); }
+  .files li > span { display: block; margin-top: 2px; color: var(--text-dim); }
+  .files .chip { margin-left: var(--s-2); vertical-align: .1em; }
+  td code { overflow-wrap: anywhere; }
+  .t-keys td:nth-child(2) { width: 15.5rem; }
+
   /* entrance: blocks rise in once; bars grow as their block arrives */
   .js-motion main > * { transition: opacity var(--slow) var(--ease), transform var(--slow) var(--ease); }
   .js-motion main > :not(.in) { opacity: 0; transform: translateY(1rem); }
@@ -363,8 +409,10 @@
     <li><a href="#graph">图模型</a></li>
     <li><a href="#runs">运行记录</a></li>
     <li><a href="#team">团队与审查</a></li>
-    <li><a href="#miyabi">Miyabi 分工</a></li>
+    <li><a href="#watch">会话监视</a></li>
+    <li><a href="#compute">计算资源</a></li>
     <li><a href="#e2e">端到端结果</a></li>
+    <li><a href="#config">项目配置</a></li>
     <li><a href="#build">实现</a></li>
     <li><a href="#sources">来源</a></li>
   </ol>
@@ -375,13 +423,13 @@
     <p class="eyebrow"><span class="nb">smooth-research</span> · 设计总览</p>
     <h1>插件只记录，不执行</h1>
     <p class="lead">它把研究计划变成可检验的假说，用成本逐级增加的实验积累证据，把每次运行的事实<span class="ve-ref" data-ref="rec" tabindex="0">登记</span>进 <span class="ve-ref" data-ref="db" tabindex="0">LatticeDB</span>。<b>启动、轮询和取消实验，都由 agent 用自己的<span class="ve-ref" data-ref="tools" tabindex="0">执行工具</span>完成。</b></p>
-    <p class="meta">v0.1.0 · 设计文档 v0.2 · 实施记录 v0.3（§21）· 68 项测试 · <span class="nb">2026-10-31</span></p>
+    <p class="meta">v0.1.0 · 记录格式 4 · 设计文档 v0.2 · 实施记录 §21.1–§21.24 · 248 项测试 · <span class="nb">2026-11-06</span></p>
   </header>
 
   <!-- Fig. 1: one run through the system, as a replay. Everything is drawn from the start ("0"); each step lights its edges. -->
   <figure class="ve-steps">
     <div class="frame">
-      <svg class="ve-svg" viewBox="0 0 1000 470" role="img" aria-label="研究计划交给研究 agent。agent 用 rl CLI 登记 RunSpec，用执行工具（shell、pi-env-mcp、miyabi-mcp）在本机或 Miyabi PBS 上运行；工具交回状态、工件和用量，agent 再用 rl 登记。rl 写入 LatticeDB 并封存文档，提供恢复包，并把审查包和咨询包交给配置里的审查者和顾问。rl 到执行工具之间没有控制通道：从不启动、轮询或取消。">
+      <svg class="ve-svg" viewBox="0 0 1000 470" role="img" aria-label="研究计划交给研究 agent。agent 用 rl CLI 登记 RunSpec，用执行工具在本机运行，或经 pi-env-mcp 由主机上的 miyabi-mcp 提交到 Miyabi PBS；工具交回状态、工件和用量，agent 再用 rl 登记。rl 写入 LatticeDB 并封存文档，提供恢复包，并把审查包和咨询包交给配置里的审查者和顾问。rl 到执行工具之间没有控制通道：从不启动、轮询或取消。">
         <rect class="ve-bd" x="20" y="166" width="340" height="290" rx="4"/>
         <text class="ve-bd-t" x="34" y="189">插件 · SMOOTH-RESEARCH</text>
         <rect class="ve-bd" x="640" y="166" width="340" height="290" rx="4"/>
@@ -426,12 +474,12 @@
         <circle class="ve-tok" data-s="5" r="5" style="offset-path: path('M315 292V316H500V338'); --d: 300ms"/>
 
         <g class="ve-n" data-s="0 1" transform="translate(40 30)"><path class="sh" d="M0 0H150L170 20V84H0Z"/><path class="gl" d="M150 0V20H170"/><text x="85" y="34">研究计划</text><text class="sub" x="85" y="60">用户 + GPT</text></g>
-        <g class="ve-n" data-s="0" transform="translate(400 30)"><rect class="sh" width="200" height="96" rx="4"/><text x="100" y="38">研究 agent</text><text class="sub" x="100" y="66">Claude · Codex</text></g>
+        <g class="ve-n" data-s="0" transform="translate(400 30)"><rect class="sh" width="200" height="96" rx="4"/><text x="100" y="38">研究 agent</text><text class="sub" x="100" y="66">Claude Code · Codex · pi</text></g>
         <g class="ve-n is-key" data-s="0 1 4 5" data-ref="rec" transform="translate(50 200)"><rect class="sh" width="280" height="92" rx="4"/><text x="140" y="36">rl CLI</text><text class="sub" x="140" y="64">记录核心 · 3 个 skill</text></g>
         <g class="ve-n" data-s="0 4" data-ref="db" transform="translate(50 340)"><path class="sh" d="M0 10V80A65 10 0 0 0 130 80V10"/><ellipse class="sh lid" cx="65" cy="10" rx="65" ry="10"/><text x="65" y="48">LatticeDB</text><text class="sub" x="65" y="72">0.15.0</text></g>
         <g class="ve-n" data-s="0 4 5" transform="translate(200 340)"><path class="sh" d="M0 0H112L130 18V90H0Z"/><path class="gl" d="M112 0V18H130"/><text x="65" y="40">封存文档</text><text class="sub" x="65" y="66">DOC@rev</text></g>
         <g class="ve-n" data-s="0 5" transform="translate(410 340)"><rect class="sh" width="180" height="90" rx="4"/><text x="90" y="36">审查 · 顾问</text><text class="sub" x="90" y="62">按配置选模型</text></g>
-        <g class="ve-n" data-s="0 2 3" data-ref="tools" transform="translate(670 200)"><rect class="sh" width="280" height="92" rx="4"/><text x="140" y="36">执行工具</text><text class="sub" x="140" y="64">shell · pi-env-mcp · miyabi-mcp</text></g>
+        <g class="ve-n" data-s="0 2 3" data-ref="tools" transform="translate(670 200)"><rect class="sh" width="280" height="92" rx="4"/><text x="140" y="36">执行工具</text><text class="sub" x="140" y="64">shell · pi-env-mcp → miyabi-mcp</text></g>
         <g class="ve-n" data-s="0 2 3" transform="translate(670 340)"><rect class="sh" width="280" height="90" rx="4"/><text x="140" y="36">计算环境</text><text class="sub" x="140" y="62">本机 · Miyabi PBS</text></g>
 
         <g class="ve-co q" data-s="0 1" transform="translate(418 176)"><circle r="11"/><text>1</text></g>
@@ -444,7 +492,7 @@
     <div class="ve-player">
       <ol class="ve-cap">
         <li data-n="1/6">计划给出方向。agent 先用 <code>rl run register</code> 登记不可变的 RunSpec，得到 RUN 与 ATT 编号。</li>
-        <li data-n="2/6">agent 用自己的工具运行：本机 shell，或经 <span class="nb">miyabi-mcp</span> 提交 PBS 作业。</li>
+        <li data-n="2/6">agent 用自己的工具运行：本机 shell，或经 <span class="nb">pi-env-mcp</span> 连到主机，由主机上的 <span class="nb">miyabi-mcp</span> 提交 PBS 作业。</li>
         <li data-n="3/6">工具把状态、工件和用量交回 agent。插件从不启动、轮询或取消作业。</li>
         <li data-n="4/6">agent 用 <code>rl run record</code> 和 <code>rl run <span class="nb">import-result</span></code> 登记事实；核心在一个事务里写入 LatticeDB，并封存文档。</li>
         <li data-n="5/6">新 session 用 <code>rl resume</code> 拿回恢复包；审查包和咨询包交给配置里的审查者和顾问，回答也封存。</li>
@@ -507,7 +555,7 @@
 
     <figure>
       <div class="frame">
-        <svg class="ve-svg" viewBox="0 0 1000 330" role="img" aria-label="四个实验层级，成本逐级增加：E0 结构与实现，E1 隔离机制，E2 最小模型，E3 有限确认。成熟代码上的新问题可以从 E0 直接跳到 E2。本机端到端测试用了 E0 和 E1 两份契约，Miyabi 测试的 E-0001 在 E2，E3 尚未进入。">
+        <svg class="ve-svg" viewBox="0 0 1000 330" role="img" aria-label="四个实验层级，成本逐级增加：E0 结构与实现，E1 隔离机制，E2 最小模型，E3 有限确认。成熟代码上的新问题可以从 E0 直接跳到 E2。本机端到端测试用了 E0 和 E1 两份契约，两轮联合测试都在 E1，Miyabi bf16 测试的 E-0001 在 E2，E3 尚未进入。">
           <path class="ve-e is-hot is-async" d="M132 156C132 40 622 30 622 96"/>
           <text class="ve-el" x="377" y="44">成熟代码上的新问题可以直接做 E2</text>
           <g class="ve-n" transform="translate(20 160)"><rect class="sh" width="225" height="120" rx="4"/><text class="ve-kind l" x="16" y="24">E0</text><text class="l" x="16" y="52">结构与实现</text><text class="sub l" x="16" y="78">公式一致？算子对吗？</text><text class="sub l" x="16" y="100">维度 · 梯度 · 等价性</text></g>
@@ -515,9 +563,9 @@
           <g class="ve-n" transform="translate(510 100)"><rect class="sh" width="225" height="180" rx="4"/><text class="ve-kind l" x="16" y="24">E2</text><text class="l" x="16" y="52">最小模型</text><text class="sub l" x="16" y="78">放进真实模型还有信号吗？</text><text class="sub l" x="16" y="100">小模型 · 单模块 · 固定预算</text></g>
           <g class="ve-n" transform="translate(755 70)"><rect class="sh" width="225" height="210" rx="4"/><text class="ve-kind l" x="16" y="24">E3</text><text class="l" x="16" y="52">有限确认</text><text class="sub l" x="16" y="78">足以支持正式投入吗？</text><text class="sub l" x="16" y="100">预先固定的比较 · 消融</text></g>
           <path class="ann" d="M20 292V298H490V292"/>
-          <text class="mk" x="255" y="318">本机 e2e：E0 · E1 两份契约</text>
+          <text class="mk" x="255" y="318">本机 e2e：E0 · E1 · 联合测试：E1 ×2</text>
           <path class="ann" d="M510 292V298H735V292"/>
-          <text class="mk" x="622" y="318">Miyabi e2e：E-0001</text>
+          <text class="mk" x="622" y="318">bf16 e2e：E-0001</text>
           <path class="ann" d="M755 292V298H980V292"/>
           <text class="mk" x="867" y="318">尚未进入</text>
         </svg>
@@ -691,6 +739,130 @@
       </div>
       <figcaption><span class="fig-n">Fig. 7</span>同一次运行（bf16 测试 seed 0）在八个维度上各有一个值。作业 ended 且 success、结果 complete，却不能作预设比较；证据 valid 但只是 screening；假说仍是 inconclusive。</figcaption>
     </figure>
+
+    <figure>
+      <div class="frame">
+        <svg class="ve-svg tree" viewBox="0 0 1000 470" role="img" aria-label="层次编号的例子。H1（H-0001）来自计划，是顶层。H1.1（H-0002）和 H1.2（H-0003）以 H1 为来源，挂在 H1 下。EH1.1/1（E-0002）和 EH1.1/2（E-0003）只检验 H1.1，锚在 H1.1。EH1/1（E-0001）检验 H1.1 和 H1.2，锚在两者的最深共同祖先 H1。H2（H-0004）以 H1.2 为来源，但用 --root 开了一条新研究线。层次编号用在状态、列表、报告、草稿和说明页里；内部编号用在路径、作业名和提交信息里。">
+          <text class="hdr" x="36" y="22">层次编号</text>
+          <text class="hdr" x="330" y="22">内部编号</text>
+          <text class="hdr" x="450" y="22">编号怎样定</text>
+          <path class="rule" d="M30 34H970M320 80H970M320 128H970M320 176H970M320 224H970M320 272H970"/>
+          <path class="ve-bd" d="M30 326H970"/>
+          <text class="ve-bd-t" x="964" y="316" text-anchor="end">另一条研究线</text>
+
+          <path class="br" d="M48 63V296M48 104H81M48 248H81M48 296H81M88 111V200M88 152H116M88 200H116"/>
+
+          <circle class="gh" cx="48" cy="56" r="7"/>
+          <text class="lb" x="62" y="56">H1</text><text class="id" x="330" y="56">H-0001</text>
+          <text class="an" x="450" y="56">顶层：来自计划，没有假说来源</text>
+
+          <circle class="gh" cx="88" cy="104" r="7"/>
+          <text class="lb" x="102" y="104">H1.1</text><text class="id" x="330" y="104">H-0002</text>
+          <text class="an" x="450" y="104">来源是 H1：挂在 H1 下，第 1 个</text>
+
+          <rect class="gh" x="116" y="145" width="14" height="14" rx="2"/>
+          <text class="lb" x="140" y="152">EH1.1/1</text><text class="id" x="330" y="152">E-0002</text>
+          <text class="an" x="450" y="152">只检验 H1.1：锚在 H1.1，第 1 个实验</text>
+
+          <rect class="gh" x="116" y="193" width="14" height="14" rx="2"/>
+          <text class="lb" x="140" y="200">EH1.1/2</text><text class="id" x="330" y="200">E-0003</text>
+          <text class="an" x="450" y="200">锚在 H1.1 的第 2 个实验</text>
+
+          <circle class="gh" cx="88" cy="248" r="7"/>
+          <text class="lb" x="102" y="248">H1.2</text><text class="id" x="330" y="248">H-0003</text>
+          <text class="an" x="450" y="248">来源是 H1：H1 下的第 2 个</text>
+
+          <rect class="gh is-key" x="81" y="289" width="14" height="14" rx="2"/>
+          <text class="lb" x="102" y="296">EH1/1</text><text class="id" x="330" y="296">E-0001</text>
+          <text class="an key" x="450" y="296">检验 H1.1 和 H1.2：锚在两者的最深共同祖先 H1</text>
+
+          <circle class="gh" cx="48" cy="360" r="7"/>
+          <text class="lb" x="62" y="360">H2</text><text class="id" x="330" y="360">H-0004</text>
+          <text class="an" x="450" y="360">来源是 H1.2，但 --root 开一条新研究线；来源关系照常记录</text>
+
+          <g class="ve-n" transform="translate(30 394)"><rect class="sh" width="460" height="64" rx="4"/><text x="230" y="22">层次编号：创建时定下，以后不变</text><text class="sub" x="230" y="46">status · 列表 · 报告 · 草稿 · research.html</text></g>
+          <g class="ve-n" transform="translate(510 394)"><rect class="sh" width="460" height="64" rx="4"/><text x="230" y="22">内部编号：H-0002 · E-0001</text><text class="sub" x="230" y="46">路径 · 作业名 · 提交信息</text></g>
+
+          <g class="ve-key">
+            <circle class="gh" cx="706" cy="18" r="7"/><text x="720" y="18">假说</text>
+            <rect class="gh" x="779" y="11" width="14" height="14" rx="2"/><text x="801" y="18">实验</text>
+          </g>
+        </svg>
+      </div>
+      <figcaption><span class="fig-n">Fig. 8</span>假说和实验除了内部编号，还有创建时定下的层次编号。假说挂在最晚创建的假说来源下（<code>--parent</code> 可以改），实验锚在所检验假说的最深共同祖先下（<code>--anchor</code> 可以改），<code>--root</code> 开一条新研究线。接受编号的参数两种写法都认，<code>rl show</code> 两种都显示。</figcaption>
+    </figure>
+
+    <figure>
+      <div class="cases">
+        <div class="case" data-st="ok"><span class="chip ok">封存并绑定</span><h3>建任务时</h3>
+          <svg class="ve-mini" viewBox="0 0 240 128" role="img" aria-label="任务 T-0001 建立时，实验契约草稿封存，任务绑定 E@1。">
+            <path class="ve-e is-st" d="M80 64H148"/>
+            <text class="mn" x="114" y="52">绑定</text>
+            <g class="ve-n"><rect class="sh" x="2" y="44" width="78" height="40" rx="4"/><text x="41" y="64">T-0001</text></g>
+            <g class="ve-n is-st"><path class="sh" d="M150 44H220L236 60V84H150Z"/><path class="gl" d="M220 44V60H236"/><text x="191" y="64">E@1</text></g>
+          </svg>
+          <p><code>rl task create <span class="nb">--targets</span> E-x</code> 和 <code>rl review request <span class="nb">--target</span> E-x</code> 封存契约草稿。草稿还有空字段或 TODO 时报错，列出要填的字段，什么也不封存。</p></div>
+        <div class="case" data-st="warn"><span class="chip warn">任务照常进行</span><h3>契约之后又修订</h3>
+          <svg class="ve-mini" viewBox="0 0 240 128" role="img" aria-label="E@2 替代 E@1。任务 T-0001 仍绑定 E@1，工作包列出两个修订的差异。">
+            <path class="ve-e" d="M80 56C112 56 116 26 148 26"/>
+            <path class="ve-e is-off is-st no-ah" d="M80 72C112 72 116 102 148 102"/>
+            <text class="mn" x="104" y="122">差异</text>
+            <path class="ve-e" d="M193 84V46"/>
+            <text class="mn l" x="200" y="69">替代</text>
+            <g class="ve-n"><rect class="sh" x="2" y="44" width="78" height="40" rx="4"/><text x="41" y="64">T-0001</text></g>
+            <g class="ve-n"><rect class="sh" x="150" y="8" width="86" height="36" rx="4"/><text x="193" y="26">E@1</text></g>
+            <g class="ve-n is-st"><rect class="sh" x="150" y="84" width="86" height="36" rx="4"/><text x="193" y="102">E@2</text></g>
+          </svg>
+          <p>工作包列出任务绑定的修订、现在的修订和两者正文的差异（最多 80 行）。已登记的 run 仍绑定登记时的修订。</p></div>
+        <div class="case" data-st="risk"><span class="chip risk">决定有缺口</span><h3>结论审查看的是旧版</h3>
+          <svg class="ve-mini" viewBox="0 0 240 128" role="img" aria-label="RV-0002 审查的是 H@1。H@2 替代 H@1 后，针对 H@2 的决定缺少通过的结论审查。">
+            <path class="ve-e" d="M80 56C112 56 116 26 148 26"/>
+            <path class="ve-e is-off is-st" d="M80 72C112 72 116 102 148 102"/>
+            <path class="ve-x" d="M107 81l9 9M116 81l-9 9"/>
+            <path class="ve-e" d="M193 84V46"/>
+            <text class="mn l" x="200" y="69">替代</text>
+            <g class="ve-n"><rect class="sh" x="2" y="44" width="78" height="40" rx="4"/><text x="41" y="64">RV-0002</text></g>
+            <g class="ve-n"><rect class="sh" x="150" y="8" width="86" height="36" rx="4"/><text x="193" y="26">H@1</text></g>
+            <g class="ve-n is-st"><rect class="sh" x="150" y="84" width="86" height="36" rx="4"/><text x="193" y="102">H@2</text></g>
+          </svg>
+          <p><code>rl decide</code> 和 attention 只认针对同一修订的通过审查。缺口写明两个修订：重新审查，或在理由里说明这次修订为什么不改变结论。</p></div>
+        <div class="case" data-st="info"><span class="chip info">只提示</span><h3>审查之后的新证据</h3>
+          <svg class="ve-mini" viewBox="0 0 240 128" role="img" aria-label="RV-0002 审查时看到 EV-0001。之后挂到假说上的 EV-0002 只提示，不算缺口。">
+            <path class="ve-e" d="M80 56C112 56 116 26 148 26"/>
+            <text class="mn" x="104" y="30">看过</text>
+            <path class="ve-e is-off is-st no-ah" d="M80 72C112 72 116 102 148 102"/>
+            <text class="mn" x="104" y="122">提示</text>
+            <g class="ve-n"><rect class="sh" x="2" y="44" width="78" height="40" rx="4"/><text x="41" y="64">RV-0002</text></g>
+            <g class="ve-n"><rect class="sh" x="150" y="8" width="86" height="36" rx="4"/><text x="193" y="26">EV-0001</text></g>
+            <g class="ve-n is-st"><rect class="sh" x="150" y="84" width="86" height="36" rx="4"/><text x="193" y="102">EV-0002</text></g>
+          </svg>
+          <p>结论审查记下它看到的证据。之后才挂到假说上的证据只在 decide 的输出和 attention 里提示，不算缺口。</p></div>
+      </div>
+      <figcaption><span class="fig-n">Fig. 9</span>任务和结论审查绑定到具体修订（记录格式 4）。修订之后工作照常进行，但工作包和决定都会指出版本差异，和证据的规则（Fig. 6）一样不自动继承。</figcaption>
+    </figure>
+
+    <figure>
+      <div class="frame">
+        <svg class="ve-svg" viewBox="0 0 1000 420" role="img" aria-label="读物从记录生成。rl view 在一个读事务里从记录取事实，从 research/notes/explanation.yaml 取文字，渲染 docs/research.html。rl view --stamp 把核对过的事实摘要写进 explanation.basis.yaml；事实变了，页面标出说明可能过期。rl manuscript 从记录取事实，只刷新 rl:begin 和 rl:end 之间的块，写 docs/manuscript.md，或写 manuscript.tex 再编译出 PDF。">
+          <path class="ve-e" d="M160 205H298"/><text class="ve-el" x="229" y="196">事实</text>
+          <path class="ve-e" d="M390 104V168"/><text class="ve-el r" x="400" y="140">文字</text>
+          <path class="ve-e is-hot" d="M480 205H618"/><text class="ve-el" x="549" y="196">渲染</text>
+          <path class="ve-e" d="M480 182H560V62H618"/><text class="ve-el l" x="552" y="126">--stamp</text>
+          <path class="ve-e is-async" d="M790 104V148"/><text class="ve-el r" x="800" y="127">事实变了：标“可能过期”</text>
+          <path class="ve-e" d="M95 252V345H298"/><text class="ve-el" x="200" y="336">事实</text>
+          <path class="ve-e" d="M480 345H618"/><text class="ve-el" x="549" y="336">只刷新标记之间</text>
+
+          <g class="ve-n" transform="translate(30 160)"><path class="sh" d="M0 10V80A65 10 0 0 0 130 80V10"/><ellipse class="sh lid" cx="65" cy="10" rx="65" ry="10"/><text x="65" y="46">记录</text><text class="sub" x="65" y="70">LatticeDB</text></g>
+          <g class="ve-n" transform="translate(260 20)"><path class="sh" d="M0 0H242L260 18V84H0Z"/><path class="gl" d="M242 0V18H260"/><text x="130" y="30">说明文字 · 协调者写</text><text class="sub" x="130" y="58">notes/explanation.yaml</text></g>
+          <g class="ve-n is-key" transform="translate(300 170)"><rect class="sh" width="180" height="70" rx="4"/><text class="m" x="90" y="24">rl view</text><text class="sub" x="90" y="48">读事务 · 现取事实</text></g>
+          <g class="ve-n" transform="translate(620 20)"><path class="sh" d="M0 0H322L340 18V84H0Z"/><path class="gl" d="M322 0V18H340"/><text x="170" y="30">核对过的事实摘要</text><text class="sub" x="170" y="58">notes/explanation.basis.yaml</text></g>
+          <g class="ve-n" transform="translate(620 150)"><path class="sh" d="M0 0H322L340 18V110H0Z"/><path class="gl" d="M322 0V18H340"/><text class="m" x="170" y="28">docs/research.html</text><text class="sub" x="170" y="56">研究线 → 假说树 → 实验</text><text class="sub" x="170" y="80">自包含 · 内容没变不写</text></g>
+          <g class="ve-n" transform="translate(300 310)"><rect class="sh" width="180" height="70" rx="4"/><text class="m" x="90" y="24">rl manuscript</text><text class="sub" x="90" y="48">manuscript.latex</text></g>
+          <g class="ve-n" transform="translate(620 290)"><path class="sh" d="M0 0H322L340 18V110H0Z"/><path class="gl" d="M322 0V18H340"/><text class="m" x="170" y="28">docs/manuscript.md</text><text class="sub" x="170" y="56">或 manuscript.tex → PDF</text><text class="sub" x="170" y="80">[write: …] 由协调者写</text></g>
+        </svg>
+      </div>
+      <figcaption><span class="fig-n">Fig. 10</span>说明页和论文草稿都从记录生成：事实每次现取，文字由协调者写在别处，rl 只读不改。hypothesis、experiment、evidence、decide、link 之后页面自动重渲染，<code>rl view <span class="nb">--todo</span></code> 列出要写和要改的说明。实验表格按契约修订、arm 和条件分组，不做跨条件平均；<code>rl report</code> 和结论审查包用同一张表。</figcaption>
+    </figure>
   </section>
 
   <section id="runs">
@@ -729,12 +901,12 @@
         </svg>
       </div>
       <ol class="co-list">
-        <li><span class="n">1</span><span>RunSpec 不可变，摘要用 blake2b。科学内容变了就登记新 Run；同一 request_id 同内容返回原记录，内容不同返回 CONFLICT。</span></li>
-        <li><span class="n">2</span><span>重新执行登记为新的 Attempt（<span class="nb">ATT-0001-2</span>），失败的那次保留。本地运行不必经过 queued。每个 Attempt 还记下登记时代码审查是否覆盖它的代码（Fig. 14）。</span></li>
-        <li><span class="n">3</span><span>ExecRef 只存 kind、命名空间和外部 ID；核心不解析调度器 ID。多个 attempt 可以共享一个作业。</span></li>
+        <li><span class="n">1</span><span>RunSpec 不可变，摘要用 blake2b。科学内容变了就登记新 Run；同一 request_id 同内容返回原记录，内容不同返回 CONFLICT。契约在 front matter 里列出 <code>arms:</code> 时，不在其中的 arm 登记被拒绝，什么也不留下。</span></li>
+        <li><span class="n">2</span><span>重新执行登记为新的 Attempt（<span class="nb">ATT-0001-2</span>），失败的那次保留。本地运行不必经过 queued。每个 Attempt 还记下登记时代码审查是否覆盖它的代码（Fig. 13）。</span></li>
+        <li><span class="n">3</span><span>ExecRef 只存 kind、命名空间和外部 ID；核心不解析调度器 ID。多个 attempt 可以共享一个作业。作业号绑错时，更正绑定它的那条观测（<code><span class="nb">--correction-of</span></code>）会把绑定移到正确的作业（<code>run.rebound</code>）；其他情况下换作业就是新的 attempt。</span></li>
         <li><span class="n">4</span><span>用量按 accounting_ref（<span class="nb">miyabi-pbs</span>:3737671.opbs）只记一次；单位不同不相加，未报告不是零。</span></li>
       </ol>
-      <figcaption><span class="fig-n">Fig. 8</span>bf16 测试 seed 0 的真实记录链：一个不可变的 RunSpec，一次执行尝试，一个 Miyabi 作业。三条写命令各写一部分。</figcaption>
+      <figcaption><span class="fig-n">Fig. 11</span>bf16 测试 seed 0 的真实记录链：一个不可变的 RunSpec，一次执行尝试，一个 Miyabi 作业。三条写命令各写一部分。</figcaption>
     </figure>
 
     <figure class="ve-steps">
@@ -797,14 +969,53 @@
         <input type="range" min="0" value="0" aria-label="步骤">
         <button data-go="1" aria-label="下一步">→</button>
       </div>
-      <figcaption><span class="fig-n">Fig. 9</span>新旧按来源序号判断，没有序号时按 observed_at；终态只能被带依据的显式更正改变。规则取自 <code>runs.py</code> 的投影逻辑，事件序列按契约测试构造；e2e 中三条观测按序到达，全部 applied。</figcaption>
+      <figcaption><span class="fig-n">Fig. 12</span>新旧按来源序号判断，没有序号时按 observed_at；终态只能被带依据的显式更正改变。规则取自 <code>runs.py</code> 的投影逻辑，事件序列按契约测试构造；e2e 中三条观测按序到达，全部 applied。</figcaption>
+    </figure>
+
+    <figure>
+      <div class="cases">
+        <div class="case" data-st="risk"><span class="chip risk">stale</span><h3>changed：内容变了</h3>
+          <svg class="ve-mini" viewBox="0 0 240 84" role="img" aria-label="审查看过的 model.py 摘要是 a1，run 的代码里是 b2：内容变了，覆盖变成 stale。">
+            <text class="mn" x="50" y="12">审查看过</text><text class="mn" x="190" y="12">run 的代码</text>
+            <g class="ve-n"><path class="sh" d="M2 24H84L98 38V78H2Z"/><path class="gl" d="M84 24V38H98"/><text class="m" x="50" y="44">model.py</text><text class="sub" x="50" y="64">a1</text></g>
+            <text class="neq" x="120" y="58">≠</text>
+            <g class="ve-n is-st"><path class="sh" d="M142 24H224L238 38V78H142Z"/><path class="gl" d="M224 24V38H238"/><text class="m" x="190" y="44">model.py</text><text class="sub" x="190" y="64">b2</text></g>
+          </svg>
+          <p>只有这一种让覆盖变成 stale。另一个实验的通过审查看过现在的内容时，输出写出它的编号；确认它也回答这个实验的问题，再加 <code><span class="nb">--review</span> RV-x</code> 登记。</p></div>
+        <div class="case" data-st="info"><span class="chip info">只列出</span><h3>absent：代码里没有</h3>
+          <svg class="ve-mini" viewBox="0 0 240 84" role="img" aria-label="审查看过 old.py，run 的代码里没有这个文件，run 执行不到它。">
+            <text class="mn" x="50" y="12">审查看过</text><text class="mn" x="190" y="12">run 的代码</text>
+            <g class="ve-n"><path class="sh" d="M2 24H84L98 38V78H2Z"/><path class="gl" d="M84 24V38H98"/><text class="m" x="50" y="44">old.py</text><text class="sub" x="50" y="64">a1</text></g>
+            <g class="ve-n is-st"><path class="sh is-off" d="M142 24H224L238 38V78H142Z"/><text x="190" y="51">没有</text></g>
+          </svg>
+          <p>代码里没有这个路径，run 执行不到它，只列出名字。</p></div>
+        <div class="case" data-st="info"><span class="chip info">只列出</span><h3>test：测试文件改了</h3>
+          <svg class="ve-mini" viewBox="0 0 240 84" role="img" aria-label="审查看过的 test_x.py 是 a1，run 的代码里是 c3。它是测试文件，run 计算的东西不变，只列出。">
+            <text class="mn" x="50" y="12">审查看过</text><text class="mn" x="190" y="12">run 的代码</text>
+            <g class="ve-n"><path class="sh" d="M2 24H84L98 38V78H2Z"/><path class="gl" d="M84 24V38H98"/><text class="m" x="50" y="44">test_x.py</text><text class="sub" x="50" y="64">a1</text></g>
+            <text class="neq" x="120" y="58">≠</text>
+            <g class="ve-n is-st"><path class="sh" d="M142 24H224L238 38V78H142Z"/><path class="gl" d="M224 24V38H238"/><text class="m" x="190" y="44">test_x.py</text><text class="sub" x="190" y="64">c3</text></g>
+          </svg>
+          <p>在 <code>tests/</code> 下，或名为 <code>test_*.py</code>、<code>*_test.py</code>、<code>conftest.py</code>：run 计算的东西不变。只按名字判断，所以逐个写出文件名。</p></div>
+        <div class="case" data-st="warn"><span class="chip warn">注明</span><h3>file by file：分开审过</h3>
+          <svg class="ve-mini" viewBox="0 0 240 84" role="img" aria-label="RV-1 看过 a.py，RV-2 看过 b.py；run 的代码同时用到两个文件，这个组合没有一起审过。">
+            <text class="mn" x="50" y="12">两次审查</text><text class="mn" x="190" y="12">run 的代码</text>
+            <path class="ve-e" d="M98 35C118 35 120 46 140 46"/>
+            <path class="ve-e" d="M98 69C118 69 120 60 140 60"/>
+            <g class="ve-n"><rect class="sh" x="2" y="22" width="96" height="26" rx="4"/><text class="sub" x="50" y="35">RV-1 · a.py</text></g>
+            <g class="ve-n"><rect class="sh" x="2" y="56" width="96" height="26" rx="4"/><text class="sub" x="50" y="69">RV-2 · b.py</text></g>
+            <g class="ve-n is-st"><path class="sh" d="M142 30H224L238 44V76H142Z"/><path class="gl" d="M224 30V44H238"/><text class="sub" x="190" y="54">a.py · b.py</text></g>
+          </svg>
+          <p>覆盖来自几次审查，没有一次看过全部文件：这些文件的组合没有一起审过。</p></div>
+      </div>
+      <figcaption><span class="fig-n">Fig. 13</span><code>rl run register</code> 逐个路径核对代码审查：run 执行的代码（提交，没有提交时是工作树）里，每个路径是否还是某次通过的审查看过的版本。对不上的路径各有一个原因，只有 changed 让覆盖变成 stale；<code>rl run show ATT-x</code> 逐行列出。这个实验没有通过、之后也没有通过复查的审查，另外列为 not passed。</figcaption>
     </figure>
   </section>
 
   <section id="team">
     <div class="sec-intro">
       <div class="sec-head"><p class="ve-label caps">团队与审查</p><h2>四个角色各在自己的会话里，经记录交接</h2></div>
-      <p>现在有四个 agent 角色：<span class="ve-ref" data-ref="r-coord" tabindex="0">协调者</span>、<span class="ve-ref" data-ref="r-res" tabindex="0">研究者</span>、<span class="ve-ref" data-ref="r-rev" tabindex="0">审查者</span>和<span class="ve-ref" data-ref="r-adv" tabindex="0">顾问</span>。协调者掌握路线和结论，实现与运行交给研究者。<b>它们不在聊天里互相转述，而是经 rl 记录交接</b>。在 herdr 里，其他三个角色各开一个 tab，研究者在自己的 git worktree 里工作；新 session 用 rl resume 接续。</p>
+      <p>现在有四个 agent 角色：<span class="ve-ref" data-ref="r-coord" tabindex="0">协调者</span>、<span class="ve-ref" data-ref="r-res" tabindex="0">研究者</span>、<span class="ve-ref" data-ref="r-rev" tabindex="0">审查者</span>和<span class="ve-ref" data-ref="r-adv" tabindex="0">顾问</span>。协调者掌握路线和结论，实现与运行交给研究者。<b>它们不在聊天里互相转述，而是经 rl 记录交接</b>。在 herdr 里，其他三个角色各开一个 tab，研究者在自己的 git worktree 里工作，headless 命令拒绝执行；新 session 用 rl resume 接续。</p>
     </div>
 
     <figure>
@@ -867,14 +1078,49 @@
       </div>
       <ol class="co-list">
         <li><span class="n">1</span><span>用户给研究计划和约束；协调者用 <code>rl init <span class="nb">--plan</span></code> 导入并封存计划，只就会改变目标或预算的缺口提问。</span></li>
-        <li><span class="n">2</span><span>协调者就是用户正在对话的 Claude Code 或 Codex session（<code>rl session start <span class="nb">--role</span> coordinator</code>）。它掌握假说和路线决定：写实验合同、建任务、验收交付、下结论；实现和运行交给研究者，自己只做小改动、冒烟检查和读结果。用 <code>rl resume</code> 和 <code>rl inbox</code> 读记录；新的协调 session 会把旧的标为 superseded，只作记录。在 herdr 里，它用 <code>rl agent open</code>、<code>assign</code>、<code>reset</code>、<code>close</code> 开关其他角色的会话，接受任务后用 <code>git merge <span class="nb">--no-ff</span></code> 合并研究者的分支（不 squash、不 rebase：已登记的 run 指向这些提交）。</span></li>
-        <li><span class="n">3</span><span>研究者由协调者启动。在 herdr 里，<code>rl agent open <span class="nb">researcher-1</span> <span class="nb">--role</span> researcher <span class="nb">--task</span> <span class="nb">T-x</span></code> 开一个 tab，模型取 <code><span class="nb">models.researcher</span></code> 第一个可用的条目；研究者在自己的 worktree <code>&lt;项目&gt;/../&lt;项目名&gt;-worktrees/researcher-1</code> 里工作，每个任务一个分支 <code><span class="nb">sr/researcher-1/T-x</span></code>，任务从 <code>rl agent brief</code> 读。不在 herdr 里时，用宿主子代理（Claude 的 <code><span class="nb">smooth-research:researcher</span></code>）或 <code>rl delegate</code>。</span></li>
-        <li><span class="n">4</span><span>研究者 <code>task claim</code>（同时领取只有一个成功），在分支上提交代码；新核心路径进入有成本的运行前先请代码审查；用 <code>rl run …</code> 和 <code>rl evidence add</code> 登记，最后 <code>task deliver</code>。它不合并、不 rebase；只在远程资源用 git 同步代码时推送自己的任务分支，从不强推。等集群作业时以 <code>task wait</code> 结束，由协调者等通知。</span></li>
-        <li><span class="n">5</span><span>审查分两种（Fig. 14），一轮最多两次（Fig. 13）。研究者会话请求代码审查时，协调者收到 NOTE，用 <code>rl agent open <span class="nb">--role</span> reviewer <span class="nb">--ticket</span> <span class="nb">RV-x</span></code> 分配审查者。审查者只读（Claude 会话不给 Edit、Write），补丁写在回答里，用 <code>rl review answer</code> 提交，回答存为 <code><span class="nb">research/reviews/RV-x.md</span></code>。不在 herdr 里时，<code>rl review run</code> 以 headless 方式调用配置的审查者。</span></li>
+        <li><span class="n">2</span><span>协调者就是用户正在对话的 Claude Code 或 Codex session（<code>rl session start <span class="nb">--role</span> coordinator</code>）。它掌握假说和路线决定：写实验合同、建任务、验收交付、下结论；实现和运行交给研究者，自己只做小改动、冒烟检查和读结果。用 <code>rl resume</code> 和 <code>rl inbox</code> 读记录；新的协调 session 会把旧的标为 superseded，只作记录。在 herdr 里，它用 <code>rl agent open</code>、<code>assign</code>、<code>reset</code>、<code>close</code> 开关其他角色的会话，接受任务后用 <code>git merge <span class="nb">--no-ff</span></code> 合并研究者的分支（不 squash、不 rebase：已登记的 run 指向这些提交）。<code>rl status</code> 的待处理里只陈述事实的条目，可以用 <code>rl attention ack</code> 带理由收下，事实变了会再出现。</span></li>
+        <li><span class="n">3</span><span>研究者由协调者启动。在 herdr 里，<code>rl agent open <span class="nb">researcher-1</span> <span class="nb">--role</span> researcher <span class="nb">--task</span> <span class="nb">T-x</span></code> 开一个 tab，模型取 <code><span class="nb">models.researcher</span></code> 第一个可用的条目；研究者在自己的 worktree <code>&lt;项目&gt;/../&lt;项目名&gt;-worktrees/researcher-1</code> 里工作，每个任务一个分支 <code><span class="nb">sr/researcher-1/T-x</span></code>，任务从 <code>rl agent brief</code> 读。在 herdr 里不用 <code>rl delegate</code>：它拒绝执行（Fig. 15）。不在 herdr 里时，用宿主子代理（Claude 的 <code><span class="nb">smooth-research:researcher</span></code>）或 <code>rl delegate</code>；delegate 的会话也带 <code>agents.args.&lt;宿主&gt;</code>，有同样的 MCP 服务。</span></li>
+        <li><span class="n">4</span><span>研究者 <code>task claim</code>（同时领取只有一个成功），在分支上提交代码；新核心路径进入有成本的运行前先请代码审查；用 <code>rl run …</code> 和 <code>rl evidence add</code> 登记，最后 <code>task deliver</code>（<code><span class="nb">--verified</span></code> 写下改动代码的测试运行）。它不合并、不 rebase；只在远程资源用 git 同步代码时推送自己的任务分支，从不强推。等集群作业时以 <code>task wait</code> 结束，由协调者等通知。</span></li>
+        <li><span class="n">5</span><span>审查分两种（Fig. 19），一轮最多两次（Fig. 18）。研究者会话请求代码审查时，协调者收到 NOTE，用 <code>rl agent open <span class="nb">--role</span> reviewer <span class="nb">--ticket</span> <span class="nb">RV-x</span></code> 分配审查者。审查者只读（Claude 会话不给 Edit、Write），补丁写在回答里，用 <code>rl review answer</code> 提交，回答存为 <code><span class="nb">research/reviews/RV-x.md</span></code>。不在 herdr 里时，<code>rl review run</code> 以 headless 方式调用配置的审查者；在 herdr 里它拒绝执行。</span></li>
         <li><span class="n">6</span><span><code>rl advise prepare</code> 为 <code><span class="nb">models.advisor</span></code> 的每个条目开一个 AD 工单（默认 <code><span class="nb">gpt-6-astra@max</span></code> 和 <code><span class="nb">claude-fable-5-1@high</span></code>）。herdr 里每个工单一个会话：顾问独立回答，经 <code>rl agent tell</code> 与协调者对话，可以修订回答；协调者拿到最终建议后关闭会话。每个项目最多 3 轮，再多要用户同意。建议是新假说的来源，不是证据。</span></li>
-        <li><span class="n">7</span><span>审查者和研究者直接对话（<code>rl agent tell</code>，消息进记录）；复查（<code><span class="nb">--recheck-of</span></code>）自动交给同一个审查者。消息到达活动会话时，herdr 另送一行以 <code>[smooth-research MSG-</code> 开头的通知；通知来自其他会话，从不代表用户的批准。任何会话都可以开更低一档模型的子代理，子代理不写记录。</span></li>
+        <li><span class="n">7</span><span>审查者和研究者直接对话（<code>rl agent tell</code>，消息进记录）；复查（<code><span class="nb">--recheck-of</span></code>）自动交给同一个审查者。消息到达活动会话时，herdr 另送一行以 <code>[smooth-research MSG-</code> 开头的通知；通知来自其他会话，从不代表用户的批准。从 <code>rl agent open</code> 的会话发起审查时，rl 把它为这个会话记录的模型补进作者模型。任何会话都可以开更低一档模型的子代理，子代理不写记录。</span></li>
       </ol>
-      <figcaption><span class="fig-n">Fig. 10</span>四个 agent 角色围绕同一份记录。在 herdr 里，研究者、审查者和顾问各在自己的 tab 里，由协调者开关；研究者在自己的 worktree 里工作，审查者直接和它对话。会话之间只传记录的消息，herdr 另送一行通知。</figcaption>
+      <figcaption><span class="fig-n">Fig. 14</span>四个 agent 角色围绕同一份记录。在 herdr 里，研究者、审查者和顾问各在自己的 tab 里，由协调者开关；研究者在自己的 worktree 里工作，审查者直接和它对话。会话之间只传记录的消息，herdr 另送一行通知。</figcaption>
+    </figure>
+
+    <figure>
+      <div class="cases">
+        <div class="case" data-ref="r-res" data-st="risk"><span class="chip risk">INVALID</span><h3>herdr 里的 <code>rl delegate</code></h3>
+          <svg class="ve-mini" viewBox="0 0 240 72" role="img" aria-label="在 herdr 里，rl delegate 拒绝执行，并给出 rl agent open 的命令。">
+            <path class="ve-e is-st" d="M104 44H134"/>
+            <path class="ve-x" d="M113 38l12 12M125 38l-12 12"/>
+            <g class="ve-n"><rect class="sh" x="2" y="20" width="102" height="48" rx="4"/><text x="53" y="36">delegate</text><text class="sub" x="53" y="56">HERDR_ENV=1</text></g>
+            <g class="ve-n is-st"><rect class="sh" x="136" y="20" width="102" height="48" rx="4"/><text x="187" y="36">INVALID</text><text class="sub" x="187" y="56">给出命令</text></g>
+          </svg>
+          <p>拒绝执行，并给出该用的命令：<code>rl agent open researcher-1 <span class="nb">--role</span> researcher <span class="nb">--task</span> T-x</code>。<code>rl review run</code> 和 <code>rl advise run</code> 同样拒绝，并写明开 reviewer 或 advisor 会话的命令。</p></div>
+        <div class="case" data-ref="r-res" data-st="ok"><span class="chip ok">标准做法</span><h3>herdr 里的 <code>rl agent open</code></h3>
+          <svg class="ve-mini" viewBox="0 0 240 72" role="img" aria-label="在 herdr 里，rl agent open 开一个研究者会话，有自己的 tab 和 worktree。">
+            <path class="ve-e is-st" d="M104 44H134"/>
+            <g class="ve-n"><rect class="sh" x="2" y="20" width="102" height="48" rx="4"/><text x="53" y="36">agent open</text><text class="sub" x="53" y="56">herdr tab</text></g>
+            <g class="ve-n is-st"><rect class="sh" x="136" y="20" width="102" height="48" rx="4"/><text x="187" y="36">研究者会话</text><text class="sub" x="187" y="56">worktree</text></g>
+          </svg>
+          <p>研究者、审查者和顾问都是 herdr 会话：各有一个 tab，带 <code>agents.args</code>，所以有同样的 MCP 服务；监视程序看着它们。</p></div>
+        <div class="case" data-st="warn"><span class="chip warn">--headless</span><h3>确实要 headless</h3>
+          <svg class="ve-mini" viewBox="0 0 240 72" role="img" aria-label="加 --headless 后，rl delegate 在 herdr 里也启动 headless 会话。">
+            <path class="ve-e is-st" d="M104 44H134"/>
+            <g class="ve-n"><rect class="sh" x="2" y="20" width="102" height="48" rx="4"/><text x="53" y="36">delegate</text><text class="sub" x="53" y="56">--headless</text></g>
+            <g class="ve-n is-st"><rect class="sh" x="136" y="20" width="102" height="48" rx="4"/><text x="187" y="36">headless</text><text class="sub" x="187" y="56">claude -p 等</text></g>
+          </svg>
+          <p>加 <code><span class="nb">--headless</span></code> 照常运行。rl 自己启动的后台 worker（<code><span class="nb">--background</span></code>、几个建议工单）都带上它：调用方已经通过了检查。</p></div>
+        <div class="case" data-st="ok"><span class="chip ok">不受限制</span><h3>rl 启动的 headless 会话</h3>
+          <svg class="ve-mini" viewBox="0 0 240 72" role="img" aria-label="rl 启动的 headless 会话里，rl review run 照常执行。">
+            <path class="ve-e is-st" d="M104 44H134"/>
+            <g class="ve-n"><rect class="sh" x="2" y="20" width="102" height="48" rx="4"/><text x="53" y="36">headless</text><text class="sub" x="53" y="56">没有 pane</text></g>
+            <g class="ve-n is-st"><rect class="sh" x="136" y="20" width="102" height="48" rx="4"/><text x="187" y="36">review run</text><text class="sub" x="187" y="56">照常执行</text></g>
+          </svg>
+          <p>它们继承了 <code>HERDR_ENV</code>，但不在任何 pane 里。rl 给它们设 <code>SMOOTH_RESEARCH_<wbr>HEADLESS=1</code>，所以用 <code><span class="nb">--headless</span></code> 委派的研究者自己还能请求审查。</p></div>
+      </div>
+      <figcaption><span class="fig-n">Fig. 15</span>在 herdr 里（<code>HERDR_ENV=1</code>），<code>rl delegate</code>、<code>rl review run</code> 和 <code>rl advise run</code> 拒绝执行，并给出该用的 <code>rl agent open</code> 命令。不在 herdr 里时，它们就是标准做法，Claude Code 还可以用原生子代理。联合测试 B′ 里 Codex 协调者先用了 <code>rl delegate</code>，这一检查由此而来（§21.24）。</figcaption>
     </figure>
 
     <figure>
@@ -937,7 +1183,7 @@
           <svg class="ve-mini" viewBox="0 0 240 70" role="img" aria-label="delivered 变回 active，不发消息"><path class="ve-e" d="M94 51H148"/><text class="none" x="120" y="14">不发消息</text><g class="st" transform="translate(2 36)"><rect width="92" height="30" rx="15"/><text x="46" y="15">delivered</text></g><g class="st" transform="translate(150 36)"><rect width="88" height="30" rx="15"/><text x="44" y="15">active</text></g></svg>
           <p>要求修改：有 owner 时回到 active，没有时回到 ready。stopped 的任务也可以重开。</p></div>
       </div>
-      <figcaption><span class="fig-n">Fig. 11</span>协调者和研究者之间的任务协议，时间从左到右。每个命令改写任务状态；需要对方知道的变化写成一条消息，对方从收件箱读到；在 herdr 里，收件人还会收到一行通知。等作业的是协调者：通知到达后，它以同一角色重启研究者。下方是另外四个出口。</figcaption>
+      <figcaption><span class="fig-n">Fig. 16</span>协调者和研究者之间的任务协议，时间从左到右。每个命令改写任务状态；需要对方知道的变化写成一条消息，对方从收件箱读到；在 herdr 里，收件人还会收到一行通知。等作业的是协调者：通知到达后，它以同一角色重启研究者。下方是另外四个出口。</figcaption>
     </figure>
 
     <figure>
@@ -951,7 +1197,7 @@
         <div class="case" data-ref="r-adv"><h3><code>advice</code> 咨询包</h3><p>瓶颈、关键正反证据、失败机制、尚存解释、预算、待决问题</p>
           <svg class="ve-mini rng" viewBox="0 0 240 56" role="img" aria-label="咨询包默认目标 10k tokens"><path class="ax" d="M10 30H230"/><path class="tk" d="M10 26V34M120 26V34M230 26V34"/><rect class="hot" x="10" y="23" width="183.3" height="14" rx="2"/><text class="rv" x="193.3" y="11">10k</text><text x="10" y="45">0</text><text class="rm" x="120" y="45">6k</text><text class="re" x="230" y="45">12k</text></svg></div>
       </div>
-      <figcaption><span class="fig-n">Fig. 12</span>四种上下文包都围绕当前要做的决定。条形长度是 <code>smooth-research.yaml</code> 里的默认 token 目标（<code>context.work_target_tokens</code>、<code>context.advice_target_tokens</code>），按“ASCII 字符 / 4 + 非 ASCII 字符”估算；超出部分列为按需读取的索引。</figcaption>
+      <figcaption><span class="fig-n">Fig. 17</span>四种上下文包都围绕当前要做的决定。条形长度是 <code>smooth-research.yaml</code> 里的默认 token 目标（<code>context.work_target_tokens</code>、<code>context.advice_target_tokens</code>），按“ASCII 字符 / 4 + 非 ASCII 字符”估算；超出部分列为按需读取的索引。</figcaption>
     </figure>
 
     <figure>
@@ -966,7 +1212,7 @@
         <div class="case" data-ref="r-rev" data-st="ok"><span class="chip ok">复查后通过</span><h3>修复后只剩 low</h3>
           <svg class="ve-mini" viewBox="0 0 240 92" role="img" aria-label="第一次审查有 medium，修复后复查只剩 low，审查通过。">
             <text class="mn" x="120" y="14">修复后复查</text><path class="ve-e" d="M68 58H85"/><path class="ve-e is-st" d="M153 58H170"/><g class="ve-n"><rect class="sh" x="2" y="36" width="66" height="44" rx="4"/><text x="35" y="51">RV-1</text><text class="sub" x="35" y="69">medium</text></g><g class="ve-n"><rect class="sh" x="87" y="36" width="66" height="44" rx="4"/><text x="120" y="51">RV-2</text><text class="sub" x="120" y="69">复查</text></g><g class="ve-n is-st"><rect class="sh" x="172" y="36" width="66" height="44" rx="4"/><text x="205" y="51">通过</text><text class="sub" x="205" y="69">low</text></g>
-          </svg><p class="rel"><code><span class="nb">--recheck-of</span> RV-1</code><span>同一个审查者</span></p></div>
+          </svg><p class="rel"><code><span class="nb">--recheck-of</span> RV-1</code><span>同一个审查者；再用 <code>review resolve</code> 让 RV-1 离开待处理</span></p></div>
         <div class="case" data-ref="r-rev r-coord" data-st="warn"><span class="chip warn">交给协调者</span><h3>两次后仍有 medium</h3>
           <svg class="ve-mini" viewBox="0 0 240 92" role="img" aria-label="两次审查后仍有 medium，交给协调者决定。">
             <text class="mn" x="120" y="14">同一轮的两次</text><path class="ve-e" d="M68 58H85"/><path class="ve-e is-st" d="M153 58H170"/><g class="ve-n"><rect class="sh" x="2" y="36" width="66" height="44" rx="4"/><text x="35" y="51">RV-1</text><text class="sub" x="35" y="69">medium</text></g><g class="ve-n"><rect class="sh" x="87" y="36" width="66" height="44" rx="4"/><text x="120" y="51">RV-2</text><text class="sub" x="120" y="69">medium</text></g><g class="ve-n is-st"><rect class="sh" x="172" y="36" width="66" height="44" rx="4"/><text x="205" y="51">协调者</text><text class="sub" x="205" y="69">决定</text></g>
@@ -976,7 +1222,7 @@
             <text class="mn" x="120" y="14">同一轮第三次</text><path class="ve-e is-st is-off" d="M68 58H85"/><path class="ve-e" d="M153 58H170"/><g class="ve-n"><rect class="sh" x="2" y="36" width="66" height="44" rx="4"/><text x="35" y="51">RV-2</text><text class="sub" x="35" y="69">第二次</text></g><g class="ve-n is-st"><rect class="sh is-off" x="87" y="36" width="66" height="44" rx="4"/><text x="120" y="51">RV-3</text><text class="sub" x="120" y="69">LIMIT</text></g><g class="ve-n"><rect class="sh" x="172" y="36" width="66" height="44" rx="4"/><text x="205" y="51">新一轮</text><text class="sub" x="205" y="69">写原因</text></g>
           </svg><p class="rel"><code><span class="nb">--new-round</span> "原因"</code><span>重新计数</span></p></div>
       </div>
-      <figcaption><span class="fig-n">Fig. 13</span>一轮审查最多两次：第一次加一次复查。只剩 low 的发现算通过；第二次后仍有 medium 以上，交给协调者写明理由批准或退回；同一轮的第三次请求报 LIMIT。审查者只由配置决定；它和作者的关系（<code>cross_model</code>、<code><span class="nb">same_family_independent_session</span></code> 等）照实记录，但不是门槛。</figcaption>
+      <figcaption><span class="fig-n">Fig. 18</span>一轮审查最多两次：第一次加一次复查。只剩 low 的发现算通过；第二次后仍有 medium 以上，交给协调者写明理由批准或退回；复查通过时用 <code>rl review resolve</code> 记下问题已解决（被解决的那次仍不算通过）；同一轮的第三次请求报 LIMIT。审查者只由配置决定；它和作者的关系（<code>cross_model</code>、<code><span class="nb">same_family_independent_session</span></code> 等）照实记录，但不是门槛。</figcaption>
     </figure>
 
     <figure>
@@ -990,14 +1236,14 @@
             <tr><td class="k">审查包</td><td>实验合同，被审代码与配置全文，依赖，可选 diff</td><td>拟记录的结论；假说，相关证据及其运行与结果，合同与各臂数字，代码审查，已有决定，其他开放假说</td></tr>
             <tr><td class="k">查什么</td><td>代码是否忠实实现方法</td><td>证据等级与范围撑不撑得起结论，有没有未排除的竞争解释，摘要与数字是否一致</td></tr>
             <tr><td class="k">严重度</td><td colspan="2">high：结果会错或实验无效；medium：很可能扭曲结果或浪费大量预算；low：值得修，不改变结论。只剩 low 的 issues 算通过</td></tr>
-            <tr><td class="k">轮次</td><td colspan="2">一轮最多两次：第一次加一次复查（<code><span class="nb">--recheck-of</span></code>）。第二次后仍有 medium 以上，交给协调者用 <code>rl review approve <span class="nb">--rationale</span></code> 批准或退回；再审要写明原因开新一轮（<code><span class="nb">--new-round</span></code>）</td></tr>
+            <tr><td class="k">轮次</td><td colspan="2">一轮最多两次：第一次加一次复查（<code><span class="nb">--recheck-of</span></code>）。第二次后仍有 medium 以上，交给协调者用 <code>rl review approve <span class="nb">--rationale</span></code> 批准或退回；再审要写明原因开新一轮（<code><span class="nb">--new-round</span></code>）；通过的复查解决了问题时，用 <code>rl review resolve RV-x <span class="nb">--by</span> RV-y</code> 记下</td></tr>
             <tr><td class="k">复用</td><td>代码、配置（去掉 seed 等键）、依赖与范围都没变</td><td>审查包内容没变</td></tr>
-            <tr><td class="k">自动检查</td><td><code>rl run register</code> 核对被审过的文件在这次 run 执行的代码（commit，否则工作区）里是否仍是审查看到的版本：covered、stale 或未审查，记在 Attempt 上；不需要审查的 run 用 <code><span class="nb">--no-review</span></code> 写明理由</td><td><code>rl decide</code> 记录关键决定时，核对它是否引用了一次通过的结论审查</td></tr>
+            <tr><td class="k">自动检查</td><td><code>rl run register</code> 逐个路径核对：这次 run 执行的代码里，被审过的文件是否仍是某次通过的审查看到的版本；对不上的路径各有原因（Fig. 13），结果记在 Attempt 上；不需要审查的 run 用 <code><span class="nb">--no-review</span></code> 写明理由</td><td><code>rl decide</code> 记录关键决定时，核对它是否引用了一次针对同一修订的通过结论审查（Fig. 9）</td></tr>
             <tr><td class="k">没有通过时</td><td><span class="chip warn">不扩大实验</span> 研究者以 <span class="nb">model_unavailable</span> 阻塞任务；登记检查不拦截，状态写进结论审查包和报告</td><td><span class="chip warn">不拦截</span> 但留在 <code>rl status</code> 的待处理中，直到链接一次通过的审查</td></tr>
           </tbody>
         </table>
       </div>
-      <figcaption><span class="fig-n">Fig. 14</span>两种审查共用 RV 工单、只读的审查者、回答格式（verdict 加带严重度的 findings）和轮次规则，只是对象不同：代码审查看实现是否忠实于方法，结论审查看证据是否撑得起结论。</figcaption>
+      <figcaption><span class="fig-n">Fig. 19</span>两种审查共用 RV 工单、只读的审查者、回答格式（verdict 加带严重度的 findings）和轮次规则，只是对象不同：代码审查看实现是否忠实于方法，结论审查看证据是否撑得起结论。</figcaption>
     </figure>
 
     <figure>
@@ -1039,61 +1285,286 @@
           <g class="st" transform="translate(818 55)"><rect width="160" height="30" rx="15"/><text x="80" y="15">批准 · 合并 · 关闭</text></g>
         </svg>
       </div>
-      <figcaption><span class="fig-n">Fig. 15</span>herdr 实测（pi 会话，<span class="nb">deepseek-flash</span>）的一轮审查。协调者只在三处出手：分配审查者，处理用完两次的一轮，验收合并。复查由 CLI 自动交给同一审查者；第二次后仍剩 1 个 medium（run 登记在修复前的提交上），研究者重新登记后，协调者读了之后的改动才批准。两个 tab 关闭，worktree 删除。</figcaption>
+      <figcaption><span class="fig-n">Fig. 20</span>herdr 实测（pi 会话，<span class="nb">deepseek-flash</span>）的一轮审查。协调者只在三处出手：分配审查者，处理用完两次的一轮，验收合并。复查由 CLI 自动交给同一审查者；第二次后仍剩 1 个 medium（run 登记在修复前的提交上），研究者重新登记后，协调者读了之后的改动才批准。两个 tab 关闭，worktree 删除。</figcaption>
     </figure>
   </section>
 
-  <section id="miyabi">
+  <section id="watch">
     <div class="sec-intro">
-      <div class="sec-head"><p class="ve-label caps">Miyabi 分工</p><h2>三个组件各管一层，接口只有提交参数和导出</h2></div>
-      <p><span class="nb">pi-env-mcp</span> 只管传输，<span class="nb">miyabi-mcp</span> 管 PBS 语义，<span class="nb">smooth-research</span> 只管记录。<b>记录不经模型转抄</b>：<span class="nb">miyabi-mcp</span> 的<span class="ve-ref" data-ref="export" tabindex="0">导出</span>直接交给 <code>rl run record</code>；一批作业共用一个<span class="ve-ref" data-ref="notify" tabindex="0">通知组</span>。</p>
+      <div class="sec-head"><p class="ve-label caps">会话监视</p><h2>协调者不轮询：监视程序每 5 分钟看一遍会话</h2></div>
+      <p><code>rl agent open</code> 同时在 <code><span class="nb">sr-watch</span></code> tab 里启动监视程序。每一拍它经 herdr 看每个会话和协调者，Codex 会话再读日志新写的部分；发现汇成一条来自 <code>watch</code> 的 NOTE。<b>它只往会话里输入固定的提示，从不连执行器。</b></p>
     </div>
 
     <figure>
       <div class="frame">
-        <svg class="ve-svg" viewBox="0 0 1000 480" role="img" aria-label="三个边界：pi-env-mcp 负责 exec、文件、终端、后台进程和上传下载，不负责项目映射与同步；miyabi-mcp 负责提交、查询、取消、台账、用量、通知和导出为 Observation，不负责研究记录；smooth-research 负责 RunSpec、attempt、绑定、观测排序与去重、结果与证据，不负责调度、SSH 与轮询。agent 经 pi-env-mcp 上传只读快照到远端项目目录，经 miyabi-mcp 用 job_submit 提交到 PBS，收到组通知；miyabi-mcp 的 JSON Lines 导出交给 smooth-research。">
-          <rect class="ve-bd" x="20" y="140" width="300" height="240" rx="4"/><text class="ve-bd-t" x="34" y="162">PI-ENV-MCP · 传输</text>
-          <rect class="ve-bd" x="350" y="140" width="300" height="240" rx="4"/><text class="ve-bd-t" x="364" y="162">MIYABI-MCP · PBS 语义</text>
-          <rect class="ve-bd" x="680" y="140" width="300" height="240" rx="4"/><text class="ve-bd-t" x="694" y="162">SMOOTH-RESEARCH · 记录</text>
+        <svg class="ve-svg lad" viewBox="0 0 1000 580" role="img" aria-label="监视程序的一拍，每个会话归入第一个符合的类别。1 退出：在原目录重启，新对话读 brief，一小时最多 3 次，额度低的宿主上不重启。2 停在对话框：只回答本会话目录的信任问题，其他对话框报告一次，通知先挂起。3 额度低：researcher 提交并交接，reviewer 停下，请协调者 switch。4 回合出错：在下一拍、再隔 2 拍、再隔 4 拍输入固定的继续提示，最多 3 次，之后报告。5 停滞：30 分钟没有进展，把屏幕末尾发给协调者，不输入。6 空闲未完成：连续两拍没有变化才提醒，每项任务最多 2 次。7 在等：不打扰；等的 run 60 分钟没有消息时请协调者去执行器核对。">
+          <g class="ve-n"><rect class="sh" x="40" y="24" width="400" height="58" rx="4"/></g>
+          <g class="ve-n"><rect class="sh" x="40" y="104" width="400" height="58" rx="4"/></g>
+          <g class="ve-n"><rect class="sh" x="40" y="184" width="400" height="58" rx="4"/></g>
+          <g class="ve-n is-key"><rect class="sh" x="40" y="264" width="400" height="58" rx="4"/></g>
+          <g class="ve-n"><rect class="sh" x="40" y="344" width="400" height="58" rx="4"/></g>
+          <g class="ve-n"><rect class="sh" x="40" y="424" width="400" height="58" rx="4"/></g>
+          <g class="ve-n ro"><rect class="sh" x="40" y="504" width="400" height="58" rx="4"/></g>
 
-          <path class="ve-e" d="M420 80V100H170V176"/><text class="ve-el" x="295" y="91">上传快照</text>
-          <path class="ve-e" d="M500 80V176"/><text class="ve-el l" x="490" y="126">job_submit</text>
-          <path class="ve-e is-async" data-ref="notify" d="M600 176V82"/><text class="ve-el r" data-ref="notify" x="610" y="112">组通知</text>
-          <path class="ve-e is-hot" data-ref="export" d="M630 295H698"/><text class="ve-el" data-ref="export" x="664" y="286">JSONL</text>
-          <path class="ve-e" d="M170 328V408"/><text class="ve-el r" x="180" y="396">上传 · 下载</text>
-          <path class="ve-e" d="M500 380V408"/><text class="ve-el r" x="510" y="397">qsub · qstat · qdel</text>
-          <path class="ve-e" d="M400 440H322"/><text class="ve-el" x="361" y="431">写出</text>
+          <path class="ve-e" d="M240 82V102"/><path class="ve-e" d="M240 162V182"/><path class="ve-e" d="M240 242V262"/><path class="ve-e" d="M240 322V342"/><path class="ve-e" d="M240 402V422"/><path class="ve-e" d="M240 482V502"/>
+          <text class="ve-el r" x="250" y="96">否</text><text class="ve-el r" x="250" y="176">否</text><text class="ve-el r" x="250" y="256">否</text>
+          <text class="ve-el r" x="250" y="336">否</text><text class="ve-el r" x="250" y="416">否</text><text class="ve-el r" x="250" y="496">否</text>
+          <path class="ve-e" d="M440 53H488"/><path class="ve-e" d="M440 133H488"/><path class="ve-e" d="M440 213H488"/><path class="ve-e" d="M440 293H488"/><path class="ve-e" d="M440 373H488"/><path class="ve-e" d="M440 453H488"/><path class="ve-e" d="M440 533H488"/>
+          <text class="ve-el" x="464" y="44">是</text><text class="ve-el" x="464" y="124">是</text><text class="ve-el" x="464" y="204">是</text>
+          <text class="ve-el" x="464" y="284">是</text><text class="ve-el" x="464" y="364">是</text><text class="ve-el" x="464" y="444">是</text><text class="ve-el" x="464" y="524">是</text>
 
-          <g class="ve-n" transform="translate(380 14)"><rect class="sh" width="240" height="66" rx="4"/><text x="120" y="26">研究 agent</text><text class="sub" x="120" y="50">Claude Code · Bash</text></g>
-          <g class="ve-n" transform="translate(40 178)"><rect class="sh" width="260" height="66" rx="4"/><text x="130" y="24">exec · 文件 · 终端</text><text class="sub" x="130" y="48">后台进程</text></g>
-          <g class="ve-n" transform="translate(40 262)"><rect class="sh" width="260" height="66" rx="4"/><text x="130" y="24">快照与清单</text><text class="sub" x="130" y="48">上传 · 解压 · 下载</text></g>
-          <g class="ve-n" transform="translate(370 178)"><rect class="sh" width="260" height="66" rx="4"/><text x="130" y="24">提交 · 查询 · 取消</text><text class="sub" x="130" y="48">台账 · 用量 · 通知</text></g>
-          <g class="ve-n" data-ref="export" transform="translate(370 262)"><rect class="sh" width="260" height="66" rx="4"/><text x="130" y="24">导出为 Observation</text><text class="sub" x="130" y="48">export_command · JSONL</text></g>
-          <g class="ve-n" transform="translate(700 178)"><rect class="sh" width="260" height="66" rx="4"/><text x="130" y="24">RunSpec · attempt</text><text class="sub" x="130" y="48">绑定 · 结果 · 证据</text></g>
-          <g class="ve-n is-key" data-ref="export" transform="translate(700 262)"><rect class="sh" width="260" height="66" rx="4"/><text x="130" y="24">观测排序与去重</text><text class="sub" x="130" y="48">rl run record</text></g>
-          <path class="ve-x" d="M40 350l8 8M48 350l-8 8"/><text class="mn l" x="58" y="359">项目映射 · 同步</text>
-          <path class="ve-x" d="M370 350l8 8M378 350l-8 8"/><text class="mn l" x="388" y="359">研究记录</text>
-          <path class="ve-x" d="M700 350l8 8M708 350l-8 8"/><text class="mn l" x="718" y="359">调度 · SSH · 轮询</text>
-          <g class="ve-n" transform="translate(20 410)"><rect class="sh" width="300" height="60" rx="4"/><text x="150" y="20">远端项目目录</text><text class="sub" x="150" y="42">snapshots/&lt;sha&gt; · runs/&lt;ATT&gt;</text></g>
-          <g class="ve-n" transform="translate(400 410)"><rect class="sh" width="220" height="60" rx="4"/><text x="110" y="20">PBS · debug-mig</text><text class="sub" x="110" y="42">Miyabi-G</text></g>
+          <text class="t" x="60" y="44">1 · 退出</text>
+          <text class="c" x="60" y="66">agent 退出了，或者它的 tab 被关掉</text>
+          <text class="a" x="500" y="44">在原来的目录里重启，新对话从 brief 读回任务</text>
+          <rect class="sq" x="842" y="38" width="12" height="12" rx="2"/><rect class="sq" x="858" y="38" width="12" height="12" rx="2"/><rect class="sq" x="874" y="38" width="12" height="12" rx="2"/>
+          <text class="a dim" x="894" y="44">次/小时</text>
+          <text class="a dim" x="500" y="66">额度低的宿主上不重启，请协调者换模型</text>
 
-          <g class="ve-co" transform="translate(664 318)"><circle r="11"/><text>1</text></g>
-          <g class="ve-co" transform="translate(150 122)"><circle r="11"/><text>2</text></g>
-          <g class="ve-co" transform="translate(630 128)"><circle r="11"/><text>3</text></g>
+          <text class="t" x="60" y="124">2 · 停在对话框</text>
+          <text class="c" x="60" y="146">herdr 看到 blocked，或 rl 从屏幕认出 Codex 的对话框</text>
+          <text class="a" x="500" y="124">只回答本会话目录的信任问题</text>
+          <text class="a dim" x="500" y="146">其他对话框报告一次；发给它的通知先挂起</text>
+
+          <text class="t" x="60" y="204">3 · 额度低</text>
+          <text class="c" x="60" y="226">researcher 或 reviewer 所在的宿主额度低</text>
+          <text class="a" x="500" y="204">researcher 提交并交接，reviewer 马上停下</text>
+          <text class="a dim" x="500" y="226">请协调者 rl agent switch；这个宿主上不提醒、不重试、不重启</text>
+
+          <text class="t" x="60" y="284">4 · 回合出错</text>
+          <text class="c" x="60" y="306">Codex 日志：最后一个回合以服务错误结束</text>
+          <text class="a" x="500" y="284">输入固定的“继续”提示</text>
+          <path class="lane" d="M708 284H960"/>
+          <path class="tick" d="M708 279V289M744 279V289M780 279V289M816 279V289M852 279V289M888 279V289M924 279V289M960 279V289"/>
+          <circle class="rd" cx="744" cy="284" r="6"/><circle class="rd" cx="816" cy="284" r="6"/><circle class="rd" cx="960" cy="284" r="6"/>
+          <text class="bt" x="708" y="272">出错</text><text class="bt on" x="744" y="272">1</text><text class="bt on" x="816" y="272">3</text><text class="bt on" x="960" y="272">7</text>
+          <text class="a dim" x="976" y="284">拍</text>
+          <text class="a dim" x="500" y="306">之后报告协调者；额度用完按额度低处理</text>
+
+          <text class="t" x="60" y="364">5 · 停滞</text>
+          <text class="c" x="60" y="386">30 分钟没有进展，也没有挂起的工具调用</text>
+          <text class="a" x="500" y="364">把屏幕末尾发给协调者，什么都不输入</text>
+          <text class="a dim" x="500" y="386">工具调用挂起超过 4 倍停滞时间，也报告一次</text>
+
+          <text class="t" x="60" y="444">6 · 空闲未完成</text>
+          <text class="c" x="60" y="466">空闲、任务没做完、又没在等什么</text>
+          <text class="a" x="500" y="444">连续两拍没有变化，才提醒它继续</text>
+          <rect class="sq" x="764" y="438" width="12" height="12" rx="2"/><rect class="sq" x="780" y="438" width="12" height="12" rx="2"/>
+          <text class="a dim" x="800" y="444">次/任务</text>
+          <text class="a dim" x="500" y="466">之后报告协调者</text>
+
+          <text class="t" x="60" y="524">7 · 在等</text>
+          <text class="c" x="60" y="546">task wait 或 block、等审查、run 未结束、消息未回</text>
+          <text class="a" x="500" y="524">不打扰</text>
+          <text class="a dim" x="500" y="546">等的 run 60 分钟没有消息：请协调者核对；到 2、4、8 倍时再问</text>
+        </svg>
+      </div>
+      <figcaption><span class="fig-n">Fig. 21</span>监视程序的一拍：每个会话归入第一个符合的类别。提示只在确认送达后计数（herdr 看到 working 或 blocked，或 Codex 日志出现新回合）；确认不了的报告给协调者，不再输入。协调者自己的回合出错也按第 4 类重试；协调者有消息一整拍没读，提醒一次。</figcaption>
+    </figure>
+
+    <figure>
+      <div class="frame">
+        <svg class="ve-svg" viewBox="0 0 1000 272" role="img" aria-label="额度阈值。角色会话的宿主：窗口还剩 10% 或更少时算作额度低，例如读数 7%。协调者自己的宿主：20% 或更少，例如读数 18%。超过 15 分钟的读数照样显示，但不算额度低，例如 40 分钟前的 6%。">
+          <text class="row-t" x="20" y="72">角色会话的宿主</text>
+          <rect class="trk" x="200" y="62" width="760" height="20" rx="2"/>
+          <rect class="zone" x="200" y="62" width="76" height="20"/>
+          <circle class="rd" cx="253.2" cy="72" r="7"/>
+          <text class="lbl" x="253" y="49" text-anchor="middle">读数 7%，3 分钟前</text>
+          <text class="lbl" x="290" y="77">≤ 10% 算作额度低 · usage.switch_left_percent</text>
+
+          <text class="row-t" x="20" y="146">协调者自己的宿主</text>
+          <rect class="trk" x="200" y="136" width="760" height="20" rx="2"/>
+          <rect class="zone" x="200" y="136" width="152" height="20"/>
+          <circle class="rd" cx="336.8" cy="146" r="7"/>
+          <text class="lbl" x="337" y="123" text-anchor="middle">读数 18%</text>
+          <text class="lbl" x="366" y="151">≤ 20% · usage.coordinator_host_left_percent</text>
+
+          <text class="row-t" x="20" y="220">过期的读数</text>
+          <rect class="trk" x="200" y="210" width="760" height="20" rx="2"/>
+          <rect class="zone" x="200" y="210" width="76" height="20"/>
+          <circle class="rd old" cx="245.6" cy="220" r="7"/>
+          <text class="lbl" x="246" y="197" text-anchor="middle">读数 6%，40 分钟前</text>
+          <text class="lbl" x="290" y="225">超过 15 分钟：照样显示，不算额度低</text>
+
+          <path class="lane" d="M200 246H960"/>
+          <path class="tick" d="M200 242V250M276 242V250M352 242V250M580 242V250M960 242V250"/>
+          <text class="tick-t" x="200" y="266">0%</text><text class="tick-t" x="276" y="266">10%</text><text class="tick-t" x="352" y="266">20%</text><text class="tick-t" x="580" y="266">50%</text><text class="tick-t" x="960" y="266">100%</text>
+        </svg>
+      </div>
+      <div class="cases">
+        <div class="case" data-ref="r-res" data-st="warn"><span class="chip warn">交接后换</span><h3>researcher</h3>
+          <svg class="ve-mini" viewBox="0 0 240 72" role="img" aria-label="额度低的宿主上的 researcher-1 交接后，协调者用 rl agent switch 在下一个条目上开同名会话。">
+            <path class="ve-e is-st" d="M104 44H134"/><text class="mn" x="119" y="12">switch</text>
+            <g class="ve-n"><rect class="sh is-off" x="2" y="20" width="102" height="48" rx="4"/><text x="53" y="36">researcher-1</text><text class="sub" x="53" y="56">codex · 低</text></g>
+            <g class="ve-n is-st"><rect class="sh" x="136" y="20" width="102" height="48" rx="4"/><text x="187" y="36">researcher-1</text><text class="sub" x="187" y="56">claude</text></g>
+          </svg>
+          <p>在任务分支上提交，写交接说明，<code>rl task handoff</code>。HANDOFF 到了以后，<code>rl agent switch &lt;名字&gt;</code> 关掉会话、保留 worktree，在下一个条目上开同名会话，带同一任务。</p></div>
+        <div class="case" data-ref="r-rev" data-st="risk"><span class="chip risk">马上停下</span><h3>reviewer</h3>
+          <svg class="ve-mini" viewBox="0 0 240 72" role="img" aria-label="额度低的宿主上的 reviewer-1 不交答案，马上停下。">
+            <path class="ve-e is-st" d="M104 44H134"/><path class="ve-x" d="M113 38l12 12M125 38l-12 12"/>
+            <g class="ve-n"><rect class="sh is-off" x="2" y="20" width="102" height="48" rx="4"/><text x="53" y="36">reviewer-1</text><text class="sub" x="53" y="56">codex · 低</text></g>
+            <g class="ve-n is-st"><rect class="sh" x="136" y="20" width="102" height="48" rx="4"/><text x="187" y="36">不交答案</text><text class="sub" x="187" y="56">等 switch</text></g>
+          </svg>
+          <p>不交答案。switch 从工单的候选条目里选下一个；之后的复查交给替换后的同名会话。</p></div>
+        <div class="case" data-ref="r-adv" data-st="ok"><span class="chip ok">不换</span><h3>advisor</h3>
+          <svg class="ve-mini" viewBox="0 0 240 72" role="img" aria-label="advisor 在额度低的宿主上也不换模型。">
+            <path class="ve-e is-st" d="M104 44H134"/>
+            <g class="ve-n"><rect class="sh" x="2" y="20" width="102" height="48" rx="4"/><text x="53" y="36">advisor-1</text><text class="sub" x="53" y="56">codex · 低</text></g>
+            <g class="ve-n is-st"><rect class="sh" x="136" y="20" width="102" height="48" rx="4"/><text x="187" y="36">advisor-1</text><text class="sub" x="187" y="56">同一模型</text></g>
+          </svg>
+          <p>不换模型，也不收通知：剩下的额度留给顾问。</p></div>
+        <div class="case" data-st="info"><span class="chip info">跳过</span><h3>新会话和 headless 调用</h3>
+          <svg class="ve-mini" viewBox="0 0 240 72" role="img" aria-label="新会话跳过额度低的宿主上的条目 1，用条目 2。">
+            <path class="ve-e is-st" d="M104 44H134"/><text class="mn" x="119" y="12">跳过</text>
+            <g class="ve-n"><rect class="sh is-off" x="2" y="20" width="102" height="48" rx="4"/><text x="53" y="36">条目 1</text><text class="sub" x="53" y="56">宿主低</text></g>
+            <g class="ve-n is-st"><rect class="sh" x="136" y="20" width="102" height="48" rx="4"/><text x="187" y="36">条目 2</text><text class="sub" x="187" y="56">下一个</text></g>
+          </svg>
+          <p>新开的 researcher、reviewer 会话、<code>rl delegate</code> 和 <code>rl review run</code> 用角色列表里的下一个条目；<code><span class="nb">--entry</span></code> 照常用指定的条目。</p></div>
+      </div>
+      <figcaption><span class="fig-n">Fig. 22</span>窗口剩得少的宿主算作额度低：角色会话的宿主 ≤ 10%，协调者自己的宿主 ≤ 20%，因为协调者还要接着用它，而且不换自己的模型。Codex 的读数来自会话日志的 <code>token_count</code> 事件；Claude Code 的来自 rl 的状态栏命令 <code>rl usage statusline</code>。<code>rl agent list</code> 列出各宿主的窗口。</figcaption>
+    </figure>
+
+    <figure>
+      <div class="cases">
+        <div class="case" data-st="ok"><span class="chip ok">CLI 回答</span><h3>信任这个文件夹？</h3>
+          <svg class="ve-mini" viewBox="0 0 240 72" role="img" aria-label="会话问是否信任 rl 开它的目录，rl 选信任。">
+            <path class="ve-e is-st" d="M104 44H134"/>
+            <g class="ve-n"><rect class="sh" x="2" y="20" width="102" height="48" rx="4"/><text x="53" y="36">信任文件夹？</text><text class="sub" x="53" y="56">自己的目录</text></g>
+            <g class="ve-n is-st"><rect class="sh" x="136" y="20" width="102" height="48" rx="4"/><text x="187" y="36">rl</text><text class="sub" x="187" y="56">选信任</text></g>
+          </svg>
+          <p>问的正是 rl 开会话的目录（worktree，或用户启动协调者时已经信任的项目目录）时，<code>rl agent open</code> 或监视程序选“信任”，记一条 <code>session.trusted</code>。</p></div>
+        <div class="case" data-ref="r-coord" data-st="info"><span class="chip info">协调者回答</span><h3>审批、MCP 和其他对话框</h3>
+          <svg class="ve-mini" viewBox="0 0 240 72" role="img" aria-label="其他对话框由协调者用 rl agent answer 回答。">
+            <path class="ve-e is-st" d="M104 44H134"/>
+            <g class="ve-n"><rect class="sh" x="2" y="20" width="102" height="48" rx="4"/><text x="53" y="36">审批 · MCP</text><text class="sub" x="53" y="56">其他对话框</text></g>
+            <g class="ve-n is-st"><rect class="sh" x="136" y="20" width="102" height="48" rx="4"/><text x="187" y="36">协调者</text><text class="sub" x="187" y="56">answer</text></g>
+          </svg>
+          <p><code>rl agent dialog &lt;名字&gt;</code> 显示选项，<code>rl agent answer &lt;名字&gt; &lt;选项&gt; <span class="nb">--reason</span> ..</code> 选择并记下理由。选项按屏幕最下方那一组认；同一会话一次只跑一个 answer。</p></div>
+        <div class="case" data-st="warn"><span class="chip warn">用户决定</span><h3>Codex 的 Hooks 审核</h3>
+          <svg class="ve-mini" viewBox="0 0 240 72" role="img" aria-label="herdr 的 Codex 集成 hook 要审核时，由用户决定；用户决定之前，协调者选不信任继续。">
+            <path class="ve-e is-st" d="M104 44H134"/>
+            <g class="ve-n"><rect class="sh" x="2" y="20" width="102" height="48" rx="4"/><text x="53" y="36">Hooks 审核</text><text class="sub" x="53" y="56">herdr 集成</text></g>
+            <g class="ve-n is-st"><rect class="sh" x="136" y="20" width="102" height="48" rx="4"/><text x="187" y="36">用户</text><text class="sub" x="187" y="56">之前不信任</text></g>
+          </svg>
+          <p>这个 hook 在沙箱外运行，信任它由用户决定。用户信任之前，协调者选 “Continue without trusting”。herdr 认不出这类对话框，rl 从屏幕上认。</p></div>
+        <div class="case" data-st="risk"><span class="chip risk">只问用户</span><h3>只有用户能定的事</h3>
+          <svg class="ve-mini" viewBox="0 0 240 72" role="img" aria-label="超出范围、预算或凭据的事只问用户。">
+            <path class="ve-e is-st" d="M104 44H134"/>
+            <g class="ve-n"><rect class="sh" x="2" y="20" width="102" height="48" rx="4"/><text x="53" y="36">超出范围</text><text class="sub" x="53" y="56">预算 · 凭据</text></g>
+            <g class="ve-n is-st"><rect class="sh" x="136" y="20" width="102" height="48" rx="4"/><text x="187" y="36">用户</text><text class="sub" x="187" y="56">经协调者</text></g>
+          </svg>
+          <p>超出范围、预算或约束文档留给用户的动作，超过 <code>advice.max_rounds</code> 的建议轮，用户的账户和凭据，项目以外不可撤销的操作。</p></div>
+      </div>
+      <figcaption><span class="fig-n">Fig. 23</span>角色会话只问协调者，从不直接问用户。会话停在对话框时什么都不输入：发给它的消息照常记录，通知先挂在 <code>Session.watch.notices</code> 里，离开对话框后用一条通知告诉它。记录不足以判断时，协调者选稳妥的选项。</figcaption>
+    </figure>
+  </section>
+
+  <section id="compute">
+    <div class="sec-intro">
+      <div class="sec-head"><p class="ve-label caps">计算资源</p><h2>作业 MCP 走资源自己的连接，接口只有提交参数和导出</h2></div>
+      <p><span class="nb">pi-env-mcp</span> 只管传输，<span class="nb">miyabi-mcp</span> 管 PBS 语义，<span class="nb">smooth-research</span> 只管记录。<b>作业 MCP 经资源的 <code>connect</code> 访问</b>：<code>connect: <span class="nb">pi-env-mcp:miyabi-g</span></code> 时，pi-env-mcp 在主机上运行 miyabi-mcp。<span class="nb">miyabi-mcp</span> 的<span class="ve-ref" data-ref="export" tabindex="0">导出</span>直接交给 <code>rl run record</code>；一批作业共用一个<span class="ve-ref" data-ref="notify" tabindex="0">通知组</span>。</p>
+    </div>
+
+    <figure>
+      <div class="frame">
+        <svg class="ve-svg" viewBox="0 0 1000 500" role="img" aria-label="作业 MCP 经资源的连接访问。研究 agent 的宿主只注册 pi-env-mcp，调用 miyabi_pbs__job_submit；pi-env-mcp 经它已有的 SSH 会话在主机上运行 miyabi-mcp，miyabi-mcp 用 qsub、qstat、qdel 操作 PBS。联合测试 A、B 轮用 ssh 直接注册 miyabi-mcp，绕过了 pi-env-mcp，这条路已改掉。miyabi-mcp 的导出以 JSON Lines 交给 rl run record；一批作业的组通知发给协调者。三个边界：pi-env-mcp 管传输，不做项目映射；miyabi-mcp 管 PBS 语义，不写研究记录；smooth-research 管记录，不调度、不连 SSH、不轮询。">
+          <rect class="ve-bd" x="20" y="150" width="300" height="240" rx="4"/><text class="ve-bd-t" x="34" y="172">PI-ENV-MCP · 传输</text>
+          <rect class="ve-bd" x="350" y="150" width="300" height="240" rx="4"/><text class="ve-bd-t" x="364" y="172">MIYABI-MCP · 在主机上</text>
+          <rect class="ve-bd" x="680" y="150" width="300" height="240" rx="4"/><text class="ve-bd-t" x="694" y="172">SMOOTH-RESEARCH · 记录</text>
+
+          <path class="ve-e is-hot" d="M370 49H170V186"/><text class="ve-el" x="270" y="40">miyabi_pbs__job_submit</text>
+          <path class="ve-e is-hot" d="M300 221H368"/><text class="ve-el" x="334" y="212">SSH</text>
+          <path class="ve-blk" d="M460 84V184"/>
+          <path class="ve-x" d="M453 127l14 14M467 127l-14 14"/>
+          <text class="ve-el r is-risk" x="474" y="124">ssh 直连（A/B）</text>
+          <path class="ve-e is-async" data-ref="notify" d="M600 186V86"/><text class="ve-el l" data-ref="notify" x="590" y="160">组通知</text>
+          <path class="ve-e" d="M630 49H830V186"/><text class="ve-el" x="730" y="40">rl run register</text>
+          <path class="ve-e" data-ref="export" d="M630 305H698"/><text class="ve-el" data-ref="export" x="664" y="296">JSONL</text>
+          <path class="ve-e" d="M170 338V418"/><text class="ve-el r" x="180" y="404">上传 · 下载</text>
+          <path class="ve-e" d="M500 338V418"/><text class="ve-el r" x="510" y="404">qsub · qstat · qdel</text>
+          <path class="ve-e" d="M400 450H322"/><text class="ve-el" x="361" y="441">写出</text>
+
+          <g class="ve-n" transform="translate(370 14)"><rect class="sh" width="260" height="70" rx="4"/><text x="130" y="26">研究 agent</text><text class="sub" x="130" y="52">宿主只注册 pi-env-mcp</text></g>
+          <g class="ve-n is-key" transform="translate(40 188)"><rect class="sh" width="260" height="66" rx="4"/><text x="130" y="24">在主机上运行 MCP</text><text class="sub" x="130" y="48">工具转出为 &lt;服务&gt;__&lt;工具&gt;</text></g>
+          <g class="ve-n" transform="translate(40 272)"><rect class="sh" width="260" height="66" rx="4"/><text x="130" y="24">exec · 文件 · 终端</text><text class="sub" x="130" y="48">上传 · 解开 · 下载</text></g>
+          <g class="ve-n" transform="translate(370 188)"><rect class="sh" width="260" height="66" rx="4"/><text x="130" y="24">提交 · 查询 · 取消</text><text class="sub" x="130" y="48">台账 · 用量 · 通知</text></g>
+          <g class="ve-n" data-ref="export" transform="translate(370 272)"><rect class="sh" width="260" height="66" rx="4"/><text x="130" y="24">导出为 Observation</text><text class="sub" x="130" y="48">export_command · JSONL</text></g>
+          <g class="ve-n" transform="translate(700 188)"><rect class="sh" width="260" height="66" rx="4"/><text x="130" y="24">RunSpec · attempt</text><text class="sub" x="130" y="48">绑定 · 结果 · 证据</text></g>
+          <g class="ve-n" data-ref="export" transform="translate(700 272)"><rect class="sh" width="260" height="66" rx="4"/><text x="130" y="24">观测排序与去重</text><text class="sub" x="130" y="48">rl run record</text></g>
+          <path class="ve-x" d="M40 362l8 8M48 362l-8 8"/><text class="mn l" x="58" y="371">项目映射 · 同步</text>
+          <path class="ve-x" d="M370 362l8 8M378 362l-8 8"/><text class="mn l" x="388" y="371">研究记录</text>
+          <path class="ve-x" d="M700 362l8 8M708 362l-8 8"/><text class="mn l" x="718" y="371">调度 · SSH · 轮询</text>
+          <g class="ve-n" transform="translate(20 420)"><rect class="sh" width="300" height="64" rx="4"/><text x="150" y="22">远端项目目录 = workspace</text><text class="sub" x="150" y="46">snapshots/&lt;commit&gt; · runs/&lt;ATT&gt;</text></g>
+          <g class="ve-n" transform="translate(400 420)"><rect class="sh" width="220" height="64" rx="4"/><text x="110" y="22">PBS · debug-mig</text><text class="sub" x="110" y="46">Miyabi-G</text></g>
+
+          <g class="ve-co" transform="translate(170 120)"><circle r="11"/><text>1</text></g>
+          <g class="ve-co q" transform="translate(460 100)"><circle r="11"/><text>2</text></g>
+          <g class="ve-co" transform="translate(664 328)"><circle r="11"/><text>3</text></g>
+          <g class="ve-co" transform="translate(150 404)"><circle r="11"/><text>4</text></g>
+          <g class="ve-co" transform="translate(600 120)"><circle r="11"/><text>5</text></g>
         </svg>
       </div>
       <ol class="co-list">
-        <li><span class="n">1</span><span><span class="nb">miyabi-mcp</span> 返回一条本机可执行的 <code>export_command</code>；输出写入 <code>observations.jsonl</code>，再由 <code>rl run record --observation @file</code> 读入。</span></li>
-        <li><span class="n">2</span><span>代码按 commit 过去：<code>code: git</code> 时 <code>rl session start</code>（<code>rl compute sync</code>）推送分支（没有 remote 时先建 private GitHub 仓库），主机 fetch 到 <code>repo.git</code>；<code>code: archive</code> 时 <code>git archive</code> 后上传。两种都解压为只读的 <code>snapshots/&lt;sha&gt;/</code>；作业脚本和 workdir 都在快照里，输出写到 <code>runs/&lt;ATT&gt;/</code>。</span></li>
-        <li><span class="n">3</span><span>一批作业一个通知组；listener 在后台等待，收到后先 <code>notify_ack</code>，再导出并登记。</span></li>
+        <li><span class="n">1</span><span>宿主只注册 pi-env-mcp（<code>connect: <span class="nb">pi-env-mcp:miyabi-g</span></code>）。pi-env-mcp 用 <code><span class="nb">pi-env-mcp</span> mcp add <span class="nb">miyabi-pbs</span> <span class="nb">--host</span> <span class="nb">miyabi-g</span> -- &lt;命令&gt;</code> 在主机上运行 miyabi-mcp，用的是它已有的那条 SSH 会话。工具转出为 <code><span class="nb">miyabi_pbs__&lt;工具&gt;</span></code>，在 Claude Code 里是 <code>mcp__miyabi-g__<wbr>miyabi_pbs__<wbr>job_submit</code>。需要项目目录的工具用资源的 <code>workspace</code>，所以一份 pi-env-mcp 配置可以服务多个研究项目。</span></li>
+        <li><span class="n">2</span><span>联合测试 A、B 轮把 miyabi-pbs 注册成 <code>ssh -T <span class="nb">miyabi-g</span> … <span class="nb">miyabi-mcp</span> serve</code>，作业调用没有经过 pi-env-mcp。原因有二：插件只写了服务名，没说经哪条路；那时 pi-env-mcp 也运行不了远程 MCP。现在 <code>rl compute steps</code> 和工作包写明工具名；工具不在时用 pi-env-mcp 的 <code>hosts</code> 查看并重启它，不改用 ssh 注册（§21.23）。</span></li>
+        <li><span class="n">3</span><span><span class="nb">miyabi-mcp</span> 返回一条本机可执行的 <code>export_command</code>；输出写入 <code>observations.jsonl</code>，再由 <code>rl run record <span class="nb">--observation</span> @file</code> 读入。记录不经模型转抄。</span></li>
+        <li><span class="n">4</span><span>代码按 commit 过去：<code>code: git</code> 时协调者的 <code>rl session start</code>（<code>rl compute sync</code>）推送分支（没有 remote 时先建 private GitHub 仓库），主机 fetch 到 <code>repo.git</code>；<code>code: archive</code> 时 <code>git archive</code> 后上传。两种都解开为只读的 <code>snapshots/&lt;commit&gt;/</code>；作业脚本和 workdir 都在快照里，输出写到 <code>runs/&lt;ATT&gt;/</code>。</span></li>
+        <li><span class="n">5</span><span>一批作业一个通知组；listener 在后台等待，收到后先 <code>notify_ack</code>，再导出并登记。通知要发到协调者自己的 herdr 目标（<code>rl resume</code> 写出它）；等的 run 60 分钟没有消息时，监视程序请协调者去执行器核对。</span></li>
       </ol>
-      <figcaption><span class="fig-n">Fig. 16</span><span class="nb">pi-env-mcp</span> 保持通用，不做项目映射；PBS 的全部语义在 <span class="nb">miyabi-mcp</span>；<span class="nb">smooth-research</span> 不碰调度和 SSH。</figcaption>
+      <figcaption><span class="fig-n">Fig. 24</span>作业 MCP 走资源自己的连接：agent → pi-env-mcp → 主机上的 miyabi-mcp → PBS。<span class="nb">pi-env-mcp</span> 保持通用，不做项目映射；PBS 的全部语义在 <span class="nb">miyabi-mcp</span>；<span class="nb">smooth-research</span> 不碰调度和 SSH。</figcaption>
+    </figure>
+
+    <figure>
+      <div class="cases">
+        <div class="case" data-st="ok"><span class="chip ok">联合测试用的</span><h3><code>connect: <span class="nb">pi-env-mcp:&lt;服务名&gt;</span></code></h3>
+          <svg class="ve-mini" viewBox="0 0 240 72" role="img" aria-label="agent 经 pi-env-mcp 连到主机，主机上运行 miyabi-mcp。">
+            <path class="ve-e is-st" d="M92 44H146"/><text class="mn" x="119" y="12">pi-env-mcp</text>
+            <g class="ve-n"><rect class="sh" x="2" y="20" width="90" height="48" rx="4"/><text x="47" y="36">agent</text><text class="sub" x="47" y="56">工作站</text></g>
+            <g class="ve-n is-st"><rect class="sh" x="148" y="20" width="90" height="48" rx="4"/><text x="193" y="36">主机</text><text class="sub" x="193" y="56">miyabi-mcp</text></g>
+          </svg>
+<pre>miyabi:
+  host: miyabi-g
+  connect: pi-env-mcp:miyabi-g
+  jobs: mcp:miyabi-pbs
+  workspace: /work/…/joint-a</pre>
+          <p>宿主只注册 pi-env-mcp，作业服务器跑在主机上。<code>code</code> 默认 git：会话开始时推送，主机 fetch。</p></div>
+        <div class="case" data-st="info"><span class="chip info">ssh</span><h3><code>connect: ssh</code></h3>
+          <svg class="ve-mini" viewBox="0 0 240 72" role="img" aria-label="宿主注册作业服务器，经 ssh 在主机上启动它。">
+            <path class="ve-e is-st" d="M92 44H146"/><text class="mn" x="119" y="12">ssh</text>
+            <g class="ve-n"><rect class="sh" x="2" y="20" width="90" height="48" rx="4"/><text x="47" y="36">agent</text><text class="sub" x="47" y="56">注册 MCP</text></g>
+            <g class="ve-n is-st"><rect class="sh" x="148" y="20" width="90" height="48" rx="4"/><text x="193" y="36">主机</text><text class="sub" x="193" y="56">作业服务器</text></g>
+          </svg>
+<pre>cluster:
+  host: cluster-login
+  connect: ssh
+  jobs: mcp:cluster-jobs
+  workspace: /work/me/project</pre>
+          <p>宿主注册作业服务器，经 ssh 在主机上启动。<code>rl compute steps</code> 打印传输命令。</p></div>
+        <div class="case" data-st="warn"><span class="chip warn">登录节点</span><h3><code>connect: local</code> · <code>coordinator: login</code></h3>
+          <svg class="ve-mini" viewBox="0 0 240 72" role="img" aria-label="协调者在登录节点上，经作业 MCP 把 workload 投到计算节点，两边共享目录。">
+            <path class="ve-e is-st" d="M92 44H146"/><text class="mn" x="119" y="12">作业 MCP</text>
+            <g class="ve-n"><rect class="sh" x="2" y="20" width="90" height="48" rx="4"/><text x="47" y="36">登录节点</text><text class="sub" x="47" y="56">agent</text></g>
+            <g class="ve-n is-st"><rect class="sh" x="148" y="20" width="90" height="48" rx="4"/><text x="193" y="36">计算节点</text><text class="sub" x="193" y="56">共享目录</text></g>
+          </svg>
+<pre>compute:
+  coordinator: login
+  default: cluster
+  repository: none
+  resources:
+    cluster:
+      kind: remote
+      connect: local
+      jobs: mcp:cluster-jobs
+      workspace: /shared/proj
+      code: archive</pre>
+          <p>只能 <code>code: archive</code>：在共享目录生成只读快照。所有 workload 都经执行器，登记必须带 <code><span class="nb">--resource</span></code>，不允许 <code>jobs: shell</code>；作业 MCP 不可用时不在本地回退。</p></div>
+      </div>
+      <figcaption><span class="fig-n">Fig. 25</span><code>connect</code> 决定作业 MCP 由谁注册、跑在哪里。三种写法里 rl 都不连接、不复制、不启动：它读配置，检查本地看得到的东西，打印步骤（<code>rl compute steps</code>），由 agent 用自己的工具执行。</figcaption>
     </figure>
 
     <figure>
       <div class="specs">
         <div class="spec">
-          <div class="spec-h"><h3>job_submit</h3><span class="meta">agent → <span class="nb">miyabi-mcp</span> · 用 attempt 绑定作业</span></div>
+          <div class="spec-h"><h3>job_submit</h3><span class="meta">经 <span class="nb">pi-env-mcp</span> 调 <span class="nb">miyabi_pbs__job_submit</span> · 用 attempt 绑定作业</span></div>
           <dl>
             <dt>request_key</dt><dd class="mono">sr:<span class="nb">ATT-0001-1</span></dd>
             <dt>client_ref · name</dt><dd><span class="mono"><span class="nb">ATT-0001-1</span></span> <span class="dim">— 导出时 client_ref 成为 attempt_id</span></dd>
@@ -1116,14 +1587,14 @@
           </dl>
         </div>
       </div>
-      <figcaption><span class="fig-n">Fig. 17</span>两条接口的全部要点。提交时用 attempt 编号绑定作业；导出时作业变成带命名空间的观测和用量。值取自 bf16 测试 seed 0 的真实记录。</figcaption>
+      <figcaption><span class="fig-n">Fig. 26</span>两条接口的全部要点。提交时用 attempt 编号绑定作业；导出时作业变成带命名空间的观测和用量。值取自 bf16 测试 seed 0 的真实记录（那时作业 MCP 还是直接注册的）。</figcaption>
     </figure>
   </section>
 
   <section id="e2e">
     <div class="sec-intro">
-      <div class="sec-head"><p class="ve-label caps">端到端测试</p><h2>Miyabi 上 3 个作业跑通，记录与台账逐字节一致</h2></div>
-      <p>Claude Code 2.1.314（Sonnet 5.5）加载插件，在 <span class="nb">Miyabi-G</span> 的 <span class="nb">debug-mig</span> 上完成一次研究循环。<b>结论只到 screening</b>：速度得到支持，精度等价还没有显示。</p>
+      <div class="sec-head"><p class="ve-label caps">端到端测试</p><h2>Miyabi 上三轮研究都走完了循环，联合测试纠正了作业 MCP 的接法</h2></div>
+      <p>bf16 测试由 Claude Code 2.1.314（Sonnet 5.5）在 <span class="nb">Miyabi-G</span> 的 <span class="nb">debug-mig</span> 上完成，3 个作业的记录与台账逐字节一致，<b>结论只到 screening</b>。联合测试让 Claude Code 和 Codex 互换协调者与角色，各跑一轮（A、B），改正接法后各重测一次作业路径（A′、B′）。</p>
     </div>
 
     <figure>
@@ -1154,7 +1625,7 @@
           <g class="ve-dim is-key"><path class="ext" d="M641.3 214V236M900.7 114V236"/><path class="ln" d="M641.3 230H900.7M637.3 234l8 -8M896.7 234l8 -8"/><text x="771" y="223">3 min 08 s</text></g>
         </svg>
       </div>
-      <figcaption><span class="fig-n">Fig. 18</span>Miyabi 端到端测试的实际时间线，按比例绘制。三个作业在 18:53:56 前全部结束；组通知等到 notifyd 的下一次轮询（每 300&nbsp;s 一次），12&nbsp;s 后 rl 已登记全部观测和用量。</figcaption>
+      <figcaption><span class="fig-n">Fig. 27</span>Miyabi 端到端测试的实际时间线，按比例绘制。三个作业在 18:53:56 前全部结束；组通知等到 notifyd 的下一次轮询（每 300&nbsp;s 一次），12&nbsp;s 后 rl 已登记全部观测和用量。</figcaption>
     </figure>
 
     <figure>
@@ -1168,7 +1639,7 @@
         <div class="kpi"><span class="ve-label">观测 · 与重新导出逐字节一致</span><span class="val"><span data-count="9">9</span></span>
           <svg class="ve-waffle" viewBox="0 0 170 76" role="img" aria-label="9 条观测：3 个作业，各有 queued、running、ended"><rect class="on" x="0" y="0" width="22" height="22" rx="2"/><rect class="on" x="26" y="0" width="22" height="22" rx="2"/><rect class="on" x="52" y="0" width="22" height="22" rx="2"/><rect class="on" x="0" y="26" width="22" height="22" rx="2"/><rect class="on" x="26" y="26" width="22" height="22" rx="2"/><rect class="on" x="52" y="26" width="22" height="22" rx="2"/><rect class="on" x="0" y="52" width="22" height="22" rx="2"/><rect class="on" x="26" y="52" width="22" height="22" rx="2"/><rect class="on" x="52" y="52" width="22" height="22" rx="2"/><text x="86" y="24">3 个作业</text><text x="86" y="50">× 3 状态</text></svg></div>
       </div>
-      <figcaption><span class="fig-n">Fig. 19</span>三个作业都在 policy 之内：只用 <span class="nb">debug-mig</span>，每个作业 1 个 MIG 实例、walltime&nbsp;≤&nbsp;10&nbsp;min。实际用量只有申请量的约 39%，没有台账外的作业。</figcaption>
+      <figcaption><span class="fig-n">Fig. 28</span>三个作业都在 policy 之内：只用 <span class="nb">debug-mig</span>，每个作业 1 个 MIG 实例、walltime&nbsp;≤&nbsp;10&nbsp;min。实际用量只有申请量的约 39%，没有台账外的作业。</figcaption>
     </figure>
 
     <figure>
@@ -1192,7 +1663,7 @@
           <text class="lbl" x="974" y="75">×2</text><text class="lbl" x="974" y="140">×3</text><text class="lbl" x="974" y="200">×3</text>
         </svg>
       </div>
-      <figcaption><span class="fig-n">Fig. 20</span>bf16 三个 seed 都是 1.000。均值差 2.3&nbsp;pp 全部来自 fp32 的 <span class="ve-ref" data-ref="s1" tabindex="0">seed 1</span>，所以严格的“差距 &lt; 1&nbsp;pp”判据没有达到，但这不是 bf16 有害的证据。轴从 0.90 开始。</figcaption>
+      <figcaption><span class="fig-n">Fig. 29</span>bf16 三个 seed 都是 1.000。均值差 2.3&nbsp;pp 全部来自 fp32 的 <span class="ve-ref" data-ref="s1" tabindex="0">seed 1</span>，所以严格的“差距 &lt; 1&nbsp;pp”判据没有达到，但这不是 bf16 有害的证据。轴从 0.90 开始。</figcaption>
     </figure>
 
     <figure>
@@ -1213,7 +1684,7 @@
           </tbody>
         </table>
       </div>
-      <figcaption><span class="fig-n">Fig. 21</span>测试发现的 8 个问题按责任范围修复：4 个在 <span class="nb">smooth-research</span>，4 个在 <span class="nb">miyabi-mcp</span>，<span class="nb">pi-env-mcp</span> 无需改动。</figcaption>
+      <figcaption><span class="fig-n">Fig. 30</span>测试发现的 8 个问题按责任范围修复：4 个在 <span class="nb">smooth-research</span>，4 个在 <span class="nb">miyabi-mcp</span>，<span class="nb">pi-env-mcp</span> 无需改动。</figcaption>
     </figure>
 
     <figure>
@@ -1228,11 +1699,392 @@
             <tr><td class="k">用量</td><td class="num">约 53 cpu_s（实测）</td><td class="num">0.155834 mig_instance_hours（台账导出）</td></tr>
             <tr><td class="k">阶段交付</td><td><span class="chip info">continue_probe</span></td><td><span class="chip info">continue_probe</span></td></tr>
             <tr><td class="k">审查</td><td>第二轮 <span class="nb">RV-0004</span>：cross_model（<span class="nb">gpt-6-astra</span>），1 条非阻塞发现</td><td>未做跨模型审查，<span class="nb">D-0003</span> 已注明</td></tr>
-            <tr><td class="k">发现的问题</td><td>Codex 沙箱读不到审查包 → 审查包内联代码；无法解析的回答记为失败</td><td>8 个，见 Fig. 21</td></tr>
+            <tr><td class="k">发现的问题</td><td>Codex 沙箱读不到审查包 → 审查包内联代码；无法解析的回答记为失败</td><td>8 个，见 Fig. 30</td></tr>
           </tbody>
         </table>
       </div>
-      <figcaption><span class="fig-n">Fig. 22</span>两次端到端测试都由 Claude Code 2.1.314（Sonnet 5.5）在 herdr 新 tab 中加载插件完成，都停在 continue_probe，并如实报告了证据边界。</figcaption>
+      <figcaption><span class="fig-n">Fig. 31</span>本机和 bf16 两次端到端测试都由 Claude Code 2.1.314（Sonnet 5.5）在 herdr 新 tab 中加载插件完成，都停在 continue_probe，并如实报告了证据边界。</figcaption>
+    </figure>
+
+    <figure>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th></th><th>A · 协调者 Claude Code</th><th>B · 协调者 Codex</th></tr></thead>
+          <tbody>
+            <tr><td class="k">模型</td><td>协调者 <span class="nb">claude-opus-5-5</span>；研究者、审查者、顾问 <span class="nb">codex:gpt-6.1-terra@medium</span></td><td>协调者 <span class="nb">gpt-6.1-terra</span>；研究者、审查者、顾问 <span class="nb">claude:claude-opus-5-5@medium</span></td></tr>
+            <tr><td class="k">资源</td><td colspan="2"><code>connect: <span class="nb">pi-env-mcp:miyabi-g</span></code> · <code>jobs: <span class="nb">mcp:miyabi-pbs</span></code> · workspace 在 <code>/work</code>；A 用 <code>code: git</code>（默认），B 用 <code>code: archive</code></td></tr>
+            <tr><td class="k">研究问题</td><td colspan="2">特征标准化能否让全批量梯度下降更快达到最小二乘训练 MSE 的 1.01 倍（<span class="nb">EH1/1</span> · E1，合成数据，每个 arm 用固定网格里最大的稳定学习率）</td></tr>
+            <tr><td class="k">作业</td><td>2 个（3811667、3811668），都成功</td><td>3 个：3814927、3814933 的单元测试失败，没有结果；数值修订 A1 后，3815028 成功</td></tr>
+            <tr><td class="k">用量</td><td class="num">0.000278 mig_instance_hours</td><td class="num">0.0014 mig_instance_hours</td></tr>
+            <tr><td class="k">代码审查</td><td><span class="nb">RV-0001</span> pass（同一家族，协调者接受）</td><td><span class="nb">RV-0001</span>…0005 都通过，只有 low</td></tr>
+            <tr><td class="k">结论审查</td><td><span class="nb">RV-0002</span> 1 个 medium（措辞）→ 改写后 <span class="nb">RV-0003</span> pass → <code>review resolve</code></td><td><span class="nb">RV-0006</span> pass</td></tr>
+            <tr><td class="k">证据 · 决定</td><td><span class="chip info">screening</span> <span class="nb">EV-0001</span> valid · <span class="nb">D-0001</span> stop</td><td><span class="chip info">exploratory</span> <span class="nb">EV-0001</span> valid · <span class="nb">D-0001</span> stop</td></tr>
+            <tr><td class="k">用时</td><td class="num">11-05 17:53 → 11-06 02:08；T-0001 在 waiting 停了 8&nbsp;h</td><td class="num">11-06 05:22 → 05:51，29&nbsp;min</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <figcaption><span class="fig-n">Fig. 32</span>联合测试让 Claude Code 和 Codex 互换协调者与角色，各跑一轮，都走完了建任务、代码审查、Miyabi 作业、导入结果、证据、结论审查和决定。A 的两个作业几秒就结束，但结束通知没有送到协调者，任务在 waiting 里停了一夜。</figcaption>
+    </figure>
+
+    <figure>
+      <div class="frame">
+        <svg class="ve-svg" viewBox="0 0 1000 250" role="img" aria-label="达到 1.01 倍最小二乘 MSE 所需的步数，对数刻度。A：标准化 10 步（学习率 0.3），原始特征 5000 步内没有达到（学习率 0.001），大于 500 倍。B：标准化 7 步，原始特征 5000 步内没有达到，大于 714 倍；5000 步后原始特征的 MSE 仍是最优值的 38.1 倍。">
+          <path class="gridv" d="M200 40V196M390 40V196M580 40V196M770 40V196M960 40V196"/>
+          <text class="tick-t" x="200" y="216">1</text><text class="tick-t" x="390" y="216">10</text><text class="tick-t" x="580" y="216">100</text><text class="tick-t" x="770" y="216">1,000</text><text class="tick-t" x="960" y="216">10,000 步</text>
+          <text class="row-t" x="20" y="90">A · 一个种子</text>
+          <text class="row-t" x="20" y="166">B · 一个种子</text>
+
+          <g class="ve-dim is-key"><path class="ext" d="M390 80V58M902.8 80V58"/><path class="ln" d="M390 62H902.8M386 66l8 -8M898.8 66l8 -8"/><text x="646" y="56">&gt; 500×</text></g>
+          <path class="ve-e" d="M909 90H952"/>
+          <circle class="dot" cx="902.8" cy="90" r="7" style="fill: var(--surface); stroke: var(--text-dim); stroke-width: 1.75"/>
+          <circle class="dot hot" cx="390" cy="90" r="7"/>
+          <text class="lbl" x="390" y="116" text-anchor="middle">标准化 10 步 · lr 0.3</text>
+          <text class="lbl" x="902.8" y="116" text-anchor="middle">原始 &gt; 5000 · lr 0.001</text>
+
+          <g class="ve-dim is-key"><path class="ext" d="M360.6 156V134M902.8 156V134"/><path class="ln" d="M360.6 138H902.8M356.6 142l8 -8M898.8 142l8 -8"/><text x="632" y="132">&gt; 714×</text></g>
+          <path class="ve-e" d="M909 166H952"/>
+          <circle class="dot" cx="902.8" cy="166" r="7" style="fill: var(--surface); stroke: var(--text-dim); stroke-width: 1.75"/>
+          <circle class="dot hot" cx="360.6" cy="166" r="7"/>
+          <text class="lbl" x="360.6" y="192" text-anchor="middle">标准化 7 步 · lr 0.3</text>
+          <text class="lbl" x="902.8" y="192" text-anchor="middle">原始 &gt; 5000 · MSE 38.1×</text>
+        </svg>
+      </div>
+      <figcaption><span class="fig-n">Fig. 33</span>两轮得到同一方向的结果：标准化后 7–10 步达到目标，原始特征 5000 步内没有达到（空心点加箭头表示在上限处截断）。每轮只有一个数据种子，所以 A 记为 screening、B 记为 exploratory，都停在这一个比较上。横轴是对数刻度。</figcaption>
+    </figure>
+
+    <figure>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>重测</th><th>会话</th><th>作业工具的路径</th><th>结果</th></tr></thead>
+          <tbody>
+            <tr><td class="k">A′ · T-0002</td><td>researcher-1：Codex 的 herdr 会话（<code>rl agent open</code>）</td><td>经 pi-env-mcp 调 <code><span class="nb">miyabi_pbs__*</span></code>：快照在，<code>job_submit</code> dry run 有效，<code>job_get</code> 查到之前的两个作业</td><td><span class="chip ok">走通</span></td></tr>
+            <tr><td class="k">B′ · T-0002 第一次</td><td>Codex 协调者在 herdr 里用了 <code>rl delegate</code>：headless 的 <code>claude -p</code></td><td>会话没有 <code>agents.args</code>，所以没有作业 MCP；它如实报 BLOCKED，没有改走 ssh</td><td><span class="chip warn">暴露问题</span></td></tr>
+            <tr><td class="k">B′ · T-0002 第二次</td><td>改用 <code>rl agent open</code> 的 herdr 会话</td><td>快照与 <code>git archive</code> 的 21 个文件一致；dry run 走到 policy 检查；查到之前的作业</td><td><span class="chip ok">走通</span></td></tr>
+            <tr><td class="k">B′ · T-0003 · T-0004</td><td>修复后的 headless delegate，Claude 和 Codex 各一个</td><td><code><span class="nb">miyabi_pbs__pbs_context</span></code>：<span class="nb">server.host</span> <span class="nb">miyabi-g1</span>，<span class="nb">server.commit</span> 69f2f5a</td><td><span class="chip ok">修复已验证</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <figcaption><span class="fig-n">Fig. 34</span>改正接法后的重测只做只读调用和 dry run，没有提交新作业。两种组合都经 pi-env-mcp 调到了 <code><span class="nb">miyabi_pbs__*</span></code>。B′ 的第一次暴露了两个问题：delegate 的会话没有作业 MCP（ce511a1 加上 <code>agents.args</code>）；herdr 里本不该用 headless 会话（d63b268，Fig. 15）。</figcaption>
+    </figure>
+
+    <figure>
+      <div class="table-scroll">
+        <table class="t-issues">
+          <thead><tr><th>问题</th><th>修复</th><th>提交</th><th>状态</th></tr></thead>
+          <tbody>
+            <tr class="grp"><td colspan="4"><span class="nb">smooth-research</span></td></tr>
+            <tr><td>结束通知没送到协调者</td><td>工作包写明协调者的 herdr 目标；等的 run 很久没消息时，监视程序请协调者去执行器核对</td><td class="k">433a50b</td><td><span class="chip ok">已修复</span></td></tr>
+            <tr><td>Codex 会话没有 id</td><td>herdr 的集成还没报 id 时说明原因，并显示 <code>/status</code> 读到的内容</td><td class="k">ccd6b63</td><td><span class="chip ok">已修复</span></td></tr>
+            <tr><td>作者模型只听会话自己说</td><td>从 <code>rl agent open</code> 的会话发起审查时，补上 rl 为这个会话记录的模型</td><td class="k">11e49d6</td><td><span class="chip ok">已修复</span></td></tr>
+            <tr><td>两种构建互相提示升级</td><td>build id 分成 <code>&lt;源码&gt;-&lt;构建&gt;</code>，只比较共享源码的那一段</td><td class="k">1fb90ab</td><td><span class="chip ok">已修复</span></td></tr>
+            <tr><td>对话框选项认错</td><td>选项按屏幕最下方那一组认；会话停在对话框时通知先挂起</td><td class="k">de65d10</td><td><span class="chip ok">已修复</span></td></tr>
+            <tr><td>manifest 没有 results</td><td>导入时说明应该改记什么</td><td class="k">e6d7fbc</td><td><span class="chip ok">已修复</span></td></tr>
+            <tr><td>作业 MCP 没经过 pi-env-mcp</td><td>作业 MCP 经 connect 访问；steps 和工作包写明工具名</td><td class="k">aa14290</td><td><span class="chip ok">已修复</span></td></tr>
+            <tr><td>delegate 的会话没有作业 MCP</td><td>delegate 的可写会话加上 <code>agents.args.&lt;宿主&gt;</code></td><td class="k">ce511a1</td><td><span class="chip ok">已修复</span></td></tr>
+            <tr><td>herdr 里用了 headless 会话</td><td>三个 headless 命令在 herdr 里拒绝执行，除非加 <code><span class="nb">--headless</span></code></td><td class="k">d63b268</td><td><span class="chip ok">已修复</span></td></tr>
+            <tr><td><code>rl resume</code> 不提示 herdr</td><td>在 herdr 里时提示研究者用 <code>rl agent open</code> 开（§21.24 的可选项）</td><td class="k">—</td><td><span class="chip warn">未做</span></td></tr>
+            <tr class="grp"><td colspan="4"><span class="nb">pi-env-mcp</span></td></tr>
+            <tr><td>运行不了远程 MCP</td><td>在主机上运行 MCP 服务器，工具转出为 <code>&lt;服务&gt;__&lt;工具&gt;</code>；一个 agent 只占一条 SSH 会话</td><td class="k">476e15d</td><td><span class="chip ok">已修复</span></td></tr>
+            <tr><td>连接满了报成关闭</td><td>共享连接满了时如实说满了；每次调用都向远程 MCP 要进度</td><td class="k">8ba80d0 · 6aab119</td><td><span class="chip ok">已修复</span></td></tr>
+            <tr class="grp"><td colspan="4"><span class="nb">miyabi-mcp</span>（<span class="nb">miyabi-toolbox</span>）</td></tr>
+            <tr><td>通知目标写错没人知道</td><td>登记时检查投递目标，说明放弃的通知；工具说明里写明什么是 herdr 目标</td><td class="k">fecb5c2 · 7c845d7</td><td><span class="chip ok">已修复</span></td></tr>
+            <tr><td>短作业看不到结束</td><td>刚提交的作业也读 history，<code>job_wait</code> 能看到它结束</td><td class="k">ae637b1</td><td><span class="chip ok">已修复</span></td></tr>
+            <tr><td>不知道服务器跑哪个版本</td><td>报告服务器运行的 commit，checkout 前移时说明</td><td class="k">5fef8f7</td><td><span class="chip ok">已修复</span></td></tr>
+            <tr><td>ssh master 满了</td><td>重试并说明被拒的会话</td><td class="k">980500f</td><td><span class="chip ok">已修复</span></td></tr>
+            <tr><td>说明按直接注册写</td><td>说明和 <code>job_wait</code> 改为 pi-env-mcp 托管；文档写明从工作站经 pi-env-mcp 进入</td><td class="k">69f2f5a · e55ab9f</td><td><span class="chip ok">已修复</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <figcaption><span class="fig-n">Fig. 35</span>联合测试和重测期间的修复，按责任范围分开：插件只改记录与提示，传输在 <span class="nb">pi-env-mcp</span>，PBS 语义在 <span class="nb">miyabi-mcp</span>。还有一项可选的改进没有做。</figcaption>
+    </figure>
+  </section>
+
+  <section id="config">
+    <div class="sec-intro">
+      <div class="sec-head"><p class="ve-label caps">项目配置</p><h2>程序只读一个文件，写错了也不让命令失败</h2></div>
+      <p>配置分四处：项目根目录的 <code><span class="nb">smooth-research.yaml</span></code>、约束文档 <code>docs/constraints.md</code>、几个环境变量和命令行选项。<b>CLI 只读 <span class="nb">smooth-research.yaml</span></b>；约束文档写给人和 agent，CLI 不执行它。默认值在 <code>project.py</code> 的 <code>DEFAULT_CONFIG</code>，详细说明在 <code>docs/configuration.md</code>。</p>
+    </div>
+
+    <figure>
+      <div class="frame">
+        <svg class="ve-svg" viewBox="0 0 1000 410" role="img" aria-label="smooth-research.yaml 的七节和它们驱动的部分。models 按顺序选 agent open、delegate、review run 和 advise run 的模型；agents 给 herdr 会话和 delegate 会话追加参数，并定监视程序的节拍；usage 定额度低的阈值；advice 限每个项目的建议轮数；context 定工作包、恢复包和咨询包的 token 目标；manuscript 选 Markdown 或 LaTeX；compute 定 compute steps、run register 和 session start 用的资源。">
+          <g class="ve-n is-key" transform="translate(20 14)"><rect class="sh" width="330" height="382" rx="4"/><text class="m" x="165" y="26">smooth-research.yaml</text><text class="sub" x="165" y="50">version: 1 · rl init 生成</text>
+            <path class="ann" d="M18 66H312"/>
+            <text class="m l" x="24" y="88">models</text><text class="sub" x="306" y="88" style="text-anchor:end">3 个角色的条目列表</text>
+            <text class="m l" x="24" y="132">agents</text><text class="sub" x="306" y="132" style="text-anchor:end">args · 3 个分钟数</text>
+            <text class="m l" x="24" y="176">usage</text><text class="sub" x="306" y="176" style="text-anchor:end">2 个百分比阈值</text>
+            <text class="m l" x="24" y="220">advice</text><text class="sub" x="306" y="220" style="text-anchor:end">max_rounds</text>
+            <text class="m l" x="24" y="264">context</text><text class="sub" x="306" y="264" style="text-anchor:end">2 个 token 目标</text>
+            <text class="m l" x="24" y="308">manuscript</text><text class="sub" x="306" y="308" style="text-anchor:end">latex</text>
+            <text class="m l" x="24" y="352">compute</text><text class="sub" x="306" y="352" style="text-anchor:end">资源表 · 3 个选项</text>
+          </g>
+          <path class="ve-e" d="M350 102H598"/><text class="ve-el" x="474" y="93">按顺序选模型</text>
+          <path class="ve-e" d="M350 146H598"/><text class="ve-el" x="474" y="137">追加参数 · 定节拍</text>
+          <path class="ve-e" d="M350 190H598"/><text class="ve-el" x="474" y="181">定阈值</text>
+          <path class="ve-e" d="M350 234H598"/><text class="ve-el" x="474" y="225">限轮数</text>
+          <path class="ve-e" d="M350 278H598"/><text class="ve-el" x="474" y="269">定 token 目标</text>
+          <path class="ve-e" d="M350 322H598"/><text class="ve-el" x="474" y="313">选格式</text>
+          <path class="ve-e is-hot" d="M350 366H598"/><text class="ve-el" x="474" y="357">定在哪里跑</text>
+          <g class="ve-n" transform="translate(600 85)"><rect class="sh" width="380" height="34" rx="4"/><text class="s" x="190" y="17">agent open · delegate · review run · advise run</text></g>
+          <g class="ve-n" transform="translate(600 129)"><rect class="sh" width="380" height="34" rx="4"/><text class="s" x="190" y="17">herdr 会话 · delegate 的会话 · 监视程序</text></g>
+          <g class="ve-n" transform="translate(600 173)"><rect class="sh" width="380" height="34" rx="4"/><text class="s" x="190" y="17">额度低时换到列表里的下一个条目</text></g>
+          <g class="ve-n" transform="translate(600 217)"><rect class="sh" width="380" height="34" rx="4"/><text class="s" x="190" y="17">advise prepare：超过要用户同意</text></g>
+          <g class="ve-n" transform="translate(600 261)"><rect class="sh" width="380" height="34" rx="4"/><text class="s" x="190" y="17">工作包 · 恢复包 · 咨询包</text></g>
+          <g class="ve-n" transform="translate(600 305)"><rect class="sh" width="380" height="34" rx="4"/><text class="s" x="190" y="17">rl manuscript：Markdown，或 LaTeX → PDF</text></g>
+          <g class="ve-n" transform="translate(600 349)"><rect class="sh" width="380" height="34" rx="4"/><text class="s" x="190" y="17">compute steps · run register · session start</text></g>
+        </svg>
+      </div>
+      <figcaption><span class="fig-n">Fig. 36</span><span class="nb">smooth-research.yaml</span> 的七节各管一件事。环境变量和命令行选项只影响一次调用（Fig. 43、Fig. 44）；预算和队列限制不在这里，写在约束文档里。</figcaption>
+    </figure>
+
+    <figure>
+      <div class="cases">
+        <div class="case" data-st="ok"><span class="chip ok">逐键覆盖</span><h3>字典 · <code>agents</code></h3>
+          <dl class="mrg"><dt>默认</dt><dd><code>watch_minutes: 5</code><br><code>stall_minutes: 30</code></dd><dt>文件</dt><dd><code>watch_minutes: 10</code></dd><dt>结果</dt><dd><code>watch_minutes: 10</code><br><code>stall_minutes: 30</code></dd></dl>
+          <p>没写的键保留默认值。</p></div>
+        <div class="case" data-st="warn"><span class="chip warn">整体替换</span><h3>列表 · <code>models.reviewer</code></h3>
+          <dl class="mrg"><dt>默认</dt><dd><code>codex:…@medium</code><br><code>claude:…@medium</code></dd><dt>文件</dt><dd><code><span class="nb">claude:claude-opus-5-5</span>&#8203;<span class="nb">@medium</span></code></dd><dt>结果</dt><dd>只剩 claude 一个条目</dd></dl>
+          <p>只写一个条目，默认的两个就都没了。</p></div>
+        <div class="case" data-st="warn"><span class="chip warn">整体替换</span><h3>资源表 · <code>compute.resources</code></h3>
+          <dl class="mrg"><dt>默认</dt><dd><code>{local: {kind: local}}</code></dd><dt>文件</dt><dd><code>{miyabi: {…}}</code></dd><dt>结果</dt><dd>没有 <code>local</code></dd></dl>
+          <p>文件里没写 <code>local</code>，就没有默认的本机资源。</p></div>
+        <div class="case" data-st="info"><span class="chip info">沿用上次</span><h3>文件解析不了</h3>
+          <dl class="mrg"><dt>文件</dt><dd>YAML 写错，或顶层不是键值对</dd><dt>结果</dt><dd><code>research/state/<wbr>config.last-read.json</code></dd></dl>
+          <p>沿用上一次成功读取的设置，直到文件改好；从没读成功过时用默认值。<code><span class="nb">--read-only</span></code> 不更新这份副本。</p></div>
+      </div>
+      <figcaption><span class="fig-n">Fig. 37</span>文件和默认值深度合并：字典逐键覆盖，列表和资源表整体替换。配置里的任何问题都不让命令失败：CLI 用能用的值继续，并在输出末尾的 <code>warning:</code> 行、<code><span class="nb">--json</span></code> 的 <code>warnings</code> 和会话开始的提示里说明它实际用了什么。</figcaption>
+    </figure>
+
+    <figure>
+      <div class="frame">
+        <svg class="ve-svg" viewBox="0 0 1000 286" role="img" aria-label="模型条目 codex:gpt-6-astra@medium 分三段。入口决定怎样调用：claude 用 claude -p，codex 用 codex exec，pi 用 pi -p --mode json，manual 由人提交再导入。模型原样传给 CLI，pi 的模型写成 provider/模型。effort 可选，传给 Claude 的 --effort、Codex 的 model_reasoning_effort 或 pi 的 --thinking。">
+          <text class="big" x="340" y="48">codex</text><text class="big dim" x="390" y="48">:</text><text class="big" x="491" y="48">gpt-6-astra</text><text class="big dim" x="592" y="48">@</text><text class="big" x="651" y="48">medium</text>
+          <path class="brk" d="M296 76V84H384V76M398 76V84H584V76M600 76V84H702V76"/>
+          <path class="ann" d="M340 84V104H185V122M491 84V122M651 84V104H815V122"/>
+          <text class="hd" x="185" y="142">入口：怎样调用</text>
+          <text class="hd" x="491" y="142">模型：原样传给 CLI</text>
+          <text class="hd" x="815" y="142">@effort：可选</text>
+          <g class="tm">
+            <text x="50" y="176">claude</text><text x="116" y="176">→ claude -p</text>
+            <text x="50" y="202">codex</text><text x="116" y="202">→ codex exec</text>
+            <text x="50" y="228">pi</text><text x="116" y="228">→ pi -p --mode json</text>
+            <text x="50" y="254">manual</text><text x="116" y="254">→ 人提交，再 import</text>
+            <text class="d" x="370" y="176">pi 写成 &lt;provider&gt;/&lt;模型&gt;</text>
+            <text class="d" x="370" y="202">pi:openai/gpt-6-astra@high</text>
+            <text class="d" x="370" y="228">家族先按名字判断，</text>
+            <text class="d" x="370" y="254">再看 provider 和入口</text>
+            <text x="690" y="176">claude</text><text x="756" y="176">→ --effort</text>
+            <text x="690" y="202">codex</text><text x="756" y="202">→ model_reasoning_effort</text>
+            <text x="690" y="228">pi</text><text x="756" y="228">→ --thinking</text>
+          </g>
+        </svg>
+      </div>
+      <figcaption><span class="fig-n">Fig. 38</span>一个模型条目有三段。每个角色一个有序列表：跳过没装的入口和额度低的宿主；审查遇到 <code>manual</code> 就停，所以 <code>manual</code> 放最后。rl 自己只加模型、effort、会话 id、名字和额度的参数，从不加绕过沙箱、审批或权限的参数。</figcaption>
+    </figure>
+
+    <figure>
+      <div class="table-scroll">
+        <table class="t-keys">
+          <thead><tr><th>键</th><th>默认值</th><th>作用</th><th>写错时</th></tr></thead>
+          <tbody>
+            <tr class="grp"><td colspan="4">模型 · models（每项 <code>&lt;入口&gt;:&lt;模型&gt;[@effort]</code>，按顺序尝试）</td></tr>
+            <tr><td class="k">models.researcher</td><td><code><span class="nb">claude:claude-opus-5-5</span>&#8203;<span class="nb">@high</span></code><br><code><span class="nb">codex:gpt-6-astra</span>&#8203;<span class="nb">@high</span></code></td><td><code>rl delegate</code> 和 <code>rl agent open <span class="nb">--role</span> researcher</code> 不带 <code><span class="nb">--entry</span></code> 时按顺序用；delegate 的会话失败就换下一个，接着做同一个任务</td><td>条目格式不对：跳过这一条</td></tr>
+            <tr><td class="k">models.reviewer</td><td><code><span class="nb">codex:gpt-6-astra</span>&#8203;<span class="nb">@medium</span></code><br><code><span class="nb">claude:claude-opus-5-5</span>&#8203;<span class="nb">@medium</span></code></td><td>第一个给出可解析回答的生效；遇到 <code>manual</code> 就停；候选在建工单时固定</td><td>不是列表：用默认列表</td></tr>
+            <tr><td class="k">models.advisor</td><td><code><span class="nb">codex:gpt-6-astra</span>&#8203;<span class="nb">@max</span></code><br><code><span class="nb">claude:claude-fable-5-1</span>&#8203;<span class="nb">@high</span></code></td><td>一轮建议里每个条目一个工单，各自独立回答；改列表会影响建议请求的去重</td><td>同上</td></tr>
+            <tr class="grp"><td colspan="4">agent 会话 · agents</td></tr>
+            <tr><td class="k">agents.args.claude</td><td><code><span class="nb">["--permission-mode",</span> <span class="nb">"auto"]</span></code></td><td>追加给 Claude Code 的 herdr 会话和 delegate 的 <code>claude -p</code>；排在 rl 的 <code>acceptEdits</code> 后面，所以这里的权限方式生效，headless 会话才能用 MCP 工具</td><td>不是参数列表：用默认；字符串按 shell 规则拆开</td></tr>
+            <tr><td class="k">agents.args.codex</td><td><code>[]</code></td><td>追加给 Codex 会话和 <code>codex exec</code>；沙箱写在这里（如 <code>["-s", "workspace-write"]</code>）；启动慢的 MCP 加 <code>-c mcp_servers.&lt;名字&gt;.required=true</code></td><td>同上</td></tr>
+            <tr><td class="k">agents.args.pi</td><td><code>[]</code></td><td>追加给 pi 会话和 <code>pi -p</code></td><td>同上</td></tr>
+            <tr><td class="k">agents.watch_minutes</td><td class="num">5</td><td>监视程序每几分钟走一拍；<code>0</code> 关闭</td><td>按 5</td></tr>
+            <tr><td class="k">agents.stall_minutes</td><td class="num">30</td><td>一个回合多久没有进展算停滞</td><td>不是正数：按 30</td></tr>
+            <tr><td class="k">agents.wait_check_minutes</td><td class="num">60</td><td>等的 run 多久没有新消息，就请协调者去执行器核对，到 2、4、8 倍时再问；<code>0</code> 关闭</td><td>按 60</td></tr>
+            <tr class="grp"><td colspan="4">订阅额度 · usage</td></tr>
+            <tr><td class="k">usage.switch_left_percent</td><td class="num">10</td><td>某个窗口只剩这么多（%）时，宿主算作额度低</td><td>不在 0–100：用 10</td></tr>
+            <tr><td class="k">usage.<br>coordinator_host_left_percent</td><td class="num">20</td><td>协调者自己所在的宿主用这个阈值</td><td>不在 0–100：用 20</td></tr>
+            <tr class="grp"><td colspan="4">建议 · advice</td></tr>
+            <tr><td class="k">advice.max_rounds</td><td class="num">3</td><td>每个项目最多几轮建议；再开一轮要 <code><span class="nb">--user-approved</span> "&lt;用户的原话&gt;"</code>；重复的请求不占轮数</td><td>不是非负整数：按 3</td></tr>
+            <tr class="grp"><td colspan="4">上下文包 · context（估算：ASCII 字符 / 4，非 ASCII 字符各算 1）</td></tr>
+            <tr><td class="k">context.work_target_tokens</td><td class="num">4000</td><td>工作包和恢复包的 token 目标；超出的段落只在包尾列出名字；<code><span class="nb">--budget</span></code> 单次覆盖</td><td>不是正整数：用默认</td></tr>
+            <tr><td class="k">context.advice_target_tokens</td><td class="num">10000</td><td>咨询包的 token 目标；审查包不用目标，只列文件路径</td><td>同上</td></tr>
+            <tr class="grp"><td colspan="4">论文草稿 · manuscript</td></tr>
+            <tr><td class="k">manuscript.latex</td><td><code>null</code></td><td><code>null</code> 写 <code>docs/manuscript.md</code>；写成编译命令（如 <code>latexmk -pdf -interaction=nonstopmode</code>）时写 <code>manuscript.tex</code> 并编译出 PDF；中日文正文用 xelatex 并检查抽出的文字</td><td>不是命令：写 Markdown</td></tr>
+            <tr class="grp"><td colspan="4">计算资源 · compute</td></tr>
+            <tr><td class="k">compute.coordinator</td><td><code>local</code></td><td><code>local</code>：普通本机工作流。<code>login</code>：协调者在登录节点，所有 workload 经执行器，登记必须带 <code><span class="nb">--resource</span></code></td><td>未知值：按 login，不回退到本机执行</td></tr>
+            <tr><td class="k">compute.default</td><td><code>local</code></td><td>工作包和 <code>compute steps</code> 的默认资源；<code>run register</code> 不自动用它</td><td>不是能用的资源：用第一个能用的</td></tr>
+            <tr><td class="k">compute.repository</td><td><code>github-private</code></td><td><code>code: git</code> 的资源缺 remote 时，<code>session start</code> 先建 private GitHub 仓库再推送；<code>none</code> 不建</td><td>—</td></tr>
+            <tr><td class="k">compute.resources</td><td><code>{local: {kind: local}}</code></td><td>资源名到设置的映射，整体替换默认值；名字只用字母、数字、<code>.</code>、<code>_</code>、<code>-</code></td><td>名字不合法：这个资源不能用</td></tr>
+            <tr class="grp"><td colspan="4">每个资源 · compute.resources.&lt;名字&gt;</td></tr>
+            <tr><td class="k">kind</td><td>有 <code>host</code> 或 <code>connect: local</code> 时 <code>remote</code>，否则 <code>local</code></td><td><code>local</code> 用调用者的 checkout，输出到 <code>research/artifacts/&lt;attempt&gt;/</code>；<code>remote</code> 跑 commit 的只读快照</td><td>不是 local 或 remote：资源不能用</td></tr>
+            <tr><td class="k">host</td><td>无</td><td>ssh 或 pi-env-mcp 的连接目标；<code>connect: local</code> 不需要</td><td>remote 缺它：资源不能用</td></tr>
+            <tr><td class="k">connect</td><td><code>ssh</code></td><td><code>ssh</code>、<code>pi-env-mcp</code>、<code>pi-env-mcp:&lt;服务名&gt;</code> 或 <code>local</code>；作业 MCP 也走它（Fig. 25）</td><td>不认识：资源不能用，不回退到 ssh</td></tr>
+            <tr><td class="k">jobs</td><td><code>shell</code></td><td><code>shell</code>、<code>mcp:&lt;服务名&gt;</code> 或 <code>skill:&lt;名字&gt;</code>；<code>coordinator: login</code> 和 <code>connect: local</code> 都不允许 <code>shell</code></td><td>不认识：资源不能用，不回退到 shell</td></tr>
+            <tr><td class="k">workspace</td><td>无，remote 必填</td><td>主机上的绝对路径，放 <code>snapshots/&lt;commit&gt;/</code>、<code>runs/&lt;attempt&gt;/</code>，git 时还有 <code>repo.git</code>；一个研究项目一个</td><td>缺少或不是绝对路径：资源不能用</td></tr>
+            <tr><td class="k">code</td><td><code>connect: local</code> 时 <code>archive</code>，否则 <code>git</code></td><td><code>git</code>：推送后主机 fetch；<code>archive</code>：从调用者的 commit 打包，上传或直接生成共享快照</td><td>不认识：按 git；<code>connect: local</code> 不是 archive：资源不能用</td></tr>
+            <tr><td class="k">git_remote · git_url</td><td><code>origin</code> · 它的 URL</td><td>code 为 git 时，本地推送用的 remote，和主机 clone 用的 URL（主机要有读权限）</td><td>—</td></tr>
+            <tr><td class="k">notes</td><td>无</td><td>给 agent 看的说明；不能代替 <code>compute.coordinator</code> 的策略</td><td>—</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <figcaption><span class="fig-n">Fig. 39</span><span class="nb">smooth-research.yaml</span> 的全部键。“写错时”一栏是 CLI 实际用的值，同时给出警告；不认识的键没有作用。</figcaption>
+    </figure>
+
+    <figure>
+      <div class="cases">
+        <div class="case"><h3><code>项目根目录</code></h3>
+          <ul class="files">
+            <li><code><span class="nb">smooth-research.yaml</span></code><span>项目配置，CLI 只读它</span></li>
+            <li><code>pyproject.toml</code> · <code>uv.lock</code><span>一份，所有计算资源共用；CPU、CUDA 写成互斥的 extras</span></li>
+            <li><code>.venv/</code><span>项目自己的环境，rl 在上面运行</span></li>
+          </ul></div>
+        <div class="case"><h3><code>src/</code></h3>
+          <ul class="files">
+            <li><code>src/&lt;包名&gt;/</code><span>实验代码；<code>rl init</code> 先把项目建成 uv 项目</span></li>
+            <li><code>.gitignore</code><span>忽略 <code>__pycache__</code> 和 <code>*.pyc</code></span></li>
+          </ul>
+          <p>工作包让 agent 把代码放这里，但不强制：审查范围和 RunSpec 可以引用任何路径。</p></div>
+        <div class="case"><h3><code>docs/</code> · 给人读</h3>
+          <ul class="files">
+            <li><div><code>plan.md</code><span class="chip warn">封存</span></div><span>导入的计划，不能换</span></li>
+            <li><code>constraints.md</code><span>目标与范围、数据与资源、上限、留给用户的动作；CLI 不解析，咨询包附它的前 3000 字</span></li>
+            <li><code>research.html</code><span><code>rl view</code> 的说明页</span></li>
+            <li><code>manuscript.md</code> 或 <code>manuscript/</code><span>论文草稿</span></li>
+            <li><code>explanations/</code><span>用户让 agent 解释的事</span></li>
+          </ul></div>
+        <div class="case"><h3><code>research/</code> · 其余一切</h3>
+          <ul class="files">
+            <li><code>experiments/</code> · <code>tasks/</code> · <code>notes/</code><span>契约、任务与交接、研究者笔记</span></li>
+            <li><code>reviews/</code> · <code>advice/</code> · <code>reports/</code><span>回答和阶段报告</span></li>
+            <li><code>documents/objects/</code> · <code>packages/</code><span>封存的文档、请求包</span></li>
+            <li><div><code>state/</code><span class="chip info">不进 git</span></div><span>数据库 <code>research.lattice</code>、写锁、备份</span></li>
+            <li><div><code>calls/</code> · <code>artifacts/&lt;attempt&gt;/</code><span class="chip info">不进 git</span></div><span>模型调用日志、run 产物</span></li>
+          </ul></div>
+      </div>
+      <figcaption><span class="fig-n">Fig. 40</span>目录不能配置，所有项目都一样。导入的计划不能换：再导入不同的计划报 CONFLICT，计划的变化记成假说修订和决定。</figcaption>
+    </figure>
+
+    <figure>
+      <div class="frame">
+        <svg class="ve-svg tm" viewBox="0 0 1000 392" role="img" aria-label="时间常数，对数刻度。herdr：20 秒确认提示送达，90 秒等会话启动。记录：60 秒等写锁，未结束的 attempt 6 小时没有新观测时提示刷新。监视程序：5 分钟一拍，30 分钟算停滞，60 分钟没消息请协调者核对，工具调用 120 分钟（4 倍停滞时间）未返回时报告。额度：15 分钟后读数过期。模型调用：审查与建议 30 分钟，delegate 60 分钟。论文：LaTeX 编译 300 秒。">
+          <path class="gridv" d="M200.0 40V340M366.3 40V340M580.0 40V340M746.3 40V340M960.0 40V340"/>
+          <text class="lane-m" x="20" y="64" dominant-baseline="central">herdr 与会话</text><path class="lane" d="M200 64H960"/>
+          <path class="f" d="M264.3 56l8 8l-8 8l-8 -8z"/>
+          <text x="277.3" y="64">20 s 提示送达</text>
+          <rect class="o" x="397.9" y="58" width="12" height="12" rx="2"/>
+          <text x="416.9" y="64">90 s 等会话启动</text>
+          <text class="lane-m" x="20" y="116" dominant-baseline="central">记录</text><path class="lane" d="M200 116H960"/>
+          <path class="f" d="M366.3 108l8 8l-8 8l-8 -8z"/>
+          <text x="379.3" y="116">60 s 等写锁</text>
+          <path class="f" d="M912.6 108l8 8l-8 8l-8 -8z"/>
+          <text x="899.6" y="116" text-anchor="end">6 h 没有新观测：提示刷新</text>
+          <text class="lane-m" x="20" y="168" dominant-baseline="central">监视程序</text><path class="lane" d="M200 168H960"/>
+          <circle class="c" cx="515.7" cy="168" r="7"/>
+          <text x="528.7" y="168">5 min 一拍</text>
+          <circle class="c" cx="682.0" cy="168" r="7"/>
+          <text x="682.0" y="149" text-anchor="middle">30 min 停滞</text>
+          <circle class="c" cx="746.3" cy="168" r="7"/>
+          <text x="746.3" y="187" text-anchor="middle">60 min 等 run 没消息</text>
+          <path class="f" d="M810.6 160l8 8l-8 8l-8 -8z"/>
+          <text x="823.6" y="168">120 min 工具调用未返回</text>
+          <text class="lane-m" x="20" y="220" dominant-baseline="central">额度</text><path class="lane" d="M200 220H960"/>
+          <path class="f" d="M617.6 212l8 8l-8 8l-8 -8z"/>
+          <text x="630.6" y="220">15 min 读数过期</text>
+          <text class="lane-m" x="20" y="272" dominant-baseline="central">模型调用</text><path class="lane" d="M200 272H960"/>
+          <rect class="o" x="676.0" y="266" width="12" height="12" rx="2"/>
+          <text x="682.0" y="253" text-anchor="middle">30 min 审查与建议</text>
+          <rect class="o" x="740.3" y="266" width="12" height="12" rx="2"/>
+          <text x="759.3" y="272">60 min delegate</text>
+          <text class="lane-m" x="20" y="324" dominant-baseline="central">论文</text><path class="lane" d="M200 324H960"/>
+          <path class="f" d="M515.7 316l8 8l-8 8l-8 -8z"/>
+          <text x="528.7" y="324">300 s LaTeX 编译</text>
+          <path class="lane" d="M200 356H960"/>
+          <path class="tick" d="M200.0 352V360M366.3 352V360M580.0 352V360M746.3 352V360M960.0 352V360"/>
+          <text class="d" x="200.0" y="378" text-anchor="middle">10 s</text><text class="d" x="366.3" y="378" text-anchor="middle">1 min</text><text class="d" x="580.0" y="378" text-anchor="middle">10 min</text><text class="d" x="746.3" y="378" text-anchor="middle">1 h</text><text class="d" x="960.0" y="378" text-anchor="middle">10 h</text>
+          <circle class="c" cx="208" cy="20" r="7"/><text class="d" x="222" y="20">smooth-research.yaml 的键</text><rect class="o" x="472" y="14" width="12" height="12" rx="2"/><text class="d" x="492" y="20">命令行选项的默认值</text><path class="f" d="M700 12l8 8l-8 8l-8 -8z"/><text class="d" x="716" y="20">写死的常量</text>
+        </svg>
+      </div>
+      <figcaption><span class="fig-n">Fig. 41</span>时间常数从 20 秒到 6 小时，各管一件事。圆圈是 <span class="nb">smooth-research.yaml</span> 的键，可以改；方块是命令行 <code><span class="nb">--timeout</span></code> 的默认值；菱形写死在代码里。横轴是对数刻度。</figcaption>
+    </figure>
+
+    <figure>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>常量</th><th>值</th><th>含义</th><th>模块</th></tr></thead>
+          <tbody>
+            <tr><td class="k">REVIEWS_PER_ROUND</td><td class="num">2</td><td>一轮审查最多几次；第二次后还有 medium 以上，交给协调者</td><td class="k">reviews.py</td></tr>
+            <tr><td class="k">MAX_RESTARTS</td><td class="num">3 次/小时</td><td>监视程序重启同一个会话的上限，再退出就交给协调者</td><td class="k">watch.py</td></tr>
+            <tr><td class="k">MAX_RETRIES</td><td class="num">3</td><td>一串暂时性回合错误最多重试几次：下一拍、隔 2 拍、隔 4 拍</td><td class="k">watch.py</td></tr>
+            <tr><td class="k">MAX_REMINDERS</td><td class="num">2</td><td>同一项任务最多提醒几次，之后报告协调者</td><td class="k">watch.py</td></tr>
+            <tr><td class="k">TOOL_STALLS</td><td class="num">4×</td><td>工具调用挂起超过 <code>agents.stall_minutes</code> 的这么多倍时报告一次</td><td class="k">watch.py</td></tr>
+            <tr><td class="k">NOTICE_CHARS</td><td class="num">600 字符</td><td>一行通知里保留的消息正文；完整消息在 <code>rl inbox</code></td><td class="k">herdr.py</td></tr>
+            <tr><td class="k">DIFF_LINES</td><td class="num">80 行</td><td>工作包里契约差异的行数上限</td><td class="k">context.py</td></tr>
+            <tr><td class="k">CELL_CHARS</td><td class="num">60 字符</td><td>实验表格单元格的长度上限；完整内容见 <code>rl run show</code></td><td class="k">view.py</td></tr>
+            <tr><td class="k">MAX_METRICS</td><td class="num">6</td><td>契约没有声明 <code>metrics:</code> 时，实验表格最多列几个指标</td><td class="k">view.py</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <figcaption><span class="fig-n">Fig. 42</span>写死的计数和长度不能配置。时间常数见 Fig. 41。</figcaption>
+    </figure>
+
+    <figure>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>变量</th><th>谁设</th><th>作用</th></tr></thead>
+          <tbody>
+            <tr><td class="k">SMOOTH_RESEARCH_PROJECT</td><td>用户</td><td>项目目录。查找顺序：<code><span class="nb">--project</span></code>，这个变量，再从当前目录往上找 <code><span class="nb">smooth-research.yaml</span></code></td></tr>
+            <tr><td class="k">SMOOTH_RESEARCH_HOME</td><td>用户（可选）</td><td>插件自己的环境 <code>env-&lt;build&gt;</code> 和 Claude 的额度读数 <code>usage/claude.json</code>；默认 <code>$XDG_DATA_HOME/smooth-research</code> 或 <code>~/.local/share/smooth-research</code></td></tr>
+            <tr><td class="k">SMOOTH_RESEARCH_RL</td><td><code>bin/rl</code> 启动器</td><td>启动器自己的绝对路径：hook 提示、delegate 和 agent 会话调用同一个 CLI</td></tr>
+            <tr><td class="k">SMOOTH_RESEARCH_BUILD</td><td><code>bin/rl</code> 启动器</td><td>build id <code>&lt;源码&gt;-&lt;构建&gt;</code>；前一段变了，status、resume 和会话开始的提示才说插件变了</td></tr>
+            <tr><td class="k">SMOOTH_RESEARCH_CHECKOUT</td><td><code>rl agent open</code></td><td>researcher 的 worktree：代码路径、审查指纹和 run 的代码检查按它读；记录仍写进主项目</td></tr>
+            <tr><td class="k">SMOOTH_RESEARCH_SESSION · _ROLE</td><td><code>rl agent open</code></td><td>会话记录 S-x 和会话名；设了 ROLE 的会话不能批准或解决审查轮次</td></tr>
+            <tr><td class="k">SMOOTH_RESEARCH_HEADLESS</td><td>rl 的 headless 会话</td><td><code>1</code>：不在 herdr 的 pane 里，三个 headless 命令照常执行（Fig. 15）</td></tr>
+            <tr><td class="k">HERDR_ENV · HERDR_PANE_ID</td><td>herdr</td><td><code>HERDR_ENV=1</code> 时才能开 agent 会话、发通知，三个 headless 命令拒绝执行；协调者的 pane 收通知</td></tr>
+            <tr><td class="k">CODEX_HOME</td><td>用户（默认 <code>~/.codex</code>）</td><td>从 <code>sessions/</code> 读 Codex 实际用的模型和额度；<code>config.toml</code> 设了 <code>danger-full-access</code> 时，delegate 的 Codex 会话也用它</td></tr>
+            <tr><td class="k">CLAUDE_CONFIG_DIR</td><td>用户（默认 <code>~/.claude</code>）</td><td>看 <code>settings.json</code> 里有没有用户自己的状态栏；有就不替换</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <figcaption><span class="fig-n">Fig. 43</span>环境变量大多由启动器、herdr 和 <code>rl agent open</code> 设置，CLI 只读；用户一般只设项目目录和插件环境的位置。</figcaption>
+    </figure>
+
+    <figure>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>选项</th><th>用在</th><th>默认与说明</th></tr></thead>
+          <tbody>
+            <tr class="grp"><td colspan="3">全局（<code><span class="nb">--project</span></code>、<code><span class="nb">--json</span></code>、<code><span class="nb">--read-only</span></code> 也可以写在子命令后面）</td></tr>
+            <tr><td class="k">--project</td><td>所有命令</td><td>项目目录</td></tr>
+            <tr><td class="k">--json</td><td>所有命令</td><td>输出完整 JSON，含 <code>warnings</code></td></tr>
+            <tr><td class="k">--actor</td><td>写命令</td><td>写进事件日志的名字</td></tr>
+            <tr><td class="k">--read-only</td><td>查看命令</td><td>什么都不改：不升级记录、不更新环境、不写文件；写命令报 READ_ONLY。能用 status、resume、show、history、graph、context、doctor、digest、inbox、各类 list 和 show、agent brief/list、compute steps、<code>view <span class="nb">--todo</span></code>、<code>export <span class="nb">--records-only</span></code></td></tr>
+            <tr class="grp"><td colspan="3">单次覆盖</td></tr>
+            <tr><td class="k">--budget</td><td>context · resume</td><td>token 目标</td></tr>
+            <tr><td class="k">--entry</td><td>review run · advise run · delegate · agent open · agent switch</td><td>只用这一个模型条目，额度低也照用</td></tr>
+            <tr><td class="k">--timeout</td><td>审查与建议 · delegate · agent open</td><td><span class="num">1800&nbsp;s</span> · <span class="num">3600&nbsp;s</span> · <span class="num">90&nbsp;s</span>（等会话启动）</td></tr>
+            <tr><td class="k">--background</td><td>review run · advise run · delegate</td><td>在后台进程运行</td></tr>
+            <tr><td class="k">--headless</td><td>delegate · review run · advise run</td><td>herdr 里也用 headless 会话（默认拒绝）</td></tr>
+            <tr class="grp"><td colspan="3">审查</td></tr>
+            <tr><td class="k">--recheck-of RV-x</td><td>review request · conclusion</td><td>同一轮的第二次；第三次报 LIMIT</td></tr>
+            <tr><td class="k">--new-round "&lt;原因&gt;"</td><td>review request · conclusion</td><td>开新一轮</td></tr>
+            <tr><td class="k">approve --rationale</td><td>协调者</td><td>接受剩下的问题，这次审查从此算通过</td></tr>
+            <tr><td class="k">resolve --by RV-y --reason</td><td>协调者</td><td>记下问题已由通过的复查解决；RV-x 离开 attention，仍不算通过</td></tr>
+            <tr><td class="k">--review RV-x · --no-review</td><td>run register</td><td>把另一个实验的审查算进覆盖；或写明不需要审查的理由</td></tr>
+            <tr class="grp"><td colspan="3">记录与读物</td></tr>
+            <tr><td class="k">--parent · --root · --anchor</td><td>hypothesis add · experiment add</td><td>层次编号挂在哪里（Fig. 8）</td></tr>
+            <tr><td class="k">--resource &lt;名字&gt;</td><td>run register</td><td>把资源记到 attempt 上；<code>coordinator: login</code> 时必填</td></tr>
+            <tr><td class="k">--verified "&lt;命令&gt; @&lt;提交&gt;: pass|fail, log &lt;路径&gt;"</td><td>task deliver</td><td>改动代码的测试运行，可重复；<code>task accept</code> 显示它们</td></tr>
+            <tr><td class="k">ack &lt;条目&gt; --reason</td><td>attention</td><td>只陈述事实的待处理条目离开 attention，事实变了再出现</td></tr>
+            <tr><td class="k">--user-approved "&lt;用户的原话&gt;"</td><td>advise prepare</td><td>超过 <code>advice.max_rounds</code> 时开新一轮</td></tr>
+            <tr><td class="k">--todo · --stamp H3,EH3.3/3</td><td>view</td><td>列出要写的说明；记下核对过的事实</td></tr>
+            <tr class="grp"><td colspan="3">环境与会话</td></tr>
+            <tr><td class="k">--python 3.13</td><td>init</td><td>项目的 Python 版本，不能低于 3.13</td></tr>
+            <tr><td class="k">--no-sync</td><td>session start</td><td>不运行 <code>compute sync</code></td></tr>
+            <tr><td class="k">--note · --move &lt;旧&gt; &lt;新&gt;</td><td>upgrade</td><td>记下手工调整；移动旧布局的文件并改写记录里的路径</td></tr>
+            <tr><td class="k">--no-worktree · --base</td><td>agent open</td><td>研究者在主 checkout 里工作；分支从哪里建</td></tr>
+            <tr><td class="k">--remove-worktree · --now · --every</td><td>agent close · switch · watch</td><td>分支合并后删 worktree；连还在工作的会话也换；监视程序的间隔</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <figcaption><span class="fig-n">Fig. 44</span>命令行选项只影响一次调用。全部命令见 <code>rl <span class="nb">--help</span></code>，每个子命令的选项见 <code><span class="nb">rl &lt;命令&gt; --help</span></code>。</figcaption>
     </figure>
   </section>
 
@@ -1244,7 +2096,7 @@
 
     <figure>
       <div class="frame">
-        <svg class="ve-svg" viewBox="0 0 1000 392" role="img" aria-label="构建：共享的 plugin/（bin/rl、3 个 skill、workflow.md、team.md）和 src/smooth_research（19 个模块，5,982 行），加上 hosts/claude 或 hosts/codex 的适配文件，经 build_plugins.py 填占位符、检查并写 blake2b 清单，产出 dist/claude（35 个文件）和 dist/codex（34 个文件）。">
+        <svg class="ve-svg" viewBox="0 0 1000 430" role="img" aria-label="构建：共享的 plugin/（bin/rl、3 个 skill、workflow.md、team.md）和 src/smooth_research（31 个模块，11,964 行），加上 hosts/claude 或 hosts/codex 的适配文件，经 build_plugins.py 填占位符、检查并写 blake2b 清单，产出 dist/claude（47 个文件）和 dist/codex（46 个文件）。两者的 build id 前一段相同，是共享源码的摘要。">
           <rect class="ve-bd" x="16" y="32" width="298" height="164" rx="4"/><text class="ve-bd-t" x="16" y="22">共享 · 两宿主相同</text>
           <rect class="ve-bd" x="16" y="220" width="298" height="162" rx="4"/><text class="ve-bd-t" x="16" y="212">宿主适配</text>
           <path class="ve-e is-hot" d="M300 76H350V180H398"/>
@@ -1255,12 +2107,17 @@
           <path class="ve-e" d="M620 228H660V280H698"/><text class="ve-el l" x="652" y="264">codex</text>
 
           <g class="ve-n" transform="translate(30 44)"><rect class="sh" width="270" height="64" rx="4"/><text class="m" x="135" y="22">plugin/</text><text class="sub" x="135" y="46">bin/rl · 3 个 skill · 2 份参考</text></g>
-          <g class="ve-n" transform="translate(30 120)"><rect class="sh" width="270" height="64" rx="4"/><text class="m" x="135" y="22">src/smooth_research/</text><text class="sub" x="135" y="46">19 个模块 · 5,982 行</text></g>
+          <g class="ve-n" transform="translate(30 120)"><rect class="sh" width="270" height="64" rx="4"/><text class="m" x="135" y="22">src/smooth_research/</text><text class="sub" x="135" y="46">31 个模块 · 11,964 行</text></g>
           <g class="ve-n" transform="translate(30 232)"><rect class="sh" width="270" height="64" rx="4"/><text class="m" x="135" y="22">hosts/claude/</text><text class="sub" x="135" y="46">manifest · hook · 子代理 · host.md</text></g>
           <g class="ve-n" transform="translate(30 308)"><rect class="sh" width="270" height="64" rx="4"/><text class="m" x="135" y="22">hosts/codex/</text><text class="sub" x="135" y="46">manifest · hook · host.md</text></g>
           <g class="ve-n is-key" transform="translate(400 160)"><rect class="sh" width="220" height="88" rx="4"/><text class="m" x="110" y="32">build_plugins.py</text><text class="sub" x="110" y="60">填占位符 · 检查 · 清单</text></g>
-          <g class="ve-n" transform="translate(700 80)"><rect class="sh" width="280" height="96" rx="4"/><text class="ve-kind" x="140" y="22">CLAUDE CODE</text><text class="m" x="140" y="48">dist/claude</text><text class="sub" x="140" y="74">35 个文件 · marketplace</text></g>
-          <g class="ve-n" transform="translate(700 232)"><rect class="sh" width="280" height="96" rx="4"/><text class="ve-kind" x="140" y="22">CODEX</text><text class="m" x="140" y="48">dist/codex</text><text class="sub" x="140" y="74">34 个文件 · marketplace</text></g>
+          <g class="ve-n" transform="translate(700 80)"><rect class="sh" width="280" height="96" rx="4"/><text class="ve-kind" x="140" y="22">CLAUDE CODE</text><text class="m" x="140" y="48">dist/claude</text><text class="sub" x="140" y="74">47 个文件 · marketplace</text></g>
+          <g class="ve-n" transform="translate(700 232)"><rect class="sh" width="280" height="96" rx="4"/><text class="ve-kind" x="140" y="22">CODEX</text><text class="m" x="140" y="48">dist/codex</text><text class="sub" x="140" y="74">46 个文件 · marketplace</text></g>
+
+          <text class="mk" x="690" y="360" style="text-anchor:start">claude</text><text class="rec" x="819" y="360">6eac92ed6bd2ae20</text><text class="mk" x="928" y="360">-7ee596c7</text>
+          <text class="mk" x="690" y="384" style="text-anchor:start">codex</text><text class="rec" x="819" y="384">6eac92ed6bd2ae20</text><text class="mk" x="928" y="384">-9f8fce44</text>
+          <path class="brk" d="M752 394V400H886V394M892 394V400H966V394"/>
+          <text class="mk" x="819" y="420">共享源码：相同</text><text class="mk" x="929" y="420">各自构建</text>
 
           <g class="ve-co" transform="translate(450 272)"><circle r="11"/><text>1</text></g>
           <g class="ve-co" transform="translate(510 272)"><circle r="11"/><text>2</text></g>
@@ -1270,50 +2127,110 @@
       <ol class="co-list">
         <li><span class="n">1</span><span>同一个目标文件有两个来源 → 拒绝构建；适配层不能覆盖共享文件。</span></li>
         <li><span class="n">2</span><span>还有未填的占位符（如 <code>{{rl}}</code>、<code>{{session_id}}</code>）→ 拒绝构建。Claude 填 <code>${CLAUDE_PLUGIN_ROOT}/bin/rl</code> 与 <code>${CLAUDE_SESSION_ID}</code>；Codex 填 <code>rl</code>，绝对路径由 <span class="nb">session-start</span> 提示给出。</span></li>
-        <li><span class="n">3</span><span>输出与源码重叠，或旧目录不是构建产物 → 拒绝覆盖。BUILD.json 记录每个文件的 blake2b；构建号随内容变化，<code>rl setup</code> 据此安装新环境。</span></li>
+        <li><span class="n">3</span><span>输出与源码重叠，或旧目录不是构建产物 → 拒绝覆盖。BUILD.json 记录每个文件的 blake2b。build id 是 <code>&lt;源码&gt;-&lt;构建&gt;</code>：前一段是共享源码的摘要，两个宿主相同；只有它变了才提示 <code>rl upgrade</code>，所以 Claude 和 Codex 的会话可以共用一个项目。<code>rl setup</code> 按 build id 安装插件自己的环境。</span></li>
       </ol>
-      <figcaption><span class="fig-n">Fig. 23</span>两个宿主的插件从同一份源码组装，只差适配文件；Claude 包多一个 researcher 子代理。</figcaption>
+      <figcaption><span class="fig-n">Fig. 45</span>两个宿主的插件从同一份源码组装，只差适配文件；Claude 包多一个 researcher 子代理。</figcaption>
     </figure>
 
     <figure>
       <div class="frame">
-        <svg class="ve-svg bars" viewBox="0 0 1000 440" role="img" aria-label="模块行数：reviews 891，cli 823，runs 556，research 549，agents 448，store 334，adapters 310，project 302，tasks 252，context 223，view 216，literature 188，schema 183，delegate 169，util 148，snapshot 114，documents 107，herdr 93，hooks 63。测试项数：records 20，reviews 20，runs 13，agents 5，executor_contract 5，packaging 5。">
-          <text class="hd2" x="0" y="14">src/smooth_research · 行数</text>
-          <text class="hd2" x="657" y="14">tests · 项数（共 68）</text>
-          <text class="lab" x="140" y="44">reviews.py</text><rect class="hot" x="150" y="37" width="420.0" height="14" rx="2"/><text x="578" y="44">891</text>
-          <text class="lab" x="140" y="65">cli.py</text><rect class="hot" x="150" y="58" width="387.9" height="14" rx="2"/><text x="546" y="65">823</text>
-          <text class="lab" x="140" y="86">runs.py</text><rect class="hot" x="150" y="79" width="262.1" height="14" rx="2"/><text x="420" y="86">556</text>
-          <text class="lab" x="140" y="107">research.py</text><rect class="hot" x="150" y="100" width="258.8" height="14" rx="2"/><text x="417" y="107">549</text>
-          <text class="lab" x="140" y="128">agents.py</text><rect x="150" y="121" width="211.2" height="14" rx="2"/><text x="369" y="128">448</text>
-          <text class="lab" x="140" y="149">store.py</text><rect x="150" y="142" width="157.4" height="14" rx="2"/><text x="315" y="149">334</text>
-          <text class="lab" x="140" y="170">adapters.py</text><rect x="150" y="163" width="146.1" height="14" rx="2"/><text x="304" y="170">310</text>
-          <text class="lab" x="140" y="191">project.py</text><rect x="150" y="184" width="142.4" height="14" rx="2"/><text x="300" y="191">302</text>
-          <text class="lab" x="140" y="212">tasks.py</text><rect x="150" y="205" width="118.8" height="14" rx="2"/><text x="277" y="212">252</text>
-          <text class="lab" x="140" y="233">context.py</text><rect x="150" y="226" width="105.1" height="14" rx="2"/><text x="263" y="233">223</text>
-          <text class="lab" x="140" y="254">view.py</text><rect x="150" y="247" width="101.8" height="14" rx="2"/><text x="260" y="254">216</text>
-          <text class="lab" x="140" y="275">literature.py</text><rect x="150" y="268" width="88.6" height="14" rx="2"/><text x="247" y="275">188</text>
-          <text class="lab" x="140" y="296">schema.py</text><rect x="150" y="289" width="86.3" height="14" rx="2"/><text x="244" y="296">183</text>
-          <text class="lab" x="140" y="317">delegate.py</text><rect x="150" y="310" width="79.7" height="14" rx="2"/><text x="238" y="317">169</text>
-          <text class="lab" x="140" y="338">util.py</text><rect x="150" y="331" width="69.8" height="14" rx="2"/><text x="228" y="338">148</text>
-          <text class="lab" x="140" y="359">snapshot.py</text><rect x="150" y="352" width="53.7" height="14" rx="2"/><text x="212" y="359">114</text>
-          <text class="lab" x="140" y="380">documents.py</text><rect x="150" y="373" width="50.4" height="14" rx="2"/><text x="208" y="380">107</text>
-          <text class="lab" x="140" y="401">herdr.py</text><rect x="150" y="394" width="43.8" height="14" rx="2"/><text x="202" y="401">93</text>
-          <text class="lab" x="140" y="422">hooks.py</text><rect x="150" y="415" width="29.7" height="14" rx="2"/><text x="188" y="422">63</text>
-          <text class="lab" x="800" y="44">records</text><rect class="hot" x="810" y="37" width="160" height="14" rx="2"/><text x="978" y="44">20</text>
-          <text class="lab" x="800" y="72">reviews</text><rect x="810" y="65" width="160" height="14" rx="2"/><text x="978" y="72">20</text>
-          <text class="lab" x="800" y="100">runs</text><rect class="hot" x="810" y="93" width="104" height="14" rx="2"/><text x="922" y="100">13</text>
-          <text class="lab" x="800" y="128">agents</text><rect x="810" y="121" width="40" height="14" rx="2"/><text x="858" y="128">5</text>
-          <text class="lab" x="800" y="156">executor_contract</text><rect x="810" y="149" width="40" height="14" rx="2"/><text x="858" y="156">5</text>
-          <text class="lab" x="800" y="184">packaging</text><rect x="810" y="177" width="40" height="14" rx="2"/><text x="858" y="184">5</text>
+        <svg class="ve-svg bars" viewBox="0 0 1000 802" role="img" aria-label="模块行数，按五组。团队与会话 3207 行：watch 967，agents 551，adapters 347，usage 306，tasks 241，delegate 190，herdr 174，messages 168，agentlog 141，worktrees 122。CLI 与环境 2910 行：cli 1114，project 696，compute 463，launch 280，util 160，snapshot 127，hooks 70。记录核心 2727 行：research 827，runs 684，store 429，upgrade 364，schema 190，labels 126，documents 107。读物 1596 行：explain 725，manuscript 383，view 300，literature 188。审查与上下文 1516 行：reviews 877，context 393，scope 246。测试：reviews 42，records 38，watch 29，compute 26，runs 19，agents 18，upgrade 15，explain 13，usage 12，setup 9，labels 7，packaging 6，executor_contract 5，manuscript 5，hosts 4。">
+          <text class="hd2" x="0" y="14">src/smooth_research · 行数（31 个模块，共 11,964）</text>
+          <text class="hd2" x="0" y="44">团队与会话 · 3,207 行 · 27%</text>
+          <text class="lab" x="150" y="65">watch.py</text><rect class="hot" x="160" y="59" width="303.8" height="12" rx="2"/><text x="471.8" y="65">967</text>
+          <text class="lab" x="150" y="84">agents.py</text><rect class="hot" x="160" y="78" width="173.1" height="12" rx="2"/><text x="341.1" y="84">551</text>
+          <text class="lab" x="150" y="103">adapters.py</text><rect class="hot" x="160" y="97" width="109.0" height="12" rx="2"/><text x="277.0" y="103">347</text>
+          <text class="lab" x="150" y="122">usage.py</text><rect class="hot" x="160" y="116" width="96.1" height="12" rx="2"/><text x="264.1" y="122">306</text>
+          <text class="lab" x="150" y="141">tasks.py</text><rect class="hot" x="160" y="135" width="75.7" height="12" rx="2"/><text x="243.7" y="141">241</text>
+          <text class="lab" x="150" y="160">delegate.py</text><rect class="hot" x="160" y="154" width="59.7" height="12" rx="2"/><text x="227.7" y="160">190</text>
+          <text class="lab" x="150" y="179">herdr.py</text><rect class="hot" x="160" y="173" width="54.7" height="12" rx="2"/><text x="222.7" y="179">174</text>
+          <text class="lab" x="150" y="198">messages.py</text><rect class="hot" x="160" y="192" width="52.8" height="12" rx="2"/><text x="220.8" y="198">168</text>
+          <text class="lab" x="150" y="217">agentlog.py</text><rect class="hot" x="160" y="211" width="44.3" height="12" rx="2"/><text x="212.3" y="217">141</text>
+          <text class="lab" x="150" y="236">worktrees.py</text><rect class="hot" x="160" y="230" width="38.3" height="12" rx="2"/><text x="206.3" y="236">122</text>
+          <text class="hd2" x="0" y="267">CLI 与环境 · 2,910 行 · 24%</text>
+          <text class="lab" x="150" y="288">cli.py</text><rect x="160" y="282" width="350.0" height="12" rx="2"/><text x="518.0" y="288">1,114</text>
+          <text class="lab" x="150" y="307">project.py</text><rect x="160" y="301" width="218.7" height="12" rx="2"/><text x="386.7" y="307">696</text>
+          <text class="lab" x="150" y="326">compute.py</text><rect x="160" y="320" width="145.5" height="12" rx="2"/><text x="313.5" y="326">463</text>
+          <text class="lab" x="150" y="345">launch.py</text><rect x="160" y="339" width="88.0" height="12" rx="2"/><text x="256.0" y="345">280</text>
+          <text class="lab" x="150" y="364">util.py</text><rect x="160" y="358" width="50.3" height="12" rx="2"/><text x="218.3" y="364">160</text>
+          <text class="lab" x="150" y="383">snapshot.py</text><rect x="160" y="377" width="39.9" height="12" rx="2"/><text x="207.9" y="383">127</text>
+          <text class="lab" x="150" y="402">hooks.py</text><rect x="160" y="396" width="22.0" height="12" rx="2"/><text x="190.0" y="402">70</text>
+          <text class="hd2" x="0" y="433">记录核心 · 2,727 行 · 23%</text>
+          <text class="lab" x="150" y="454">research.py</text><rect x="160" y="448" width="259.8" height="12" rx="2"/><text x="427.8" y="454">827</text>
+          <text class="lab" x="150" y="473">runs.py</text><rect x="160" y="467" width="214.9" height="12" rx="2"/><text x="382.9" y="473">684</text>
+          <text class="lab" x="150" y="492">store.py</text><rect x="160" y="486" width="134.8" height="12" rx="2"/><text x="302.8" y="492">429</text>
+          <text class="lab" x="150" y="511">upgrade.py</text><rect x="160" y="505" width="114.4" height="12" rx="2"/><text x="282.4" y="511">364</text>
+          <text class="lab" x="150" y="530">schema.py</text><rect x="160" y="524" width="59.7" height="12" rx="2"/><text x="227.7" y="530">190</text>
+          <text class="lab" x="150" y="549">labels.py</text><rect x="160" y="543" width="39.6" height="12" rx="2"/><text x="207.6" y="549">126</text>
+          <text class="lab" x="150" y="568">documents.py</text><rect x="160" y="562" width="33.6" height="12" rx="2"/><text x="201.6" y="568">107</text>
+          <text class="hd2" x="0" y="599">读物 · 1,596 行 · 13%</text>
+          <text class="lab" x="150" y="620">explain.py</text><rect x="160" y="614" width="227.8" height="12" rx="2"/><text x="395.8" y="620">725</text>
+          <text class="lab" x="150" y="639">manuscript.py</text><rect x="160" y="633" width="120.3" height="12" rx="2"/><text x="288.3" y="639">383</text>
+          <text class="lab" x="150" y="658">view.py</text><rect x="160" y="652" width="94.3" height="12" rx="2"/><text x="262.3" y="658">300</text>
+          <text class="lab" x="150" y="677">literature.py</text><rect x="160" y="671" width="59.1" height="12" rx="2"/><text x="227.1" y="677">188</text>
+          <text class="hd2" x="0" y="708">审查与上下文 · 1,516 行 · 13%</text>
+          <text class="lab" x="150" y="729">reviews.py</text><rect x="160" y="723" width="275.5" height="12" rx="2"/><text x="443.5" y="729">877</text>
+          <text class="lab" x="150" y="748">context.py</text><rect x="160" y="742" width="123.5" height="12" rx="2"/><text x="291.5" y="748">393</text>
+          <text class="lab" x="150" y="767">scope.py</text><rect x="160" y="761" width="77.3" height="12" rx="2"/><text x="245.3" y="767">246</text>
+          <text class="hd2" x="657" y="14">tests · 项数（共 248）</text>
+          <text class="lab" x="820" y="44">reviews</text><rect x="830" y="38" width="130.0" height="12" rx="2"/><text x="968.0" y="44">42</text>
+          <text class="lab" x="820" y="68">records</text><rect x="830" y="62" width="117.6" height="12" rx="2"/><text x="955.6" y="68">38</text>
+          <text class="lab" x="820" y="92">watch</text><rect class="hot" x="830" y="86" width="89.8" height="12" rx="2"/><text x="927.8" y="92">29</text>
+          <text class="lab" x="820" y="116">compute</text><rect x="830" y="110" width="80.5" height="12" rx="2"/><text x="918.5" y="116">26</text>
+          <text class="lab" x="820" y="140">runs</text><rect x="830" y="134" width="58.8" height="12" rx="2"/><text x="896.8" y="140">19</text>
+          <text class="lab" x="820" y="164">agents</text><rect class="hot" x="830" y="158" width="55.7" height="12" rx="2"/><text x="893.7" y="164">18</text>
+          <text class="lab" x="820" y="188">upgrade</text><rect x="830" y="182" width="46.4" height="12" rx="2"/><text x="884.4" y="188">15</text>
+          <text class="lab" x="820" y="212">explain</text><rect x="830" y="206" width="40.2" height="12" rx="2"/><text x="878.2" y="212">13</text>
+          <text class="lab" x="820" y="236">usage</text><rect class="hot" x="830" y="230" width="37.1" height="12" rx="2"/><text x="875.1" y="236">12</text>
+          <text class="lab" x="820" y="260">setup</text><rect x="830" y="254" width="27.9" height="12" rx="2"/><text x="865.9" y="260">9</text>
+          <text class="lab" x="820" y="284">labels</text><rect x="830" y="278" width="21.7" height="12" rx="2"/><text x="859.7" y="284">7</text>
+          <text class="lab" x="820" y="308">packaging</text><rect x="830" y="302" width="18.6" height="12" rx="2"/><text x="856.6" y="308">6</text>
+          <text class="lab" x="820" y="332">executor_contract</text><rect x="830" y="326" width="15.5" height="12" rx="2"/><text x="853.5" y="332">5</text>
+          <text class="lab" x="820" y="356">manuscript</text><rect x="830" y="350" width="15.5" height="12" rx="2"/><text x="853.5" y="356">5</text>
+          <text class="lab" x="820" y="380">hosts</text><rect x="830" y="374" width="12.4" height="12" rx="2"/><text x="850.4" y="380">4</text>
         </svg>
       </div>
-      <figcaption><span class="fig-n">Fig. 24</span>5,982 行 Python：19 个模块，加上 <code>__init__</code> 与 <code>__main__</code> 的 13 行；最大的四个模块（审查、CLI、运行记录、研究图）合占 47%。新增的 <code>agents.py</code> 与 <code>herdr.py</code> 管 herdr 会话。68 项测试中，记录与运行的契约测试占 33 项。</figcaption>
+      <figcaption><span class="fig-n">Fig. 46</span>11,964 行 Python：31 个模块（另有 <code>__init__</code> 与 <code>__main__</code> 的 8 行）分五组。管 herdr 会话、监视、额度和任务消息的一组最大（3,207 行，约 27%），图中高亮；它的测试（agents、watch、usage）有 59 项。248 项测试中最多的是审查（42）和记录契约（38）。</figcaption>
+    </figure>
+
+    <figure>
+      <div class="frame">
+        <svg class="ve-svg" viewBox="0 0 1000 334" role="img" aria-label="记录格式从 1 到 4。格式 2 补上 attempt 的代码审查检查和建议轮等字段；格式 3 补上层次编号；格式 4 让结论审查绑定所审假说的修订。新 CLI 第一次打开旧项目时，在写锁下先把数据库复制到 research/state/backups/，再在一个事务里运行全部迁移，记一条 project.upgrade 事件并给出一条警告。项目由更新的插件写过时，CLI 照常读取，拒绝写入，提示更新插件。">
+          <path class="ve-e" d="M190 62H288"/><text class="ve-el" x="239" y="53">补字段</text>
+          <path class="ve-e" d="M440 62H538"/><text class="ve-el" x="489" y="53">补编号</text>
+          <path class="ve-e is-hot" d="M690 62H788"/><text class="ve-el" x="739" y="53">补修订</text>
+          <g class="ve-n" transform="translate(40 30)"><rect class="sh" width="150" height="64" rx="4"/><text x="75" y="24">格式 1</text><text class="sub" x="75" y="46">首版</text></g>
+          <g class="ve-n" transform="translate(290 30)"><rect class="sh" width="150" height="64" rx="4"/><text x="75" y="24">格式 2</text><text class="sub" x="75" y="46">字段齐全</text></g>
+          <g class="ve-n" transform="translate(540 30)"><rect class="sh" width="150" height="64" rx="4"/><text x="75" y="24">格式 3</text><text class="sub" x="75" y="46">层次编号</text></g>
+          <g class="ve-n is-key" transform="translate(790 30)"><rect class="sh" width="170" height="64" rx="4"/><text x="85" y="24">格式 4</text><text class="sub" x="85" y="46">SCHEMA_VERSION</text></g>
+          <text class="mk" x="365" y="122">attempt 的审查检查</text><text class="mk" x="365" y="142">建议轮</text>
+          <text class="mk" x="615" y="122">H2.1 · EH2.1/3</text><text class="mk" x="615" y="142">旧项目的编号偏深</text>
+          <text class="mk" x="875" y="122">结论审查绑定修订</text><text class="mk" x="875" y="142">按事件日志补上</text>
+
+          <path class="ve-e" d="M230 216H268"/><path class="ve-e" d="M480 216H518"/><path class="ve-e" d="M730 216H768"/>
+          <g class="ve-n" transform="translate(20 186)"><rect class="sh" width="210" height="60" rx="4"/><text x="105" y="22">新 CLI 打开旧项目</text><text class="sub" x="105" y="44">写锁下</text></g>
+          <g class="ve-n" transform="translate(270 186)"><rect class="sh" width="210" height="60" rx="4"/><text x="105" y="22">先复制数据库</text><text class="sub" x="105" y="44">state/backups/</text></g>
+          <g class="ve-n" transform="translate(520 186)"><rect class="sh" width="210" height="60" rx="4"/><text x="105" y="22">一个事务里迁移</text><text class="sub" x="105" y="44">只补充，不删除</text></g>
+          <g class="ve-n" transform="translate(770 186)"><rect class="sh" width="210" height="60" rx="4"/><text class="m" x="105" y="22">project.upgrade</text><text class="sub" x="105" y="44">事件 · 一条警告</text></g>
+
+          <path class="ve-blk" d="M230 298H268"/>
+          <g class="ve-n" transform="translate(20 276)"><rect class="sh" width="210" height="44" rx="4"/><text x="105" y="22">项目比 CLI 新</text></g>
+          <g class="ve-n" transform="translate(270 276)"><rect class="sh" width="460" height="44" rx="4"/><text x="230" y="22">照常读，拒绝写（UNSUPPORTED），提示更新插件</text></g>
+        </svg>
+      </div>
+      <ol class="co-list">
+        <li><span class="n">1</span><span>迁移只补充和填写：不删除记录，不改记录下来的事实，不碰封存的文档。<code>rl restore</code> 也接受旧版本的快照，恢复后同样升级。</span></li>
+        <li><span class="n">2</span><span><code>rl upgrade</code> 列出旧布局放在别处的文件、配置警告、找不到的契约和记录问题。agent 自己调整旧资产（配置、未封存的草稿、笔记、文件位置），只有会改变目标、范围、数据或预算的才问用户；<code><span class="nb">--note</span></code> 记下调整，<code><span class="nb">--move</span></code> 移动文件并在同一个事务里改写记录里的路径。</span></li>
+        <li><span class="n">3</span><span>项目里的 <code>rl</code> 在项目自己的 <code>.venv</code> 上运行，依赖由项目的 <code>uv.lock</code> 锁定；插件依赖变了时，项目里的第一条命令先 <code>uv add</code>。插件自己的环境 <code>env-&lt;build&gt;</code> 只给项目外的命令和旧项目用。</span></li>
+        <li><span class="n">4</span><span>开发规则：改记录格式时提高 <code>SCHEMA_VERSION</code>，在 <code>upgrade.MIGRATIONS</code> 里加迁移，并在 <code>tests/fixtures/projects/</code> 冻结一份新格式的项目；测试用每一份冻结项目运行全部命令，不删除读取旧项目的能力。</span></li>
+      </ol>
+      <figcaption><span class="fig-n">Fig. 47</span>插件升级不打断研究：新 CLI 第一次打开旧项目时，先备份，再在一个事务里把记录补到当前格式。</figcaption>
     </figure>
 
     <div class="callout">
       <span class="chip warn">首版未做</span>
       <ul class="tags">
-        <li>向量检索</li><li>Zotero 同步</li><li>MCP 包装</li><li>自动 session 轮换阈值</li><li>跨主机协调者 failover</li><li>文献检索只接 arXiv（另可用 Crossref 核对 DOI）</li>
+        <li>向量检索</li><li>Zotero 同步</li><li>MCP 包装</li><li>自动 session 轮换阈值</li><li>跨主机协调者 failover</li><li>文献检索只接 arXiv（另可用 Crossref 核对 DOI）</li><li>Claude 会话日志的回合错误规则（还没有错误样本）</li><li><code>rl resume</code> 在 herdr 里提示用 <code>rl agent open</code></li>
       </ul>
     </div>
   </section>
@@ -1321,11 +2238,11 @@
   <section class="sources" id="sources" aria-label="来源">
     <p class="ve-label caps">来源</p>
     <ul>
-      <li>设计文档 <code>design/ml-research-agent-design-2026-10-30 (1).md</code>：§2–§10 为设计，§21 为实施记录（与正文冲突时以 §21 为准）。</li>
-      <li>代码 <code>src/smooth_research/</code>（<code>runs.py</code> 的观测投影、<code>reviews.py</code> 的审查轮次与关系、<code>agents.py</code> 与 <code>herdr.py</code> 的会话）· <code>plugin/</code> · <code>hosts/</code> · <code>scripts/build_plugins.py</code>。</li>
-      <li>测试 <code>tests/test_records.py</code> · <code>test_runs.py</code> · <code>test_reviews.py</code> · <code>test_executor_contract.py</code> · <code>test_packaging.py</code> · <code>test_agents.py</code>（68 项）。</li>
-      <li>提交 446fd7b · 3ff9329 · a35ac78 · 2e13425 · 07db148 · c2686cf · 693e191 · dfa8cdb · d20ba15 · eb83554；<span class="nb">miyabi-mcp</span> 96f2247。<span class="nb">miyabi-mcp</span> 一侧的权威说明：<span class="nb">miyabi-toolbox</span> <code><span class="nb">miyabi-mcp</span>/DESIGN.md</code> §11。</li>
-      <li>e2e 记录：<code>/home/yu/workspace/<span class="nb">sr-e2e</span>/<span class="nb">miyabi-bf16</span></code> 的 <code>rl show</code> / <code>rl run show</code> 输出（<span class="nb">D-0003</span>、<span class="nb">E-0001</span>、<span class="nb">EV-0001</span>…0003、RUN/ATT/<span class="nb">U-0001</span>…0003）；本机 e2e 见设计文档 §21.6；herdr 多会话实测（临时项目，pi 会话）见 §21.9。</li>
+      <li>设计文档 <code>design/ml-research-agent-design-2026-10-30 (1).md</code>：§2–§10 为设计，§21.1–§21.24 为实施记录（与正文冲突时以 §21 为准）。配置说明 <code>docs/configuration.md</code>；默认配置 <code>project.py</code> 的 <code>DEFAULT_CONFIG</code>。</li>
+      <li>代码 <code>src/smooth_research/</code>：<code>runs.py</code> 的观测投影与 rebound，<code>reviews.py</code> 与 <code>scope.py</code> 的审查轮次和逐路径核对，<code>labels.py</code> 的层次编号，<code>agents.py</code>、<code>herdr.py</code>、<code>watch.py</code>、<code>usage.py</code> 的会话、监视和额度，<code>compute.py</code> 的计算资源，<code>explain.py</code> 与 <code>manuscript.py</code> 的读物，<code>upgrade.py</code> 的迁移；另有 <code>plugin/</code> · <code>hosts/</code> · <code>scripts/build_plugins.py</code>。</li>
+      <li>测试 <code>tests/</code> 的 15 个文件，共 248 项（<code>uv run pytest</code>）。</li>
+      <li>提交 446fd7b … eb83554（首版到 bf16 测试）；79dbe9e … d63b268（之后的 45 个提交，aa14290、ce511a1、d63b268 是联合测试后的修正）。<span class="nb">pi-env-mcp</span> 476e15d · 8ba80d0 · 6aab119；<span class="nb">miyabi-toolbox</span> fecb5c2 … b54210f。<span class="nb">miyabi-mcp</span> 一侧的权威说明：<code><span class="nb">miyabi-mcp</span>/DESIGN.md</code> §11。</li>
+      <li>e2e 记录：<code>/home/yu/workspace/<span class="nb">sr-e2e</span>/</code> 下的 <code><span class="nb">miyabi-bf16</span></code>、<code><span class="nb">miyabi-joint-a</span></code>、<code><span class="nb">miyabi-joint-b</span></code>（<code>rl show</code> / <code>rl run show</code> 输出）；本机 e2e 见 §21.6，herdr 多会话实测见 §21.9，联合测试与修正见 §21.23、§21.24。</li>
     </ul>
   </section>
 

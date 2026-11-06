@@ -27,7 +27,7 @@
   - `agents.args.<宿主>` 不是参数列表：用默认参数（写成一个字符串时，按 shell 的规则拆开，不警告）；
   - `context` 的 token 目标不是正整数：用默认值；
   - `manuscript.latex` 不是一条命令：写 Markdown 草稿；
-  - 计算资源有问题（见下面的“计算资源”）：不认识的键没有作用；`connect`、`jobs`、`code` 的值不认识时分别按 `ssh`、`shell`、`git` 计算；远程资源缺 `host` 或 `workspace`、`workspace` 不是绝对路径、名字含有不允许的字符时，这个资源不能用；`compute.default` 不是能用的资源时，用第一个能用的。
+  - 计算资源有问题（见下面的“计算资源”）：不认识的键没有作用；`kind`、`connect`、`jobs` 的值不认识时，这个资源不能用（不回退到 ssh 或 shell）；`code` 的值不认识时按 `git` 计算；远程资源缺 `host` 或 `workspace`、`workspace` 不是绝对路径、名字含有不允许的字符、`connect: local` 却写了 `jobs: shell` 或不是 `code: archive` 时，这个资源也不能用；`compute.default` 不是能用的资源时，用第一个能用的。
 
 ### 目录（固定）
 
