@@ -128,7 +128,7 @@ def open_session(store: Store, kind: str, name: str | None = None, entry_text: s
     where = f"worktree {wt} on {branch or 'a detached HEAD'}" if wt else f"in {cwd}"
     summary = f"{sid} {name} ({kind}, {entry}) open in herdr tab {tab_id}, {where}" + (f"; {trusted}" if trusted else "")
     if entry.entry == "codex" and not started["host_session"] and not waiting:
-        summary += f"\n{name}: {watch.NO_ID}"
+        summary += f"\n{name}: {watch.no_id(herdr.read(name))}"
     out = {"id": sid, "name": name, "tab": tab_id, "pane": pane, "entry": str(entry), "worktree": str(wt) if wt else None,
            "branch": branch}
     if task or ticket:

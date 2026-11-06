@@ -98,6 +98,20 @@ def prompt(target: str, text: str, wait_ms: int | None = None) -> str | None:
         return exc.message
 
 
+def integration(kind: str) -> bool | None:
+    """Is herdr's integration for this agent kind installed (`herdr integration status`, a line such as
+    `codex: current (v10) (<hook path>)`)? None when herdr does not say."""
+    try:
+        out = subprocess.run(["herdr", "integration", "status"], capture_output=True, text=True, timeout=15)
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    for line in out.stdout.splitlines() if out.returncode == 0 else ():
+        name, _, state = line.partition(":")
+        if name.strip() == kind:
+            return not state.strip().startswith("not installed")
+    return None
+
+
 def read(target: str) -> str:
     """What a live agent's terminal shows now, as text ('' when it cannot be read)."""
     try:

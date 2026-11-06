@@ -78,6 +78,17 @@ NO_ID = ("rl found no Codex session id (herdr reports none, and /status showed n
          "turn errors or retries, no log progress, its model unverified); herdr's Codex integration reports it: if "
          "`herdr integration status` does not list codex as installed, ask the user to install it (`herdr "
          "integration install codex`; it adds a hook to their Codex configuration)")
+NO_ID_YET = ("rl has no Codex session id yet (herdr reports none before the first turn, and /status showed none in "
+             "time); herdr's Codex integration is installed and reports it from the first turn on, and the watcher "
+             "records it then. Until then rl reads no log of it (no turn errors or retries, no log progress, its "
+             "model unverified)")
+
+
+def no_id(screen: str = "") -> str:
+    """Why rl has no id of a Codex session: none reported yet (the integration is installed), or no integration
+    (the user installs it); with the end of the screen /status left, when there is one."""
+    shown = f" (the screen: {excerpt(screen)})" if screen.strip() else ""
+    return (NO_ID_YET if herdr.integration("codex") else NO_ID) + shown
 IN_PROGRESS = ("queued", "running")
 NOT_USER = "(from the watcher, not from the user)"
 CONFIRM_S = 5.0  # how long the log of a Codex session that herdr already saw working is given to show a new turn
@@ -243,7 +254,8 @@ def describe(s: dict, p: dict, c: dict, every: float, now: datetime | None = Non
     if s.get("host") != "codex":
         seen = "herdr only"  # no rule for the other hosts' logs yet
     elif not p.get("sid"):
-        seen = "log unavailable (no session id: herdr integration install codex)"
+        seen = ("log unavailable (no session id yet: herdr reports it from the first turn)" if herdr.integration("codex")
+                else "log unavailable (no session id: herdr integration install codex)")
     else:
         seen = None if (log or {}).get("path") else "log not found"
     quiet = _minutes(view.get("progress_at"), now) if view else None

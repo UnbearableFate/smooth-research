@@ -118,6 +118,9 @@ if (group, action) == ("tab", "close"):
     state["agents"] = {k: v for k, v in state["agents"].items() if v != args[2]}
     state["closed"].append(args[2])
     done({"type": "ok"})
+if (group, action) == ("integration", "status"):  # plain text, one line per agent kind
+    codex = os.environ.get("FAKE_HERDR_CODEX_INTEGRATION", "not installed")
+    done(text=f"pi: not installed (/h/.pi/x.ts)\ncodex: {codex} (/h/.codex/herdr-agent-state.sh)")
 if (group, action) == ("tab", "get"):
     if not open_tab(args[2]):
         done(error=("tab_not_found", f"tab {args[2]} not found"))
@@ -472,6 +475,13 @@ def test_a_codex_session_without_an_id_from_herdr_is_found_by_its_status(project
     out = agents.open_session(project, "advisor", ticket=ad["ids"][1], entry_text="codex:gpt-6-astra@max")
     assert "advisor-2: rl found no Codex session id" in out["summary"]
     assert "herdr integration install codex" in out["summary"]
+    assert "(the screen: >)" in out["summary"]  # what /status left on the screen
+    monkeypatch.setenv("FAKE_HERDR_CODEX_INTEGRATION", "current (v10)")  # installed: the id comes with the first turn
+    out = agents.open_session(project, "advisor", ticket=ad["ids"][1], entry_text="codex:gpt-6-astra@max",
+                              name="advisor-4")
+    assert "advisor-4: rl has no Codex session id yet" in out["summary"]
+    assert "integration install" not in out["summary"]
+    assert "log unavailable (no session id yet" in agents.list_sessions(project)["summary"]
 
 
 def test_a_quoted_screen_leaves_out_who_is_signed_in():
