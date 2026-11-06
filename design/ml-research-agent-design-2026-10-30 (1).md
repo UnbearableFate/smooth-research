@@ -1683,3 +1683,29 @@ GitHub 链接固定到本次读取的提交；外部产品文档按 2026-10-30 �
 验证：计算 allocation 中相关配置、快照、上下文、结果导入和双宿主打包测试 29 项通过；全量 158 项通过，1 项初始化布局测试失败。该项在未修改的 HEAD 基线单独复现（当前 uv 0.11.26 的 init 未生成测试期待的 src/<package>/__init__.py），保留原有实现与断言，不在此改动中修复。两种插件构建均已检查，不包含集群专属名称。
 
 独立 herdr tab 内的 Codex 使用最终构建 d52e29cfea8bf46b 完成最小确定性 demo：省略资源登记被拒绝且没有新 run；共享 commit 快照只读；外部 MCP 原生预检查/提交成功，计算节点 guard 通过并得到 sum(range(10))=45；原生 ledger 导出最终记录 ended/success 和测量用量，结果 RES-0001 的两个绝对共享路径产物摘要均验证通过，ATT-0001-1 为 ended/success/result:complete，绑定真实 hpc_job。观察到 executor 历史状态与 ledger 短暂不同步，后续 bounded wait 正常返回完成；未修改外部工具、未手工改写台账。
+
+### 21.23 作业 MCP 经 connect 访问（2026-11-06）
+
+用户指出联合测试（smooth-research + miyabi-mcp + pi-env-mcp）偏离了设计。设计的路径是 agent → pi-env-mcp → miyabi-mcp：`connect: pi-env-mcp:miyabi-g` 是 agent 到主机的通道，`jobs: mcp:miyabi-pbs` 的服务器也走这条通道。测试时 miyabi-pbs 却注册成了 `ssh -T miyabi-g … miyabi-mcp serve`（miyabi-mcp DESIGN 5.1 的方式 B），作业调用没有经过 pi-env-mcp。
+
+原因有两个：
+
+- 插件只引用服务名，`compute steps` 只写"用 MCP 服务 miyabi-pbs 提交"，没有说它经哪条路。
+- 那时 pi-env-mcp 也运行不了远程 MCP。它只能用 `bash` 运行 `miyabi-mcp <cmd> --json`，这样没有工具 schema，也不能按工具放行。
+
+pi-env-mcp 一侧（476e15d，按用户决定照搬上游 pi 的做法）：
+
+- 远程 MCP 用 pi-env daemon 的 `process` 操作运行在 pi-env 连接里，客户端是 pi-mcp 的 McpClient 和 PipeTransport。
+- 工具以 `<服务>__<工具>` 由 serve 转出。
+- 一个 agent 只占一条 SSH 会话，联合测试 J7 的主连接 10 会话上限因此缓解。
+
+本插件的改动：
+
+- 规则是"作业 MCP 经 connect 访问"：
+  - pi-env-mcp：由它在主机上运行（`pi-env-mcp mcp add`），工具名为 pi-env-mcp 服务下的 `<前缀>__<工具>`，前缀把字母、数字、`_` 以外的字符换成 `_`；
+  - ssh：宿主经 ssh 启动；
+  - local：登录节点上的宿主直接注册。
+- `Resource.executor()` 和 `jobs_on_pi_env` 给出这条路。工作包和 `rl compute` 的资源行写明工具前缀。
+- `rl compute steps` 写明工具名。工具不在时，用 pi-env-mcp 的 `hosts` 查看并重启该服务器；配置里没有这个服务器时，报告为设置问题，不改用 ssh 注册。
+- 需要项目目录的作业服务器，用资源的 `workspace` 作项目参数。这样一份 pi-env-mcp 配置可以服务多个研究项目。
+- docs/configuration.md、skill 的 workflow.md 和 YAML 模板同步更新。

@@ -58,6 +58,13 @@ compute:
                                      # archive: git archive, uploaded
 ```
 
+The jobs MCP server is reached through `connect`, never on a connection of its own. With
+`connect: pi-env-mcp:<server>`, pi-env-mcp runs it on the host over the connection it already holds: its tools are
+among that pi-env-mcp server's tools, named `<prefix>__<tool>`, where the prefix is the jobs server's name with
+characters other than letters, digits and `_` turned into `_` (`mcp:cluster-jobs` → `cluster_jobs__job_submit`).
+There is no separate server for it. With `connect: ssh` it is a server of your host started over ssh; with
+`connect: local`, one of your host on the login node. `{{rl}} compute steps` names the tools.
+
 A remote run executes one commit, staged once as the read-only snapshot `<workspace>/snapshots/<commit>/`:
 the branch or worktree it came from does not matter, and a branch that moves on cannot change a queued job.
 Workspace layout: `repo.git` (a bare clone the host fetches into, code: git), `snapshots/<commit>/`,
@@ -168,8 +175,12 @@ With `jobs: mcp:<server>` or `skill:<name>`, the external integration owns sched
 allocation checks, cancellation, usage accounting and notifications. Read its actual tool schema and
 instructions; the names and fields below describe the information to pass, not a required MCP API. Keep
 server registration, launcher paths, queue names, account names and site-specific scripts in the user's
-project or host configuration, outside this plugin. Do not bypass the configured executor using raw scheduler
-commands. Submit only within the user's authorized resources and budget.
+project, host or pi-env-mcp configuration, outside this plugin. Do not bypass the configured executor using raw
+scheduler commands. Submit only within the user's authorized resources and budget. Under pi-env-mcp, when the
+jobs tools are missing, its `hosts` tool shows the server's state and the end of its stderr, and `hosts` with
+`connect: true` starts it again. Report a server missing from pi-env-mcp's configuration as a setup problem; do
+not register it over ssh instead. Pass the resource's workspace as the executor's project when its tools take
+one.
 
 3. `{{rl}} compute steps --attempt ATT` stages the registered commit as a read-only snapshot. With
    `connect: local`, run its small source archive script directly on the shared filesystem; use an allocation

@@ -369,12 +369,20 @@ RESOURCE_KEYS = ("kind", "host", "connect", "jobs", "workspace", "code", "git_re
 RESOURCE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 
 
+def mcp_tool_prefix(server: str) -> str:
+    """The prefix pi-env-mcp gives the tools of an MCP server it runs on a host (<prefix>__<tool>): pi's
+    createMcpToolName, where characters other than letters, digits and _ become _."""
+    return re.sub(r"[^A-Za-z0-9_]", "_", server)
+
+
 @dataclass(frozen=True)
 class Resource:
     """One entry of compute.resources. local: this machine, code from the caller's checkout. remote: a host the
     agent reaches with ssh or pi-env-mcp (host is the ssh alias, or pi-env-mcp's host name); jobs say what starts
     the work there (shell: a background process; mcp:<server>; skill:<name>); connect: local accesses a shared
-    cluster workspace from the login node without a network hop. workspace is the
+    cluster workspace from the login node without a network hop. An MCP server in jobs is reached through connect:
+    with pi-env-mcp it runs on the host as one of pi-env-mcp's own servers, and its tools are the pi-env-mcp
+    server's <prefix>__<tool> tools (executor()). workspace is the
     absolute remote directory that holds repo.git, snapshots/<commit>/ and runs/<attempt>/; code says how a commit
     gets there (git: pushed to git_remote and fetched by the host from git_url; archive: git archive, uploaded)."""
     name: str
@@ -393,6 +401,23 @@ class Resource:
     def remote(self) -> bool:
         return self.kind == "remote"
 
+    @property
+    def jobs_on_pi_env(self) -> bool:
+        """jobs is an MCP server that pi-env-mcp runs on the host, reached through the connection itself."""
+        return self.remote and self.connect == "pi-env-mcp" and self.jobs.startswith("mcp:")
+
+    def executor(self) -> str:
+        """What submits the work, as the agent reaches it. An MCP server in jobs is reached through connect: under
+        pi-env-mcp it is one of pi-env-mcp's own servers on the host (pi-env-mcp mcp add <server> --host <host> --
+        <command>), so the agent registers no separate server for it; ssh or local: a server of the agent's host."""
+        kind, _, name = self.jobs.partition(":")
+        if self.jobs_on_pi_env:
+            return (f"MCP server {name}, which pi-env-mcp runs on {self.host} (tools {mcp_tool_prefix(name)}__<tool> "
+                    f"of pi-env-mcp server {self.server or 'pi-env-mcp'})")
+        if kind == "mcp":
+            return f"MCP server {name}"
+        return f"skill {name} (through {self.connect})" if kind == "skill" else self.jobs
+
     def describe(self) -> str:
         """One line: where it is, how it is reached, what starts jobs and how the code gets there."""
         if not self.remote:
@@ -403,7 +428,9 @@ class Resource:
                     if self.code == "git" else "archive (git archive, shared filesystem)" if self.connect == "local"
                     else "archive (git archive, uploaded)")
             access = "shared cluster filesystem via local" if self.connect == "local" else f"host {self.host} via {via}"
-            text = (f"{self.name}: {access} · jobs {self.jobs} · workspace {self.workspace} · "
+            jobs = (f"{self.jobs} (run on the host by pi-env-mcp: tools {mcp_tool_prefix(self.jobs[4:])}__<tool>)"
+                    if self.jobs_on_pi_env else self.jobs)
+            text = (f"{self.name}: {access} · jobs {jobs} · workspace {self.workspace} · "
                     f"code {code}")
         return text + (f" · notes: {self.notes}" if self.notes else "")
 
@@ -657,7 +684,8 @@ def write_default_config(root: Path) -> Path:
                 "#   cluster:\n"
                 "#     host: cluster-login            # ssh alias, or pi-env-mcp's host name\n"
                 "#     connect: ssh                   # ssh, or pi-env-mcp:<MCP server name>\n"
-                "#     jobs: mcp:cluster-jobs         # shell, mcp:<server> or skill:<name>\n"
+                "#     jobs: mcp:cluster-jobs         # shell, mcp:<server> or skill:<name>; an MCP server is reached\n"
+                "#                                    # through connect (pi-env-mcp runs it: pi-env-mcp mcp add)\n"
                 "#     workspace: /shared/<user>/<project>        # absolute cluster workspace\n"
                 "#     code: git                       # git (push, the host fetches) or archive (upload)\n"
                 "# On a login node set compute.coordinator: login; use a remote resource with connect: local,\n"

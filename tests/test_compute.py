@@ -13,7 +13,7 @@ import yaml
 
 from smooth_research import compute, context, runs, tasks
 from smooth_research.project import DEFAULT_CONFIG, _merge, compute_default, compute_resources, config_warnings, \
-    find_project
+    find_project, mcp_tool_prefix
 from smooth_research.store import Store
 from smooth_research.util import RLError
 
@@ -178,6 +178,29 @@ def test_pi_env_mcp_steps_name_its_server_and_the_job_tool(project, tmp_path):
                  "Use /work/g/u/demo as the executor's project workspace if it requires one",
                  "pi-env-mcp download (server miyabi-g, host miyabi-g): /work/g/u/demo/runs/<ATT>/manifest.json"):
         assert part in text, part
+
+
+def test_a_jobs_mcp_server_is_reached_through_the_connection(project, tmp_path):
+    """Under pi-env-mcp the jobs server runs on the host as one of pi-env-mcp's servers: its tools are that server's
+    <prefix>__<tool>, never a server of its own over ssh. With ssh it stays a server of the agent's host."""
+    assert mcp_tool_prefix("miyabi-pbs") == "miyabi_pbs" and mcp_tool_prefix("a.b c_d9") == "a_b_c_d9"
+    store = configure(tmp_path, {"miyabi": {"host": "miyabi-g", "connect": "pi-env-mcp:miyabi-g",
+                                            "jobs": "mcp:miyabi-pbs", "workspace": "/work/g/u/demo",
+                                            "code": "archive"},
+                                 "box": {"host": "box", "connect": "ssh", "jobs": "mcp:cluster-jobs",
+                                         "workspace": "/w/p", "code": "archive"}})
+    _, sha = _repo(project, tmp_path)
+    tools = ("MCP server miyabi-pbs, which pi-env-mcp runs on miyabi-g (tools miyabi_pbs__<tool> of pi-env-mcp "
+             "server miyabi-g)")
+    text = compute.steps(store, "miyabi", commit=sha)["summary"]
+    assert f"Submit with {tools}:" in text and "not a reason to register miyabi-pbs over ssh" in text
+    assert "a project argument of its tools" in text
+    listing = compute.show(store)["summary"]
+    assert "jobs mcp:miyabi-pbs (run on the host by pi-env-mcp: tools miyabi_pbs__<tool>)" in listing
+    assert f"mcp:miyabi-pbs: {tools}; its entry is in pi-env-mcp's configuration (pi-env-mcp mcp list)" in listing
+    assert "mcp:cluster-jobs: checked by the agent" in listing
+    text = compute.steps(store, "box", commit=sha)["summary"]
+    assert "Submit with MCP server cluster-jobs:" in text and "pi-env-mcp" not in text
 
 
 def test_a_remote_attempt_without_a_commit_says_so_instead_of_staging_head(project, tmp_path):

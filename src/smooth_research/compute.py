@@ -4,7 +4,8 @@ how the code of a commit gets there.
 rl connects to, copies to and starts nothing on any of them. It reads the configuration, checks what it can see
 locally (the ssh command, the git remote, whether a commit is on a branch and pushed as of the last push or
 fetch) and prints the steps for the agent's own tools: Bash, ssh, pi-env-mcp, and the MCP server or skill that
-submits jobs. The one exception is the git side of sync: for the resources that fetch code by git, rl compute
+submits jobs. That MCP server is reached through the resource's connection: under pi-env-mcp, pi-env-mcp runs it
+on the host and offers its tools as its own (Resource.executor). The one exception is the git side of sync: for the resources that fetch code by git, rl compute
 sync (and the coordinator's rl session start) pushes the current branch, after creating the git remote as a
 private GitHub repository when it is missing and compute.repository allows it; the clone on the host is again a
 printed step. A remote run always executes a read-only snapshot of one full commit,
@@ -98,7 +99,10 @@ def show(store: Store, commit: str | None = None) -> dict:
             checks.append("ssh on PATH" if shutil.which("ssh") else "ssh not found on PATH")
         if res.remote and res.connect == "pi-env-mcp":
             checks.append(f"pi-env-mcp server {res.server or '(any)'}: an MCP tool, checked by the agent (hosts)")
-        if res.jobs.startswith(("mcp:", "skill:")):
+        if res.jobs_on_pi_env:
+            checks.append(f"{res.jobs}: {res.executor()}; its entry is in pi-env-mcp's configuration (pi-env-mcp "
+                          "mcp list), checked by the agent")
+        elif res.jobs.startswith(("mcp:", "skill:")):
             checks.append(f"{res.jobs}: checked by the agent")
         facts = _git_facts(project, res, commit) if res.remote else {}
         if facts.get("url"):
@@ -306,13 +310,17 @@ def _run_steps(res: Resource, env: str, att: str, where: dict) -> list[str]:
         return [f"2. Run from {workdir} ({how}), with {env}, writing only to {run_dir}/ and ending with "
                 f"{run_dir}/manifest.json (carrying the spec digest); then {record}."]
     kind, _, tool = res.jobs.partition(":")
-    via = f"MCP server {tool}" if kind == "mcp" else f"skill {tool} (through {res.connect})"
     code = f"{workdir} (read-only)" if res.remote else workdir
-    lines = [f"2. Submit with {via}: job script and workdir in {code}, {env}, request key sr:{att}, "
+    lines = [f"2. Submit with {res.executor()}: job script and workdir in {code}, {env}, request key sr:{att}, "
              f"outputs only in {run_dir}/ ending with manifest.json (carrying the spec digest)."]
+    if res.jobs_on_pi_env:
+        lines.append("   Without those tools, pi-env-mcp's hosts shows the server's state and the end of its stderr, "
+                     "and hosts with connect: true starts it again; a server missing from pi-env-mcp's configuration "
+                     f"is a setup problem to report, not a reason to register {tool} over ssh.")
     if kind == "mcp":
         if res.workspace:
-            lines.append(f"   Use {res.workspace} as the executor's project workspace if it requires one.")
+            lines.append(f"   Use {res.workspace} as the executor's project workspace if it requires one (for example "
+                         "a project argument of its tools).")
         lines.append("   Read the executor's tool schema and instructions for submission, allocation checks and "
                      "notifications. Record its compatible export (`rl run record --observation @file`), or "
                      f"record observed job facts: rl run record --attempt {att} --source {tool} "
