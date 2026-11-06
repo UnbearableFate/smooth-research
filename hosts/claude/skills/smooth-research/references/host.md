@@ -26,7 +26,8 @@ the absolute path from SKILL.md.
 - Reviewer: the first available entry of models.reviewer (by default the Codex CLI, then Claude):
   `rl review request --author-model <model that wrote it>`; your conclusions likewise:
   `rl review conclusion --author-model <your model id>`. The relation to the author's model family is
-  recorded with each answer.
+  recorded with each answer. From a session rl opened, rl adds the model it recorded for that session when
+  the ones given leave it out, and says so.
 - Advisors: every entry of models.advisor (by default `codex:gpt-6-astra@max` and
   `claude:claude-fable-5-1@high`) answers an advice round in its own session that sees only the package.
 - Your own subagents (Agent tool `model`) run on a lower tier than you: Fable → Opus or below, Opus → Sonnet

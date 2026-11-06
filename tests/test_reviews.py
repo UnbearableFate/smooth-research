@@ -142,6 +142,24 @@ def test_the_first_reviewer_answers_and_is_reused_while_the_code_is_unchanged(pr
     assert "reused_from" not in fresh and fresh["id"] != rv["id"]
 
 
+def test_a_session_rl_knows_cannot_leave_its_own_model_out_of_the_authors(project, fakes, tmp_path, monkeypatch):
+    code(tmp_path)
+    s = tasks.start_session(project, "researcher-1", "codex", model_requested="gpt-6.1-terra")
+    monkeypatch.setenv("SMOOTH_RESEARCH_SESSION", s["id"])
+    rv = request(project, author="GPT-6")  # what a Codex session said of itself in the joint test
+    assert f"author models: added gpt-6.1-terra, the model rl recorded for {s['id']} (given: GPT-6)" in rv["summary"]
+    with project.read() as tx:
+        assert tx.require(rv["id"])["author_models"] == ["GPT-6", "gpt-6.1-terra"]
+    code(tmp_path, body="def f(x):\n    return 3 * x\n")
+    exact = request(project, author="gpt-6.1-terra")
+    assert "author models: added" not in exact["summary"]
+    conclusion = reviews.request_conclusion_review(project, ["H-0001"], "supported at screening level", ["GPT-6"])
+    assert "added gpt-6.1-terra" in conclusion["summary"]
+    monkeypatch.delenv("SMOOTH_RESEARCH_SESSION")  # outside a session rl opened: as given
+    code(tmp_path, body="def f(x):\n    return 4 * x\n")
+    assert "author models: added" not in request(project, author="GPT-6")["summary"]
+
+
 PASS = 'Fine.\n```json\n{"verdict": "pass", "findings": [], "checked": ["all"], "unchecked": []}\n```'
 
 

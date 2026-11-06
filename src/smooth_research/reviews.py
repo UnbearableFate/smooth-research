@@ -28,7 +28,7 @@ from pathlib import Path
 from . import adapters, documents, messages, usage
 from .agents import assign
 from .context import advice_pack, contract_summary
-from .herdr import caller_role
+from .herdr import ENV_SESSION, caller_role
 from .project import advice_limit, usable_entries
 from .research import brief, passing_rechecks, prepare_contracts, review_mark, review_passes, seal_referenced
 from .runs import code_review_summary, evidence_attempts
@@ -118,6 +118,20 @@ End with exactly one ```json block:
 
 def _entries(store: Store, kind: str) -> list[adapters.Entry]:
     return usable_entries(store.project.config, "reviewer" if kind == "review" else "advisor")
+
+
+def _with_caller_model(tx: Tx, author_models: list[str]) -> tuple[list[str], str | None]:
+    """The author models with the model rl recorded for the calling session (a session `rl agent open` started has
+    its id in the environment) when the given ones leave it out, so that what wrote the code or drew the conclusion
+    is on record, not only what the session said of itself; adding a model never loosens the independence check.
+    Also the note that says so, or None."""
+    sid = os.environ.get(ENV_SESSION)
+    s = tx.get(sid, "Session") if sid else None
+    model = (s.get("model_observed") or s.get("model_requested")) if s else None
+    if not model or model.lower().rsplit("/", 1)[-1] in {m.lower().rsplit("/", 1)[-1] for m in author_models}:
+        return list(author_models), None
+    return [*author_models, model], (f"author models: added {model}, the model rl recorded for {sid} (given: "
+                                     f"{', '.join(author_models)})")
 
 
 def _relation(author_models: list[str], observed: str | None, requested: str) -> str:
@@ -577,7 +591,10 @@ def request_review(store: Store, target: str | None, files: list[str], question:
     with store.write() as tx:
         if target:
             tx.require(target)
-        bound, sealed = seal_referenced(tx, contracts, store.project)
+        author_models, added = _with_caller_model(tx, author_models)
+        sealed = [added] if added else []
+        bound, more = seal_referenced(tx, contracts, store.project)
+        sealed += more
         targets = {target: bound.get(target, {})} if target else {}
         reused = None if recheck_of else _reuse(tx, fp, target, targets, author_models, "code", {"code_scope": detail})
         if reused:
@@ -688,9 +705,10 @@ def request_conclusion_review(store: Store, targets: list[str], proposal: str, a
     target_text = ", ".join(targets)
     error = None if eligible else "no reviewer configured (models.reviewer is empty)"
     with store.write() as tx:
+        author_models, added = _with_caller_model(tx, author_models)
         reused = None if recheck_of else _reuse(tx, key, target_text, bound, author_models, "conclusion")
         if reused:
-            return reused
+            return {**reused, "summary": reused["summary"] + (f"; {added}" if added else "")}
         rid = tx.next_id("Ticket", "RV")
         rounds = _round(tx, recheck_of, new_round)
         path = store.project.dir("packages") / f"{rid}.request.md"
@@ -708,7 +726,8 @@ def request_conclusion_review(store: Store, targets: list[str], proposal: str, a
             f"assign it to a reviewer session in herdr), then cite it: rl decide ... --based-on {rid}"
             if eligible else "no reviewer configured: recorded unavailable (not a pass)")
     route = _route(store, rid, recheck_of, caller_role()) if eligible else ""
-    return {"id": rid, "request_ref": ref, "summary": f"{rid} {_round_note(store, rid)}{note}{route}"}
+    return {"id": rid, "request_ref": ref,
+            "summary": f"{rid} {_round_note(store, rid)}{note}{route}" + (f"; {added}" if added else "")}
 
 
 def _result_line(res: dict) -> str:
