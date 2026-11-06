@@ -248,7 +248,7 @@ compute:
 | `SMOOTH_RESEARCH_PROJECT` | 项目目录。查找顺序：先看 `--project`，再看这个变量，最后从当前目录往上找 `smooth-research.yaml` |
 | `SMOOTH_RESEARCH_HOME` | 插件自己的 CLI 环境的安装位置（项目外的命令和还没有自己环境的旧项目用它；项目内的命令用项目的 `.venv`，见第 6 节）。设了 `XDG_DATA_HOME` 时默认为 `$XDG_DATA_HOME/smooth-research`，否则为 `~/.local/share/smooth-research`。`rl setup` 在这里建 `env-<build-id>`；Claude 的额度读数存在这里的 `usage/claude.json` |
 | `SMOOTH_RESEARCH_RL` | `bin/rl` 启动器自动把它设成自己的绝对路径，让 hook 提示、delegate 子会话和 agent 会话调用同一个 CLI。一般不用手动设 |
-| `SMOOTH_RESEARCH_BUILD` | `bin/rl` 启动器设成插件的 build id（源码里运行时没有，按 `dev` 计算）。项目记下最后一次 `rl upgrade` 时的 build；两者不同时，`rl status`、`rl resume` 和会话开始的提示会说插件变了，要运行 `rl upgrade`。一般不用手动设 |
+| `SMOOTH_RESEARCH_BUILD` | `bin/rl` 启动器设成插件的 build id（源码里运行时没有，按 `dev` 计算）。build id 的形式是 `<源码>-<构建>`：前一段是共享源码（未填入宿主占位符时）的摘要，同一份源码构建出的 Claude 版和 Codex 版这一段相同；后一段是这个宿主构建的全部文件的摘要。项目记下最后一次 `rl upgrade` 时的 build；前一段不同时，`rl status`、`rl resume` 和会话开始的提示会说插件变了，要运行 `rl upgrade`。所以 Codex 协调者和 Claude 研究员共用一个项目时，不会因为两边的构建不同而互相提示（没有 `-` 的旧 build id 整个比较）。一般不用手动设 |
 | `SMOOTH_RESEARCH_CHECKOUT` | `rl agent open` 给 researcher 会话设成它的 worktree。代码路径、代码审查的指纹和 `rl run register` 的代码检查都按这个 checkout 读；研究记录仍写进 `SMOOTH_RESEARCH_PROJECT` 指向的项目。不设时从当前目录判断：在项目的 linked worktree 里就用这个 worktree |
 | `SMOOTH_RESEARCH_SESSION`、`SMOOTH_RESEARCH_ROLE` | `rl agent open` 给每个会话设成它的会话记录（S-x）和会话名（如 `reviewer-1`）。设了 `SMOOTH_RESEARCH_ROLE` 的会话不能批准审查轮次（`rl review approve`），发消息时默认以这个名字发送 |
 | `HERDR_ENV`、`HERDR_PANE_ID` | herdr 设置，CLI 只读。`HERDR_ENV=1` 时才能开 agent 会话、发通知；协调者 `rl session start` 时记下 `HERDR_PANE_ID`，通知发到这个 pane |

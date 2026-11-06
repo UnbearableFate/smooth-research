@@ -1621,7 +1621,7 @@ GitHub 链接固定到本次读取的提交；外部产品文档按 2026-10-30 �
 | 版本化迁移（`upgrade.py`，新） | `SCHEMA_VERSION` 升到 2。CLI 第一次打开旧项目时，在写锁下先把数据库文件复制到 `research/state/backups/schema-<旧>-<时间>/`，再在一个事务里运行 `MIGRATIONS` 里旧格式之后的全部迁移，记 `project.upgrade` 事件；并发的 CLI 等锁后发现已经升级。迁移只补充和填写，不删记录、不改事实、不碰封存文档。v2：旧 attempt 的代码审查检查记为 unchecked（“登记时还没有记录代码审查检查”），旧 advice 工单按请求包分组补上轮次。审查的 `code_scope` 缺失时改为容错读取（没有范围的审查不覆盖任何文件） |
 | 更新的格式 | 由更新插件写过的项目照常读取，写入报 UNSUPPORTED，提示更新插件；会话开始的提示让 agent 告诉用户 |
 | 快照恢复 | 接受旧格式的快照，按快照里的格式写入，第一次打开时自动升级；data_version 的核对放在升级之前 |
-| 插件 build | 启动器导出 `SMOOTH_RESEARCH_BUILD`；新项目记下创建时的 build，`rl upgrade` 记下当前 build。两者不同时 `rl status`/`rl resume`/会话开始的 attention 第一条提醒运行 `rl upgrade` |
+| 插件 build | 启动器导出 `SMOOTH_RESEARCH_BUILD`；新项目记下创建时的 build，`rl upgrade` 记下当前 build。两者的源码段不同时 `rl status`/`rl resume`/会话开始的 attention 第一条提醒运行 `rl upgrade`。build id 是 `<源码>-<构建>`（`scripts/build_plugins.py`），同一份源码的 Claude 版和 Codex 版源码段相同，混用两种宿主的项目不会被误报为插件变了（联合测试第二轮发现） |
 | `rl upgrade` | 补建新布局要的目录（旧布局里还有对应文件时不新建模板）；列出旧布局放在别处的文件、配置警告、找不到的合同文件和 doctor 的问题；打印 agent 可以自己调整的范围和不能改的东西。`--note` 记 `project.adjusted`；`--move <旧> <新>` 移动文件或目录并在同一事务里改写 `Experiment.contract_path` 和 `Document.path`，事务失败时文件移回；封存来源（修订、事件）不改；数据库和封存对象不能移；父目录里还有另有去处的旧子目录时要求先移子目录 |
 | 启动器 | 环境缺失时第一条命令自动构建（`mkdir` 锁，一次只构建一个，其他会话等待；完成后写 `.ready`）；hook 不等待，在后台开始构建并说明；`rl setup` 强制重建 |
 | skill 与文档 | SKILL.md 的 CLI 一节加一条：升级后运行 `rl upgrade`，按它列出的内容自己调整旧资产，不用问用户，不改记录的事实和封存文档；workflow.md 新增 “After a plugin update”；`docs/configuration.md` 新增第 6 节 |

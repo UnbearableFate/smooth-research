@@ -92,17 +92,28 @@ def check_versions(repo: Path) -> str:
     return version
 
 
+def short(digests: dict, size: int) -> str:
+    return hashlib.blake2b(json.dumps(digests, sort_keys=True).encode(), digest_size=size).hexdigest()
+
+
 def assemble(target: str, destination: Path, repo: Path, version: str) -> dict:
+    """The build id is <source>-<build>: source digests the shared sources as written (before the host
+    placeholders are filled), so the Claude and Codex builds of one source tree share it and a project used
+    by both sees no plugin change (upgrade.same_source); build digests every file of this host's build."""
     subs = json.loads((repo / "hosts" / target / "substitutions.json").read_text(encoding="utf-8"))
     plugin = destination / "plugins" / NAME
-    digests = {}
+    adapter = (repo / "hosts" / target).resolve()
+    digests, shared = {}, {}
     for dest, src in sources(target, repo):
-        data = render(dest, src.read_bytes(), subs)
+        raw = src.read_bytes()
+        data = render(dest, raw, subs)
         out = plugin / dest
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_bytes(data)
         out.chmod(0o755 if src.stat().st_mode & 0o111 else 0o644)
         digests[dest] = blake(data)
+        if adapter not in src.resolve().parents:
+            shared[dest] = blake(raw)
     for required in ("bin/rl", "skills/smooth-research/SKILL.md", "skills/research-review/SKILL.md",
                      "skills/research-advise/SKILL.md", "skills/smooth-research/references/host.md",
                      "skills/smooth-research/references/workflow.md", "skills/smooth-research/references/team.md",
@@ -110,7 +121,7 @@ def assemble(target: str, destination: Path, repo: Path, version: str) -> dict:
                      "pyproject.toml", "uv.lock", "src/smooth_research/cli.py"):
         if required not in digests:
             raise ValueError(f"{target} build is missing {required}")
-    build_id = hashlib.blake2b(json.dumps(digests, sort_keys=True).encode(), digest_size=8).hexdigest()
+    build_id = f"{short(shared, 8)}-{short(digests, 4)}"
     (plugin / ".build-id").write_text(build_id + "\n", encoding="utf-8")
     catalog = json.loads((repo / CATALOGS[target]).read_text(encoding="utf-8"))
     entry = next(p for p in catalog["plugins"] if p["name"] == NAME)

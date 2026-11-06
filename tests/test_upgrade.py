@@ -143,6 +143,21 @@ def test_a_plugin_update_is_flagged_until_rl_upgrade_records_it(project, tmp_pat
             ["by build b2: moved old notes into research/notes/"]
 
 
+def test_the_claude_and_codex_builds_of_one_source_share_a_project_without_a_plugin_change(project, rl, monkeypatch):
+    with project.write() as tx:  # a Codex coordinator made the project; its Claude researchers use the Claude build
+        tx.set_meta(last_build="0123456789abcdef-c0dec0de")
+    monkeypatch.setenv("SMOOTH_RESEARCH_BUILD", "0123456789abcdef-c1a0de00")
+    code, out, _ = rl("status")
+    assert code == 0 and "plugin changed" not in out
+    monkeypatch.setenv("SMOOTH_RESEARCH_BUILD", "fedcba9876543210-c1a0de00")  # a new source: an update
+    code, out, _ = rl("status")
+    assert "plugin changed since this project was last used (build 0123456789abcdef-c0dec0de -> fedcba98" in out
+    with project.write() as tx:  # the id of a build from before ids had a source part is compared whole
+        tx.set_meta(last_build="599ea6164eab10d1")
+    code, out, _ = rl("status")
+    assert "(build 599ea6164eab10d1 -> fedcba9876543210-c1a0de00)" in out
+
+
 def test_the_upgrade_binds_older_conclusion_reviews_to_the_revision_they_reviewed(project, tmp_path):
     before = reviews.request_conclusion_review(project, ["H-0001"], "H1 holds", ["claude-opus-5-5"])["id"]
     research.revise_hypothesis(project, "H-0001", "sharper", statement="weight decay raises test accuracy a lot")

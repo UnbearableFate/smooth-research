@@ -150,6 +150,14 @@ def build() -> str:
     return os.environ.get(ENV_BUILD) or "dev"
 
 
+def same_source(last: str | None, current: str) -> bool:
+    """Whether two build ids come from one source tree. An id is <source>-<build> (scripts/build_plugins.py):
+    the Claude and Codex builds of one tree differ only after the dash, so a project that a Codex coordinator
+    and Claude researchers share is not changed by either. An id without a dash (older builds, dev) is
+    compared whole."""
+    return bool(last) and last.split("-", 1)[0] == current.split("-", 1)[0]
+
+
 def migrate(store: "Store") -> dict | None:
     """Bring an older store up to SCHEMA_VERSION; None when it already is (or is newer). Holds the write lock
     throughout, so concurrent CLIs wait and then find it upgraded."""

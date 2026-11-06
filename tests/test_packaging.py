@@ -3,6 +3,7 @@
 import importlib.util
 import json
 import re
+import shutil
 from pathlib import Path
 
 import pytest
@@ -32,6 +33,28 @@ def test_both_hosts_share_the_core_and_differ_only_in_adapters(built):
     for target in ("claude", "codex"):
         digests = records[target]["files"].values()
         assert all(d.startswith("blake2b:") for d in digests)
+
+
+def test_the_claude_and_codex_builds_of_one_tree_share_the_source_part_of_their_id(built, tmp_path):
+    out, records = built
+    claude, codex = (records[t]["build_id"].split("-") for t in ("claude", "codex"))
+    assert claude[0] == codex[0] and claude[1] != codex[1]  # rl reads a project both use as unchanged
+    assert (out / "codex/plugins/smooth-research/.build-id").read_text().strip() == records["codex"]["build_id"]
+    repo = tmp_path / "repo"  # a copy of the sources, to change one file at a time
+    repo.mkdir()
+    for name in build_plugins.PACKAGE_FILES:
+        if (REPO / name).is_file():
+            shutil.copy2(REPO / name, repo / name)
+    for name in (".claude-plugin", ".agents", "src", "plugin", "hosts"):
+        shutil.copytree(REPO / name, repo / name, ignore=shutil.ignore_patterns("__pycache__"))
+    host = repo / "hosts/claude/skills/smooth-research/references/host.md"
+    host.write_text(host.read_text() + "\nOne more host note.\n")
+    again = {r["target"]: r["build_id"] for r in build_plugins.build(["claude", "codex"], tmp_path / "dist", repo)}
+    assert again["codex"] == records["codex"]["build_id"]  # a host adapter changes its own build part only
+    assert again["claude"].split("-")[0] == claude[0] and again["claude"] != records["claude"]["build_id"]
+    (repo / "src/smooth_research/store.py").write_text((repo / "src/smooth_research/store.py").read_text() + "\n")
+    shared = {r["target"]: r["build_id"].split("-")[0] for r in build_plugins.build(["claude", "codex"], tmp_path / "dist", repo)}
+    assert shared["claude"] == shared["codex"] != claude[0]  # a shared change is a new source for both
 
 
 def test_placeholders_are_filled_per_host(built):

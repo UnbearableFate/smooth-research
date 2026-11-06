@@ -12,7 +12,7 @@ from . import documents, labels
 from .project import CONFIG_NAME, DOCS_DIRS, RESEARCH_DIRS, Project, load_config, write_default_config
 from .schema import ENUMS, LINKABLE, RELATIONS
 from .store import Store, Tx, _sort_key, label_of
-from .upgrade import build, environment
+from .upgrade import build, environment, same_source
 from .util import RLError, digest_file, digest_json, now_utc, short
 
 CONSTRAINTS_TEMPLATE = """# Constraints
@@ -703,7 +703,7 @@ def _attention_items(tx: Tx) -> list[tuple[str, bool]]:
     acknowledge, rl attention ack) rather than a condition still to meet (cleared by meeting it)."""
     items: list[tuple[str, bool]] = []
     last = tx.meta().get("last_build")
-    if last != build():
+    if not same_source(last, build()):
         items.append((f"the plugin changed since this project was last used (build {last or 'unknown'} -> {build()}): "
                       "run rl upgrade and adjust the old research assets to this version as it lists", False))
     for h in tx.all("Hypothesis"):
