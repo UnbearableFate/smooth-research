@@ -224,6 +224,14 @@ def test_re_execution_is_a_new_attempt_and_keeps_the_failure(project):
         register(project, request_id="r1-changed", spec={**SPEC, "seed": 9}, run="RUN-0001")
 
 
+def test_the_manifest_of_a_run_without_results_is_refused_with_what_to_record_instead(project):
+    register(project)
+    with pytest.raises(RLError) as exc:  # the job wrapper wrote a manifest for a run that failed before any result
+        runs.import_result(project, "ATT-0001-1", {"status": "failed", "exit_code": 1}, "f1")
+    assert exc.value.code == "INVALID" and "manifest.status is 'failed', not partial or complete" in exc.value.message
+    assert "`rl run record --attempt ATT-0001-1 --state ended --outcome failed --source-ref" in exc.value.message
+
+
 def test_the_tables_show_the_complete_result_until_it_is_rejected(project):
     from smooth_research import view
     register(project)

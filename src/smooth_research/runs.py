@@ -477,7 +477,10 @@ def _best(results: list[dict]) -> str:
 
 def import_result(store: Store, attempt: str, manifest: dict, request_id: str) -> dict:
     if manifest.get("status") not in ("partial", "complete"):
-        raise RLError("INVALID", "manifest.status is partial or complete")
+        raise RLError("INVALID", f"manifest.status is {manifest.get('status')!r}, not partial or complete: "
+                                 "import-result takes the manifest of a run that produced results. A run that ended "
+                                 f"without any is recorded by its end: `rl run record --attempt {attempt} --state "
+                                 "ended --outcome failed --source-ref <its log or manifest>`")
     artifacts = manifest.get("artifacts") or []
     if not isinstance(artifacts, list):
         raise RLError("INVALID", "manifest.artifacts is a list")

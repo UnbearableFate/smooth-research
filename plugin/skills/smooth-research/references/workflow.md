@@ -32,8 +32,9 @@ nohup python src/train.py --wd 0.01 --seed 0 --out research/artifacts/ATT-0001-1
 ```
 
 Short runs can be recorded after the fact with one `--state ended` record (give `--observed-at` when the
-fact was observed earlier). A crash is `--state ended --outcome failed`; a lost process you cannot check is
-`--state unknown`. A re-execution of the same RunSpec is a new attempt: `{{rl}} run register --experiment E-0001
+fact was observed earlier). A crash is `--state ended --outcome failed`, with its log or manifest as
+`--source-ref`: a run that produced no results has nothing to import (`run import-result` takes a manifest
+whose status is partial or complete). A lost process you cannot check is `--state unknown`. A re-execution of the same RunSpec is a new attempt: `{{rl}} run register --experiment E-0001
 --run RUN-0001 --request-id <new>`. A changed config or code is a new run. `--review RV-x` adds a code review
 that targets something other than E-0001 (or the experiment its code comes from) to the coverage check; the
 check names such a review when it saw a changed file as this run executes it, and leaves the choice to you.
