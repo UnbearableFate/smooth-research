@@ -36,15 +36,19 @@ assignment, retries per streak of errors, restarts per hour) and what the coordi
 Session.watch, read again inside the write that changes them; what was told is written with the note that tells it.
 
 The coordinator is looked at too: its own turn that ended with a transient error and then stayed idle for a full
-beat is retried by the same rules, and it is reminded once of messages left unread for a whole beat while idle. It
+beat is retried by the same rules, and it is reminded once of messages left unread for a whole beat while idle. A
+task waiting on runs that rl has heard nothing new of for agents.wait_check_minutes (60) goes to it as well, in case
+the executor's notice that they ended never reaches it (a wrong target, a daemon that stopped): it is asked to check
+them with their executor, again after twice as long without news, and so on. rl asks no executor itself. It
 gets one recorded note for a beat that found something. A beat and rl agent check take the same lock: when it is
 held, the other one skips. The watcher runs in its own herdr tab (sr-watch): rl agent open starts it, it stops
-when no session is open, and it prints only the beats that found something.
+when no session is open and no task waits on runs, and it prints only the beats that found something.
 """
 
 from __future__ import annotations
 
 import fcntl
+import math
 import os
 import shlex
 import time
@@ -56,7 +60,7 @@ from typing import Iterator
 from . import agentlog, herdr, messages, usage
 from .delegate import rl_command
 from .launch import UNSEEN, answer_trust, excerpt, start_agent, unseen
-from .project import DEFAULT_CONFIG, ENV_PROJECT, stall_minutes, watch_minutes
+from .project import DEFAULT_CONFIG, ENV_PROJECT, stall_minutes, wait_check_minutes, watch_minutes
 from .store import Store
 from .util import RLError, now_utc, parse_time
 
@@ -301,6 +305,7 @@ class _Beat:
         config = store.project.config
         self.every = watch_minutes(config) or float(DEFAULT_CONFIG["agents"]["watch_minutes"])
         self.stall = stall_minutes(config)
+        self.wait_check = wait_check_minutes(config)
         self.low = usage.low_hosts(store)
         self.marks: dict[str, dict] = {}  # what the coordinator is told this beat, per session: kept with the note
 
@@ -328,6 +333,9 @@ class _Beat:
             if line:
                 lines.append(line)
                 news += [line] if tell else []
+            waits = self.waits(coordinator)
+            lines += waits
+            news += waits
         note = told = None
         if news:
             with store.write() as tx:
@@ -637,6 +645,36 @@ class _Beat:
                     f"still idle then"), False
         return self.retry(c, p, view)
 
+    def waits(self, c: dict) -> list[str]:
+        """Tasks waiting on runs that rl has heard nothing new of (no observation, no change to the task) for
+        agents.wait_check_minutes: the coordinator is asked to check them with their executor, once after that long,
+        once after twice as long, and so on; news of them starts the count again."""
+        if not self.wait_check:
+            return []
+        now, out = datetime.now(timezone.utc), []
+        with self.store.read() as tx:
+            for t in tx.all("Task", state="waiting"):
+                runs = [a for a in (tx.get(x, "Attempt") for x in t.get("wait_attempts") or [])
+                        if a and a["execution_state"] in IN_PROGRESS]
+                times = [_time(x) for x in (t.get("updated_at"), *(a.get("last_observed_at") for a in runs))]
+                times = [x for x in times if x]
+                if not runs or not times:
+                    continue
+                since = max(times)
+                quiet = (now - since).total_seconds() / 60
+                if quiet < self.wait_check:
+                    continue
+                level = int(math.log2(quiet / self.wait_check))  # 0 from 1x, 1 from 2x, 2 from 4x ...
+                if not self.once(c, f"wait {t['id']}", f"{since.isoformat()} {level}"):
+                    continue
+                jobs = ", ".join(f"{a['id']} ({', '.join(_job(tx.require(e['id'])) for e in tx.out(a['id'], 'bound_to')) or 'no job id recorded'})"
+                                 for a in runs)
+                reach = f" (yours is herdr target {c['herdr_pane']})" if c.get("herdr_pane") else ""
+                out.append(f"{t['id']} waits on {jobs}, and rl has heard nothing new of them for {_span(quiet)}: if "
+                           f"no notice that they ended has reached you, check them with their executor, record what "
+                           f"it reports, and check where its notice goes{reach}")
+        return out
+
     def unread(self, c: dict, quiet: bool = False) -> str | None:
         """Remind an idle coordinator, once, of messages it has left unread for a whole beat (quiet: a notice has
         just reached it, so only take note of them)."""
@@ -665,6 +703,30 @@ class _Beat:
             reminded = max(old)
         remember(self.store, c, seen=max(seqs, default=0), reminded=reminded)
         return out
+
+
+def waits_on_runs(tx) -> bool:
+    """Does a task wait on runs still queued or running, with a coordinator in herdr to tell if no news of them
+    comes? The watcher keeps beating for it after the last session closed."""
+    if not any(s["role_id"] == "coordinator" and s.get("herdr_pane") for s in tx.all("Session", status="active")):
+        return False
+    return any(a and a["execution_state"] in IN_PROGRESS for t in tx.all("Task", state="waiting")
+               for a in (tx.get(x, "Attempt") for x in t.get("wait_attempts") or []))
+
+
+def _time(at: str | None) -> datetime | None:
+    try:
+        return parse_time(at) if at else None
+    except RLError:
+        return None
+
+
+def _job(ref: dict) -> str:
+    return f"{ref['executor_namespace']}/{ref['opaque_id']}"
+
+
+def _span(minutes: float) -> str:
+    return f"{minutes:.0f} min" if minutes < 120 else f"{minutes / 60:.1f} h"
 
 
 def _finish(store: Store, s: dict) -> str | None:
@@ -848,7 +910,7 @@ def run(store: Store, every: float | None = None, own_tab: bool = False) -> dict
     hint = config_hint(store)
     print(f"{now_utc()} watching the agent sessions of {store.project.root}: a beat every {every:g} min"
           + (f" ({hint})" if hint else ""), flush=True)
-    end, first = "no agent session is open", True
+    end, first = "no agent session is open and no task waits on runs", True
     while True:
         if not first:
             time.sleep(every * 60)
@@ -874,8 +936,12 @@ def run(store: Store, every: float | None = None, own_tab: bool = False) -> dict
             with store.write() as tx:
                 # decided where no session can be recorded in between: `rl agent open` finds this watcher registered
                 # and starts none, so one recorded since the beat read the sessions keeps it
-                watched = watched or any(s.get("herdr_agent") for s in tx.all("Session", status="active"))
+                watched = watched or any(s.get("herdr_agent") for s in tx.all("Session", status="active")) \
+                    or waits_on_runs(tx)
                 tx.set_meta(watch_beat=now_utc(), **({} if watched else {"watch_tab": None, "watch_pane": None}))
+        elif not watched:
+            with store.read() as tx:
+                watched = waits_on_runs(tx)
         if not watched:
             break
     print(f"{now_utc()} {end}; the watcher stops", flush=True)

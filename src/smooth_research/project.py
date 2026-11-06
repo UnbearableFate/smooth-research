@@ -34,8 +34,10 @@ UNREAD = "_unread"  # in a loaded configuration: why the file could not be read
 # package). Researchers and reviewers use the first available entry of their list; every available advisor is
 # asked, each on its own. agents.args are extra launch arguments for the sessions `rl agent open` starts in
 # herdr tabs (no sandbox or approval flags are added otherwise: each CLI's own settings apply);
-# agents.watch_minutes is the time between the watcher's beats over those sessions (0 turns it off), and
-# agents.stall_minutes how long a turn may show no progress before the watcher reports it (watch.py).
+# agents.watch_minutes is the time between the watcher's beats over those sessions (0 turns it off),
+# agents.stall_minutes how long a turn may show no progress before the watcher reports it, and
+# agents.wait_check_minutes how long a task may wait on runs with no news of them before the watcher asks the
+# coordinator to check them with their executor: again after twice as long, and so on (0 turns it off; watch.py).
 # usage: a Claude or Codex subscription is low when a 5-hour or weekly window has switch_left_percent or less left
 # (coordinator_host_left_percent on the coordinator's own host); its researchers and reviewers then hand over to
 # another entry of their role, and advisors keep the rest (usage.py).
@@ -56,7 +58,7 @@ DEFAULT_CONFIG: dict = {
     },
     "advice": {"max_rounds": 3},
     "agents": {"args": {"claude": ["--permission-mode", "auto"], "codex": [], "pi": []}, "watch_minutes": 5,
-               "stall_minutes": 30},
+               "stall_minutes": 30, "wait_check_minutes": 60},
     "usage": {"switch_left_percent": 10, "coordinator_host_left_percent": 20},
     "context": {"work_target_tokens": 4000, "advice_target_tokens": 10000},
     "manuscript": {"latex": None},
@@ -221,6 +223,10 @@ def config_warnings(config: dict) -> list[str]:
     if stall is not None and not (_minutes(stall) and stall > 0):
         out.append(f"{CONFIG_NAME}: agents.stall_minutes must be a positive number of minutes, not {stall!r}; using "
                    f"{DEFAULT_CONFIG['agents']['stall_minutes']}")
+    waits = agents.get("wait_check_minutes") if isinstance(agents, dict) else None
+    if waits is not None and not _minutes(waits):
+        out.append(f"{CONFIG_NAME}: agents.wait_check_minutes must be a number of minutes (0 turns the check off), "
+                   f"not {waits!r}; using {DEFAULT_CONFIG['agents']['wait_check_minutes']}")
     args = agents.get("args") if isinstance(agents, dict) else None
     for host, value in args.items() if isinstance(args, dict) else ():
         if value is not None and not isinstance(value, (str, list)):
@@ -317,6 +323,14 @@ def stall_minutes(config: dict) -> float:
     agents = config.get("agents")
     value = agents.get("stall_minutes") if isinstance(agents, dict) else None
     return float(value) if _minutes(value) and value > 0 else float(DEFAULT_CONFIG["agents"]["stall_minutes"])
+
+
+def wait_check_minutes(config: dict) -> float:
+    """Minutes a task may wait on runs with no news of them before the watcher asks the coordinator to check them
+    with their executor (agents.wait_check_minutes); 0 turns the check off."""
+    agents = config.get("agents")
+    value = agents.get("wait_check_minutes") if isinstance(agents, dict) else None
+    return float(value) if _minutes(value) else float(DEFAULT_CONFIG["agents"]["wait_check_minutes"])
 
 
 def latex_command(config: dict) -> list[str] | None:
@@ -629,7 +643,9 @@ def write_default_config(root: Path) -> Path:
                 "# reviewers use the first available entry of their list; every available advisor is asked.\n"
                 "# agents.args: extra launch arguments for sessions opened in herdr tabs (rl agent open);\n"
                 "# agents.watch_minutes: minutes between the watcher's beats over those sessions (0: off);\n"
-                "# agents.stall_minutes: minutes a turn may show no progress before the watcher reports it.\n"
+                "# agents.stall_minutes: minutes a turn may show no progress before the watcher reports it;\n"
+                "# agents.wait_check_minutes: minutes a task may wait on runs with no news of them before the\n"
+                "# watcher asks the coordinator to check them with their executor (doubling; 0: off).\n"
                 "# usage: when a Claude or Codex 5-hour or weekly window has this percent left or less, its\n"
                 "# researchers and reviewers hand over to the next model entry (more is kept on the coordinator's\n"
                 "# host); advisors keep the rest. rl agent list shows the windows.\n"

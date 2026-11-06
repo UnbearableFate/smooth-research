@@ -32,8 +32,9 @@ directories above the smooth-research SKILL.md). Write the absolute path in each
 - Long runs on a machine permitted to execute workloads: start them in the background (`nohup ... &` and record the PID), keep working, record the end
   after checking the exit status. Do not sleep-poll.
 - Cluster jobs: waiting is the coordinator's. Follow the configured executor's notification schema and
-  choose a delivery mechanism that can reach the coordinator's session (its thread id is in the work pack,
-  or its herdr agent identity). Start the listener/daemon it requires; a researcher then ends with WAIT.
+  choose a delivery mechanism that can reach the coordinator's session (the work pack names its thread id and,
+  in herdr, its herdr target: use exactly that, not a role name). Start the listener/daemon it requires; a
+  researcher then ends with WAIT. Check that the target it reports is you (`rl resume` shows yours).
   When the notice arrives, inspect completion and delegate again with the same role. With
   `compute.coordinator: login`, all workloads, including short checks, use the executor, never local nohup.
 - Context: at a natural task boundary with a heavy context, write a handoff note in `research/tasks/`, end the

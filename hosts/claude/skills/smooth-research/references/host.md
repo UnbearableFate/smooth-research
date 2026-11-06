@@ -34,8 +34,9 @@ the absolute path from SKILL.md.
 - Long runs on a machine permitted to execute workloads: start them with Bash `run_in_background` (or `nohup ... &`), record `running` with the PID,
   keep working, and record the end when you have checked the exit status. Do not sleep-poll.
 - Waiting on cluster jobs is yours: a researcher ends with WAIT and reports the completion notification
-  target and any listener command returned by the configured executor. Follow its instructions; for a
-  shell listener use Bash `run_in_background`. When notified, inspect completion and start the researcher
+  target and any listener command returned by the configured executor. Check that the target is you (in herdr:
+  the herdr target `rl resume` shows for you; a delivery to any other name never arrives). Follow its
+  instructions; for a shell listener use Bash `run_in_background`. When notified, inspect completion and start the researcher
   again with the same role. With `compute.coordinator: login`, all workloads, including short checks,
   use the executor, never local background execution.
 - Context: at a natural task boundary with a heavy context, write a handoff note in `research/tasks/`, end the

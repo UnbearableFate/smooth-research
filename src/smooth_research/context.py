@@ -10,7 +10,7 @@ import difflib
 import os
 import re
 
-from . import compute, documents, explain, labels
+from . import compute, documents, explain, herdr, labels
 from .project import Project, context_target
 from .research import CONTRACT_FIELDS, attention, brief, contract_front
 from .runs import describe_attempt
@@ -133,19 +133,54 @@ def locations(store: Store) -> str:
             "sealed documents, packages, artifacts/<attempt>/)")
 
 
+def herdr_target(s: dict) -> tuple[str | None, str | None]:
+    """How a herdr delivery reaches a session (an executor's notice that jobs ended, for one): the target rl's own
+    notices use (the agent rl named, or the pane the session started in) and what to add about it (the name herdr
+    shows for the agent there, or that herdr could not be asked); (None, why) when herdr shows no agent in that pane;
+    (None, None) for a session outside herdr. Asks herdr: call it outside a transaction."""
+    target = s.get("herdr_agent") or s.get("herdr_pane")
+    if not target:
+        return None, None
+    if herdr.problem():
+        return target, "as recorded; herdr cannot be asked from here"
+    try:
+        found = herdr.agent(target)
+    except RLError as exc:
+        return target, f"as recorded; herdr did not answer ({exc.message})"
+    if found is None:
+        return None, f"herdr shows no agent in its pane {target} now: ask the coordinator where notices should go"
+    name = found.get("name")
+    return target, (f"agent {name}" if name and name != target else None)
+
+
+def coordinator_line(c: dict | None, reach: tuple[str | None, str | None]) -> str:
+    """The work pack's line on the coordinator: where notices that jobs ended go."""
+    if not c:
+        return "coordinator: no active session"
+    target, note = reach
+    where = f"{c['host']} session {c.get('host_session_id') or 'unknown'}"
+    if target:
+        where += f"; herdr target {target}" + (f", {note}" if note else "")
+    elif note:
+        where += f"; {note}"
+    use = f": an executor's herdr delivery takes exactly `{target}`, never a role name" if target else ""
+    return f"coordinator: {c['id']} ({where}); notices that jobs ended go to this session{use}"
+
+
 def work_pack(store: Store, task_id: str, budget: int | None = None) -> dict:
     budget = budget or context_target(store.project.config, "work_target_tokens")
     with store.read() as tx:
-        task = tx.require(task_id, "Task")
         coord = [s for s in tx.all("Session", status="active") if s["role_id"] == "coordinator"]
-        c = coord[-1] if coord else None
+    c = coord[-1] if coord else None
+    reach = herdr_target(c) if c else (None, None)
+    with store.read() as tx:
+        task = tx.require(task_id, "Task")
         sections = [("Task", "\n".join(filter(None, [
             brief(task), f"next action: {task.get('next_action') or '-'}",
             None if task.get("owner_role") else f"unclaimed: rl task claim {task_id} --role <role>",
             f"waiting on: {', '.join(task['wait_attempts'])}" if task.get("wait_attempts") else None,
             f"handoff: {task['handoff_ref']}" if task.get("handoff_ref") else None,
-            f"coordinator: {c['id']} ({c['host']} session {c.get('host_session_id') or 'unknown'}); notices that "
-            "jobs ended go to this session" if c else "coordinator: no active session"]))),
+            coordinator_line(c, reach)]))),
                     ("Locations", locations(store))]
         if task.get("request_ref"):
             sections.append((f"Request {task['request_ref']}", _doc_text(tx, store, task["request_ref"])))
@@ -234,7 +269,8 @@ def resume_pack(store: Store, role: str | None = None, budget: int | None = None
         known = labels.names(tx)
     c = work["coordinator"]
     model = (c.get("model_observed") or c.get("model_requested") or "model unverified") if c else None
-    identity = [f"coordinator {c['id']} ({c['host']}, {model})" if c else "no active coordinator session",
+    here = f"; notices that jobs ended reach it through herdr target {c['herdr_pane']}" if c and c.get("herdr_pane") else ""
+    identity = [f"coordinator {c['id']} ({c['host']}, {model}){here}" if c else "no active coordinator session",
                 f"constraints {store.project.rel(store.project.constraints_path)}",
                 f"data_version {meta['data_version']}"]
     first = []

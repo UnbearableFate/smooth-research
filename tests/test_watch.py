@@ -10,7 +10,7 @@ from pathlib import Path
 from conftest import SPEC, obs
 from test_agents import calls, herdr_log  # noqa: F401 (a fixture)
 
-from smooth_research import agents, messages, reviews, runs, tasks, watch
+from smooth_research import agents, context, messages, reviews, runs, tasks, watch
 from smooth_research.delegate import rl_command
 
 FIXTURES = Path(__file__).parent / "fixtures" / "codex"
@@ -267,7 +267,8 @@ def test_the_watcher_loop_beats_at_once_leaves_when_replaced_and_ends_when_no_se
     assert started["started"] and ["tab", "close", "w1:t99"] not in calls(herdr_log)
     monkeypatch.setenv("HERDR_TAB_ID", started["tab"])
     agents._end(project, opened["id"], "ended elsewhere")
-    assert watch.run(project, 1, own_tab=True)["summary"] == "no agent session is open; the watcher stopped"
+    assert watch.run(project, 1, own_tab=True)["summary"] == ("no agent session is open and no task waits on runs; "
+                                                               "the watcher stopped")
     assert calls(herdr_log)[-1] == ["tab", "close", started["tab"]]
     with project.read() as tx:
         assert not tx.meta().get("watch_tab")
@@ -294,6 +295,100 @@ def test_a_session_recorded_while_a_beat_found_none_keeps_the_watcher(project, h
     monkeypatch.setattr(watch, "check", opened_during_the_beat)
     monkeypatch.setattr(watch.time, "sleep", replaced)
     assert "the watcher in tab w1:t77 took over" in watch.run(project, 1, own_tab=True)["summary"]
+
+
+def later(monkeypatch, minutes):
+    """The watcher's clock, this many minutes from now."""
+    base = datetime.now(timezone.utc) + timedelta(minutes=minutes)
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return base
+    monkeypatch.setattr(watch, "datetime", Clock)
+
+
+def waiting_on_a_job(project, state="queued"):
+    task = researcher(project, 1)
+    attempt = runs.register(project, "E-0001", dict(SPEC), "r1")["attempt"]
+    runs.record(project, obs(attempt, state, at=datetime.now(timezone.utc).isoformat(), execution_ref={
+        "kind": "hpc_job", "executor_namespace": "miyabi-pbs", "opaque_id": "3811668.opbs"}))
+    tasks.progress(project, task, "waiting", "researcher-1", next_action="fetch the outputs", attempts=[attempt])
+    return task, attempt
+
+
+def test_a_wait_with_no_news_of_its_runs_goes_to_the_coordinator_after_one_two_and_four_times_the_limit(
+        project, herdr_log, monkeypatch):
+    tasks.start_session(project, "coordinator", "claude")
+    task, attempt = waiting_on_a_job(project)
+    told = []
+
+    def beat(minutes):
+        later(monkeypatch, minutes)
+        out = watch.check(project)
+        told.extend(x for x in out["news"] if " waits on " in x)
+        return [x for x in out["news"] if " waits on " in x]
+
+    assert not beat(0) and not beat(59)
+    first = beat(61)
+    assert first == [(f"{task} waits on {attempt} (miyabi-pbs/3811668.opbs), and rl has heard nothing new of them for "
+                      "61 min: if no notice that they ended has reached you, check them with their executor, record "
+                      "what it reports, and check where its notice goes (yours is herdr target w1:p99)")]
+    assert not beat(119)  # once per doubling
+    assert "nothing new of them for 2.0 h" in beat(121)[0] and not beat(200) and beat(241)
+    notes = [m for m in messages.inbox(project, "coordinator")["messages"] if m["from_role"] == "watch"]
+    assert len(notes) == 3 and all(" waits on " in m["text"] for m in notes)
+
+    runs.record(project, obs(attempt, "running", at=datetime.now(timezone.utc).isoformat()))  # news: count again
+    assert not beat(0) and beat(61)
+    runs.record(project, obs(attempt, "ended", "success", at=datetime.now(timezone.utc).isoformat()))
+    assert not beat(500)  # it ended: nothing to wait for
+
+
+def test_a_wait_check_of_zero_minutes_is_off(project, herdr_log, monkeypatch):
+    tasks.start_session(project, "coordinator", "claude")
+    waiting_on_a_job(project)
+    project.project.config["agents"]["wait_check_minutes"] = 0
+    later(monkeypatch, 600)
+    assert not [x for x in watch.check(project)["news"] if " waits on " in x]
+
+
+def test_the_watcher_keeps_beating_while_a_task_waits_on_runs_after_the_last_session_closed(project, herdr_log,
+                                                                                          monkeypatch):
+    tasks.start_session(project, "coordinator", "claude")
+    _, attempt = waiting_on_a_job(project)
+    with project.read() as tx:
+        tab = tx.meta()["watch_tab"]
+        researcher_1 = next(s for s in tx.all("Session", status="active") if s["role_id"] == "researcher-1")
+    monkeypatch.setenv("HERDR_TAB_ID", tab)
+    agents._end(project, researcher_1["id"], "closed while its task waits")
+
+    def replaced(seconds):  # ends the loop at its next beat
+        with project.write() as tx:
+            tx.set_meta(watch_tab="w1:t77")
+    monkeypatch.setattr(watch.time, "sleep", replaced)
+    assert "the watcher in tab w1:t77 took over" in watch.run(project, 1, own_tab=True)["summary"]
+
+    runs.record(project, obs(attempt, "ended", "success", at=datetime.now(timezone.utc).isoformat()))
+    with project.write() as tx:
+        tx.set_meta(watch_tab=tab)
+    assert watch.run(project, 1, own_tab=True)["summary"] == ("no agent session is open and no task waits on runs; "
+                                                               "the watcher stopped")
+
+
+def test_the_work_pack_names_the_coordinators_herdr_target_for_notices_that_jobs_ended(project, herdr_log):
+    tasks.start_session(project, "coordinator", "claude", "sess-main")
+    task = tasks.create_task(project, "run E-0001", "experiment", ["E-0001"], to_role="researcher")["id"]
+    assert ("coordinator: S-0001 (claude session sess-main; herdr target w1:p99); notices that jobs ended go to this "
+            "session: an executor's herdr delivery takes exactly `w1:p99`, never a role name"
+            in context.work_pack(project, task)["summary"])
+    fake(herdr_log, lambda st: st.setdefault("names", {}).update({"w1:p99": "coord-a"}))
+    assert "(claude session sess-main; herdr target w1:p99, agent coord-a)" in context.work_pack(project, task)["summary"]
+    assert "reach it through herdr target w1:p99" in context.resume_pack(project, "coordinator")["summary"]
+    fake(herdr_log, lambda st: st.update({"empty": ["w1:p99"]}))  # the coordinator's agent has left its pane
+    line = next(x for x in context.work_pack(project, task)["summary"].splitlines() if x.startswith("coordinator:"))
+    assert line == ("coordinator: S-0001 (claude session sess-main; herdr shows no agent in its pane w1:p99 now: ask "
+                    "the coordinator where notices should go); notices that jobs ended go to this session")
 
 
 def test_a_beat_and_a_manual_check_never_act_together(project, herdr_log, rl):

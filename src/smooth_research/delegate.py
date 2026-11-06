@@ -103,8 +103,10 @@ task.
    injection, checkpoint I/O), {review}
    `{rl} run register` prints whether the reviews still cover the code the run executes; on stale, re-check
    before scaling up. A run that needs no review: --no-review "<reason>".
-4. Long external runs (cluster jobs): once they are submitted and recorded, `{rl} task wait {task_id} --role {role}
-   --attempts <ATT ids> --next-action "<what to do when they end>"`, say what reports their end, and finish. The
+4. Long external runs (cluster jobs): once they are submitted and recorded, have the executor's notice that they
+   ended go to the coordinator (the work pack's coordinator line names the target; never guess it from a role
+   name) and check the target the executor stored. Then `{rl} task wait {task_id} --role {role} --attempts <ATT
+   ids> --summary "<the notice and its target>" --next-action "<what to do when they end>"` and finish. The
    coordinator waits and starts you again with the same role.
 5. {finish} If blocked, `{rl} task block ... --reason <engineering|model_unavailable|budget|science>`. Stay
    inside the constraints document.

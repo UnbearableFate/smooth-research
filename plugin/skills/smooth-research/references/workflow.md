@@ -187,10 +187,14 @@ commands. Submit only within the user's authorized resources and budget.
    id from the executor's output, never from memory (`{{rl}} run record --exec-id` reminds you on such a resource).
    Queued is not running. Import measured usage once; unknown usage is not zero.
 6. The coordinator owns waiting (host.md). Configure the executor's completion notification to reach the
-   coordinator, start any returned listener/daemon according to that integration's instructions, then the
-   researcher uses `{{rl}} task wait` and reports the attempts, continuation and notification target. When
+   coordinator: the work pack's coordinator line names its session and, in herdr, the exact target for a herdr
+   delivery (a role name is not a target); check the target the executor stored. Start any returned
+   listener/daemon according to that integration's instructions, then the researcher uses `{{rl}} task wait
+   --summary "<the notice and its target>"` and reports the attempts, continuation and notification target. When
    notified, inspect the job, acknowledge if required, resume the researcher with the same role, and import
-   updated observations. Use a bounded wait for short jobs when supported; do not sleep-poll in the agent.
+   updated observations. Use a bounded wait for short jobs when supported; do not sleep-poll in the agent. In
+   herdr the watcher asks the coordinator to check the jobs when rl has heard nothing new of them for
+   `agents.wait_check_minutes`, in case the notice never arrives.
 7. Verify application outputs after completion: scheduler success alone is insufficient. With a shared
    filesystem, import `@<workspace>/runs/<ATT>/manifest.json` directly; use absolute shared paths for artifacts, so no download is needed.
    Relative artifact paths are always resolved from the research project root, not the manifest directory. Otherwise fetch the manifest and its small files into

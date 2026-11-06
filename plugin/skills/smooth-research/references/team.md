@@ -156,11 +156,14 @@ A prompt counts only when it arrived (herdr saw the agent take it, or its log sh
 not confirmed is reported to you and not typed again. What the watcher did or found reaches you as one NOTE
 from `watch` per beat. Your own turn cut off by a service error is retried the same way, and when you are idle
 with messages unread for a whole beat it reminds you once. So do not poll the sessions or wait for them in
-loops: end your turn and act on the notes. `{{rl}} agent list` shows each session's class, what it waits for,
+loops: end your turn and act on the notes. When a task has waited on runs and rl has heard nothing new of them
+for `agents.wait_check_minutes` (60), the watcher asks you to check them with their executor, again after twice as
+long, and so on: the executor's notice that they ended may never have reached you (a wrong target, a stopped
+daemon). rl asks no executor itself. `{{rl}} agent list` shows each session's class, what it waits for,
 its last progress, error and retries, and the hosts' usage, and acts on nothing; `{{rl}} agent check` runs one
 beat now (it skips while the watcher's beat runs). End sessions with `{{rl}} agent close`: a session closed any
 other way counts as an unexpected stop. `{{rl}} agent watch --stop` stops the watcher and `--start` starts it
-again. It ends by itself when no session is open.
+again. It ends by itself when no session is open and no task waits on runs.
 
 ## Subagents
 

@@ -22,7 +22,7 @@
   - 某一节（如 `models`、`context`）不是键值对：这一节全用默认值；
   - 模型列表不是列表（一个字符串当作只有一个条目的列表）：用默认列表；某个条目格式不对：跳过这一条，用列表里其余的条目；
   - `advice.max_rounds` 不是非负整数：按 3 计算；
-  - `agents.watch_minutes` 不是分钟数：按 5 分钟计算；`agents.stall_minutes` 不是正的分钟数：按 30 分钟计算；
+  - `agents.watch_minutes` 不是分钟数：按 5 分钟计算；`agents.stall_minutes` 不是正的分钟数：按 30 分钟计算；`agents.wait_check_minutes` 不是分钟数：按 60 分钟计算；
   - `usage.switch_left_percent`、`usage.coordinator_host_left_percent` 不是 0 到 100 的数：用默认值 10 和 20；
   - `agents.args.<宿主>` 不是参数列表：用默认参数（写成一个字符串时，按 shell 的规则拆开，不警告）；
   - `context` 的 token 目标不是正整数：用默认值；
@@ -79,6 +79,7 @@
 | `agents.args.pi` | `[]` | 追加给交互式 pi 会话的参数 |
 | `agents.watch_minutes` | `5` | 监视程序每隔几分钟走一拍（查看一次各个会话和协调者）；`0` 表示关闭。还写着旧默认值 20 的项目，监视程序启动时和 `rl upgrade` 会提示改成 5 |
 | `agents.stall_minutes` | `30` | 一个回合在会话日志里多久没有进展算作停滞，报告给协调者 |
+| `agents.wait_check_minutes` | `60` | 一个任务在等的 run 多久没有新消息（没有新的观测，任务也没变），监视程序就请协调者去执行器那里核对一次；之后每隔一倍的时间再请一次（2 倍、4 倍……），有新消息就重新计时。`0` 表示关闭 |
 
 - **CLI 自己加的参数只有模型、effort、会话 id、名字和订阅额度的两项。**
   - Claude：`--model`、`--effort`、`--session-id`、`-n`，以及运行 `rl usage statusline` 的状态栏（`--settings`，见下面的“订阅额度”）；reviewer 另加 `--disallowedTools Edit,Write,NotebookEdit`。
@@ -101,7 +102,7 @@
 
   非斜杠命令的提示用 `herdr agent prompt <目标> <文字> --wait --until working --until blocked --timeout 20000` 发送：herdr 看到 working 或 blocked 才算送达；Codex 会话的日志在发送之后出现新的 `task_started` 也算。确认不了的报告“delivery not confirmed”（附屏幕末尾；屏幕上像是 Codex 的 Hooks 面板时注明可能被面板挡住），不计数，在会话有动静之前不再输入；只有确定没送出去（对话框挡着、agent 不在）才在下一拍重发。斜杠命令照旧；`rl agent reset --clear` 给 Codex 输入 `/new` 后，Codex 会问新对话在哪里运行（herdr 把这个问题看成 idle，这时输入的提示只会回答它然后丢失），rl 选“Use current Git worktree”（会话自己的目录），等问题消失再返回。提醒、重试、重启的次数分别记在 `Session.watch` 里，只在确认送达后加一；写入时在写事务里重新读出再合并。“已经告诉过协调者”的标记和那一拍的 NOTE 在同一个事务里写入。
 
-  每一拍的发现汇成一条来自 `watch` 的 NOTE 发给协调者。协调者自己的回合以暂时性错误结束、又空闲了一整拍时，按同样的规则重试；协调者空闲、又有消息一整拍没读时，提醒一次。所以协调者不需要自己轮询会话。监视程序的一拍和 `rl agent check` 用同一把锁（`research/state/watch.lock`），锁被占着时这一拍跳过并说明。监视程序的 tab 只打印发现了什么的那些拍。没有打开的会话时，监视程序自己退出。正常结束一个会话要用 `rl agent close`；用别的方式关掉的会话算作意外停止，会被重新启动。
+  每一拍的发现汇成一条来自 `watch` 的 NOTE 发给协调者。协调者自己的回合以暂时性错误结束、又空闲了一整拍时，按同样的规则重试；协调者空闲、又有消息一整拍没读时，提醒一次。所以协调者不需要自己轮询会话。任务记为 waiting、它等的 run 还处于 queued 或 running、超过 `agents.wait_check_minutes` 没有新消息时，监视程序在 NOTE 里请协调者去执行器那里核对这些作业（写明 attempt 和作业号，以及协调者自己的 herdr 目标），因为执行器的“作业结束”通知可能根本没送到（目标写错、通知进程停了）；rl 自己不连任何执行器。之后在 2 倍、4 倍……的时间各提醒一次。监视程序的一拍和 `rl agent check` 用同一把锁（`research/state/watch.lock`），锁被占着时这一拍跳过并说明。监视程序的 tab 只打印发现了什么的那些拍。没有打开的会话、也没有任务在等 queued 或 running 的 run（且协调者在 herdr 里）时，监视程序自己退出。正常结束一个会话要用 `rl agent close`；用别的方式关掉的会话算作意外停止，会被重新启动。
 - **审查轮次。** 每轮最多两次审查（第一次加一次复查），是写死的常量，见第 5 节。
 
 ### 订阅额度

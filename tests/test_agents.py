@@ -83,6 +83,8 @@ def open_tab(tab):  # the coordinator's tab w1:t99 and the tabs created here, un
 
 def reply(name, status=None):
     out = {"agent_status": status or state["status"].get(name, "idle"), "state_change_seq": state["seq"].get(name, 1)}
+    if state.get("names", {}).get(name):  # the name an agent was started with, as herdr shows it for its pane
+        out["name"] = state["names"][name]
     if state["sessions"].get(name):
         kind = state["kinds"].get(name, "claude")
         out["agent_session"] = {"agent": kind, "kind": "id", "source": "herdr:" + kind, "value": state["sessions"][name]}
@@ -171,7 +173,7 @@ if (group, action) == ("agent", "send-keys"):
     done({"type": "ok"})
 if (group, action) in (("agent", "prompt"), ("agent", "get")):
     name = args[2]
-    if name not in state["agents"] and not name.startswith("w1:p"):
+    if (name not in state["agents"] and not name.startswith("w1:p")) or name in state.get("empty", []):
         done(error=("agent_not_found", f"agent target {name} not found"))
     if state["dialog"].get(name, {}).get("kind") in UNSEEN:  # a dialog herdr does not recognize: it sees idle
         if action == "prompt":  # what is typed goes to the question, and its Enter picks the selected option: lost
