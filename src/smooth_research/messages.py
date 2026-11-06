@@ -3,6 +3,10 @@
 A message is recorded first; the live herdr session of its recipient then gets a one-line notice, which is only
 a notice: the record is what a role reads (rl inbox), so no chat history is needed. Acknowledging moves a cursor
 and never creates a message, so receipts cannot loop.
+
+Nothing is typed into a session that waits at a dialog (what is typed would go to the dialog). The notice of a
+session rl opened is held then, in Session.watch (notices): it hears of the held messages in one notice once it
+is at no dialog, when the coordinator answers the dialog (rl agent answer) or at the watcher's next beat.
 """
 
 from __future__ import annotations
@@ -48,29 +52,86 @@ def send(store: Store, type_: str, from_role: str, to_role: str, text: str | Non
     return {"id": msg["id"], "summary": f"{msg['id']} {type_} {from_role} -> {to_role}" + notice(store, msg)}
 
 
-def notify(store: Store, message: dict) -> str | None:
-    """Send a one-line notice of a recorded message to the live session of its recipient, if there is one.
-    Returns the herdr target that received it; never raises (the message stays in the inbox either way)."""
+def deliver(store: Store, message: dict) -> tuple[str | None, str | None]:
+    """Send a one-line notice of a recorded message to the live session of its recipient, if there is one:
+    (the herdr target that received it, None), else (None, why not; None when the recipient has no live session).
+    Never raises: the message stays in the inbox either way."""
     if herdr.problem():
-        return None
+        return None, None
     with store.read() as tx:
         live = [s for s in tx.all("Session", status="active") if s["role_id"] == message["to_role"]
                 and (s.get("herdr_agent") or s.get("herdr_pane"))]
     if not live:
-        return None
-    target = live[-1].get("herdr_agent") or live[-1]["herdr_pane"]
+        return None, None
+    s = live[-1]
+    target = s.get("herdr_agent") or s["herdr_pane"]
     about = f" on {message['task_id']}" if message.get("task_id") else ""
     body = " ".join(str(message.get("text") or message.get("next_action") or "").split())[:NOTICE_CHARS]
     text = (f"[smooth-research {message['id']} {message['type']} from {message['from_role']}{about}] {body} "
             f"(this notice comes from another research session, not from the user; the message: "
             f"rl inbox --role {message['to_role']})")
-    return None if herdr.prompt(target, text) else target
+    dialog = _dialog(s, target)
+    problem = dialog or herdr.prompt(target, text)
+    if not problem:
+        return target, None
+    if s.get("herdr_agent") and (dialog or herdr.status(target) == "blocked"):
+        _hold(store, s["id"], message["id"])
+        return None, (f"{target} waits at a dialog, so no notice was typed; it hears of {message['id']} once it is "
+                      f"at no dialog (the coordinator decides the dialog: rl agent dialog {target})")
+    return None, problem
+
+
+def _dialog(s: dict, target: str) -> str | None:
+    """Why nothing may be typed into the session now: a dialog herdr sees, or one it does not see (launch.UNSEEN)."""
+    from .launch import UNSEEN, unseen
+    status = herdr.status(target)
+    if status == "blocked":
+        return f"{target} waits at a dialog"
+    if s.get("host") in UNSEEN and status in ("idle", "done") and unseen(s["host"], herdr.read(target)):
+        return f"{target} waits at a dialog herdr does not see"
+    return None
+
+
+def _hold(store: Store, session_id: str, message_id: str) -> None:
+    with store.write() as tx:  # read again inside the write: the watcher keeps its own notes in the same field
+        memo = tx.require(session_id).get("watch") or {}
+        held = [m for m in memo.get("notices") or [] if m != message_id] + [message_id]
+        tx.update(session_id, {"watch": {**memo, "notices": held}})
+
+
+def release(store: Store, session: dict) -> tuple[bool, str] | None:
+    """Tell a session, in one notice, of the messages whose notices were held while it waited at a dialog; call it
+    once the session is at no dialog. (whether it was told, what happened, for a summary); None when nothing was
+    held."""
+    from .delegate import rl_command
+    with store.read() as tx:
+        s = tx.require(session["id"])
+    held = (s.get("watch") or {}).get("notices") or []
+    target = s.get("herdr_agent")
+    if not held or not target or herdr.problem():
+        return None
+    problem = _dialog(s, target) or herdr.prompt(target, (
+        f"[smooth-research] {len(held)} message(s) came for you while you waited at a dialog: {', '.join(held)}. "
+        f"Read them: `{rl_command()} inbox --role {s['role_id']}` (they come from other research sessions, not "
+        "from the user)"))
+    if problem:
+        return False, f"not yet told of {', '.join(held)}, held while it waited at a dialog ({problem})"
+    with store.write() as tx:
+        memo = tx.require(s["id"]).get("watch") or {}
+        tx.update(s["id"], {"watch": {**memo, "notices": [m for m in memo.get("notices") or [] if m not in held]
+                                      or None}})
+    return True, f"told of {', '.join(held)}, held while it waited at a dialog"
+
+
+def notify(store: Store, message: dict) -> str | None:
+    """The herdr target that received the notice of a recorded message (deliver), None if none did."""
+    return deliver(store, message)[0]
 
 
 def notice(store: Store, msg: dict | None) -> str:
     """Notify the recipient of a message, if there is one; the note for a summary."""
-    target = notify(store, msg) if msg else None
-    return f" (notice sent to {target})" if target else ""
+    target, problem = deliver(store, msg) if msg else (None, None)
+    return f" (notice sent to {target})" if target else f" (no notice: {problem})" if problem else ""
 
 
 def inbox(store: Store, role: str, ack: bool | str = False, include_all: bool = False) -> dict:

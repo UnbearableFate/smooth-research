@@ -13,6 +13,7 @@ import os
 import re
 import time
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 
 from . import adapters, herdr, usage
@@ -177,7 +178,7 @@ def answer_new(name: str, host: str, timeout: int = 30, asked: float = 5.0) -> s
                 break
             time.sleep(0.25)
         else:
-            problem = select(name, keep, screen)
+            problem = select(name, keep, screen, lambda now: question in now)
             if problem:
                 return f"{name} asks where its new conversation runs; {problem}: {ask}"
             herdr.keys(name, "enter")
@@ -203,7 +204,7 @@ def answer_trust(name: str, host: str, folder: Path, timeout: int) -> str | None
             return f"{name} waits at a dialog ({excerpt(screen)}): {ask}"
         if not _names(screen, folder):
             return f"{name} waits at a folder trust question that does not name {folder}: {ask}"
-        problem = select(name, accept, screen)
+        problem = select(name, accept, screen, lambda now: question in now)
         if problem:
             return f"{name} waits at the folder trust question for {folder}; {problem}: {ask}"
         herdr.keys(name, "enter")
@@ -231,8 +232,10 @@ def _names(screen: str, folder: Path) -> bool:
 
 
 def option_line(screen: str, option: str) -> str | None:
-    """The line of a dialog's option: given as its number, or as the start of its text (else any line holding it)."""
-    lines = screen.splitlines()
+    """The line of a dialog's option: given as its number, or as the start of its text (else any line holding it).
+    The lowest such line: the dialog sits at the bottom of the screen, under the conversation, whose text can have
+    lines like it (a numbered list, a line that starts with the option's word)."""
+    lines = screen.splitlines()[::-1]
     if option.strip().isdigit():
         pattern = re.compile(rf"^\s*(?:[{''.join(SELECTED)}]\s*)?{option.strip()}[.)]\s")
         return next((x for x in lines if pattern.match(x)), None)
@@ -241,15 +244,19 @@ def option_line(screen: str, option: str) -> str | None:
     return next((x for x, b in bare if b.startswith(want)), None) or next((x for x, b in bare if want in b), None)
 
 
-def select(target: str, option: str, screen: str) -> str | None:
+def select(target: str, option: str, screen: str, present: Callable[[str], bool]) -> str | None:
     """Move a dialog's selection to the option (down, then up); None once it is selected, else why not. After every
     key the screen is read until the selection has moved: a key shows a moment after it is sent, and deciding on the
-    screen from before would press one key too many (Claude Code's two trust options wrap around)."""
+    screen from before would press one key too many (Claude Code's two trust options wrap around). present(screen)
+    says whether the dialog is still there: once it is gone (answered meanwhile, or closed by its host), no key is
+    pressed, since in the input box an arrow key brings back an earlier prompt that the next notice would join."""
     if option_line(screen, option) is None:
         return f"no option '{option}' on the screen of {target}"
     for key in ["down"] * 6 + ["up"] * 12:
         if (option_line(screen, option) or "").lstrip().startswith(SELECTED):
             return None
+        if not present(screen):
+            return f"the dialog is no longer on the screen of {target}, so nothing more was pressed"
         herdr.keys(target, key)
         screen = _moved(target, screen)
     return f"rl could not select '{option}'"
@@ -257,9 +264,10 @@ def select(target: str, option: str, screen: str) -> str | None:
 
 def _moved(target: str, before: str, wait: float = 2.0) -> str:
     """The screen once its selected line is not the one before the key, or as it is after wait (a key at the end of
-    a list that does not wrap around moves nothing)."""
+    a list that does not wrap around moves nothing). The lowest marked line: the conversation above the dialog
+    marks earlier prompts the same way."""
     def selected(screen: str) -> str | None:
-        return next((x for x in screen.splitlines() if x.lstrip().startswith(SELECTED)), None)
+        return next((x for x in reversed(screen.splitlines()) if x.lstrip().startswith(SELECTED)), None)
     deadline = time.monotonic() + wait
     while selected(screen := herdr.read(target)) == selected(before) and time.monotonic() < deadline:
         time.sleep(0.1)

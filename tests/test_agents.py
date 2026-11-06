@@ -1,5 +1,6 @@
 """Agent sessions in herdr tabs (through a fake herdr CLI) and researcher worktrees (with real git)."""
 
+import fcntl
 import json
 import os
 import stat
@@ -588,6 +589,72 @@ def test_the_coordinator_answers_a_dialog_in_a_session_and_records_why(project, 
     fake_state.write_text(json.dumps(state))
     out = agents.answer(project, "reviewer-1", "3", "a reviewer does not delete build outputs")
     assert out["chosen"].startswith("3. No, and tell Claude") and out["state"] == "idle"
+
+
+def test_the_option_of_a_dialog_is_found_under_a_conversation_with_lines_like_it():
+    screen = ("  When the notice arrives, I'll:\n  1. Check each job's log\n  2. Acknowledge the notification\n"
+              "  Now I'm recording the attempts.\n❯ [smooth-research MSG-0011 NOTE from coordinator] When you resume\n"
+              " Bash command\n Do you want to proceed?\n ❯ 1. Yes\n   2. No\n Esc to cancel · Tab to amend")
+    assert launch.option_line(screen, "2") == "   2. No"  # not the numbered list of the conversation above it
+    assert launch.option_line(screen, "No") == "   2. No"  # nor its line that starts with "Now"
+    assert launch.option_line(screen, "1") == " ❯ 1. Yes"
+
+
+def test_no_key_is_pressed_once_the_dialog_is_gone(monkeypatch):
+    pressed = []  # in the input box an arrow key brings back an earlier prompt, which the next notice would join
+    monkeypatch.setattr(launch.herdr, "keys", lambda target, *names: pressed.append(names))
+    out = launch.select("researcher-1", "2", " Do you want to proceed?\n ❯ 1. Yes\n   2. No", lambda now: False)
+    assert "no longer on the screen of researcher-1, so nothing more was pressed" in out and pressed == []
+
+
+def test_a_notice_for_a_session_at_a_dialog_waits_until_it_is_at_none(project, herdr_log, tmp_path):
+    (tmp_path / "src/model.py").write_text("def f(x):\n    return x\n")
+    rv = reviews.request_review(project, "E-0001", ["src/model.py"], "right?", ["claude-opus-5-5"], scope="op")
+    agents.open_session(project, "reviewer", ticket=rv["id"])
+    fake_state = herdr_log.parent / "state.json"
+
+    def at_dialog():
+        state = json.loads(fake_state.read_text())
+        state["dialog"]["reviewer-1"] = {"kind": "approval", "sel": 0, "cwd": ""}
+        fake_state.write_text(json.dumps(state))
+
+    def prompts():
+        return [c[3] for c in calls(herdr_log) if c[:3] == ["agent", "prompt", "reviewer-1"]]
+
+    at_dialog()
+    before = len(prompts())
+    told = agents.tell(project, "reviewer-1", "please also check the loss mask")
+    assert told["delivered_to"] is None and "no notice: reviewer-1 waits at a dialog, so no notice was typed; " \
+        f"it hears of {told['id']} once it is at no dialog" in told["summary"]
+    assert len(prompts()) == before  # nothing typed into the dialog
+    with project.read() as tx:
+        sid = next(x["id"] for x in tx.all("Session") if x["role_id"] == "reviewer-1")
+        assert tx.require(sid)["watch"]["notices"] == [told["id"]]
+
+    lock = project.project.state_dir / "locks" / f"answer-{sid}.lock"  # an answer still running
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(lock, os.O_RDWR | os.O_CREAT, 0o644)
+    fcntl.flock(fd, fcntl.LOCK_EX)
+    try:
+        with pytest.raises(RLError) as exc:
+            agents.answer(project, "reviewer-1", "3", "a reviewer does not delete build outputs")
+        assert exc.value.code == "CONFLICT" and "another `rl agent answer reviewer-1` is still running" in exc.value.message
+    finally:
+        os.close(fd)
+    out = agents.answer(project, "reviewer-1", "3", "a reviewer does not delete build outputs")
+    assert f"told of {told['id']}, held while it waited at a dialog" in out["summary"]
+    assert any(told["id"] in p and "came for you while you waited at a dialog" in p for p in prompts()[before:])
+    with project.read() as tx:
+        assert not tx.require(sid)["watch"].get("notices")
+
+    at_dialog()  # a dialog its host closed by itself (Claude Code denies after a while): the watcher tells it
+    again = agents.tell(project, "reviewer-1", "and the data split")
+    state = json.loads(fake_state.read_text())
+    del state["dialog"]["reviewer-1"]
+    fake_state.write_text(json.dumps(state))
+    beat = watch.check(project)
+    assert f"reviewer-1: told of {again['id']}, held while it waited at a dialog" in beat["summary"]
+    assert again["id"] in prompts()[-1]
 
 
 def test_sessions_need_herdr_but_messages_do_not(project, monkeypatch):

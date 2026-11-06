@@ -10,7 +10,8 @@ these classes that applies:
               folder, in a new conversation that reads its assignment from the records (rl agent brief), at most 3
               times an hour; on a low host it is not started again and the coordinator is asked to switch it
   dialog      it waits at a dialog: the trust question for the session's own folder is answered; any other
-              dialog goes to the coordinator, once
+              dialog goes to the coordinator, once. Notices of messages that come meanwhile are held
+              (messages.py): the first beat that finds it at no dialog tells it of them in one notice
   low usage   a researcher or reviewer on a low host: told once per window to finish (a researcher commits and
               hands its task over, a reviewer stops) and the coordinator to switch it when it is idle (rl agent
               switch); no retries, reminders or restarts there. Advisors keep the rest of the window
@@ -383,6 +384,10 @@ class _Beat:
         c = classify(self.store, s, p, self.low, self.stall)
         if c["kind"] != "idle" and (s.get("watch") or {}).get("idle"):
             remember(self.store, s, idle=None)  # two beats in a row: the count starts again
+        if c["kind"] not in ("dialog", "exited") and (s.get("watch") or {}).get("notices"):
+            released = messages.release(self.store, s)  # notices held while it waited at a dialog
+            if released and released[0]:
+                return f"{s['role_id']}: {released[1]}", False  # the notice moves it: the rest waits a beat
         return getattr(self, f"on_{c['kind']}")(s, p, c)
 
     def settle(self, s: dict, p: dict) -> None:

@@ -119,7 +119,12 @@ the records let you judge it, and answer at once:
 
 - a question: `{{rl}} agent tell <name> "<answer>"`;
 - a dialog: `{{rl}} agent dialog <name>` shows it with its options; `{{rl}} agent answer <name> "<option>"
-  --reason "<why>"` selects one, confirms it and records your reason. Only you answer dialogs.
+  --reason "<why>"` selects one, confirms it and records your reason. Only you answer dialogs. One answer per
+  session runs at a time: when your host hands the command back before it printed anything, it still runs, so
+  wait for it and look with `{{rl}} agent dialog` instead of answering again (a second answer is refused).
+
+Nothing is typed into a session at a dialog: a message to it is recorded, and its notice waits until the session
+is at no dialog (after your answer, or at the watcher's next beat).
 
 Claude Code and Codex ask whether to trust a folder the first time they start in it; `{{rl}} agent open`
 answers that for you when it names the folder rl opened the session in (its worktree, or the project directory

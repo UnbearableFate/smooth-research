@@ -14,8 +14,12 @@ delegate, rl review run, rl advise run.
 
 from __future__ import annotations
 
+import fcntl
+import os
 import re
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 from . import adapters, herdr, messages, usage, watch, worktrees
@@ -168,16 +172,41 @@ def answer(store: Store, name: str, option: str, reason: str, timeout: int = 30)
     if not (reason or "").strip():
         raise RLError("INVALID", "--reason: why you chose this option (it is recorded)")
     s = _session(store, name)
-    target = s["herdr_agent"]
+    with _answering(store, s):
+        return _answer(store, s, option, reason, timeout)
+
+
+@contextmanager
+def _answering(store: Store, s: dict) -> Iterator[None]:
+    """One answer to a session's dialog at a time. A host may hand the coordinator back a command that has not
+    finished (Codex after a few seconds), and a second answer would then press its keys alongside the first."""
+    path = store.project.state_dir / "locks" / f"answer-{s['id']}.lock"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise RLError("CONFLICT", f"another `rl agent answer {s['role_id']}` is still running: wait for it to "
+                                      f"finish, then look with `rl agent dialog {s['role_id']}`") from None
+        yield
+    finally:
+        os.close(fd)  # closing releases the lock
+
+
+def _answer(store: Store, s: dict, option: str, reason: str, timeout: int) -> dict:
+    name, target = s["role_id"], s["herdr_agent"]
     state = herdr.status(target)
     screen = herdr.read(target)
     shown = unseen(s["host"], screen)  # a dialog herdr does not see: it reports the agent idle
     if state != "blocked" and not shown:
         raise RLError("CONFLICT", f"{name} is {state}, not at a dialog; `rl agent dialog {name}` shows its screen")
-    problem = select(target, option, screen)
+    problem = select(target, option, screen,
+                     lambda now: herdr.status(target) == "blocked" or bool(shown and shown in now))
     if problem:
         raise RLError("NOT_FOUND", f"{name}: {problem}; `rl agent dialog {name}` shows the options")
-    chosen = " ".join((option_line(herdr.read(target), option) or option).split()).lstrip("".join(SELECTED) + " ")
+    picked = option_line(herdr.read(target), option) or option
+    chosen = " ".join(picked.split()).lstrip("".join(SELECTED) + " ")
     herdr.keys(target, "enter")
     deadline, now = time.monotonic() + timeout, screen
     while time.monotonic() < deadline:
@@ -188,13 +217,20 @@ def answer(store: Store, name: str, option: str, reason: str, timeout: int = 30)
     with store.write() as tx:
         tx.event("session.answered", s["id"], f"{name}: chose '{chosen}' at '{excerpt(screen, chars=200)}': {reason}")
     summary = f"{name}: chose '{chosen}' ({reason}); now {state}"
-    if state == "blocked" or unseen(s["host"], now):
+    if (state == "blocked" or unseen(s["host"], now)) and option_line(now, option) == picked:
+        summary += (f"; its dialog still shows '{chosen}' selected after {timeout}s, as if the key that confirms it "
+                    f"did not arrive: look with `rl agent dialog {name}` and answer again")
+    elif state == "blocked" or unseen(s["host"], now):
         summary += f"; it waits at a dialog again: `rl agent dialog {name}`"
-    elif state in ("idle", "done") and s.get("assignment"):
-        stopped, desc, _ = watch.assignment_state(store, s)
-        if stopped:
-            summary += f"; {desc}: " + _told(s, f"[smooth-research] {name}: your assignment is {s['assignment']}. "
-                                                f"Run `{rl_command()} agent brief {name}` and follow it.")
+    else:
+        released = messages.release(store, s)
+        summary += f"; {released[1]}" if released else ""
+        if state in ("idle", "done") and s.get("assignment"):
+            stopped, desc, _ = watch.assignment_state(store, s)
+            if stopped:
+                summary += f"; {desc}: " + _told(s, f"[smooth-research] {name}: your assignment is "
+                                                    f"{s['assignment']}. Run `{rl_command()} agent brief {name}` "
+                                                    "and follow it.")
     return {"id": s["id"], "chosen": chosen, "state": state, "summary": summary}
 
 
@@ -267,11 +303,11 @@ def tell(store: Store, to: str, text: str, sender: str | None = None, task: str 
         if task:
             tx.require(task, "Task")
         msg = messages.record(tx, "NOTE", sender, to, task, None, [], text.strip())
-    target = messages.notify(store, msg)
+    target, problem = messages.deliver(store, msg)
     return {"id": msg["id"], "delivered_to": target,
             "summary": f"{msg['id']} NOTE {sender} -> {to}: "
-                       + (f"notice sent to {target}" if target else "recorded (no live session of that name: it "
-                                                                    f"reads `rl inbox --role {to}`)")}
+                       + (f"notice sent to {target}" if target else f"recorded; no notice: {problem}" if problem
+                          else f"recorded (no live session of that name: it reads `rl inbox --role {to}`)")}
 
 
 def reset(store: Store, name: str, mode: str) -> dict:
