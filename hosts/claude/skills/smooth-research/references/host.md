@@ -22,6 +22,7 @@ the absolute path from SKILL.md.
 - Cross-session work (another model, or long isolated work): `rl delegate T-x --background` starts an
   independent session with the work pack, using the first available entry of models.researcher in
   `smooth-research.yaml` (`--entry codex:<model>@high` picks one); its session id and model are recorded.
+  It gets that host's `agents.args`, so it has the MCP servers a herdr session of the role has.
   To continue a task that role owns (after a WAIT), delegate it again with the same `--role`.
 - Reviewer: the first available entry of models.reviewer (by default the Codex CLI, then Claude):
   `rl review request --author-model <model that wrote it>`; your conclusions likewise:

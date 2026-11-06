@@ -11,7 +11,7 @@ import subprocess
 
 from . import adapters, usage
 from .context import work_pack
-from .project import usable_entries
+from .project import agent_args, usable_entries
 from .store import Store
 from .util import RLError, now_utc, rl_process
 
@@ -157,7 +157,7 @@ def delegate(store: Store, task_id: str, entry_text: str | None = None, role: st
 def _session(store: Store, task_id: str, entry: adapters.Entry, role: str, timeout: int) -> dict:
     log = store.project.dir("calls") / f"{task_id}.delegate.{entry.entry}.{now_utc().replace(':', '')}.log"
     res = adapters.call(entry, prompt_for(store, task_id, role), store.project.root, read_only=False,
-                        timeout=timeout, log=log)
+                        timeout=timeout, log=log, extra=agent_args(store.project.config, entry.entry))
     with store.write() as tx:
         sid = tx.next_id("Session")
         tx.create("Session", {"id": sid, "role_id": role, "host": entry.entry, "host_session_id": res.session_id,

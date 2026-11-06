@@ -18,7 +18,8 @@ directories above the smooth-research SKILL.md). Write the absolute path in each
 - Researchers: for each implementation or run task, use a Codex subagent if they are enabled, or
   `rl delegate T-x --background` for an independent session with the first available entry of
   models.researcher in `smooth-research.yaml` (`--entry codex:<model>@high` or `--entry claude:<model>` picks
-  one); its thread id and model are recorded. Then read
+  one); its thread id and model are recorded. It gets that host's `agents.args`, so it has the MCP servers a
+  herdr session of the role has. Then read
   `rl inbox --role coordinator`, check the outputs and `rl task accept` or `rl task reopen` with what to
   change. To continue a task that role owns (after a WAIT), delegate it again with the same `--role`.
   Start several at once only for tasks that can proceed independently.

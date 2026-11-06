@@ -9,8 +9,10 @@ them afterwards. Without herdr, the headless forms in host.md do the same work (
 
 Each role takes the first available entry of its list in `smooth-research.yaml` (`models.researcher`,
 `models.reviewer`, `models.advisor`; entries `<claude|codex|pi>:<model>[@effort]`). `--entry` picks one
-explicitly. `agents.args.<host>` holds the extra command-line arguments each host gets (for Claude Code the
-default is `--permission-mode auto`); rl adds no sandbox, approval or permission-bypass flags of its own.
+explicitly. `agents.args.<host>` holds the extra command-line arguments each host gets, in herdr sessions and in
+`{{rl}} delegate`'s sessions alike (for Claude Code the default is `--permission-mode auto`). In herdr sessions rl
+adds no sandbox, approval or permission-bypass flags of its own; a delegated session never asks, so rl gives it
+defaults that these arguments override.
 
 ## Subscription usage
 

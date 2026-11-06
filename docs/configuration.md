@@ -50,7 +50,7 @@
 - **`pi`**：用 `pi -p --mode json` 调用。模型写成 `<provider>/<模型>`，比如 `pi:openai/gpt-6-astra@high`。审查和建议只开放 read 工具。
 - **`manual`**：不自动调用。CLI 给出请求包的路径，由人提交给模型（代码审查要连同包里列出的文件一起提交），再用 `rl review import` 或 `rl advise import` 导入回答。
 - **`@effort`**：传给 Claude 的 `--effort`、Codex 的 `model_reasoning_effort`，或 pi 的 `--thinking`。
-- **headless 和 herdr 会话。** 上面说的 `claude -p`、`codex exec`、`pi -p` 是 headless 调用（`rl delegate`、`rl review run`、`rl advise run`）。协调者在 herdr 里时，`rl agent open` 把同一个条目开成交互会话，放在单独的 tab 里，见下面的“agent 会话”。
+- **headless 和 herdr 会话。** 上面说的 `claude -p`、`codex exec`、`pi -p` 是 headless 调用（`rl delegate`、`rl review run`、`rl advise run`）。协调者在 herdr 里时，`rl agent open` 把同一个条目开成交互会话，放在单独的 tab 里，见下面的“agent 会话”。`rl delegate` 的可写会话也加上 `agents.args.<宿主>`，这样它和同一角色的 herdr 会话有同样的 MCP 服务和权限方式；审查和建议是独立的只读调用，不加。
 - **模型家族**：先按模型名的最后一段判断：`claude`、`opus`、`sonnet`、`haiku`、`fable` 开头的属于 anthropic，`gpt`、`o1`–`o9`、`codex`、`chatgpt` 开头的属于 openai。deepseek、google（gemini、gemma）、alibaba（qwen、qwq）、moonshot（kimi）、zhipu（glm）、xai（grok）、mistral、meta（llama）也认得。名字判断不了时看 pi 的 provider 前缀（如 `deepseek/`），再不行按入口推断（`claude` 是 anthropic，`codex` 是 openai）。审查者和作者的模型名相同时，不论家族表认不认得，都算同一家族。从 `rl agent open` 开的会话发起审查（环境里有 `SMOOTH_RESEARCH_SESSION`）时，如果 `--author-model` 里没有 rl 为这个会话记录的模型（观测到的，或者请求的），rl 把它补进作者模型并在输出里说明：作者是谁以记录为准，不只听会话自己说；多一个作者只会让关系判断更严，不会更松。
 
 | 键 | 默认值 | 怎样使用 |
@@ -74,9 +74,9 @@
 
 | 键 | 默认值 | 含义 |
 |---|---|---|
-| `agents.args.claude` | `["--permission-mode", "auto"]` | 追加给交互式 Claude Code 会话的参数。三个宿主都可以写成列表，也可以写成一个字符串（按 shell 的规则拆开） |
-| `agents.args.codex` | `[]` | 追加给交互式 Codex 会话的参数。沙箱和审批方式要用户自己写在这里，比如 `["-s", "workspace-write"]` |
-| `agents.args.pi` | `[]` | 追加给交互式 pi 会话的参数 |
+| `agents.args.claude` | `["--permission-mode", "auto"]` | 追加给交互式 Claude Code 会话和 `rl delegate` 的 `claude -p` 会话的参数。在 `claude -p` 里，它排在 rl 自己的 `--permission-mode acceptEdits --allowedTools Bash` 后面，所以这里写的权限方式生效。只有这一组时，MCP 工具在 headless 会话里会被拒绝；默认的 `auto` 才放行。三个宿主都可以写成列表，也可以写成一个字符串（按 shell 的规则拆开） |
+| `agents.args.codex` | `[]` | 追加给交互式 Codex 会话和 `rl delegate` 的 `codex exec` 会话的参数。沙箱和审批方式要用户自己写在这里，比如 `["-s", "workspace-write"]`。`codex exec` 没有审批参数，rl 去掉 `-a`/`--ask-for-approval`（headless 会话从不询问，rl 设 `approval_policy="never"`）；写了 `-s`/`--sandbox` 时用它代替 rl 的默认沙箱。启动慢的 MCP 服务（例如 pi-env-mcp 要等远端的服务）要加 `-c mcp_servers.<名字>.required=true`：`codex exec` 不等其他 MCP 服务就开始，第一轮看不到它们的工具 |
+| `agents.args.pi` | `[]` | 追加给交互式 pi 会话和 `rl delegate` 的 `pi -p` 会话的参数 |
 | `agents.watch_minutes` | `5` | 监视程序每隔几分钟走一拍（查看一次各个会话和协调者）；`0` 表示关闭。还写着旧默认值 20 的项目，监视程序启动时和 `rl upgrade` 会提示改成 5 |
 | `agents.stall_minutes` | `30` | 一个回合在会话日志里多久没有进展算作停滞，报告给协调者 |
 | `agents.wait_check_minutes` | `60` | 一个任务在等的 run 多久没有新消息（没有新的观测，任务也没变），监视程序就请协调者去执行器那里核对一次；之后每隔一倍的时间再请一次（2 倍、4 倍……），有新消息就重新计时。`0` 表示关闭 |

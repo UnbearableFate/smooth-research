@@ -109,7 +109,7 @@ def _run(cmd: list[str], prompt: str, cwd: Path, timeout: int) -> subprocess.Com
 
 
 def call_claude(entry: Entry, prompt: str, cwd: Path, read_only: bool, timeout: int,
-                add_dirs: list[str] = (), log: Path | None = None, web: bool = False) -> Call:
+                add_dirs: list[str] = (), log: Path | None = None, web: bool = False, extra: list[str] = ()) -> Call:
     session = str(uuid.uuid4())
     cmd = ["claude", "-p", "--output-format", "json", "--model", entry.model, "--session-id", session]
     if entry.effort:
@@ -121,7 +121,9 @@ def call_claude(entry: Entry, prompt: str, cwd: Path, read_only: bool, timeout: 
         cmd += ["--safe-mode", "--restricted", "--strict-mcp-config", "--tools", tools,
                 "--permission-mode", "dontAsk", *(["--allowedTools", "WebSearch,WebFetch"] if web else [])]
     else:
-        cmd += ["--permission-mode", "acceptEdits", "--allowedTools", "Bash"]
+        # then the user's agents.args.claude, which win (a later --permission-mode replaces this one): the MCP
+        # servers and the permission mode a session of this role has in herdr
+        cmd += ["--permission-mode", "acceptEdits", "--allowedTools", "Bash", *extra]
     for d in add_dirs:
         cmd += ["--add-dir", d]
     out = _run(cmd, prompt, cwd, timeout)
@@ -178,8 +180,30 @@ def codex_write_sandbox() -> str:
     return "workspace-write"
 
 
+APPROVAL_FLAGS = ("-a", "--ask-for-approval")
+SANDBOX_FLAGS = ("-s", "--sandbox")
+
+
+def exec_args(args: list[str]) -> tuple[list[str], str | None]:
+    """agents.args.codex as codex exec takes them: its approval flags are left out (exec has none, and a headless
+    session never asks: rl sets approval_policy "never"), and a sandbox flag comes back apart, to replace rl's
+    default (exec refuses two)."""
+    out, sandbox, i = [], None, 0
+    while i < len(args):
+        name, eq, value = args[i].partition("=")
+        if name in APPROVAL_FLAGS + SANDBOX_FLAGS:
+            if not eq:
+                i += 1
+                value = args[i] if i < len(args) else ""
+            sandbox = value if name in SANDBOX_FLAGS else sandbox
+        else:
+            out.append(args[i])
+        i += 1
+    return out, sandbox
+
+
 def call_codex(entry: Entry, prompt: str, cwd: Path, read_only: bool, timeout: int,
-               add_dirs: list[str] = (), log: Path | None = None, web: bool = False) -> Call:
+               add_dirs: list[str] = (), log: Path | None = None, web: bool = False, extra: list[str] = ()) -> Call:
     with tempfile.TemporaryDirectory(prefix="rl-codex-") as tmp:
         last = Path(tmp) / "last.txt"
         cmd = ["codex", "exec", "--json", "--skip-git-repo-check", "--model", entry.model, "--cd", str(cwd),
@@ -187,13 +211,14 @@ def call_codex(entry: Entry, prompt: str, cwd: Path, read_only: bool, timeout: i
         # A reviewer or advisor starts the usual way, under the user's own Codex settings: rl adds no sandbox
         # (a read-only sandbox that cannot run on the host would leave it unable to read a file). Its
         # instructions keep it read-only.
+        own, sandbox = exec_args(list(extra)) if not read_only else ([], None)
         if not read_only:
-            cmd += ["--sandbox", codex_write_sandbox()]
+            cmd += ["--sandbox", sandbox or codex_write_sandbox()]
         if entry.effort:
             cmd += ["-c", f'model_reasoning_effort="{entry.effort}"']
         for d in () if read_only else add_dirs:  # --add-dir would make d writable; a reader needs none
             cmd += ["--add-dir", d]
-        out = _run(cmd + ["-"], prompt, cwd, timeout)
+        out = _run(cmd + own + ["-"], prompt, cwd, timeout)
         final = last.read_text(encoding="utf-8") if last.exists() else ""
     if log:
         log.write_text(out.stdout + ("\n--- stderr ---\n" + out.stderr if out.stderr else ""), encoding="utf-8")
@@ -225,15 +250,14 @@ def call_codex(entry: Entry, prompt: str, cwd: Path, read_only: bool, timeout: i
 
 
 def call_pi(entry: Entry, prompt: str, cwd: Path, read_only: bool, timeout: int,
-            add_dirs: list[str] = (), log: Path | None = None, web: bool = False) -> Call:
+            add_dirs: list[str] = (), log: Path | None = None, web: bool = False, extra: list[str] = ()) -> Call:
     """`pi -p --mode json`: the first line is the session header, then agent events; the answer is the text of
     the last assistant message, and its model and provider are what pi reports for that message."""
     session = str(uuid.uuid4())
     cmd = ["pi", "-p", "--mode", "json", "--model", entry.model, "--session-id", session]
     if entry.effort:
         cmd += ["--thinking", entry.effort]
-    if read_only:
-        cmd += ["--tools", "read"]
+    cmd += ["--tools", "read"] if read_only else list(extra)
     out = _run(cmd, prompt, cwd, timeout)
     if log:
         log.write_text(out.stdout + ("\n--- stderr ---\n" + out.stderr if out.stderr else ""), encoding="utf-8")
@@ -293,15 +317,16 @@ def session_model(host: str, session_id: str | None) -> tuple[str | None, str | 
 
 
 def call(entry: Entry, prompt: str, cwd: Path, read_only: bool = True, timeout: int = 1800,
-         add_dirs: list[str] = (), log: Path | None = None, web: bool = False) -> Call:
+         add_dirs: list[str] = (), log: Path | None = None, web: bool = False, extra: list[str] = ()) -> Call:
     """One headless call. web lets a read-only Claude caller search the web (codex exec and pi -p have no web
-    tool to enable here)."""
+    tool to enable here). extra: the host's agents.args, for a writing session (rl delegate) so that it has the
+    tools a herdr session of its role has; an independent reader (review, advice) gets none."""
     problem = available(entry)
     if problem:
         return Call(entry.entry, entry.model, error=problem)
     fn = {"claude": call_claude, "codex": call_codex, "pi": call_pi}[entry.entry]
     try:
-        return fn(entry, prompt, cwd, read_only, timeout, list(add_dirs), log, web)
+        return fn(entry, prompt, cwd, read_only, timeout, list(add_dirs), log, web, [] if read_only else list(extra))
     except RLError as exc:
         return Call(entry.entry, entry.model, error=exc.message)
 

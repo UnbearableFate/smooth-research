@@ -1709,3 +1709,16 @@ pi-env-mcp 一侧（476e15d，按用户决定照搬上游 pi 的做法）：
 - `rl compute steps` 写明工具名。工具不在时，用 pi-env-mcp 的 `hosts` 查看并重启该服务器；配置里没有这个服务器时，报告为设置问题，不改用 ssh 注册。
 - 需要项目目录的作业服务器，用资源的 `workspace` 作项目参数。这样一份 pi-env-mcp 配置可以服务多个研究项目。
 - docs/configuration.md、skill 的 workflow.md 和 YAML 模板同步更新。
+
+重测（2026-11-06，两种组合各一轮，只做只读调用和 dry run）：
+
+- 两轮都只注册 miyabi-g（pi-env-mcp），协调者和研究员都经它调用了 `miyabi_pbs__*`。
+- B 轮发现 `rl delegate` 的 headless 会话不加 `agents.args`，研究员没有作业 MCP，如实报了 BLOCKED，没有改走 ssh。协调者改用 herdr 会话后完成。
+- 修改：`rl delegate` 的可写会话加上 `agents.args.<宿主>`；审查和建议的只读调用不加。
+- 实测 `claude -p` 的结果：
+  - 只有 `--permission-mode acceptEdits --allowedTools Bash` 时，MCP 工具被拒绝；
+  - 后面再加 `--permission-mode auto` 时，后一个生效，可以调用。
+- 实测 `codex exec` 的结果：
+  - 不接受 `-a`，所以 rl 去掉审批参数；
+  - 重复的 `--sandbox` 会报错，所以 `agents.args` 写了沙箱时，用它代替 rl 的默认值；
+  - 它不等 MCP 服务启动就开始第一轮，pi-env-mcp 的工具约 10 s 后才出现。`-c mcp_servers.<名字>.required=true` 让它先等这个服务就绪，第一次调用就能看到全部工具。

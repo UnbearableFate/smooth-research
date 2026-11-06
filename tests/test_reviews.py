@@ -4,6 +4,7 @@ unavailable."""
 import json
 import os
 import stat
+import subprocess
 
 import pytest
 import yaml
@@ -509,6 +510,37 @@ def test_delegation_tries_the_researcher_entries_in_order(project, fakes, tmp_pa
     with store.read() as tx:
         sessions = [(s["host"], s["model_requested"]) for s in tx.all("Session")]
     assert sessions == [("pi", "openai/gpt-6-astra"), ("codex", "gpt-6-astra")]
+
+
+def test_a_delegated_session_gets_its_hosts_agent_args_and_a_reader_does_not(project, monkeypatch, tmp_path):
+    """rl delegate's writing session has the tools a herdr session of its role has (agents.args: MCP servers, the
+    permission mode, which wins over rl's). codex exec takes no approval flag, and a sandbox flag there replaces
+    rl's default. Reviews and advice stay independent readers without them."""
+    made = []
+    monkeypatch.setattr(adapters, "_run", lambda cmd, prompt, cwd, timeout:
+                        made.append(cmd) or subprocess.CompletedProcess(cmd, 1, "", ""))
+    monkeypatch.setattr(adapters, "available", lambda entry: None)
+    claude = ["--permission-mode", "auto", "--mcp-config", "/x/mcp.json"]
+    for read_only in (False, True):
+        adapters.call(adapters.Entry("claude", "m", None), "p", tmp_path, read_only=read_only, timeout=1, extra=claude)
+    write, read = made
+    start = write.index("acceptEdits") + 3  # after rl's --permission-mode acceptEdits --allowedTools Bash
+    assert write[start:start + len(claude)] == claude and "--mcp-config" not in read
+    made.clear()
+    codex = ["-a", "on-request", "-s", "danger-full-access", "-c", 'mcp_servers.m.command="node"',
+             "--ask-for-approval=never", "-c", "mcp_servers.m.required=true"]
+    adapters.call(adapters.Entry("codex", "m", None), "p", tmp_path, read_only=False, timeout=1, extra=codex)
+    cmd = made[0]
+    assert cmd.count("--sandbox") == 1 and cmd[cmd.index("--sandbox") + 1] == "danger-full-access"
+    assert not {"-a", "-s", "on-request", "--ask-for-approval=never"} & set(cmd)
+    assert cmd[-5:] == ["-c", 'mcp_servers.m.command="node"', "-c", "mcp_servers.m.required=true", "-"]
+    assert adapters.exec_args(["--sandbox=read-only", "-c", "x=1"]) == (["-c", "x=1"], "read-only")
+    seen = []
+    monkeypatch.setattr(delegate.adapters, "call", lambda entry, prompt, cwd, **kw:
+                        seen.append(kw.get("extra")) or adapters.Call("claude", entry.model, ok=True, text="done"))
+    tasks.create_task(project, "implement", "implement", ["E-0001"], to_role="researcher")
+    assert delegate.delegate(project, "T-0001", "claude:claude-opus-5-5")["ok"]
+    assert seen == [["--permission-mode", "auto"]]  # the default agents.args.claude
 
 
 def evidence(project, accs=(0.8, 0.9)):
