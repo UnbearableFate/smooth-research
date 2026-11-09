@@ -1,0 +1,366 @@
+<!doctype html>
+<html lang="zh" data-register="blueprint">
+<head>
+<title>数据表关系</title>
+<link rel="stylesheet" href="kit.css" data-ve-kit>
+<style>
+header h1{font-size:clamp(1.9rem,3.2vw,2.6rem);max-width:none}
+.edges td:first-child,.edges th:first-child,.edges td.num{white-space:nowrap}
+.edges td,.tables td,.tables th{vertical-align:top}
+.tables tbody th{white-space:nowrap;text-align:left;font-weight:600}
+.b0{fill:color-mix(in srgb,var(--text) 12%,transparent)}
+.b1{fill:var(--accent)}
+.b2{fill:color-mix(in srgb,var(--text) 45%,transparent)}
+.b3{fill:color-mix(in srgb,var(--text) 22%,transparent)}
+.case p{margin:.5rem 0 0;font-size:.92rem;color:var(--text-dim)}
+</style>
+</head>
+<body>
+<nav class="ve-toc" aria-label="Sections"><div><a href="#edges">边</a><a href="#tables">表</a><a href="#example">例子</a><a href="#changes">改动</a></div><span class="pos"></span></nav>
+<main>
+<header>
+  <p class="eyebrow">Smooth Research · 数据表关系草案</p>
+  <h1>决定产生实验，任务执行实验，运行产生证据，证据支撑下一个决定</h1>
+  <p class="lead">五张表和运行链连成一个闭环。<b>新会话沿这些边读数据库，就能接着研究。</b></p>
+  <p class="meta">2026-11-09 · 草案，尚未实现 · 数据来自 bypass-lora 账本快照（2026-11-08）</p>
+</header>
+
+<figure>
+  <div class="frame">
+    <svg class="ve-svg" viewBox="0 0 1160 720" aria-label="闭环总图。上排从左到右是决定、设计任务、实验、执行任务，下排是证据和运行链，假设在中间。每条箭头从写这条边的记录指向它引用的来源。">
+      <path class="ve-e is-async" d="M705 80V36H130V80"/>
+      <text class="ve-el" x="418" y="27">MOTIVATED_BY · 这个实验因哪个决定而做</text>
+
+      <path class="ve-e is-hot" d="M600 135H490"/>
+      <text class="ve-el" x="545" y="126">DESIGNED_IN</text>
+      <text class="ve-el" x="545" y="156">多对一</text>
+
+      <path class="ve-e is-async" d="M930 135H810"/>
+      <text class="ve-el" x="870" y="126">TARGETS</text>
+      <text class="ve-el" x="870" y="156">多对一</text>
+
+      <path class="ve-e is-async" d="M405 190V300"/>
+      <text class="ve-el l" x="397" y="240">TARGETS</text>
+      <text class="ve-el l" x="397" y="262">只有设计任务</text>
+
+      <path class="ve-e" d="M650 190V300"/>
+      <text class="ve-el l" x="642" y="240">TESTS</text>
+      <text class="ve-el l" x="642" y="262">多对多</text>
+
+      <path class="ve-e" d="M70 190V580"/>
+      <text class="ve-el r" x="78" y="375">BASED_ON</text>
+      <text class="ve-el r" x="78" y="397">判断的依据</text>
+
+      <path class="ve-e is-async" d="M190 190V330H320"/>
+      <text class="ve-el" x="255" y="321">DECIDES</text>
+      <text class="ve-el" x="255" y="349">假设、实验</text>
+
+      <path class="ve-e is-async" d="M190 580V390H320"/>
+      <text class="ve-el r" x="198" y="520">SUPPORTS / CHALLENGES</text>
+      <text class="ve-el r" x="198" y="542">下结论时才写</text>
+
+      <path class="ve-e is-async" d="M440 420V470H570V420"/>
+      <text class="ve-el" x="505" y="494">DERIVED_FROM（primary）</text>
+      <text class="ve-el" x="505" y="516">每个假设一条，构成假设树</text>
+
+      <path class="ve-e is-async" d="M230 610H725V190"/>
+      <text class="ve-el" x="480" y="601">ABOUT · 多对一，必填</text>
+
+      <path class="ve-e" d="M230 650H760"/>
+      <text class="ve-el" x="480" y="641">FROM_RESULT · 由哪些结果得出</text>
+
+      <path class="ve-e" d="M1060 605V270H790V190"/>
+      <text class="ve-el" x="925" y="261">OF_EXPERIMENT · 跑哪个实验</text>
+
+      <path class="ve-e is-hot" d="M1110 605V190"/>
+      <text class="ve-el l" x="1102" y="232">OF_TASK · 属于哪个任务</text>
+
+      <path class="ve-e" d="M860 645H900"/>
+      <path class="ve-e" d="M1000 645H1040"/>
+
+      <path class="ve-e" d="M780 330H850"/>
+      <text class="ve-el r" x="862" y="335">不变</text>
+      <path class="ve-e is-async" d="M780 368H850"/>
+      <text class="ve-el r" x="862" y="373">规则变了</text>
+      <path class="ve-e is-hot" d="M780 406H850"/>
+      <text class="ve-el r" x="862" y="411">新增</text>
+      <text class="ve-el r" x="780" y="456">箭头：记录指向它引用的来源</text>
+      <text class="ve-el r" x="780" y="482">数字：时间顺序，6 之后回到 1</text>
+
+      <rect class="ve-bnd" x="745" y="570" width="405" height="130"/>
+      <text class="ve-bnd-t" x="860" y="590">运行链 · 研究者写入</text>
+
+      <g class="ve-n"><rect class="sh" x="30" y="80" width="200" height="110"/><text x="130" y="108">Decision · 决定</text><text class="sub" x="130" y="136">一次判断，唯一能改假设状态</text><text class="sub" x="130" y="162">写入：科学家</text></g>
+      <g class="ve-n"><rect class="sh" x="320" y="80" width="170" height="110"/><text x="405" y="108">Task · 设计</text><text class="sub" x="405" y="136">一轮设计工作</text><text class="sub" x="405" y="162">科学家建并持有</text></g>
+      <g class="ve-n"><rect class="sh" x="600" y="80" width="210" height="110"/><text x="705" y="108">Experiment · 实验</text><text class="sub" x="705" y="136">一份封存的检验方案，不放状态</text><text class="sub" x="705" y="162">写入：科学家</text></g>
+      <g class="ve-n"><rect class="sh" x="930" y="80" width="200" height="110"/><text x="1030" y="108">Task · 执行</text><text class="sub" x="1030" y="136">一份执行工作，只放工作状态</text><text class="sub" x="1030" y="162">协调者建，研究者持有</text></g>
+      <g class="ve-n is-key"><rect class="sh" x="320" y="300" width="370" height="120"/><text x="505" y="332">Hypothesis · 假设</text><text class="sub" x="505" y="362">要判断的命题，假设树的节点</text><text class="sub" x="505" y="390">写入：科学家；状态只由 Decision 改</text></g>
+      <g class="ve-n"><rect class="sh" x="30" y="580" width="200" height="110"/><text x="130" y="608">Evidence · 证据</text><text class="sub" x="130" y="636">一条事实发现，不带方向</text><text class="sub" x="130" y="662">写入：研究者</text></g>
+      <g class="ve-n"><rect class="sh" x="760" y="605" width="100" height="80"/><text x="810" y="633">Result</text><text class="sub" x="810" y="661">一份结果</text></g>
+      <g class="ve-n"><rect class="sh" x="900" y="605" width="100" height="80"/><text x="950" y="633">Attempt</text><text class="sub" x="950" y="661">一次提交</text></g>
+      <g class="ve-n"><rect class="sh" x="1040" y="605" width="100" height="80"/><text x="1090" y="633">Run</text><text class="sub" x="1090" y="661">一次运行</text></g>
+
+      <g class="ve-co" transform="translate(30 80)"><circle r="11"/><text>1</text></g>
+      <g class="ve-co" transform="translate(320 80)"><circle r="11"/><text>2</text></g>
+      <g class="ve-co" transform="translate(600 80)"><circle r="11"/><text>3</text></g>
+      <g class="ve-co" transform="translate(930 80)"><circle r="11"/><text>4</text></g>
+      <g class="ve-co" transform="translate(745 570)"><circle r="11"/><text>5</text></g>
+      <g class="ve-co" transform="translate(30 580)"><circle r="11"/><text>6</text></g>
+    </svg>
+  </div>
+  <figcaption><span class="fig-n">图 1</span>每条记录指向它的来源；按数字读是时间顺序，第 6 步的证据支撑下一个决定。</figcaption>
+</figure>
+
+<section id="edges">
+  <div class="sec-head"><p class="ve-label caps">边</p><h2>新增 2 条边，7 条改规则，7 条不变</h2></div>
+  <figure>
+    <div class="ve-table edges"><table>
+      <thead><tr><th>边（方向从左到右）</th><th>基数</th><th>含义</th><th>相对现状</th><th class="num">账本条数</th></tr></thead>
+      <tbody>
+        <tr><td><code>Experiment -DESIGNED_IN-&gt; Task</code></td><td>多对一</td><td>这份方案是哪一轮设计产出的</td><td><span class="chip ok">新增</span></td><td class="num">0</td></tr>
+        <tr><td><code>Run -OF_TASK-&gt; Task</code></td><td>多对一，新运行必填</td><td>这次运行属于哪个任务</td><td><span class="chip ok">新增</span></td><td class="num">0</td></tr>
+        <tr><td><code>Experiment -MOTIVATED_BY-&gt; Decision</code></td><td>多对多，新实验至少一条<br><small>来自初始 plan 的实验除外</small></td><td>这个实验因哪个决定而做</td><td><span class="chip warn">规则变</span> <small>改为必填</small></td><td class="num">0</td></tr>
+        <tr><td><code>Task -TARGETS-&gt; Experiment</code></td><td>多对一<br><small>执行任务最多挂一个实验</small></td><td>这份工作执行哪个实验</td><td><span class="chip warn">规则变</span> <small>收紧</small></td><td class="num">50</td></tr>
+        <tr><td><code>Task -TARGETS-&gt; Hypothesis</code></td><td>多对多<br><small>只有设计任务这样挂</small></td><td>这轮设计针对哪些假设；不封存合同</td><td><span class="chip warn">规则变</span> <small>限定任务类型</small></td><td class="num">8</td></tr>
+        <tr><td><code>Evidence -ABOUT-&gt; Experiment</code></td><td>多对一，必填</td><td>这条发现来自哪个实验</td><td><span class="chip warn">规则变</span> <small>改为必填</small></td><td class="num">205</td></tr>
+        <tr><td><code>Decision -DECIDES-&gt; Hypothesis / Experiment</code></td><td>多对多</td><td>改假设状态和路线的唯一入口</td><td><span class="chip warn">规则变</span> <small>去掉 Task</small></td><td class="num">100 + 41</td></tr>
+        <tr><td><code>Evidence -SUPPORTS / CHALLENGES-&gt; Hypothesis</code></td><td>多对多<br><small>绑定假设修订版</small></td><td>这条发现在结论中的方向</td><td><span class="chip warn">规则变</span> <small>下结论时才写</small></td><td class="num">11 + 11</td></tr>
+        <tr><td><code>Hypothesis -DERIVED_FROM-&gt; Hypothesis</code></td><td>多对多<br><small>每个假设一条 primary</small></td><td>primary 那条构成假设树</td><td><span class="chip warn">规则变</span> <small>加 primary</small></td><td class="num">54</td></tr>
+        <tr><td><code>Experiment -TESTS-&gt; Hypothesis</code></td><td>多对多</td><td>这个实验检验哪些假设</td><td><span class="chip">不变</span></td><td class="num">72</td></tr>
+        <tr><td><code>Decision -BASED_ON-&gt; Evidence</code></td><td>多对多</td><td>这次判断的依据</td><td><span class="chip">不变</span></td><td class="num">163</td></tr>
+        <tr><td><code>Evidence -FROM_RESULT-&gt; Result</code></td><td>多对多</td><td>这条发现由哪些结果得出</td><td><span class="chip">不变</span></td><td class="num">536</td></tr>
+        <tr><td><code>Evidence -FROM_ATTEMPT-&gt; Attempt</code></td><td>多对多</td><td>这条发现由哪些提交得出</td><td><span class="chip">不变</span></td><td class="num">555</td></tr>
+        <tr><td><code>Run -OF_EXPERIMENT-&gt; Experiment</code></td><td>多对一</td><td>这次运行跑哪个实验</td><td><span class="chip">不变</span></td><td class="num">461</td></tr>
+        <tr><td><code>Attempt -OF_RUN-&gt; Run</code></td><td>多对一</td><td>这次提交属于哪次运行</td><td><span class="chip">不变</span></td><td class="num">509</td></tr>
+        <tr><td><code>Result.attempt_id -&gt; Attempt</code></td><td>多对一，字段</td><td>这份结果来自哪次提交</td><td><span class="chip">不变</span></td><td class="num">433</td></tr>
+      </tbody>
+    </table></div>
+    <figcaption><span class="fig-n">图 2</span>16 条连接里只有 2 条是新的；<code>OF_TASK</code> 沿用 <code>OF_EXPERIMENT</code>、<code>OF_RUN</code> 的命名。</figcaption>
+  </figure>
+</section>
+
+<section id="tables">
+  <div class="sec-head"><p class="ve-label caps">表</p><h2>每张表只放一种事实</h2></div>
+  <figure>
+    <div class="ve-table tables"><table>
+      <thead><tr><th>表</th><th>放什么</th><th>写入者</th><th>不放什么</th><th class="num">账本行数</th></tr></thead>
+      <tbody>
+        <tr><th>Hypothesis</th><td>要判断的命题，假设树的节点</td><td>科学家；状态列只由 Decision 改</td><td>证据方向</td><td class="num">44</td></tr>
+        <tr><th>Experiment</th><td>一份封存的检验方案</td><td>科学家</td><td>状态：由任务、证据和决定推出</td><td class="num">44</td></tr>
+        <tr><th>Task</th><td>一份工作（设计或执行）的状态，含协调者的放行或退回</td><td>协调者建执行任务，科学家建设计任务，持有者更新状态</td><td>科学结论</td><td class="num">54</td></tr>
+        <tr><th>Evidence</th><td>一条事实发现</td><td>研究者</td><td>方向：由决定写</td><td class="num">205</td></tr>
+        <tr><th>Decision</th><td>一次判断，唯一能改假设状态和路线</td><td>科学家</td><td>任务状态：接受、停止、重开只改 Task</td><td class="num">96</td></tr>
+        <tr><th>Run · Attempt · Result</th><td>一次运行、一次提交、一份结果</td><td>研究者经 CLI 写入</td><td>判断</td><td class="num">461 · 509 · 433</td></tr>
+      </tbody>
+    </table></div>
+    <figcaption><span class="fig-n">图 3</span>每种事实只存一处，重启的会话不需要比对多个来源。</figcaption>
+  </figure>
+</section>
+
+<section id="example">
+  <div class="sec-head"><p class="ve-label caps">例子</p><h2>E-0032 走一圈：账本缺 4 条边和 2 条记录</h2></div>
+  <figure class="ve-steps">
+    <div class="frame">
+      <svg class="ve-svg" viewBox="0 0 1160 570" aria-label="把 E-0032 的真实记录放进新关系，逐步显示每一步写入的记录和边，并标出账本里没有的部分。">
+        <path class="ve-e" data-s="0" d="M820 240H880"/>
+        <text class="ve-el r" data-s="0" x="892" y="245">账本已有</text>
+        <path class="ve-e is-hot" data-s="0" d="M820 278H880"/>
+        <text class="ve-el r" data-s="0" x="892" y="283">账本没有</text>
+        <path class="ve-e is-async" data-s="0" d="M820 316H880"/>
+        <text class="ve-el r" data-s="0" x="892" y="321">改到下结论时写</text>
+
+        <path class="ve-e is-hot" data-s="2" d="M705 70V34H130V70"/>
+        <text class="ve-el" data-s="2" x="418" y="25">MOTIVATED_BY</text>
+        <path class="ve-e is-hot" data-s="2" d="M600 115H490"/>
+        <text class="ve-el" data-s="2" x="545" y="106">DESIGNED_IN</text>
+        <path class="ve-e is-hot" data-s="2" d="M405 160V235"/>
+        <text class="ve-el l" data-s="2" x="397" y="202">TARGETS</text>
+        <path class="ve-e" data-s="2" d="M650 160V235"/>
+        <text class="ve-el l" data-s="2" x="642" y="202">TESTS</text>
+
+        <path class="ve-e" data-s="3" d="M930 115H810"/>
+        <text class="ve-el" data-s="3" x="870" y="106">TARGETS</text>
+
+        <path class="ve-e is-hot" data-s="4" d="M1080 450V160"/>
+        <text class="ve-el l" data-s="4" x="1072" y="200">OF_TASK</text>
+        <path class="ve-e" data-s="4" d="M980 450V370H780V160"/>
+        <text class="ve-el" data-s="4" x="880" y="361">OF_EXPERIMENT</text>
+
+        <path class="ve-e" data-s="5" d="M230 480H725V160"/>
+        <text class="ve-el" data-s="5" x="480" y="471">ABOUT</text>
+        <path class="ve-e" data-s="5" d="M230 515H930"/>
+        <text class="ve-el" data-s="5" x="580" y="506">FROM_RESULT</text>
+
+        <path class="ve-e" data-s="6" d="M70 325V450"/>
+        <text class="ve-el r" data-s="6" x="78" y="392">BASED_ON</text>
+        <path class="ve-e" data-s="6" d="M230 280H320"/>
+        <text class="ve-el" data-s="6" x="275" y="271">DECIDES</text>
+        <path class="ve-e is-async" data-s="6" d="M190 450V400H450V325"/>
+        <text class="ve-el" data-s="6" x="320" y="391">CHALLENGES</text>
+        <path class="ve-e is-hot" data-s="6" d="M130 190V235"/>
+        <text class="ve-el r" data-s="6" x="138" y="218">下一个实验指回这里</text>
+
+        <g class="ve-n is-new" data-s="1"><rect class="sh" x="30" y="70" width="200" height="90"/><text x="130" y="94">D-新 · 决定</text><text class="sub" x="130" y="120">接 D-0075，采用 AD-0008</text><text class="sub" x="130" y="142">账本没有这条</text></g>
+        <g class="ve-n is-new" data-s="2"><rect class="sh" x="320" y="70" width="170" height="90"/><text x="405" y="94">T-新 · 设计任务</text><text class="sub" x="405" y="120">针对两个新假设</text><text class="sub" x="405" y="142">账本没有这条</text></g>
+        <g class="ve-n" data-s="2"><rect class="sh" x="600" y="70" width="210" height="90"/><text x="705" y="94">E-0032 · 实验</text><text class="sub" x="705" y="120">分段协议下的改进检验</text><text class="sub" x="705" y="142">阶段 E2</text></g>
+        <g class="ve-n" data-s="3"><rect class="sh" x="930" y="70" width="200" height="90"/><text x="1030" y="94">T-0035 · T-0036</text><text class="sub" x="1030" y="120">执行任务</text><text class="sub" x="1030" y="142">experiment · implement</text></g>
+        <g class="ve-n is-key" data-s="2"><rect class="sh" x="320" y="235" width="370" height="90"/><text x="505" y="262">H-0032 · H-0033</text><text class="sub" x="505" y="290">第 1 段写入范围 · X tap</text></g>
+        <g class="ve-n" data-s="6"><rect class="sh" x="30" y="235" width="200" height="90"/><text x="130" y="259">D-0078 · route / stop</text><text class="sub" x="130" y="285">两个假设 challenged</text><text class="sub" x="130" y="307">依据 5 条证据和 RV-0110</text></g>
+        <g class="ve-n" data-s="5"><rect class="sh" x="30" y="450" width="200" height="90"/><text x="130" y="474">EV-0181 等 5 条</text><text class="sub" x="130" y="500">指向 E-0032 和各自结果</text><text class="sub" x="130" y="522">2 条写了 challenges</text></g>
+        <g class="ve-n" data-s="4"><rect class="sh" x="930" y="450" width="200" height="90"/><text x="1030" y="474">13 个 Run</text><text class="sub" x="1030" y="500">RUN-0402 至 RUN-0425</text><text class="sub" x="1030" y="522">靠前缀 T0035- 关联</text></g>
+      </svg>
+    </div>
+    <div class="ve-player">
+      <ol class="ve-cap">
+        <li data-n="1/6">E-0032 之前最后一条决定是 D-0075，暂停分段线。顾问 AD-0008 随后提出新方向。账本没有决定写明要转去做这个实验，新关系要求科学家先写这条决定。</li>
+        <li data-n="2/6">科学家建设计任务，指向 H-0032 和 H-0033，产出 E-0032。账本只有“E-0032 检验这两个假设”这条边，设计任务和动机决定都没有记录。</li>
+        <li data-n="3/6">协调者建执行任务。T-0035 指向 E-0032，账本已有这条边。D-0078 之后补的实现任务 T-0036 也指向它，符合多对一。</li>
+        <li data-n="4/6">研究者跑了 13 次，每次都指向 E-0032。账本只靠 request_id 前缀 T0035- 说明它属于哪个任务，新关系把它写成一条边。</li>
+        <li data-n="5/6">研究者写 5 条证据，都指向 E-0032 和各自的结果。账本里 EV-0182、EV-0183 此时就写了 challenges，新关系下证据不带方向。</li>
+        <li data-n="6/6">科学家写 D-0078，依据这 5 条证据和结论审核 RV-0110，把两个假设记为 challenged 并 stop。方向边在这一步写入，下一个实验指回 D-0078。</li>
+      </ol>
+      <button data-go="-1" aria-label="上一步">←</button>
+      <button data-play aria-label="播放">▶</button>
+      <input type="range" aria-label="步骤">
+      <button data-go="1" aria-label="下一步">→</button>
+    </div>
+    <figcaption><span class="fig-n">图 4</span>E-0032 的真实记录放进新关系：账本已有 7 条边，缺 4 条边和 2 条记录，1 条方向边改到下结论时写。</figcaption>
+  </figure>
+</section>
+
+<section id="changes">
+  <div class="sec-head"><p class="ve-label caps">改动</p><h2>相对现状改七处，每处都有账本数据</h2></div>
+  <p>数字来自 bypass-lora 的账本快照，只代表这一个项目。</p>
+  <figure>
+    <div class="cases">
+      <div class="case" data-st="warn">
+        <span class="chip warn">规则变</span>
+        <h3>方向只在下结论时写</h3>
+        <svg class="ve-mini" viewBox="0 0 240 128" aria-label="现状在写证据时写方向边，新关系在下结论时写。16 of 31 个被判定的假设有方向边。">
+          <path class="ve-e is-off" d="M84 23H156"/>
+          <text class="ve-el" x="120" y="15">写证据时</text>
+          <text class="ve-x" x="120" y="28">✕</text>
+          <path class="ve-e is-st" d="M84 65H156"/>
+          <text class="ve-el" x="120" y="57">下结论时</text>
+          <g class="ve-n"><rect class="sh" x="6" y="6" width="78" height="34"/><text x="45" y="23">证据</text></g>
+          <g class="ve-n"><rect class="sh" x="156" y="6" width="78" height="34"/><text x="195" y="23">假设</text></g>
+          <g class="ve-n"><rect class="sh" x="6" y="48" width="78" height="34"/><text x="45" y="65">证据</text></g>
+          <g class="ve-n"><rect class="sh" x="156" y="48" width="78" height="34"/><text x="195" y="65">假设</text></g>
+          <rect class="b0" x="6" y="94" width="228" height="10"/><rect class="b1" x="6" y="94" width="118" height="10"/>
+          <text class="ve-tag" x="120" y="122" text-anchor="middle">16 / 31 个假设有方向边</text>
+        </svg>
+        <p>205 条证据只有 22 条写了方向。Decision 给了全部 31 个被判定的假设状态。</p>
+      </div>
+      <div class="case" data-st="warn">
+        <span class="chip warn">规则变</span>
+        <h3>每个新实验指回一个决定</h3>
+        <svg class="ve-mini" viewBox="0 0 240 128" aria-label="实验现在只连到假设，新关系要求实验指向产生它的决定。0 of 44 个实验有这条边。">
+          <path class="ve-e" d="M84 23H156"/>
+          <text class="ve-el" x="120" y="15">检验</text>
+          <path class="ve-e is-st" d="M84 65H156"/>
+          <text class="ve-el" x="120" y="57">动机</text>
+          <g class="ve-n"><rect class="sh" x="6" y="6" width="78" height="34"/><text x="45" y="23">实验</text></g>
+          <g class="ve-n"><rect class="sh" x="156" y="6" width="78" height="34"/><text x="195" y="23">假设</text></g>
+          <g class="ve-n"><rect class="sh" x="6" y="48" width="78" height="34"/><text x="45" y="65">实验</text></g>
+          <g class="ve-n"><rect class="sh" x="156" y="48" width="78" height="34"/><text x="195" y="65">决定</text></g>
+          <rect class="b0" x="6" y="94" width="228" height="10"/>
+          <text class="ve-tag" x="120" y="122" text-anchor="middle">0 / 44 个实验有动机边</text>
+        </svg>
+        <p>schema 已经允许这条边，一个实验都没写。旧记录不用补。</p>
+      </div>
+      <div class="case" data-st="warn">
+        <span class="chip warn">规则变</span>
+        <h3>每个假设有一个主父节点</h3>
+        <svg class="ve-mini" viewBox="0 0 240 128" aria-label="一个假设有三个父节点，其中一条边标记为 primary。12 of 44 个假设有多个父节点。">
+          <path class="ve-e is-st" d="M84 45H112V15H156"/>
+          <text class="ve-el l" x="106" y="20">primary</text>
+          <path class="ve-e" d="M84 45H156"/>
+          <path class="ve-e" d="M112 45V75H156"/>
+          <g class="ve-n"><rect class="sh" x="6" y="28" width="78" height="34"/><text x="45" y="45">假设</text></g>
+          <g class="ve-n"><rect class="sh" x="156" y="2" width="78" height="26"/><text x="195" y="15">父 1</text></g>
+          <g class="ve-n"><rect class="sh" x="156" y="32" width="78" height="26"/><text x="195" y="45">父 2</text></g>
+          <g class="ve-n"><rect class="sh" x="156" y="62" width="78" height="26"/><text x="195" y="75">父 3</text></g>
+          <rect class="b0" x="6" y="94" width="228" height="10"/><rect class="b1" x="6" y="94" width="62" height="10"/>
+          <text class="ve-tag" x="120" y="122" text-anchor="middle">12 / 44 个假设有多个父节点</text>
+        </svg>
+        <p>其中 11 个的 label 能指出主父节点，H5 按根节点处理。其余父边保留。</p>
+      </div>
+      <div class="case" data-st="warn">
+        <span class="chip warn">规则变</span>
+        <h3>执行任务只挂一个实验</h3>
+        <svg class="ve-mini" viewBox="0 0 240 128" aria-label="执行任务指向一个实验，设计任务指向假设。50 of 54 个任务恰好挂一个实验。">
+          <path class="ve-e is-st" d="M90 23H156"/>
+          <path class="ve-e is-st" d="M90 65H156"/>
+          <g class="ve-n"><rect class="sh" x="6" y="6" width="84" height="34"/><text x="48" y="23">执行任务</text></g>
+          <g class="ve-n"><rect class="sh" x="156" y="6" width="78" height="34"/><text x="195" y="23">一个实验</text></g>
+          <g class="ve-n"><rect class="sh" x="6" y="48" width="84" height="34"/><text x="48" y="65">设计任务</text></g>
+          <g class="ve-n"><rect class="sh" x="156" y="48" width="78" height="34"/><text x="195" y="65">假设</text></g>
+          <rect class="b0" x="6" y="94" width="228" height="10"/><rect class="b1" x="6" y="94" width="211" height="10"/>
+          <text class="ve-tag" x="120" y="122" text-anchor="middle">50 / 54 个任务挂一个实验</text>
+        </svg>
+        <p>没有任务挂两个实验。没挂实验的 4 个任务都是准备工作，对应设计任务。</p>
+      </div>
+      <div class="case" data-st="ok">
+        <span class="chip">不加列</span>
+        <h3>实验的状态由记录推出</h3>
+        <svg class="ve-mini" viewBox="0 0 240 128" aria-label="任务、证据和决定三类记录推出实验阶段。44 个实验中 33 个已判定，8 个待判定，3 个进行中。">
+          <path class="ve-e" d="M70 14H105V44H140"/>
+          <path class="ve-e" d="M70 44H140"/>
+          <path class="ve-e" d="M70 74H105V44H140"/>
+          <g class="ve-n"><rect class="sh" x="6" y="2" width="64" height="26"/><text x="38" y="15">任务</text></g>
+          <g class="ve-n"><rect class="sh" x="6" y="31" width="64" height="26"/><text x="38" y="44">证据</text></g>
+          <g class="ve-n"><rect class="sh" x="6" y="60" width="64" height="26"/><text x="38" y="73">决定</text></g>
+          <g class="ve-n is-key"><rect class="sh" x="140" y="27" width="94" height="34"/><text x="187" y="44">实验状态</text></g>
+          <rect class="b1" x="6" y="94" width="171" height="10"/><rect class="b2" x="177" y="94" width="41" height="10"/><rect class="b3" x="218" y="94" width="16" height="10"/>
+          <text class="ve-tag" x="120" y="122" text-anchor="middle">已判定 33 · 待判定 8 · 进行中 3</text>
+        </svg>
+        <p>进行中：还有任务没结束。待判定：任务都结束，有证据，没有决定。已判定：有决定引用它或它的证据。</p>
+      </div>
+      <div class="case" data-st="warn">
+        <span class="chip warn">规则变</span>
+        <h3>决定只改假设和路线</h3>
+        <svg class="ve-mini" viewBox="0 0 240 128" aria-label="决定不再指向任务，只指向假设和实验。0 of 141 条 DECIDES 边指向任务。">
+          <path class="ve-e is-off" d="M84 23H156"/>
+          <text class="ve-x" x="120" y="28">✕</text>
+          <path class="ve-e" d="M84 65H156"/>
+          <g class="ve-n"><rect class="sh" x="6" y="6" width="78" height="34"/><text x="45" y="23">决定</text></g>
+          <g class="ve-n is-off"><rect class="sh" x="156" y="6" width="78" height="34"/><text x="195" y="23">任务</text></g>
+          <g class="ve-n"><rect class="sh" x="6" y="48" width="78" height="34"/><text x="45" y="65">决定</text></g>
+          <g class="ve-n"><rect class="sh" x="156" y="48" width="78" height="34"/><text x="195" y="65">假设/实验</text></g>
+          <rect class="b0" x="6" y="94" width="228" height="10"/>
+          <text class="ve-tag" x="120" y="122" text-anchor="middle">0 / 141 条指向任务</text>
+        </svg>
+        <p>接受、停止和重开只改 Task。<code>rl hypothesis set</code> 也要留下一条 Decision。</p>
+      </div>
+      <div class="case" data-st="ok">
+        <span class="chip ok">新增</span>
+        <h3>每次运行写明所属任务</h3>
+        <svg class="ve-mini" viewBox="0 0 240 128" aria-label="运行现在只指向实验，新增一条指向任务的边。0 of 461 次运行有任务边。">
+          <path class="ve-e" d="M84 23H156"/>
+          <path class="ve-e is-st" d="M84 65H156"/>
+          <g class="ve-n"><rect class="sh" x="6" y="6" width="78" height="34"/><text x="45" y="23">运行</text></g>
+          <g class="ve-n"><rect class="sh" x="156" y="6" width="78" height="34"/><text x="195" y="23">实验</text></g>
+          <g class="ve-n"><rect class="sh" x="6" y="48" width="78" height="34"/><text x="45" y="65">运行</text></g>
+          <g class="ve-n is-new"><rect class="sh" x="156" y="48" width="78" height="34"/><text x="195" y="65">任务</text></g>
+          <rect class="b0" x="6" y="94" width="228" height="10"/>
+          <text class="ve-tag" x="120" y="122" text-anchor="middle">0 / 461 次运行有任务边</text>
+        </svg>
+        <p>现在只能靠 request_id 前缀找任务。E-0035 的 16 次运行分属 3 个任务。</p>
+      </div>
+    </div>
+    <figcaption><span class="fig-n">图 5</span>七处改动都有账本数据支撑；旧记录不用补，新规则只约束新写入。</figcaption>
+  </figure>
+</section>
+
+<section class="sources" aria-label="Sources">
+  <p class="ve-label caps">Sources</p>
+  <ul>
+    <li><code>src/smooth_research/schema.py:68</code> 表定义，<code>:157</code> 边定义</li>
+    <li><code>src/smooth_research/research.py:367</code> <code>add_evidence</code>，<code>:549</code> <code>decide</code></li>
+    <li><code>src/smooth_research/tasks.py:61</code> <code>create_task</code></li>
+    <li><code>bypass-lora/research/snapshots/restart-method-preparation-20261108/snapshot.json</code> 全部条数和 E-0032 的记录</li>
+  </ul>
+</section>
+</main>
+</body>
+</html>
