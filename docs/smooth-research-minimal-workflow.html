@@ -583,6 +583,7 @@ header h1{font-size:clamp(1.9rem,3.2vw,2.6rem);max-width:none}
         <tr><td class="num">10</td><td>阶段结束</td><td>协调者 → 用户</td><td>阶段结论、证据、下一阶段建议</td><td>批准或改方向</td></tr>
         <tr><td><small>按需</small></td><td>瓶颈，或大额投入前</td><td>协调者 → 顾问</td><td>一句问题、假说链、已试路径和结果、约束</td><td>给选项和理由</td></tr>
         <tr><td><small>按需</small></td><td>顾问答完</td><td>顾问 → 协调者</td><td>选项、理由、最便宜的判别实验</td><td>选路线</td></tr>
+        <tr><td><small>按需</small></td><td>协调者提了自由问题</td><td>研究者、审核者、顾问 → 协调者</td><td>答复：引用那条消息的 id，一段文字；每条最多答复一次</td><td>继续判断</td></tr>
         <tr><td><small>按需</small></td><td>超出目标、范围或预算</td><td>协调者 → 用户</td><td>选项、建议、代价</td><td>做决定</td></tr>
       </tbody>
     </table></div>
@@ -632,9 +633,9 @@ header h1{font-size:clamp(1.9rem,3.2vw,2.6rem);max-width:none}
       <thead><tr><th>发件人 ＼ 收件人</th><th>协调者</th><th>研究者</th><th>审核者</th><th>顾问</th></tr></thead>
       <tbody>
         <tr><th scope="row">协调者</th><td class="self">—</td><td class="free"><b>自由</b><small>任务卡、退回</small></td><td class="free"><b>自由</b><small>结论审核请求</small></td><td class="free"><b>自由</b><small>咨询</small></td></tr>
-        <tr><th scope="row">研究者</th><td class="fixed"><b>仅固定</b><small>任务结论、阻塞</small></td><td class="self">—</td><td class="free"><b>自由</b><small>代码审核请求</small></td><td class="none">无</td></tr>
-        <tr><th scope="row">审核者</th><td class="fixed"><b>仅固定</b><small>结论审核结果</small></td><td class="free"><b>自由</b><small>代码审核结果</small></td><td class="self">—</td><td class="none">无</td></tr>
-        <tr><th scope="row">顾问</th><td class="fixed"><b>仅固定</b><small>建议</small></td><td class="none">无</td><td class="none">无</td><td class="self">—</td></tr>
+        <tr><th scope="row">研究者</th><td class="fixed"><b>仅固定</b><small>任务结论、阻塞、答复</small></td><td class="self">—</td><td class="free"><b>自由</b><small>代码审核请求</small></td><td class="none">无</td></tr>
+        <tr><th scope="row">审核者</th><td class="fixed"><b>仅固定</b><small>结论审核结果、答复</small></td><td class="free"><b>自由</b><small>代码审核结果</small></td><td class="self">—</td><td class="none">无</td></tr>
+        <tr><th scope="row">顾问</th><td class="fixed"><b>仅固定</b><small>建议、答复</small></td><td class="none">无</td><td class="none">无</td><td class="self">—</td></tr>
         <tr><th scope="row">系统</th><td class="fixed"><b>仅固定</b><small>失联（监视）</small></td><td><b>仅固定</b><small>作业结束（执行器）</small></td><td class="none">无</td><td class="none">无</td></tr>
       </tbody>
     </table></div>
@@ -759,7 +760,7 @@ header h1{font-size:clamp(1.9rem,3.2vw,2.6rem);max-width:none}
 </section>
 
 <section id="open">
-  <div class="sec-head"><p class="ve-label caps">决定</p><h2>四件事已定，两件还要你选</h2></div>
+  <div class="sec-head"><p class="ve-label caps">决定</p><h2>五件事已定，一件还要你选</h2></div>
   <div class="ve-table"><table>
     <thead><tr><th>问题</th><th>决定</th></tr></thead>
     <tbody>
@@ -767,12 +768,12 @@ header h1{font-size:clamp(1.9rem,3.2vw,2.6rem);max-width:none}
       <tr><td>协调者怎么验收任务结论</td><td>读 CLI 生成的核验行，必要时抽查证据</td></tr>
       <tr><td>自由消息</td><td>协调者到其他角色、研究者和审核者之间可以自由发；发给协调者的只有固定类型和格式（图 5）</td></tr>
       <tr><td>贵运行要回协调者吗</td><td>任务卡授权内不用回；超出授权就发阻塞</td></tr>
+      <tr><td>怎么回答协调者的自由提问</td><td>固定类型“答复”：引用那条消息的 id，每条最多答复一次</td></tr>
     </tbody>
   </table></div>
   <p>落到代码：<code>rl task deliver</code> 从账本生成核验行，包括运行状态、证据 id、审核是否通过、branch head 是否等于通过测试的 commit（<code>verification_lines</code> 现在只做最后一项）。<code>rl agent tell</code> 和 <code>rl msg</code> 拒绝会话发给协调者的消息。<code>_reviewer_brief</code> 和 <code>_advisor_brief</code> 去掉 tell coordinator 的步骤，由 <code>rl review answer</code> 和 <code>rl advise answer</code> 发固定消息。</p>
   <div class="asks">
-    <fieldset class="ask" id="ask-reply" data-ask="reply"><legend class="ask-n">Question <b>1</b> of 2</legend><p class="ask-q">研究者、审核者、顾问怎么回答协调者的自由提问？</p><div class="ask-opts"><label class="opt"><input type="radio" name="reply" value="reply" checked><span class="opt-body"><span class="opt-label">固定类型“答复”：引用那条消息的 id，每条最多答复一次</span><span class="sug">Suggested</span></span></label><label class="opt"><input type="radio" name="reply" value="next"><span class="opt-body"><span class="opt-label">不单独答复，写进下一条任务结论或阻塞</span></span></label></div></fieldset>
-    <fieldset class="ask row" id="ask-session" data-ask="session"><legend class="ask-n">Question <b>2</b> of 2</legend><p class="ask-q">研究者每个任务开新会话吗？</p><div class="ask-opts"><label class="opt"><input type="radio" name="session" value="fresh" checked><span class="opt-body"><span class="opt-label">每个任务开新会话，只靠启动包</span><span class="sug">Suggested</span></span></label><label class="opt"><input type="radio" name="session" value="reuse"><span class="opt-body"><span class="opt-label">同一路线的连续任务复用会话</span></span></label></div></fieldset>
+    <fieldset class="ask row" id="ask-session" data-ask="session"><legend class="ask-n">Question</legend><p class="ask-q">研究者每个任务开新会话吗？</p><div class="ask-opts"><label class="opt"><input type="radio" name="session" value="fresh" checked><span class="opt-body"><span class="opt-label">每个任务开新会话，只靠启动包</span><span class="sug">Suggested</span></span></label><label class="opt"><input type="radio" name="session" value="reuse"><span class="opt-body"><span class="opt-label">同一路线的连续任务复用会话</span></span></label></div></fieldset>
   </div>
 </section>
 
