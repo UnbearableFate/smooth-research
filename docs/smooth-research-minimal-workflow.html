@@ -2,7 +2,7 @@
 <html lang="zh" data-register="blueprint">
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>协调者每个任务只发一张任务卡</title>
+<title>协调者每个任务只收一条任务结论</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230f172a'/%3E%3Cpath d='M18 40V24l14-8 14 8v16l-14 8-14-8Z' fill='none' stroke='%23fbbf24' stroke-width='4' stroke-linejoin='round'/%3E%3Ccircle cx='32' cy='32' r='5' fill='%2338bdf8'/%3E%3C/svg%3E">
 <meta charset="utf-8">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -368,6 +368,12 @@ header h1{font-size:clamp(1.9rem,3.2vw,2.6rem);max-width:none}
 .pack tr.pull td{outline:1px dashed var(--border-bright);outline-offset:-3px}
 .pack tr.out td{color:var(--text-dim);text-decoration:line-through}
 .asks{display:grid;gap:var(--s-5)}
+.chan td,.chan th{vertical-align:top}
+.chan small{display:block}
+.chan tbody th{white-space:nowrap;text-align:left;font-weight:600}
+.chan td.free{background:color-mix(in srgb,var(--text) 6%,transparent)}
+.chan td.fixed{outline:1.5px solid var(--accent);outline-offset:-3px}
+.chan td.none,.chan td.self{color:var(--text-dim)}
 </style>
 </head>
 <body>
@@ -379,11 +385,11 @@ header h1{font-size:clamp(1.9rem,3.2vw,2.6rem);max-width:none}
     <pattern id="ve-w-off" width="10" height="10" patternUnits="userSpaceOnUse"><rect x="1.5" y="1.5" width="7" height="7" rx="1.5" style="fill:none;stroke:var(--text-dim)"/></pattern>
   </defs>
 </svg>
-<nav class="ve-toc" aria-label="Sections"><div><a href="#roles">角色</a><a href="#messages">沟通</a><a href="#review">审核</a><a href="#startup">启动</a><a href="#removed">删除</a><a href="#open">待定</a></div><span class="pos"></span></nav>
+<nav class="ve-toc" aria-label="Sections"><div><a href="#roles">角色</a><a href="#messages">沟通</a><a href="#review">审核</a><a href="#startup">启动</a><a href="#removed">删除</a><a href="#open">决定</a></div><span class="pos"></span></nav>
 <main>
 <header>
   <p class="eyebrow">Smooth Research · 最精简设计草案</p>
-  <h1>协调者每个任务只发一张任务卡，只收一条任务结论</h1>
+  <h1>协调者每个任务发一张任务卡，只收一条任务结论</h1>
   <p class="lead">每个角色只回答一个问题，<b>任务有结论才发消息</b>。过程写进账本，谁需要谁按 id 查。</p>
   <p class="meta">2026-11-09 · 草案，尚未实现 · 依据 bypass-lora 两个版本的运行日志</p>
 </header>
@@ -496,7 +502,7 @@ header h1{font-size:clamp(1.9rem,3.2vw,2.6rem);max-width:none}
       <li data-n="4/10">审核者只回复研究者。通过就开跑，有问题就修后复查，每回合最多两次审核。</li>
       <li data-n="5/10">研究者提交作业，把通知目标设为自己，然后停止运行。</li>
       <li data-n="6/10">一批作业结束，执行器通知研究者一次。协调者收不到这条。</li>
-      <li data-n="7/10">问题有了答案，研究者发任务结论。这是协调者在任务期间收到的第一条消息。</li>
+      <li data-n="7/10">问题有了答案，研究者发任务结论。这是协调者在任务期间收到的第一条消息。它读 CLI 生成的核验行，必要时抽查证据。</li>
       <li data-n="8/10">结论要改变假说状态时，协调者启动一个审核会话，请它独立判断。</li>
       <li data-n="9/10">审核者把结果交给协调者。协调者记录决定，再发下一张任务卡。</li>
       <li data-n="10/10">阶段结束，协调者给用户一份阶段报告。</li>
@@ -554,7 +560,7 @@ header h1{font-size:clamp(1.9rem,3.2vw,2.6rem);max-width:none}
         <g class="ve-n"><rect class="sh" x="670" y="572" width="280" height="74"/><text x="810" y="594">监视</text><text class="sub" x="810" y="622">重启断线会话，恢复不了才报告</text></g>
       </svg>
     </div>
-    <figcaption><span class="fig-n">图 2</span>角色之间只有图上这些通道；协调者和研究者之间只走任务卡和任务结论。</figcaption>
+    <figcaption><span class="fig-n">图 2</span>角色之间只有图上这些通道；研究者发给协调者的只有任务结论和阻塞。</figcaption>
   </figure>
 </section>
 
@@ -571,7 +577,7 @@ header h1{font-size:clamp(1.9rem,3.2vw,2.6rem);max-width:none}
         <tr><td class="num">4</td><td>审完</td><td>审核者 → 研究者</td><td>通过，或问题清单（严重度、位置）；每回合最多两次审核</td><td>修复，或开跑</td></tr>
         <tr><td class="num">5</td><td>审核通过</td><td>研究者 → 执行器</td><td>提交作业，通知目标是研究者自己</td><td>排队运行</td></tr>
         <tr><td class="num">6</td><td>一批作业结束或失败</td><td>执行器 → 研究者</td><td>每批一条：成功数、失败数、日志路径</td><td>分析，或在授权内重试</td></tr>
-        <tr><td class="num">7</td><td>问题有了答案</td><td>研究者 → 协调者</td><td>一句结论；证据引用；限制；需要决定的事；CLI 生成的核验行（运行数、证据 id、commit）</td><td>决定下一步</td></tr>
+        <tr><td class="num">7</td><td>问题有了答案</td><td>研究者 → 协调者</td><td>一句结论；证据引用；限制；需要决定的事；CLI 生成的核验行（运行数、证据 id、commit）</td><td>读核验行，必要时抽查证据，决定下一步</td></tr>
         <tr><td class="num">8</td><td>结论要改变假说状态、停路线或推荐正式实验</td><td>协调者 → 审核者</td><td>启动审核会话；待审结论、假说修订版、证据引用、预设规则</td><td>独立判断</td></tr>
         <tr><td class="num">9</td><td>审完</td><td>审核者 → 协调者</td><td>成立或不成立，理由</td><td>记录决定，发下一张任务卡</td></tr>
         <tr><td class="num">10</td><td>阶段结束</td><td>协调者 → 用户</td><td>阶段结论、证据、下一阶段建议</td><td>批准或改方向</td></tr>
@@ -621,6 +627,19 @@ header h1{font-size:clamp(1.9rem,3.2vw,2.6rem);max-width:none}
     </div>
     <figcaption><span class="fig-n">图 4</span>异常路径只有三条，每条都是一个结论：发送者已经确定这件事需要别人决定。</figcaption>
   </figure>
+  <figure>
+    <div class="ve-table chan"><table>
+      <thead><tr><th>发件人 ＼ 收件人</th><th>协调者</th><th>研究者</th><th>审核者</th><th>顾问</th></tr></thead>
+      <tbody>
+        <tr><th scope="row">协调者</th><td class="self">—</td><td class="free"><b>自由</b><small>任务卡、退回</small></td><td class="free"><b>自由</b><small>结论审核请求</small></td><td class="free"><b>自由</b><small>咨询</small></td></tr>
+        <tr><th scope="row">研究者</th><td class="fixed"><b>仅固定</b><small>任务结论、阻塞</small></td><td class="self">—</td><td class="free"><b>自由</b><small>代码审核请求</small></td><td class="none">无</td></tr>
+        <tr><th scope="row">审核者</th><td class="fixed"><b>仅固定</b><small>结论审核结果</small></td><td class="free"><b>自由</b><small>代码审核结果</small></td><td class="self">—</td><td class="none">无</td></tr>
+        <tr><th scope="row">顾问</th><td class="fixed"><b>仅固定</b><small>建议</small></td><td class="none">无</td><td class="none">无</td><td class="self">—</td></tr>
+        <tr><th scope="row">系统</th><td class="fixed"><b>仅固定</b><small>失联（监视）</small></td><td><b>仅固定</b><small>作业结束（执行器）</small></td><td class="none">无</td><td class="none">无</td></tr>
+      </tbody>
+    </table></div>
+    <figcaption><span class="fig-n">图 5</span>进入协调者的只有固定类型和格式的消息（描边列）；协调者发出的消息、研究者和审核者之间的讨论可以是自由文本，固定消息的字段见图 3、图 4。</figcaption>
+  </figure>
 </section>
 
 <section id="review">
@@ -659,7 +678,7 @@ header h1{font-size:clamp(1.9rem,3.2vw,2.6rem);max-width:none}
         <g class="ve-n"><rect class="sh" x="20" y="232" width="195" height="56"/><text x="117" y="251">上一回合未通过</text><text class="sub" x="117" y="272">只能 --recheck-of</text></g>
       </svg>
     </div>
-    <figcaption><span class="fig-n">图 5</span>回合的状态全部从账本算出，不需要审核者或研究者通知谁；回合结束后，监视关闭会话。</figcaption>
+    <figcaption><span class="fig-n">图 6</span>回合的状态全部从账本算出，不需要审核者或研究者通知谁；回合结束后，监视关闭会话。</figcaption>
   </figure>
   <p>落到代码：<code>_route</code> 改为调用 <code>open_session</code>；审核单记下所属任务；<code>_round</code> 加新回合检查；会话名取自审核单 id，避免 <code>_free_name</code> 在并发时重名。</p>
 </section>
@@ -671,7 +690,7 @@ header h1{font-size:clamp(1.9rem,3.2vw,2.6rem);max-width:none}
     <div class="ve-table pack"><table>
       <thead><tr><th>启动包</th><th>协调者</th><th>研究者</th><th>审核者</th><th>顾问</th></tr></thead>
       <tbody>
-        <tr class="load"><th scope="row">角色卡</th><td>职责、可发的消息、不做的事</td><td>职责、结束方式</td><td>严重度定义、输出格式、每回合最多两次审核</td><td>只给建议、轮次上限、输出格式</td></tr>
+        <tr class="load"><th scope="row">角色卡</th><td>职责、可发的消息、不做的事</td><td>职责、可发的消息、结束方式</td><td>严重度定义、输出格式、每回合最多两次审核</td><td>只给建议、轮次上限、输出格式</td></tr>
         <tr class="load"><th scope="row">本次问题</th><td>待处理的任务结论或阻塞</td><td>任务卡全文</td><td>代码审核：commit 和文件范围。结论审核：待审结论和假说修订版</td><td>一句瓶颈问题</td></tr>
         <tr class="load"><th scope="row">必要材料</th><td>目标和约束一屏（范围、预算余量、必须问用户的事）；活跃假说和状态；最近几个决定；开放任务每个一行</td><td>目标假说和合同；worktree、branch、base commit；依赖产物的引用；计算配方（资源、队列、提交方式、通知目标 = 自己）</td><td>对照的合同；复查时加上一轮问题清单和修复 diff；结论审核另加证据引用和预设规则</td><td>相关假说链、已试路径和结果、约束</td></tr>
         <tr class="load"><th scope="row">结束条件</th><td>发出下一张任务卡、决定请求或阶段报告</td><td>问题有答案，发任务结论；授权内做不下去，发阻塞</td><td>提交通过或问题清单，发给请求者</td><td>给出选项和理由，发给协调者</td></tr>
@@ -679,7 +698,7 @@ header h1{font-size:clamp(1.9rem,3.2vw,2.6rem);max-width:none}
         <tr class="out"><th scope="row">不进入</th><td>计划全文（只在项目开始读一次）、作业 id、日志、diff、审核讨论、消息历史</td><td>假说树全貌、其他任务、协调者的消息历史</td><td>项目状态、其他任务、作者和协调者的沟通</td><td>任务流水、代码细节</td></tr>
       </tbody>
     </table></div>
-    <figcaption><span class="fig-n">图 6</span>四个 agent 的启动包结构相同；底色行启动时载入，虚线行按 id 取，划线行不进入上下文。</figcaption>
+    <figcaption><span class="fig-n">图 7</span>四个 agent 的启动包结构相同；底色行启动时载入，虚线行按 id 取，划线行不进入上下文。</figcaption>
   </figure>
 
   <figure>
@@ -687,7 +706,7 @@ header h1{font-size:clamp(1.9rem,3.2vw,2.6rem);max-width:none}
       <div class="kpi"><span class="ve-label">a8a70a9 协调者重读规则文档的轮次（57 / 122）</span><span class="val"><span data-count="47">47</span><span class="unit">%</span></span><svg class="ve-waffle" viewBox="0 0 170 100" role="img" aria-label="122 轮里有 57 轮重读规则文档"><rect x="0" y="0" width="100" height="40" fill="url(#ve-w-on)"/><rect x="0" y="40" width="70" height="10" fill="url(#ve-w-on)"/><rect x="70" y="40" width="30" height="10" fill="url(#ve-w-off)"/><rect x="0" y="50" width="100" height="50" fill="url(#ve-w-off)"/><path class="ann" d="M104 45H114"/><text x="118" y="45">其余轮次</text></svg></div>
       <div class="kpi"><span class="ve-label">协调者的规则文档（SKILL、workflow、team、host）</span><span class="val"><span data-count="63">63</span><span class="unit">KB</span></span><svg class="ve-bars" viewBox="0 0 240 52" role="img" aria-label="现在的规则文档 63 KB，角色卡的目标是 2 KB"><text y="12">现在</text><rect x="84" y="5" width="98.44" height="14" rx="2"/><text x="190.44" y="12">63 KB</text><text y="40">角色卡目标</text><rect class="hot" x="84" y="33" width="3.13" height="14" rx="2"/><text x="95.13" y="40">2 KB</text></svg></div>
     </div>
-    <figcaption><span class="fig-n">图 7</span>压缩或重启后，角色重读同一个启动包；机械规则改由 CLI 检查，其余规则按需查阅。</figcaption>
+    <figcaption><span class="fig-n">图 8</span>压缩或重启后，角色重读同一个启动包；机械规则改由 CLI 检查，其余规则按需查阅。</figcaption>
   </figure>
   <p>现有 <code>work_pack</code> 已接近研究者的启动包。<code>resume_pack</code> 给协调者时要去掉未完成 attempts、Locations 和 Compute 三节。</p>
 </section>
@@ -717,11 +736,11 @@ header h1{font-size:clamp(1.9rem,3.2vw,2.6rem);max-width:none}
         <text class="ve-tag gone-t" x="20" y="223">逐批 GO</text><text class="ve-tag" x="600" y="223">任务卡里的授权</text>
         <text class="ve-tag gone-t" x="20" y="261">进度 NOTE</text><text class="ve-tag" x="600" y="261">账本</text>
         <text class="ve-tag gone-t" x="20" y="299">文档修订的来回</text><text class="ve-tag" x="600" y="299">审核回路</text>
-        <text class="ve-tag gone-t" x="20" y="337">自由形式的 NOTE</text><text class="ve-tag" x="600" y="337">任务结论；决定不了的转成阻塞</text>
+        <text class="ve-tag gone-t" x="20" y="337">发给协调者的自由 NOTE</text><text class="ve-tag" x="600" y="337">任务结论；决定不了的转成阻塞</text>
         <text class="ve-tag gone-t" x="20" y="375">页面说明</text><text class="ve-tag" x="600" y="375">阶段结束时的独立工作</text>
       </svg>
     </div>
-    <figcaption><span class="fig-n">图 8</span>每类被删的沟通都有明确的新去向，协调者不用再读它们。</figcaption>
+    <figcaption><span class="fig-n">图 9</span>每类被删的沟通都有明确的新去向，协调者不用再读它们。</figcaption>
   </figure>
 
   <figure>
@@ -735,17 +754,25 @@ header h1{font-size:clamp(1.9rem,3.2vw,2.6rem);max-width:none}
         <svg class="ve-svg ve-stack" viewBox="0 0 800 70" role="img" aria-label="287 条消息里，NOTE 137 条，WAIT 74 条，RESULT 和 BLOCKED 共 76 条"><rect x="0" y="0" width="381.88" height="40"/><text x="190.94" y="62">NOTE 137条</text><rect x="381.88" y="0" width="206.27" height="40"/><text x="485.02" y="62">WAIT 74条</text><rect class="hot" x="588.15" y="0" width="211.85" height="40"/><text x="694.08" y="62">RESULT + BLOCKED 76条</text></svg>
       </div>
     </div>
-    <figcaption><span class="fig-n">图 9</span>a8a70a9 的消息里只有 26% 是结论；目标是正常路径每个任务 1 条，需要结论审核时 2 条，目标尚未实测。</figcaption>
+    <figcaption><span class="fig-n">图 10</span>a8a70a9 的消息里只有 26% 是结论；目标是正常路径每个任务 1 条，需要结论审核时 2 条，目标尚未实测。</figcaption>
   </figure>
 </section>
 
 <section id="open">
-  <div class="sec-head"><p class="ve-label caps">待定</p><h2>四件事需要你定</h2></div>
+  <div class="sec-head"><p class="ve-label caps">决定</p><h2>四件事已定，两件还要你选</h2></div>
+  <div class="ve-table"><table>
+    <thead><tr><th>问题</th><th>决定</th></tr></thead>
+    <tbody>
+      <tr><td>谁启动审核会话</td><td>谁请求审核，谁启动；一个回合一个会话（图 6）</td></tr>
+      <tr><td>协调者怎么验收任务结论</td><td>读 CLI 生成的核验行，必要时抽查证据</td></tr>
+      <tr><td>自由消息</td><td>协调者到其他角色、研究者和审核者之间可以自由发；发给协调者的只有固定类型和格式（图 5）</td></tr>
+      <tr><td>贵运行要回协调者吗</td><td>任务卡授权内不用回；超出授权就发阻塞</td></tr>
+    </tbody>
+  </table></div>
+  <p>落到代码：<code>rl task deliver</code> 从账本生成核验行，包括运行状态、证据 id、审核是否通过、branch head 是否等于通过测试的 commit（<code>verification_lines</code> 现在只做最后一项）。<code>rl agent tell</code> 和 <code>rl msg</code> 拒绝会话发给协调者的消息。<code>_reviewer_brief</code> 和 <code>_advisor_brief</code> 去掉 tell coordinator 的步骤，由 <code>rl review answer</code> 和 <code>rl advise answer</code> 发固定消息。</p>
   <div class="asks">
-    <fieldset class="ask" id="ask-accept" data-ask="accept"><legend class="ask-n">Question <b>1</b> of 4</legend><p class="ask-q">协调者怎么验收任务结论？</p><div class="ask-opts"><label class="opt"><input type="radio" name="accept" value="check" checked><span class="opt-body"><span class="opt-label">读 CLI 生成的核验行，必要时抽查证据</span><span class="sug">Suggested</span></span></label><label class="opt"><input type="radio" name="accept" value="full"><span class="opt-body"><span class="opt-label">每个结论都逐项复核证据</span></span></label><label class="opt"><input type="radio" name="accept" value="review"><span class="opt-body"><span class="opt-label">全部交给结论审核</span></span></label></div></fieldset>
-    <fieldset class="ask row" id="ask-tell" data-ask="tell"><legend class="ask-n">Question <b>2</b> of 4</legend><p class="ask-q">还保留 rl agent tell 这种自由消息吗？</p><div class="ask-opts"><label class="opt"><input type="radio" name="tell" value="drop" checked><span class="opt-body"><span class="opt-label">去掉，只留类型固定的消息</span><span class="sug">Suggested</span></span></label><label class="opt"><input type="radio" name="tell" value="pair"><span class="opt-body"><span class="opt-label">只在研究者和审核者之间保留</span></span></label><label class="opt"><input type="radio" name="tell" value="keep"><span class="opt-body"><span class="opt-label">保留现状</span></span></label></div></fieldset>
-    <fieldset class="ask row" id="ask-costly" data-ask="costly"><legend class="ask-n">Question <b>3</b> of 4</legend><p class="ask-q">贵运行要回到协调者批准吗？</p><div class="ask-opts"><label class="opt"><input type="radio" name="costly" value="card" checked><span class="opt-body"><span class="opt-label">任务卡授权内不用回</span><span class="sug">Suggested</span></span></label><label class="opt"><input type="radio" name="costly" value="threshold"><span class="opt-body"><span class="opt-label">超过预算阈值才回</span></span></label><label class="opt"><input type="radio" name="costly" value="always"><span class="opt-body"><span class="opt-label">每次开跑都回</span></span></label></div></fieldset>
-    <fieldset class="ask row" id="ask-session" data-ask="session"><legend class="ask-n">Question <b>4</b> of 4</legend><p class="ask-q">研究者每个任务开新会话吗？</p><div class="ask-opts"><label class="opt"><input type="radio" name="session" value="fresh" checked><span class="opt-body"><span class="opt-label">每个任务开新会话，只靠启动包</span><span class="sug">Suggested</span></span></label><label class="opt"><input type="radio" name="session" value="reuse"><span class="opt-body"><span class="opt-label">同一路线的连续任务复用会话</span></span></label></div></fieldset>
+    <fieldset class="ask" id="ask-reply" data-ask="reply"><legend class="ask-n">Question <b>1</b> of 2</legend><p class="ask-q">研究者、审核者、顾问怎么回答协调者的自由提问？</p><div class="ask-opts"><label class="opt"><input type="radio" name="reply" value="reply" checked><span class="opt-body"><span class="opt-label">固定类型“答复”：引用那条消息的 id，每条最多答复一次</span><span class="sug">Suggested</span></span></label><label class="opt"><input type="radio" name="reply" value="next"><span class="opt-body"><span class="opt-label">不单独答复，写进下一条任务结论或阻塞</span></span></label></div></fieldset>
+    <fieldset class="ask row" id="ask-session" data-ask="session"><legend class="ask-n">Question <b>2</b> of 2</legend><p class="ask-q">研究者每个任务开新会话吗？</p><div class="ask-opts"><label class="opt"><input type="radio" name="session" value="fresh" checked><span class="opt-body"><span class="opt-label">每个任务开新会话，只靠启动包</span><span class="sug">Suggested</span></span></label><label class="opt"><input type="radio" name="session" value="reuse"><span class="opt-body"><span class="opt-label">同一路线的连续任务复用会话</span></span></label></div></fieldset>
   </div>
 </section>
 
@@ -755,6 +782,7 @@ header h1{font-size:clamp(1.9rem,3.2vw,2.6rem);max-width:none}
   <p><code>design/coordinator-load-analysis-and-redesign-2026-11-09.md</code></p>
   <p><code>src/smooth_research/context.py:170</code> <code>work_pack</code> · <code>src/smooth_research/context.py:257</code> <code>resume_pack</code> · <code>src/smooth_research/agents.py:492</code> <code>_reviewer_brief</code></p>
   <p><code>src/smooth_research/reviews.py:163</code> <code>_round</code> · <code>src/smooth_research/reviews.py:184</code> <code>_route</code> · <code>src/smooth_research/research.py:447</code> <code>review_passes</code> · <code>src/smooth_research/watch.py:185</code> <code>assignment_state</code> · <code>src/smooth_research/agents.py:59</code> <code>_free_name</code></p>
+  <p><code>src/smooth_research/tasks.py:222</code> <code>verification_lines</code> · <code>src/smooth_research/agents.py:297</code> <code>tell</code> · <code>src/smooth_research/messages.py:43</code> <code>send</code></p>
   <p><code>plugin/skills/smooth-research/SKILL.md</code> · <code>references/workflow.md</code> · <code>references/team.md</code> · <code>hosts/codex/skills/smooth-research/references/host.md</code></p>
 </section>
 </main>
