@@ -20,7 +20,7 @@ header h1{font-size:clamp(1.9rem,3.2vw,2.6rem);max-width:none}
 </style>
 </head>
 <body>
-<nav class="ve-toc" aria-label="Sections"><div><a href="#roles">角色</a><a href="#messages">沟通</a><a href="#startup">启动</a><a href="#removed">删除</a><a href="#open">待定</a></div><span class="pos"></span></nav>
+<nav class="ve-toc" aria-label="Sections"><div><a href="#roles">角色</a><a href="#messages">沟通</a><a href="#review">审核</a><a href="#startup">启动</a><a href="#removed">删除</a><a href="#open">待定</a></div><span class="pos"></span></nav>
 <main>
 <header>
   <p class="eyebrow">Smooth Research · 最精简设计草案</p>
@@ -69,16 +69,17 @@ header h1{font-size:clamp(1.9rem,3.2vw,2.6rem);max-width:none}
 
       <text class="ve-el" data-s="1" x="292" y="99">计划</text>
       <text class="ve-el" data-s="2" x="480" y="151">任务卡：问题、合同、授权</text>
-      <text class="ve-el" data-s="3" x="677" y="223">commit + 合同</text>
+      <text class="ve-el" data-s="3" x="677" y="223">启动会话：commit + 合同</text>
       <text class="ve-el" data-s="4" x="677" y="275">通过或问题清单</text>
       <text class="ve-el" data-s="5" x="680" y="327">提交，通知目标 = 自己</text>
       <text class="ve-el" data-s="6" x="680" y="415">每批一条结束通知</text>
       <text class="ve-el" data-s="7" x="480" y="467">任务结论 + 证据引用</text>
-      <text class="ve-el" data-s="8" x="480" y="539">待审结论 + 证据引用</text>
+      <text class="ve-el" data-s="8" x="485" y="539">启动会话：结论 + 证据引用</text>
       <text class="ve-el" data-s="9" x="480" y="587">成立或不成立，理由</text>
       <text class="ve-el r" data-s="9" x="438" y="633">发下一张任务卡，回到 2</text>
       <text class="ve-el" data-s="10" x="292" y="635">阶段报告</text>
 
+      <text class="ve-tag" data-s="4" x="795" y="289">回合结束，会话关闭</text>
       <text class="ve-tag" data-s="1" x="128" y="113" text-anchor="end">项目开始</text>
       <g class="ve-co" data-s="1" transform="translate(146 108)"><circle r="11"/><text>1</text></g>
       <text class="ve-tag" data-s="2" x="128" y="165" text-anchor="end">选定下一个实验</text>
@@ -132,12 +133,12 @@ header h1{font-size:clamp(1.9rem,3.2vw,2.6rem);max-width:none}
     <ol class="ve-cap">
       <li data-n="1/10">用户写下目标、预算和必须先问的事。协调者把它拆成假说。</li>
       <li data-n="2/10">协调者选定下一个实验，发出任务卡，然后停止运行。</li>
-      <li data-n="3/10">贵运行前，研究者把冻结的 commit 和合同交给审核者。</li>
-      <li data-n="4/10">审核者只回复研究者。通过就开跑，有问题就修，最多两轮。</li>
+      <li data-n="3/10">贵运行前，研究者启动一个审核会话，把冻结的 commit 和合同交给它。</li>
+      <li data-n="4/10">审核者只回复研究者。通过就开跑，有问题就修后复查，每回合最多两次审核。</li>
       <li data-n="5/10">研究者提交作业，把通知目标设为自己，然后停止运行。</li>
       <li data-n="6/10">一批作业结束，执行器通知研究者一次。协调者收不到这条。</li>
       <li data-n="7/10">问题有了答案，研究者发任务结论。这是协调者在任务期间收到的第一条消息。</li>
-      <li data-n="8/10">结论要改变假说状态时，协调者请审核者独立判断。</li>
+      <li data-n="8/10">结论要改变假说状态时，协调者启动一个审核会话，请它独立判断。</li>
       <li data-n="9/10">审核者把结果交给协调者。协调者记录决定，再发下一张任务卡。</li>
       <li data-n="10/10">阶段结束，协调者给用户一份阶段报告。</li>
     </ol>
@@ -167,11 +168,11 @@ header h1{font-size:clamp(1.9rem,3.2vw,2.6rem);max-width:none}
         <path class="ve-e" d="M680 212H560"/>
         <text class="ve-el" x="620" y="203">建议</text>
         <path class="ve-e" d="M560 246H860V358"/>
-        <text class="ve-el" x="620" y="237">结论审核</text>
+        <text class="ve-el" x="620" y="237">启动结论审核</text>
         <path class="ve-e" d="M780 358V272H560"/>
         <text class="ve-el" x="620" y="263">审核结果</text>
         <path class="ve-e" d="M560 396H680"/>
-        <text class="ve-el" x="620" y="387">代码审核</text>
+        <text class="ve-el" x="620" y="387">启动代码审核</text>
         <path class="ve-e" d="M680 436H560"/>
         <text class="ve-el" x="620" y="427">审核结果</text>
         <path class="ve-e" d="M440 478V572"/>
@@ -186,9 +187,9 @@ header h1{font-size:clamp(1.9rem,3.2vw,2.6rem);max-width:none}
 
         <g class="ve-n"><rect class="sh" x="60" y="14" width="500" height="84"/><text x="310" y="36">用户 · 研究什么，花多少</text><text class="sub" x="310" y="60">负责：目标、预算、必须先问的事</text><text class="sub" x="310" y="82">不做：日常调度</text></g>
         <g class="ve-n is-key"><rect class="sh" x="60" y="168" width="500" height="120"/><text x="310" y="192">协调者 · 下一步验证什么</text><text class="sub" x="310" y="218">负责：假说树、实验选择、路线决定</text><text class="sub" x="310" y="242">不做：写代码、看作业、转发消息、复核机械事实</text><text class="sub" x="310" y="266">产出：任务卡、决定、阶段报告</text></g>
-        <g class="ve-n"><rect class="sh" x="60" y="358" width="500" height="120"/><text x="310" y="382">研究者 · 这个实验的结果是什么</text><text class="sub" x="310" y="408">负责：实现、运行、授权内处理失败、记录证据</text><text class="sub" x="310" y="432">不做：改任务的问题、定路线</text><text class="sub" x="310" y="456">产出：一条任务结论</text></g>
+        <g class="ve-n"><rect class="sh" x="60" y="358" width="500" height="120"/><text x="310" y="382">研究者 · 这个实验的结果是什么</text><text class="sub" x="310" y="408">负责：实现、运行、请审核、授权内处理失败、记录证据</text><text class="sub" x="310" y="432">不做：改任务的问题、定路线</text><text class="sub" x="310" y="456">产出：一条任务结论</text></g>
         <g class="ve-n"><rect class="sh" x="680" y="130" width="280" height="92"/><text x="820" y="152">顾问 · 卡住时还有哪条路</text><text class="sub" x="820" y="178">只在瓶颈或大额投入前工作</text><text class="sub" x="820" y="200">不做：指挥、实现</text></g>
-        <g class="ve-n"><rect class="sh" x="680" y="358" width="280" height="120"/><text x="820" y="382">审核者 · 这里有没有错</text><text class="sub" x="820" y="408">负责：独立判断代码和结论</text><text class="sub" x="820" y="432">不做：修改、定路线</text><text class="sub" x="820" y="456">产出：通过或问题清单</text></g>
+        <g class="ve-n"><rect class="sh" x="680" y="358" width="280" height="120"/><text x="820" y="382">审核者 · 这里有没有错</text><text class="sub" x="820" y="408">负责：独立判断代码和结论</text><text class="sub" x="820" y="432">产出：通过或问题清单；不修改</text><text class="sub" x="820" y="456">一个回合一个会话，结束即关闭</text></g>
         <g class="ve-n"><rect class="sh" x="60" y="572" width="270" height="74"/><text x="195" y="594">账本</text><text class="sub" x="195" y="622">记录事实，任何角色按 id 查</text></g>
         <g class="ve-n"><rect class="sh" x="380" y="572" width="240" height="74"/><text x="500" y="594">执行器</text><text class="sub" x="500" y="622">跑作业，结束时通知提交者</text></g>
         <g class="ve-n"><rect class="sh" x="670" y="572" width="280" height="74"/><text x="810" y="594">监视</text><text class="sub" x="810" y="622">重启断线会话，恢复不了才报告</text></g>
@@ -207,12 +208,12 @@ header h1{font-size:clamp(1.9rem,3.2vw,2.6rem);max-width:none}
       <tbody>
         <tr><td class="num">1</td><td>项目开始或换方向</td><td>用户 → 协调者</td><td>目标、预算、必须先问的事</td><td>拆成假说和第一批实验</td></tr>
         <tr><td class="num">2</td><td>选定下一个实验</td><td>协调者 → 研究者</td><td>要回答的问题；合同（对照、指标、范围、停止条件）；授权（预算、重试、替换、开跑条件）；结束条件</td><td>独立做完这个任务</td></tr>
-        <tr><td class="num">3</td><td>贵运行前，代码冻结</td><td>研究者 → 审核者</td><td>commit、文件范围、对照的合同</td><td>审代码</td></tr>
-        <tr><td class="num">4</td><td>审完</td><td>审核者 → 研究者</td><td>通过，或问题清单（严重度、位置）；每轮最多两次</td><td>修复，或开跑</td></tr>
+        <tr><td class="num">3</td><td>贵运行前，代码冻结</td><td>研究者 → 审核者</td><td>启动审核会话（<code>rl review request</code> 一条命令）；commit、文件范围、对照的合同</td><td>审代码</td></tr>
+        <tr><td class="num">4</td><td>审完</td><td>审核者 → 研究者</td><td>通过，或问题清单（严重度、位置）；每回合最多两次审核</td><td>修复，或开跑</td></tr>
         <tr><td class="num">5</td><td>审核通过</td><td>研究者 → 执行器</td><td>提交作业，通知目标是研究者自己</td><td>排队运行</td></tr>
         <tr><td class="num">6</td><td>一批作业结束或失败</td><td>执行器 → 研究者</td><td>每批一条：成功数、失败数、日志路径</td><td>分析，或在授权内重试</td></tr>
         <tr><td class="num">7</td><td>问题有了答案</td><td>研究者 → 协调者</td><td>一句结论；证据引用；限制；需要决定的事；CLI 生成的核验行（运行数、证据 id、commit）</td><td>决定下一步</td></tr>
-        <tr><td class="num">8</td><td>结论要改变假说状态、停路线或推荐正式实验</td><td>协调者 → 审核者</td><td>待审结论、假说修订版、证据引用、预设规则</td><td>独立判断</td></tr>
+        <tr><td class="num">8</td><td>结论要改变假说状态、停路线或推荐正式实验</td><td>协调者 → 审核者</td><td>启动审核会话；待审结论、假说修订版、证据引用、预设规则</td><td>独立判断</td></tr>
         <tr><td class="num">9</td><td>审完</td><td>审核者 → 协调者</td><td>成立或不成立，理由</td><td>记录决定，发下一张任务卡</td></tr>
         <tr><td class="num">10</td><td>阶段结束</td><td>协调者 → 用户</td><td>阶段结论、证据、下一阶段建议</td><td>批准或改方向</td></tr>
         <tr><td><small>按需</small></td><td>瓶颈，或大额投入前</td><td>协调者 → 顾问</td><td>一句问题、假说链、已试路径和结果、约束</td><td>给选项和理由</td></tr>
@@ -227,7 +228,7 @@ header h1{font-size:clamp(1.9rem,3.2vw,2.6rem);max-width:none}
     <div class="cases">
       <div class="case" data-st="warn">
         <span class="chip warn">阻塞</span>
-        <h3>授权内做不下去，或审核两轮仍有分歧</h3>
+        <h3>授权内做不下去，或两次审核后仍有分歧</h3>
         <svg class="ve-mini" viewBox="0 0 240 128" aria-label="研究者把阻塞发给协调者，内容是卡在哪、试过什么、需要哪个决定">
           <path class="ve-e is-st" d="M96 34H144"/>
           <g class="ve-n"><rect class="sh" x="6" y="12" width="90" height="44"/><text x="51" y="34">研究者</text></g>
@@ -263,6 +264,47 @@ header h1{font-size:clamp(1.9rem,3.2vw,2.6rem);max-width:none}
   </figure>
 </section>
 
+<section id="review">
+  <div class="sec-head"><p class="ve-label caps">审核</p><h2>一个回合一个会话，谁请求谁启动</h2></div>
+  <p><code>rl review request</code> 一条命令建审核单并启动会话。模型由 CLI 按配置选，请求者不能指定。每个任务同一时间最多一个开放回合，所以不需要排队和上限。</p>
+  <figure>
+    <div class="frame">
+      <svg class="ve-svg" viewBox="0 0 1000 316" aria-label="审核回合的状态图。请求者启动会话后进入审核中；未通过且不到两次时等复查；通过或两次用满时回合结束，监视关闭会话。上一回合未通过时不能开新回合。">
+        <rect class="ve-bnd" x="235" y="44" width="515" height="260"/>
+        <text class="ve-bnd-t" x="247" y="62">一个回合 = 一个会话 · 状态由账本算出</text>
+
+        <path class="ve-e" d="M160 110H260"/>
+        <text class="ve-el" x="197" y="101">启动会话</text>
+        <path class="ve-e" d="M420 110H560"/>
+        <text class="ve-el" x="490" y="101">通过或两次用满</text>
+        <path class="ve-e" d="M730 110H850"/>
+        <text class="ve-el" x="800" y="101">监视关闭</text>
+        <path class="ve-e" d="M305 138V232"/>
+        <text class="ve-el l" x="297" y="190">未通过</text>
+        <path class="ve-e" d="M375 232V138"/>
+        <text class="ve-el r" x="383" y="190">修复后 --recheck-of</text>
+        <path class="ve-e" d="M420 260H645V138"/>
+        <text class="ve-el" x="530" y="251">任务交付或关闭</text>
+        <path class="ve-e" d="M700 138V260H850"/>
+        <text class="ve-el" x="800" y="251">两次仍未通过</text>
+        <path class="ve-e" d="M90 138V232"/>
+        <text class="ve-x" x="90" y="190">✕</text>
+        <text class="ve-el r" x="104" y="190">再开新回合</text>
+
+        <g class="ve-n"><rect class="sh" x="20" y="82" width="140" height="56"/><text x="90" y="101">请求者</text><text class="sub" x="90" y="122">研究者或协调者</text></g>
+        <g class="ve-n is-key"><rect class="sh" x="260" y="82" width="160" height="56"/><text x="340" y="101">审核中</text><text class="sub" x="340" y="122">pending / running</text></g>
+        <g class="ve-n"><rect class="sh" x="260" y="232" width="160" height="56"/><text x="340" y="251">等复查</text><text class="sub" x="340" y="272">未通过，不到 2 次</text></g>
+        <g class="ve-n"><rect class="sh" x="560" y="82" width="170" height="56"/><text x="645" y="101">回合结束</text><text class="sub" x="645" y="122">账本算出，无人通知</text></g>
+        <g class="ve-n"><rect class="sh" x="850" y="82" width="130" height="56"/><text x="915" y="101">会话关闭</text><text class="sub" x="915" y="122">下一回合开新会话</text></g>
+        <g class="ve-n"><rect class="sh" x="850" y="232" width="130" height="56"/><text x="915" y="251">协调者</text><text class="sub" x="915" y="272">批准，或退回任务</text></g>
+        <g class="ve-n"><rect class="sh" x="20" y="232" width="195" height="56"/><text x="117" y="251">上一回合未通过</text><text class="sub" x="117" y="272">只能 --recheck-of</text></g>
+      </svg>
+    </div>
+    <figcaption><span class="fig-n">图 5</span>回合的状态全部从账本算出，不需要审核者或研究者通知谁；回合结束后，监视关闭会话。</figcaption>
+  </figure>
+  <p>落到代码：<code>_route</code> 改为调用 <code>open_session</code>；审核单记下所属任务；<code>_round</code> 加新回合检查；会话名取自审核单 id，避免 <code>_free_name</code> 在并发时重名。</p>
+</section>
+
 <section id="startup">
   <div class="sec-head"><p class="ve-label caps">启动</p><h2>每个角色启动时只载入一个启动包</h2></div>
   <p>用户不是 agent。用户提供目标、预算和必须先问的事，之后只看阶段报告和决定请求。</p>
@@ -270,7 +312,7 @@ header h1{font-size:clamp(1.9rem,3.2vw,2.6rem);max-width:none}
     <div class="ve-table pack"><table>
       <thead><tr><th>启动包</th><th>协调者</th><th>研究者</th><th>审核者</th><th>顾问</th></tr></thead>
       <tbody>
-        <tr class="load"><th scope="row">角色卡</th><td>职责、可发的消息、不做的事</td><td>职责、结束方式</td><td>严重度定义、输出格式、每轮最多两次</td><td>只给建议、轮次上限、输出格式</td></tr>
+        <tr class="load"><th scope="row">角色卡</th><td>职责、可发的消息、不做的事</td><td>职责、结束方式</td><td>严重度定义、输出格式、每回合最多两次审核</td><td>只给建议、轮次上限、输出格式</td></tr>
         <tr class="load"><th scope="row">本次问题</th><td>待处理的任务结论或阻塞</td><td>任务卡全文</td><td>代码审核：commit 和文件范围。结论审核：待审结论和假说修订版</td><td>一句瓶颈问题</td></tr>
         <tr class="load"><th scope="row">必要材料</th><td>目标和约束一屏（范围、预算余量、必须问用户的事）；活跃假说和状态；最近几个决定；开放任务每个一行</td><td>目标假说和合同；worktree、branch、base commit；依赖产物的引用；计算配方（资源、队列、提交方式、通知目标 = 自己）</td><td>对照的合同；复查时加上一轮问题清单和修复 diff；结论审核另加证据引用和预设规则</td><td>相关假说链、已试路径和结果、约束</td></tr>
         <tr class="load"><th scope="row">结束条件</th><td>发出下一张任务卡、决定请求或阶段报告</td><td>问题有答案，发任务结论；授权内做不下去，发阻塞</td><td>提交通过或问题清单，发给请求者</td><td>给出选项和理由，发给协调者</td></tr>
@@ -278,7 +320,7 @@ header h1{font-size:clamp(1.9rem,3.2vw,2.6rem);max-width:none}
         <tr class="out"><th scope="row">不进入</th><td>计划全文（只在项目开始读一次）、作业 id、日志、diff、审核讨论、消息历史</td><td>假说树全貌、其他任务、协调者的消息历史</td><td>项目状态、其他任务、作者和协调者的沟通</td><td>任务流水、代码细节</td></tr>
       </tbody>
     </table></div>
-    <figcaption><span class="fig-n">图 5</span>四个 agent 的启动包结构相同；底色行启动时载入，虚线行按 id 取，划线行不进入上下文。</figcaption>
+    <figcaption><span class="fig-n">图 6</span>四个 agent 的启动包结构相同；底色行启动时载入，虚线行按 id 取，划线行不进入上下文。</figcaption>
   </figure>
 
   <figure>
@@ -286,7 +328,7 @@ header h1{font-size:clamp(1.9rem,3.2vw,2.6rem);max-width:none}
       <div class="kpi"><span class="ve-label">a8a70a9 协调者重读规则文档的轮次（57 / 122）</span><span class="val"><span data-count="47">47</span><span class="unit">%</span></span><ve-waffle value="47" note="其余轮次" label="122 轮里有 57 轮重读规则文档"></ve-waffle></div>
       <div class="kpi"><span class="ve-label">协调者的规则文档（SKILL、workflow、team、host）</span><span class="val"><span data-count="63">63</span><span class="unit">KB</span></span><ve-bars unit="KB" max="64" label="现在的规则文档 63 KB，角色卡的目标是 2 KB"><ve-bar value="63">现在</ve-bar><ve-bar value="2" hot>角色卡目标</ve-bar></ve-bars></div>
     </div>
-    <figcaption><span class="fig-n">图 6</span>压缩或重启后，角色重读同一个启动包；机械规则改由 CLI 检查，其余规则按需查阅。</figcaption>
+    <figcaption><span class="fig-n">图 7</span>压缩或重启后，角色重读同一个启动包；机械规则改由 CLI 检查，其余规则按需查阅。</figcaption>
   </figure>
   <p>现有 <code>work_pack</code> 已接近研究者的启动包。<code>resume_pack</code> 给协调者时要去掉未完成 attempts、Locations 和 Compute 三节。</p>
 </section>
@@ -302,7 +344,7 @@ header h1{font-size:clamp(1.9rem,3.2vw,2.6rem);max-width:none}
         <path class="ve-e" d="M300 66H590"/><text class="ve-el" x="445" y="57">写入</text>
         <path class="ve-e" d="M300 104H590"/><text class="ve-el" x="445" y="95">直接通知</text>
         <path class="ve-e" d="M300 142H590"/><text class="ve-el" x="445" y="133">留在</text>
-        <path class="ve-e" d="M300 180H590"/><text class="ve-el" x="445" y="171">由系统分配</text>
+        <path class="ve-e" d="M300 180H590"/><text class="ve-el" x="445" y="171">由请求者启动</text>
         <path class="ve-e" d="M300 218H590"/><text class="ve-el" x="445" y="209">写进</text>
         <path class="ve-e" d="M300 256H590"/><text class="ve-el" x="445" y="247">写入</text>
         <path class="ve-e" d="M300 294H590"/><text class="ve-el" x="445" y="285">留在</text>
@@ -311,8 +353,8 @@ header h1{font-size:clamp(1.9rem,3.2vw,2.6rem);max-width:none}
 
         <text class="ve-tag gone-t" x="20" y="71">WAIT</text><text class="ve-tag" x="600" y="71">账本里的任务状态</text>
         <text class="ve-tag gone-t" x="20" y="109">作业结束的转发</text><text class="ve-tag" x="600" y="109">研究者（执行器直接发）</text>
-        <text class="ve-tag gone-t" x="20" y="147">审核中间结果、一轮结束的通知</text><text class="ve-tag" x="600" y="147">研究者和审核者之间</text>
-        <text class="ve-tag gone-t" x="20" y="185">needs a reviewer</text><text class="ve-tag" x="600" y="185">审核者（研究者发请求时）</text>
+        <text class="ve-tag gone-t" x="20" y="147">审核中间结果、一回合结束的通知</text><text class="ve-tag" x="600" y="147">研究者和审核者之间</text>
+        <text class="ve-tag gone-t" x="20" y="185">needs a reviewer</text><text class="ve-tag" x="600" y="185">审核会话（一条 rl review request）</text>
         <text class="ve-tag gone-t" x="20" y="223">逐批 GO</text><text class="ve-tag" x="600" y="223">任务卡里的授权</text>
         <text class="ve-tag gone-t" x="20" y="261">进度 NOTE</text><text class="ve-tag" x="600" y="261">账本</text>
         <text class="ve-tag gone-t" x="20" y="299">文档修订的来回</text><text class="ve-tag" x="600" y="299">审核回路</text>
@@ -320,7 +362,7 @@ header h1{font-size:clamp(1.9rem,3.2vw,2.6rem);max-width:none}
         <text class="ve-tag gone-t" x="20" y="375">页面说明</text><text class="ve-tag" x="600" y="375">阶段结束时的独立工作</text>
       </svg>
     </div>
-    <figcaption><span class="fig-n">图 7</span>每类被删的沟通都有明确的新去向，协调者不用再读它们。</figcaption>
+    <figcaption><span class="fig-n">图 8</span>每类被删的沟通都有明确的新去向，协调者不用再读它们。</figcaption>
   </figure>
 
   <figure>
@@ -334,18 +376,13 @@ header h1{font-size:clamp(1.9rem,3.2vw,2.6rem);max-width:none}
         <ve-stack unit="条" label="287 条消息里，NOTE 137 条，WAIT 74 条，RESULT 和 BLOCKED 共 76 条"><ve-bar value="137">NOTE</ve-bar><ve-bar value="74">WAIT</ve-bar><ve-bar value="76" hot>RESULT + BLOCKED</ve-bar></ve-stack>
       </div>
     </div>
-    <figcaption><span class="fig-n">图 8</span>a8a70a9 的消息里只有 26% 是结论；目标是正常路径每个任务 1 条，需要结论审核时 2 条，目标尚未实测。</figcaption>
+    <figcaption><span class="fig-n">图 9</span>a8a70a9 的消息里只有 26% 是结论；目标是正常路径每个任务 1 条，需要结论审核时 2 条，目标尚未实测。</figcaption>
   </figure>
 </section>
 
 <section id="open">
-  <div class="sec-head"><p class="ve-label caps">待定</p><h2>五件事需要你定</h2></div>
+  <div class="sec-head"><p class="ve-label caps">待定</p><h2>四件事需要你定</h2></div>
   <div class="asks">
-    <ve-ask id="reviewer" q="谁给研究者分配审核者？">
-      <ve-opt value="system" default>系统在收到审核请求时分配</ve-opt>
-      <ve-opt value="researcher">研究者按配置自己打开审核者</ve-opt>
-      <ve-opt value="coordinator">协调者分配（现在的做法）</ve-opt>
-    </ve-ask>
     <ve-ask id="accept" q="协调者怎么验收任务结论？">
       <ve-opt value="check" default>读 CLI 生成的核验行，必要时抽查证据</ve-opt>
       <ve-opt value="full">每个结论都逐项复核证据</ve-opt>
@@ -373,6 +410,7 @@ header h1{font-size:clamp(1.9rem,3.2vw,2.6rem);max-width:none}
   <p><code>design/coordinator-load-version-comparison-2026-11-09.md</code></p>
   <p><code>design/coordinator-load-analysis-and-redesign-2026-11-09.md</code></p>
   <p><code>src/smooth_research/context.py:170</code> <code>work_pack</code> · <code>src/smooth_research/context.py:257</code> <code>resume_pack</code> · <code>src/smooth_research/agents.py:492</code> <code>_reviewer_brief</code></p>
+  <p><code>src/smooth_research/reviews.py:163</code> <code>_round</code> · <code>src/smooth_research/reviews.py:184</code> <code>_route</code> · <code>src/smooth_research/research.py:447</code> <code>review_passes</code> · <code>src/smooth_research/watch.py:185</code> <code>assignment_state</code> · <code>src/smooth_research/agents.py:59</code> <code>_free_name</code></p>
   <p><code>plugin/skills/smooth-research/SKILL.md</code> · <code>references/workflow.md</code> · <code>references/team.md</code> · <code>hosts/codex/skills/smooth-research/references/host.md</code></p>
 </section>
 </main>
