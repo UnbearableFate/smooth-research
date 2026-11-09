@@ -1,0 +1,1121 @@
+<!doctype html>
+<html lang="zh" data-register="blueprint">
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>协调者每个任务只发一张任务卡</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230f172a'/%3E%3Cpath d='M18 40V24l14-8 14 8v16l-14 8-14-8Z' fill='none' stroke='%23fbbf24' stroke-width='4' stroke-linejoin='round'/%3E%3Ccircle cx='32' cy='32' r='5' fill='%2338bdf8'/%3E%3C/svg%3E">
+<meta charset="utf-8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&amp;family=IBM+Plex+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style data-ve-kit>
+/* visual-explainer kit. The renderer inlines this file at <link rel="stylesheet" data-ve-kit>.
+   Tokens sit in :where(), so a page's own :root rules (topic motif, a named palette) always win.
+   A page picks its register with <html data-register="instrument|blueprint|paper|editorial">; Instrument is the default. */
+
+/* scale, shared by every register */
+:where(:root) {
+  color-scheme: light dark;
+  --t-label: .75rem; --t-small: .875rem; --t-body: 1rem; --t-lead: 1.25rem; --t-h2: 1.625rem; --t-h1: clamp(2.25rem, 5.5vw, 4rem);
+  --s-1: .25rem; --s-2: .5rem; --s-3: .75rem; --s-4: 1rem; --s-5: 1.5rem; --s-6: 2rem; --s-7: 3rem; --s-8: 4.5rem;
+  --r-1: 4px; --r-2: 10px;
+  --ease: cubic-bezier(.16,1,.3,1); --fast: 150ms; --med: 300ms; --slow: 500ms;
+}
+
+/* Instrument (default): Geist, near-black and amber; dark first */
+:where(:root) {
+  --bg: #0b0d0c; --surface: #121614; --border: #1f2522; --border-bright: #5e6662;
+  --text: #e6ebe8; --text-dim: #919d97; --accent: #f2a93b; --accent-dim: rgba(242,169,59,.14);
+  --ok: #6fcf97; --warn: #e8c547; --risk: #ef6f5c; --info: #6cb6e0;
+  --node-top: color-mix(in srgb, var(--text) 7%, var(--surface)); --lift: rgb(0 0 0 / .45); --halo: 32%;
+  --font-body: 'Geist', 'Segoe UI', sans-serif;
+  --font-mono: 'Geist Mono', ui-monospace, monospace;
+  --font-display: var(--font-body); --display-weight: 600;
+  --stage: radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--text) 13%, transparent) 1px, transparent 1.5px) 0 0 / 20px 20px;
+}
+@media (prefers-color-scheme: light) {
+  :where(:root) {
+    --bg: #f4f5f3; --surface: #ffffff; --border: #dfe3e0; --border-bright: #888e8b;
+    --text: #121614; --text-dim: #545e59; --accent: #955700; --accent-dim: rgba(149,87,0,.12);
+    --ok: #1c7443; --warn: #7a5e00; --risk: #b0341e; --info: #1a6890;
+    --node-top: var(--surface); --lift: rgb(18 22 20 / .12); --halo: 22%;
+  }
+}
+
+/* Blueprint: IBM Plex, blue-black, a 24px line grid on the stage, r-1 everywhere; dark first */
+:where(:root[data-register="blueprint"]) {
+  --bg: #0d1520; --surface: #132031; --border: #22324a; --border-bright: #596b87;
+  --text: #e3ecf5; --text-dim: #92a6bb; --accent: #ffb547; --accent-dim: rgba(255,181,71,.14);
+  --ok: #6fd3a0; --warn: #e8d36a; --risk: #ff7b6b; --info: #7cc0f0;
+  --font-body: 'IBM Plex Sans', 'Segoe UI', sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+  --r-2: 4px;
+  --stage: linear-gradient(color-mix(in srgb, var(--border) 55%, transparent) 1px, transparent 1px) 0 0 / 24px 24px, linear-gradient(90deg, color-mix(in srgb, var(--border) 55%, transparent) 1px, transparent 1px) 0 0 / 24px 24px;
+}
+@media (prefers-color-scheme: light) {
+  :where(:root[data-register="blueprint"]) {
+    --bg: #f2f6fa; --surface: #ffffff; --border: #d6e0ea; --border-bright: #818f9e;
+    --text: #0f1a26; --text-dim: #4d6074; --accent: #a34700; --accent-dim: rgba(163,71,0,.12);
+    --ok: #1c7443; --warn: #776300; --risk: #b0341e; --info: #145f99;
+  }
+}
+
+/* Paper: Newsreader headings over Atkinson Hyperlegible, ink blue; light first */
+:where(:root[data-register="paper"]) {
+  --bg: #f7f7f4; --surface: #ffffff; --border: #e3e3dc; --border-bright: #8e8e8a;
+  --text: #17191c; --text-dim: #575c63; --accent: #2c4cd0; --accent-dim: rgba(44,76,208,.12);
+  --ok: #1d7443; --warn: #836000; --risk: #b3301d; --info: #1b6a94;
+  --node-top: var(--surface); --lift: rgb(18 22 20 / .12); --halo: 22%;
+  --font-body: 'Atkinson Hyperlegible Next', 'Segoe UI', sans-serif;
+  --font-mono: 'Atkinson Hyperlegible Mono', ui-monospace, monospace;
+  --font-display: 'Newsreader', Georgia, serif; --display-weight: 500;
+}
+@media (prefers-color-scheme: dark) {
+  :where(:root[data-register="paper"]) {
+    --bg: #111316; --surface: #181b1f; --border: #262a30; --border-bright: #62676c;
+    --text: #e8e8e3; --text-dim: #9ba1a9; --accent: #93a6ff; --accent-dim: rgba(147,166,255,.14);
+    --ok: #6cc492; --warn: #e3b94d; --risk: #f0806b; --info: #6fb8dc;
+    --node-top: color-mix(in srgb, var(--text) 7%, var(--surface)); --lift: rgb(0 0 0 / .45); --halo: 32%;
+  }
+}
+
+/* Editorial: Instrument Serif display over Instrument Sans; light first */
+:where(:root[data-register="editorial"]) {
+  --bg: #fbfbf9; --surface: #f1f0ec; --border: #e2e0da; --border-bright: #8c8a85;
+  --text: #111111; --text-dim: #5a5853; --accent: #cc3418; --accent-dim: rgba(204,52,24,.12);
+  --ok: #1d7443; --warn: #836000; --risk: #a01d48; --info: #1b6a94;
+  --node-top: var(--surface); --lift: rgb(18 22 20 / .12); --halo: 22%;
+  --font-body: 'Instrument Sans', 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  --font-display: 'Instrument Serif', Georgia, serif; --display-weight: 400;
+}
+@media (prefers-color-scheme: dark) {
+  :where(:root[data-register="editorial"]) {
+    --bg: #0f0f0f; --surface: #1a1a19; --border: #2b2a28; --border-bright: #696763;
+    --text: #f2f0eb; --text-dim: #a4a19b; --accent: #ff6e50; --accent-dim: rgba(255,110,80,.14);
+    --ok: #6cc492; --warn: #e3b94d; --risk: #f57fa2; --info: #7cb8e8;
+    --node-top: color-mix(in srgb, var(--text) 7%, var(--surface)); --lift: rgb(0 0 0 / .45); --halo: 32%;
+  }
+}
+
+/* base */
+html { font-size: 17px; }
+* { box-sizing: border-box; margin: 0; }
+body { background: var(--bg); color: var(--text); font: 400 var(--t-body)/1.6 var(--font-body); text-wrap: pretty; font-kerning: normal; font-synthesis: none; -webkit-font-smoothing: antialiased; }
+::selection { background: var(--accent-dim); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+main { max-width: 64rem; margin: 0 auto; padding: var(--s-8) var(--s-5); display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s-8); }
+section, figure, header { min-width: 0; }
+header { display: grid; gap: var(--s-4); }
+header + figure { margin-top: calc(var(--s-6) - var(--s-8)); }
+/* text-box trims to cap height and baseline, so gaps are measured from the letters, not the line box */
+h1, h2, .kpi .val { text-box: trim-both cap alphabetic; }
+h1 { font-size: var(--t-h1); line-height: 1.05; font-family: var(--font-display); font-weight: var(--display-weight); letter-spacing: -.035em; text-wrap: balance; max-width: 16ch; margin-bottom: var(--s-2); }
+h1 .num { color: var(--accent); font-variant-numeric: tabular-nums; }
+h2 { font-size: var(--t-h2); line-height: 1.2; font-family: var(--font-display); font-weight: var(--display-weight); letter-spacing: -.015em; text-wrap: balance; }
+/* section opener: hairline, mono label in columns 1–3, h2 in 4–12, on one baseline */
+.sec-head { display: grid; gap: var(--s-3) var(--s-5); align-items: baseline; border-top: 1px solid var(--border); padding-top: var(--s-5); margin-bottom: var(--s-6); }
+@media (min-width: 52rem) { .sec-head { grid-template-columns: 3fr 9fr; } }
+/* the other opener, a bare label above the h2, gets the same gaps, so the h2 never sits on the figure below */
+section > .ve-label:has(+ h2) { margin-bottom: var(--s-3); }
+section > h2 { margin-bottom: var(--s-6); }
+h3 { font-size: var(--t-body); line-height: 1.3; font-weight: 600; }
+.eyebrow { display: flex; align-items: center; gap: var(--s-2); font: 600 var(--t-label) var(--font-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+.eyebrow::before { content: ''; width: 1.25rem; height: 2px; background: currentColor; }
+.ve-label { font: 500 var(--t-label) var(--font-mono); color: var(--text-dim); }
+.caps { text-transform: uppercase; letter-spacing: .08em; font-weight: 600; color: var(--text); }
+.lead { font-size: var(--t-lead); line-height: 1.5; color: var(--text-dim); max-width: 44ch; }
+.lead b { color: var(--text); font-weight: 600; }
+.meta { font: 500 var(--t-label) var(--font-mono); color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.unit { font-size: .5em; font-weight: 500; color: var(--text-dim); letter-spacing: 0; }
+code { font: .875em var(--font-mono); font-variant-ligatures: none; }
+/* prose by element, at zero specificity so a page's own rules win: the measure on a section's own text (a card or a table sets
+   its own), code blocks, bare lists, and the gaps between a section's blocks (text to text closer than a block, the line after
+   an h3 closest). The opener keeps its own gaps, so h2 gets none. */
+:where(main, section:not(.sources)) > :where(p, ul, ol) { max-width: 65ch; }
+:where(pre) { font: 500 var(--t-small)/1.55 var(--font-mono); font-variant-ligatures: none; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-2); padding: var(--s-4); overflow-x: auto; }
+:where(pre) code { font: inherit; }
+:where(main :is(ul, ol):not([class])) { padding-left: 1.25rem; display: grid; gap: var(--s-2); }
+:where(section:not(.sources) > * + :not(h2)) { margin-top: var(--s-5); }
+:where(section:not(.sources) > :is(p, ul, ol) + :is(p, ul, ol)) { margin-top: var(--s-3); }
+:where(section:not(.sources) > h3 + *) { margin-top: var(--s-2); }
+
+/* section nav for 4+ sections: a sticky bar before <main>, aligned to its column; the links alone scroll sideways on a phone, and
+   kit.js marks the section in view */
+.ve-toc { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; gap: var(--s-4); padding: 0 max(var(--s-5), (100% - 64rem) / 2 + var(--s-5)); background: var(--bg); border-bottom: 1px solid var(--border); }
+.ve-toc > div { display: flex; flex: 1; gap: var(--s-1); min-width: 0; padding: var(--s-2) 0; overflow-x: auto; scrollbar-width: none; mask-image: linear-gradient(90deg, #000 85%, transparent); }
+.ve-toc > div::-webkit-scrollbar { display: none; }
+.ve-toc a { font: 500 var(--t-label) var(--font-mono); color: var(--text-dim); text-decoration: none; padding: var(--s-2); border-radius: var(--r-1); white-space: nowrap; }
+.ve-toc a:hover { color: var(--text); }
+.ve-toc a[aria-current] { color: var(--text); background: var(--accent-dim); }
+.ve-toc .pos { font: 500 var(--t-label) var(--font-mono); color: var(--text-dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
+:where(body:has(> .ve-toc) main > *) { scroll-margin-top: 4rem; }
+
+/* figure: the stage is a faint dot grid, so nodes read as objects placed on it */
+.frame { background: var(--stage), var(--bg); border: 1px solid var(--border); border-radius: var(--r-2); padding: var(--s-5); overflow-x: auto; }
+figcaption { font-size: var(--t-body); color: var(--text-dim); margin-top: var(--s-3); max-width: 65ch; }
+.fig-n { font: 600 var(--t-label) var(--font-mono); color: var(--text); margin-right: var(--s-2); }
+
+/* diagram kit (references/diagrams.md) */
+/* min-width keeps 14-unit labels >= 12px as rendered; narrow screens scroll the frame instead. kit/render.mjs sets --ve-min for a viewBox wider than 816. */
+.ve-svg { width: 100%; min-width: var(--ve-min, 700px); height: auto; display: block; font: 500 17px var(--font-body); }
+.ve-n .sh { fill: url(#ve-node); stroke: var(--border-bright); stroke-width: 1.5; filter: drop-shadow(0 6px 14px var(--lift)); transition: stroke var(--fast) var(--ease), opacity var(--med) var(--ease); }
+.ve-n .lid { fill: var(--node-top); }
+.ve-n.is-key .sh { fill: color-mix(in srgb, var(--accent) 11%, var(--surface)); stroke: var(--accent); stroke-width: 2; filter: drop-shadow(0 0 16px color-mix(in srgb, var(--accent) var(--halo), transparent)); }
+.ve-n text { fill: var(--text); text-anchor: middle; dominant-baseline: central; font-weight: 600; }
+.ve-n .sub { fill: var(--text-dim); font: 500 14px var(--font-mono); }
+.ve-n .gl { fill: none; stroke: var(--text-dim); stroke-width: 1.5; stroke-linejoin: round; }
+.ve-n .ve-kind { fill: var(--text-dim); font: 600 14px var(--font-mono); letter-spacing: .08em; text-transform: uppercase; }
+.ve-n.is-key .gl { stroke: var(--accent); }
+.ve-e { fill: none; stroke: var(--text-dim); stroke-width: 1.75; marker-end: url(#ve-ah); }
+.ve-e.is-hot { stroke: var(--accent); stroke-width: 2.75; filter: drop-shadow(0 0 5px color-mix(in srgb, var(--accent) 55%, transparent)); }
+.ve-e.is-async { stroke-dasharray: 6 5; }
+.ve-el { fill: var(--text-dim); font: 500 14px var(--font-mono); text-anchor: middle; paint-order: stroke; stroke: var(--bg); stroke-width: 5px; stroke-linejoin: round; }
+.ve-el.l { text-anchor: end; } .ve-el.r { text-anchor: start; }
+/* a dashed boundary around a group, with a mono tag in its corner */
+.ve-bnd { fill: none; stroke: var(--border-bright); stroke-width: 1; stroke-dasharray: 6 5; }
+.ve-bnd-t { fill: var(--text-dim); font: 600 14px var(--font-mono); letter-spacing: .08em; text-transform: uppercase; }
+/* a plain mono label on a drawing (a note, a count); .key and .risk color it */
+.ve-tag { fill: var(--text-dim); font: 500 14px var(--font-mono); }
+.ve-tag.key { fill: var(--accent); } .ve-tag.risk { fill: var(--risk); }
+/* a slot in a queue or worker pool; .is-on fills it (.on is the stepper's) */
+.ve-slot { fill: var(--surface); stroke: var(--border-bright); stroke-width: 1.25; }
+.ve-slot.is-on { fill: var(--accent-dim); stroke: var(--accent); stroke-width: 1.75; }
+/* chart axes and ticks, and their labels */
+.ve-axis { fill: none; stroke: var(--border-bright); stroke-width: 1; }
+.ve-axis-t { fill: var(--text-dim); font: 500 14px var(--font-mono); text-anchor: middle; font-variant-numeric: tabular-nums; }
+/* <ve-flow> on a page: its labels stay at 12 px or more, and a small drawing grows no more than 1.3× (kit/flow.mjs sets both) */
+.ve-svg.ve-flow { min-width: var(--min); max-width: var(--max); }
+/* flags on <ve-flow> parts: new, gone (an arrow also gets ✕) */
+.ve-n.is-new .sh { stroke: var(--ok); stroke-dasharray: 6 4; }
+.ve-n.is-gone .sh { stroke: var(--risk); stroke-dasharray: 3 4; opacity: .7; }
+.ve-n.is-gone text { text-decoration: line-through; }
+.ve-e.is-new { stroke: var(--ok); }
+.ve-e.is-gone { stroke: var(--risk); stroke-dasharray: 3 4; }
+/* a walked machine (references/machines.md): a state that can still reach a broken rule, the shortest way there, and the state
+   that breaks it; later rules win, so the breaking state stays red on the path */
+.ve-n.is-may-break .sh { stroke: var(--warn); } .ve-n.is-may-break:not(.is-key) .sh { fill: color-mix(in srgb, var(--warn) 10%, var(--surface)); }
+/* in a stepper the path lights only on its last step, the full picture; elsewhere it is always lit. :where() keeps the
+   condition from adding specificity, so .is-breaks below still wins and the breaking state stays red */
+.ve-n.is-bug-path:not(:where(.ve-steps:not(.is-full) *)) .sh, .ve-e.is-bug-path:not(:where(.ve-steps:not(.is-full) *)) { stroke: var(--accent); }
+.ve-n.is-breaks .sh, .ve-steps .ve-n.is-breaks.now > .sh { stroke: var(--risk); stroke-width: 2.5; stroke-dasharray: 6 3; }
+.ve-x { fill: var(--risk); font: 600 16px var(--font-mono); text-anchor: middle; dominant-baseline: central; paint-order: stroke; stroke: var(--surface); stroke-width: 5px; }
+/* <ve-stack>: one bar split in proportion; labels under their segments */
+.ve-stack rect { fill: color-mix(in srgb, var(--text) 9%, var(--surface)); stroke: var(--border-bright); stroke-width: 1.5; }
+.ve-stack rect.hot { fill: var(--accent-dim); stroke: var(--accent); }
+.ve-stack text { fill: var(--text-dim); font: 500 14px var(--font-mono); text-anchor: middle; dominant-baseline: central; }
+
+/* numbered callouts and edge numbers (references/diagrams.md): .now fills the current one; .q keeps an edge number quiet until its step */
+.ve-co circle { fill: var(--surface); stroke: var(--accent); stroke-width: 1.75; }
+.ve-co text { fill: var(--accent); font: 600 14px var(--font-mono); text-anchor: middle; dominant-baseline: central; }
+.ve-co.now circle { fill: var(--accent); } .ve-co.now text { fill: var(--surface); }
+.ve-co.q circle { stroke: var(--border-bright); } .ve-co.q text { fill: var(--text-dim); }
+.ve-co.q.now circle { fill: var(--accent); stroke: var(--accent); } .ve-co.q.now text { fill: var(--surface); }
+
+/* dimension lines (references/diagrams.md) */
+.ve-dim path { fill: none; stroke-width: 1; } .ve-dim .ext { stroke: var(--border-bright); } .ve-dim .ln { stroke: var(--text-dim); }
+.ve-dim text { fill: var(--text); font: 500 14px var(--font-mono); text-anchor: middle; }
+.ve-dim.is-key .ln { stroke: var(--accent); } .ve-dim.is-key text { fill: var(--accent); }
+
+/* flow dots: they travel under the nodes, so a dot enters a box and leaves from the far side */
+[data-flow] { fill: none; stroke: none; }
+.ve-dots circle { fill: var(--text); }
+.ve-dots .hit { fill: var(--accent); filter: drop-shadow(0 0 4px var(--accent)); }
+.ve-steps:not(.is-full) .ve-dots { display: none; }
+
+/* linked highlighting: same data-ref lights up together */
+/* Dim shapes, never text below 4.5:1: unlit labels drop to --text-dim instead of fading. */
+.ve-ref { text-decoration: underline dotted var(--text-dim) 1px; text-underline-offset: .22em; border-radius: var(--r-1); transition: background var(--fast) var(--ease); }
+.ve-ref.is-lit { background: var(--accent-dim); text-decoration-color: var(--accent); }
+svg [data-ref] { transition: opacity var(--med) var(--ease); }
+svg.has-lit path[data-ref]:not(.is-lit), svg.has-lit g[data-ref]:not(.is-lit) .sh { opacity: .25; }
+svg.has-lit g[data-ref]:not(.is-lit) text, svg.has-lit text[data-ref]:not(.is-lit) { fill: var(--text-dim); }
+.ve-n.is-lit .sh { stroke: var(--accent); }
+.ve-e.is-lit { stroke: var(--accent); }
+.ve-el.is-lit { fill: var(--text); }
+.case.is-lit { border-color: var(--accent); }
+
+/* stepper / scene player */
+/* Future steps: shapes stay as a faint outline; their labels are hidden, not faded to an unreadable gray. */
+.ve-steps [data-s] { transition: opacity var(--slow) var(--ease), stroke-dashoffset var(--slow) var(--ease); }
+.ve-steps [data-s]:not(.on) { opacity: .15; }
+.ve-steps g[data-s]:not(.on) text, .ve-steps text[data-s]:not(.on) { opacity: 0; }
+.ve-steps path[pathLength][data-s] { stroke-dasharray: 1; stroke-dashoffset: 1; }
+.ve-steps path[pathLength][data-s].on { stroke-dashoffset: 0; }
+.ve-steps .ve-n.now > .sh { stroke: var(--accent); }
+/* replay: the edges that fired light until the full picture, and each token runs its path once, after --d; edges and nodes still show the step without tokens */
+.ve-steps:not(.is-full) .ve-e.now { stroke: var(--accent); stroke-width: 2.75; }
+.ve-tok { fill: var(--accent); visibility: hidden; }
+.ve-steps:not(.is-still) .ve-tok.now { visibility: visible; animation: ve-run var(--dur, 900ms) ease-in-out var(--d, 0ms) both; }
+@keyframes ve-run { from { offset-distance: 0%; opacity: 0; } 10%, 75% { opacity: 1; } to { offset-distance: 100%; opacity: 0; } }
+/* a part that comes and goes (a queued job, a busy slot): shown only on the steps its data-s lists, arriving after --d */
+.ve-steps .ve-at { transition: opacity var(--med) var(--ease); }
+.ve-steps .ve-at:not(.now) { opacity: 0; }
+.ve-steps .ve-at.now { transition-delay: var(--d, 0ms); }
+/* a changing value: one text per step at one spot; the latest step's shows, swapped without a crossfade */
+/* zero-specificity parent, so a value inside a node, a dimension, or a stack keeps that part's own fill and font */
+:where(.ve-vals) text { fill: var(--text-dim); } :where(.ve-vals) .sub { font: 500 14px var(--font-mono); }
+.ve-steps .ve-vals text { transition: none; }
+.ve-vals text.on:has(~ text.on) { opacity: 0; }
+.ve-player { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; align-items: center; gap: var(--s-2) var(--s-3); margin-top: var(--s-4); }
+.ve-cap { grid-column: 1 / -1; list-style: none; padding: 0; min-height: 3.2em; }
+.ve-cap li::before { content: attr(data-n); font: 600 var(--t-label) var(--font-mono); color: var(--accent); margin-right: var(--s-3); font-variant-numeric: tabular-nums; }
+.ve-player input { accent-color: var(--accent); min-width: 0; }
+button { font: 500 var(--t-small) var(--font-mono); color: var(--text); background: var(--surface); border: 1px solid var(--border-bright); border-radius: var(--r-1); padding: var(--s-2) var(--s-3); cursor: pointer; transition: border-color var(--fast) var(--ease); }
+button:hover, button:focus-visible { border-color: var(--accent); }
+
+/* KPI strip: one frame, cells split by hairlines, each number with its picture. Flex, so a wrapped last row stretches instead of leaving an empty gray cell. */
+.kpis { display: flex; flex-wrap: wrap; gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: var(--r-2); overflow: hidden; }
+.kpi { flex: 1 1 14rem; background: var(--surface); padding: var(--s-5); display: grid; grid-template-rows: auto auto 1fr; gap: var(--s-3); min-width: 0; }
+.kpi .val { font: 600 2.75rem/1 var(--font-body); font-variant-numeric: tabular-nums; letter-spacing: -.04em; }
+.ve-waffle { align-self: end; width: 11rem; height: auto; font: 500 13px var(--font-mono); overflow: visible; }
+.ve-waffle text { fill: var(--text-dim); dominant-baseline: central; }
+.ann { fill: none; stroke: var(--text-dim); stroke-width: 1; }
+.ve-bars { align-self: end; width: 100%; max-width: 16rem; height: auto; font: 500 13px var(--font-mono); overflow: visible; }
+.ve-bars text { fill: var(--text-dim); dominant-baseline: central; }
+.ve-bars rect { fill: var(--border-bright); transform-box: fill-box; transform-origin: left; transition: transform 900ms var(--ease) 150ms; }
+.ve-bars .hot { fill: var(--accent); }
+.ve-bars .hot + text { fill: var(--text); }
+
+/* small multiples: one mini diagram per case; the changed part takes the case's status color */
+.cases { display: grid; grid-template-columns: repeat(auto-fit, minmax(14.5rem, 1fr)); gap: var(--s-4); }
+.case { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-2); padding: var(--s-4); display: grid; gap: var(--s-3); align-content: start; transition: border-color var(--fast) var(--ease); }
+.case[data-st=ok] { --st: var(--ok); } .case[data-st=warn] { --st: var(--warn); } .case[data-st=risk] { --st: var(--risk); }
+.ve-mini { width: 100%; height: auto; font: 600 15px var(--font-body); }
+.ve-mini .ve-n .sh { filter: none; }
+/* a .cases column is never under 14.5rem, so a mini is ≥ 211 px and 14 units render ≥ 12.3 px */
+.ve-mini .ve-n .sub { font-size: 14px; }
+.ve-mini .is-st.ve-e { stroke: var(--st); stroke-width: 2.75; }
+.ve-mini .is-st .sh { stroke: var(--st); stroke-width: 2; }
+.ve-mini .is-st .sub { fill: var(--st); }
+.ve-mini .is-off { stroke-dasharray: 5 4; }
+.ve-mini .ve-e.is-off { opacity: .35; }
+
+/* chips */
+.chip { display: inline-flex; align-items: center; gap: var(--s-2); font: 600 var(--t-label) var(--font-mono); padding: 2px var(--s-2); border: 1px solid currentColor; border-radius: var(--r-1); white-space: nowrap; justify-self: start; }
+.chip::before { content: ''; width: .5rem; height: .5rem; background: currentColor; }
+.chip.ok { color: var(--ok); } .chip.ok::before { border-radius: 50%; }
+.chip.warn { color: var(--warn); } .chip.warn::before { clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+.chip.risk { color: var(--risk); }
+
+/* a table: a scroll frame, the header in the label style, row rules only; .num cells are right-aligned numbers */
+.ve-table { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--r-2); }
+.ve-table table { border-collapse: collapse; width: 100%; font-size: var(--t-body); font-variant-numeric: tabular-nums; }
+.ve-table th, .ve-table td { padding: var(--s-3) var(--s-4); text-align: left; vertical-align: top; border-bottom: 1px solid var(--border); }
+.ve-table thead th { background: var(--surface); font: 600 var(--t-label)/1.3 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--text-dim); }
+.ve-table tbody th { font-weight: 600; }
+.ve-table tbody tr:last-child > * { border-bottom: 0; }
+.ve-table .num { text-align: right; font-family: var(--font-mono); }
+.ve-table td small { display: block; color: var(--text-dim); font-size: var(--t-small); }
+
+details { border-top: 1px solid var(--border); padding-top: var(--s-4); color: var(--text-dim); font-size: var(--t-body); }
+summary { cursor: pointer; font: 500 var(--t-label) var(--font-mono); margin-bottom: var(--s-2); }
+/* sources stay visible: readers check them without hunting for a toggle */
+.sources { border-top: 1px solid var(--border); padding-top: var(--s-4); display: grid; gap: var(--s-2); }
+
+/* entrance: blocks rise in once; bars grow as their block arrives (JS adds .js-motion only when motion is allowed) */
+.js-motion main > * { transition: opacity var(--slow) var(--ease), transform var(--slow) var(--ease); }
+.js-motion main > :not(.in) { opacity: 0; transform: translateY(1rem); }
+.js-motion main > :not(.in) .ve-bars rect { transform: scaleX(0); }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } .ve-tok { display: none; } }
+
+@media print {
+  /* Print uses the register's light foregrounds on white, every step fully drawn, and no effects. */
+  :where(:root) { --bg: #fff; --surface: #fff; --border: #dfe3e0; --border-bright: #888e8b; --text: #121614; --text-dim: #545e59; --accent: #955700; --ok: #1c7443; --warn: #7a5e00; --risk: #b0341e; --info: #1a6890; --node-top: #fff; }
+  :where(:root[data-register="blueprint"]) { --border: #d6e0ea; --border-bright: #818f9e; --text: #0f1a26; --text-dim: #4d6074; --accent: #a34700; --warn: #776300; --info: #145f99; }
+  :where(:root[data-register="paper"]) { --border: #e3e3dc; --border-bright: #8e8e8a; --text: #17191c; --text-dim: #575c63; --accent: #2c4cd0; --ok: #1d7443; --warn: #836000; --risk: #b3301d; --info: #1b6a94; }
+  :where(:root[data-register="editorial"]) { --border: #e2e0da; --border-bright: #8c8a85; --text: #111111; --text-dim: #5a5853; --accent: #cc3418; --ok: #1d7443; --warn: #836000; --risk: #a01d48; --info: #1b6a94; }
+  .ve-player button, .ve-player input, .ve-dots { display: none; }
+  .ve-toc { display: none; }
+  .frame { overflow: visible; background: #fff; } .ve-svg, .ve-svg.ve-flow { min-width: 0; }
+  .frame, .case, .kpi { break-inside: avoid; } h2 { break-after: avoid; }
+  svg * { filter: none !important; }
+  .js-motion main > * { opacity: 1 !important; transform: none !important; }
+  .js-motion .ve-bars rect { transform: none !important; }
+  .ve-steps [data-s]:not(.on), .ve-steps g[data-s]:not(.on) text, .ve-steps text[data-s]:not(.on) { opacity: 1; }
+  .ve-steps .ve-at:not(.now) { opacity: 0; }
+  .ve-steps path[pathLength][data-s] { stroke-dashoffset: 0; }
+  .ve-tok, .ve-vals text:not(:last-child) { display: none; }
+}
+/* <ve-ask> on a kit page (inlined only when the page has one; plans have their own in plan/plan.css) */
+.ask { border: 1px solid var(--border-bright); border-radius: var(--r-1); background: var(--surface); padding: var(--s-4) var(--s-5) var(--s-5); display: grid; gap: var(--s-3); min-width: 0; max-width: 46rem; margin: var(--s-4) 0; }
+.ask legend { float: left; width: 100%; padding: 0; font: 500 var(--t-label) var(--font-mono); color: var(--text-dim); }
+.ask legend b { color: var(--text); font-weight: 600; }
+.ask-q { font-weight: 600; font-size: var(--t-lead); line-height: 1.35; }
+.ask-opts { display: grid; gap: var(--s-2); }
+.ask.row .ask-opts { grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); }
+.opt { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--s-3); align-items: start; padding: var(--s-3) var(--s-4); border: 1px solid var(--border); border-radius: var(--r-1); background: var(--bg); cursor: pointer; }
+.opt:hover { border-color: var(--border-bright); }
+.opt:has(input:checked) { border-color: var(--text); background: color-mix(in srgb, var(--text) 5%, var(--surface)); }
+.opt input { margin-top: .3em; accent-color: var(--accent); width: 1rem; height: 1rem; }
+.opt-body { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 var(--s-3); min-width: 0; }
+.opt-label { font-weight: 500; }
+.sug { font: 500 var(--t-label) var(--font-mono); color: var(--text-dim); }
+.opt small { flex-basis: 100%; display: block; color: var(--text-dim); font-size: var(--t-small); }
+@media print { .ask { break-inside: avoid; } }
+</style>
+<style>
+header h1{font-size:clamp(1.9rem,3.2vw,2.6rem);max-width:none}
+.msgs td:first-child,.msgs td:nth-child(3){white-space:nowrap}
+.life{stroke:var(--border-bright);stroke-width:1;stroke-dasharray:2 5;fill:none}
+.awake{fill:var(--text-dim)}
+.gone-t{text-decoration:line-through}
+.pair{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr));gap:var(--s-5);align-items:start}
+.pack td,.pack th{vertical-align:top}
+.pack td{min-width:12em}
+.pack tbody th{white-space:nowrap;text-align:left;font-weight:600}
+.pack tr.load td{background:color-mix(in srgb,var(--text) 6%,transparent)}
+.pack tr.pull td{outline:1px dashed var(--border-bright);outline-offset:-3px}
+.pack tr.out td{color:var(--text-dim);text-decoration:line-through}
+.asks{display:grid;gap:var(--s-5)}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <marker id="ve-ah" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto"><path d="M0 0L10 5L0 10z" fill="context-stroke"/></marker>
+    <linearGradient id="ve-node" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color:var(--node-top)"/><stop offset="1" style="stop-color:var(--surface)"/></linearGradient>
+    <pattern id="ve-w-on" width="10" height="10" patternUnits="userSpaceOnUse"><rect x="1" y="1" width="8" height="8" rx="1.5" style="fill:var(--accent)"/></pattern>
+    <pattern id="ve-w-off" width="10" height="10" patternUnits="userSpaceOnUse"><rect x="1.5" y="1.5" width="7" height="7" rx="1.5" style="fill:none;stroke:var(--text-dim)"/></pattern>
+  </defs>
+</svg>
+<nav class="ve-toc" aria-label="Sections"><div><a href="#roles">角色</a><a href="#messages">沟通</a><a href="#startup">启动</a><a href="#removed">删除</a><a href="#open">待定</a></div><span class="pos"></span></nav>
+<main>
+<header>
+  <p class="eyebrow">Smooth Research · 最精简设计草案</p>
+  <h1>协调者每个任务只发一张任务卡，只收一条任务结论</h1>
+  <p class="lead">每个角色只回答一个问题，<b>任务有结论才发消息</b>。过程写进账本，谁需要谁按 id 查。</p>
+  <p class="meta">2026-11-09 · 草案，尚未实现 · 依据 bypass-lora 两个版本的运行日志</p>
+</header>
+
+<figure class="ve-steps">
+  <div class="frame">
+    <svg class="ve-svg" viewBox="0 0 1000 690" aria-label="一个任务的泳道图。时间向下。协调者发出任务卡后不再运行，直到研究者发来任务结论。审核和作业都在研究者、审核者和执行器之间结束。" role="img" style="--ve-min: 858px">
+      <path class="life" d="M205 66V668"/>
+      <path class="life" d="M380 66V668"/>
+      <path class="life" d="M580 66V612"/>
+      <path class="life" d="M775 66V612"/>
+      <path class="life" d="M935 66V612"/>
+
+      <rect class="ve-bnd" data-s="3" x="490" y="180" width="500" height="270"/>
+      <text class="ve-bnd-t" data-s="3" x="600" y="198">工作回路</text>
+      <text class="ve-bnd-t" data-s="3" x="787" y="198">协调者看不到这里</text>
+      <rect class="ve-bnd" data-s="8" x="300" y="508" width="560" height="104"/>
+      <text class="ve-bnd-t" data-s="8" x="600" y="526">仅当结论要改变假说状态</text>
+
+      <rect class="awake" data-s="1" x="197" y="98" width="16" height="20"/>
+      <rect class="awake" data-s="1" x="372" y="108" width="16" height="52"/>
+      <rect class="awake" data-s="2" x="572" y="160" width="16" height="72"/>
+      <rect class="awake" data-s="3" x="767" y="232" width="16" height="52"/>
+      <rect class="awake" data-s="4" x="572" y="284" width="16" height="52"/>
+      <rect class="awake" data-s="5" x="927" y="336" width="16" height="88"/>
+      <rect class="awake" data-s="6" x="572" y="424" width="16" height="52"/>
+      <rect class="awake" data-s="7" x="372" y="476" width="16" height="176"/>
+      <rect class="awake" data-s="8" x="767" y="548" width="16" height="48"/>
+      <rect class="awake" data-s="10" x="197" y="634" width="16" height="20"/>
+
+      <path class="ve-e" pathLength="1" data-s="1" d="M213 108H372"/>
+      <path class="ve-e is-hot" pathLength="1" data-s="2" d="M388 160H572"/>
+      <path class="ve-e" pathLength="1" data-s="3" d="M588 232H767"/>
+      <path class="ve-e" pathLength="1" data-s="4" d="M767 284H588"/>
+      <path class="ve-e" pathLength="1" data-s="5" d="M588 336H927"/>
+      <path class="ve-e is-async" data-s="6" d="M927 424H588"/>
+      <path class="ve-e is-hot" pathLength="1" data-s="7" d="M572 476H388"/>
+      <path class="ve-e" pathLength="1" data-s="8" d="M388 548H767"/>
+      <path class="ve-e" pathLength="1" data-s="9" d="M767 596H388"/>
+      <path class="ve-e" pathLength="1" data-s="9" d="M388 628H430"/>
+      <path class="ve-e" pathLength="1" data-s="10" d="M372 644H213"/>
+
+      <text class="ve-el" data-s="1" x="292" y="99">计划</text>
+      <text class="ve-el" data-s="2" x="480" y="151">任务卡：问题、合同、授权</text>
+      <text class="ve-el" data-s="3" x="677" y="223">commit + 合同</text>
+      <text class="ve-el" data-s="4" x="677" y="275">通过或问题清单</text>
+      <text class="ve-el" data-s="5" x="680" y="327">提交，通知目标 = 自己</text>
+      <text class="ve-el" data-s="6" x="680" y="415">每批一条结束通知</text>
+      <text class="ve-el" data-s="7" x="480" y="467">任务结论 + 证据引用</text>
+      <text class="ve-el" data-s="8" x="480" y="539">待审结论 + 证据引用</text>
+      <text class="ve-el" data-s="9" x="480" y="587">成立或不成立，理由</text>
+      <text class="ve-el r" data-s="9" x="438" y="633">发下一张任务卡，回到 2</text>
+      <text class="ve-el" data-s="10" x="292" y="635">阶段报告</text>
+
+      <text class="ve-tag" data-s="1" x="128" y="113" text-anchor="end">项目开始</text>
+      <g class="ve-co" data-s="1" transform="translate(146 108)"><circle r="11"/><text>1</text></g>
+      <text class="ve-tag" data-s="2" x="128" y="165" text-anchor="end">选定下一个实验</text>
+      <g class="ve-co" data-s="2" transform="translate(146 160)"><circle r="11"/><text>2</text></g>
+      <text class="ve-tag" data-s="3" x="128" y="237" text-anchor="end">贵运行前</text>
+      <g class="ve-co" data-s="3" transform="translate(146 232)"><circle r="11"/><text>3</text></g>
+      <text class="ve-tag" data-s="4" x="128" y="289" text-anchor="end">审完</text>
+      <g class="ve-co" data-s="4" transform="translate(146 284)"><circle r="11"/><text>4</text></g>
+      <text class="ve-tag" data-s="5" x="128" y="341" text-anchor="end">审核通过</text>
+      <g class="ve-co" data-s="5" transform="translate(146 336)"><circle r="11"/><text>5</text></g>
+      <text class="ve-tag" data-s="6" x="128" y="429" text-anchor="end">一批作业结束</text>
+      <g class="ve-co" data-s="6" transform="translate(146 424)"><circle r="11"/><text>6</text></g>
+      <text class="ve-tag key" data-s="7" x="128" y="481" text-anchor="end">问题有了答案</text>
+      <g class="ve-co" data-s="7" transform="translate(146 476)"><circle r="11"/><text>7</text></g>
+      <text class="ve-tag" data-s="8" x="128" y="553" text-anchor="end">结论要改假说</text>
+      <g class="ve-co" data-s="8" transform="translate(146 548)"><circle r="11"/><text>8</text></g>
+      <text class="ve-tag" data-s="9" x="128" y="601" text-anchor="end">审完</text>
+      <g class="ve-co" data-s="9" transform="translate(146 596)"><circle r="11"/><text>9</text></g>
+      <text class="ve-tag" data-s="10" x="128" y="649" text-anchor="end">阶段结束</text>
+      <g class="ve-co" data-s="10" transform="translate(146 644)"><circle r="14"/><text>10</text></g>
+
+      <g class="ve-dim is-key" data-s="7">
+        <path class="ext" d="M372 160H336M372 476H336"/>
+        <path class="ln" d="M342 160V476M338 164l8-8M338 480l8-8"/>
+        <text x="290" y="298">任务期间</text>
+        <text x="290" y="318">0 条消息</text>
+        <text x="290" y="338">进入协调者</text>
+      </g>
+      <g class="ve-dim" data-s="6">
+        <path class="ext" d="M927 336H899M927 424H899"/>
+        <path class="ln" d="M905 336V424M901 340l8-8M901 428l8-8"/>
+        <text x="846" y="372">作业运行</text>
+        <text x="846" y="392">研究者不轮询</text>
+      </g>
+
+      <g class="ve-n"><rect class="sh" x="145" y="14" width="120" height="52"/><text x="205" y="32">用户</text><text class="sub" x="205" y="52">研究什么，花多少</text></g>
+      <g class="ve-n is-key"><rect class="sh" x="310" y="14" width="140" height="52"/><text x="380" y="32">协调者</text><text class="sub" x="380" y="52">下一步验证什么</text></g>
+      <g class="ve-n"><rect class="sh" x="498" y="14" width="164" height="52"/><text x="580" y="32">研究者</text><text class="sub" x="580" y="52">这个实验的结果是什么</text></g>
+      <g class="ve-n"><rect class="sh" x="705" y="14" width="140" height="52"/><text x="775" y="32">审核者</text><text class="sub" x="775" y="52">这里有没有错</text></g>
+      <g class="ve-n"><rect class="sh" x="885" y="14" width="100" height="52"/><text x="935" y="32">执行器</text><text class="sub" x="935" y="52">跑作业</text></g>
+
+      <rect class="awake" x="470" y="660" width="16" height="20"/>
+      <text class="ve-tag" x="494" y="675">正在运行</text>
+      <path class="life" d="M582 660V680"/>
+      <text class="ve-tag" x="594" y="675">不运行，不消耗 token</text>
+      <path class="ve-e is-hot" d="M770 670H810"/>
+      <text class="ve-tag" x="820" y="675">协调者的主路径</text>
+    </svg>
+  </div>
+  <div class="ve-player">
+    <ol class="ve-cap">
+      <li data-n="1/10">用户写下目标、预算和必须先问的事。协调者把它拆成假说。</li>
+      <li data-n="2/10">协调者选定下一个实验，发出任务卡，然后停止运行。</li>
+      <li data-n="3/10">贵运行前，研究者把冻结的 commit 和合同交给审核者。</li>
+      <li data-n="4/10">审核者只回复研究者。通过就开跑，有问题就修，最多两轮。</li>
+      <li data-n="5/10">研究者提交作业，把通知目标设为自己，然后停止运行。</li>
+      <li data-n="6/10">一批作业结束，执行器通知研究者一次。协调者收不到这条。</li>
+      <li data-n="7/10">问题有了答案，研究者发任务结论。这是协调者在任务期间收到的第一条消息。</li>
+      <li data-n="8/10">结论要改变假说状态时，协调者请审核者独立判断。</li>
+      <li data-n="9/10">审核者把结果交给协调者。协调者记录决定，再发下一张任务卡。</li>
+      <li data-n="10/10">阶段结束，协调者给用户一份阶段报告。</li>
+    </ol>
+    <button data-go="-1" aria-label="上一步">←</button>
+    <button data-play aria-label="播放">▶</button>
+    <input type="range" aria-label="步骤">
+    <button data-go="1" aria-label="下一步">→</button>
+  </div>
+  <figcaption><span class="fig-n">图 1</span>一个任务里，协调者发一张任务卡，收一条任务结论；审核和作业都在工作回路里结束。</figcaption>
+</figure>
+
+<section id="roles">
+  <div class="sec-head"><p class="ve-label caps">角色</p><h2>每个角色只回答一个问题</h2></div>
+  <figure>
+    <div class="frame">
+      <svg class="ve-svg" viewBox="0 0 1000 670" aria-label="四个 agent 角色和用户各自的职责，以及它们之间仅有的消息通道。账本、执行器和监视属于系统。" role="img" style="--ve-min: 858px">
+        <path class="ve-e" d="M240 98V168"/>
+        <text class="ve-el l" x="232" y="137">计划</text>
+        <path class="ve-e" d="M380 168V98"/>
+        <text class="ve-el r" x="388" y="137">阶段报告 · 决定请求</text>
+        <path class="ve-e is-hot" d="M240 288V358"/>
+        <text class="ve-el l" x="232" y="327">任务卡 · 退回</text>
+        <path class="ve-e is-hot" d="M380 358V288"/>
+        <text class="ve-el r" x="388" y="327">任务结论 · 阻塞</text>
+        <path class="ve-e" d="M560 178H680"/>
+        <text class="ve-el" x="620" y="169">咨询</text>
+        <path class="ve-e" d="M680 212H560"/>
+        <text class="ve-el" x="620" y="203">建议</text>
+        <path class="ve-e" d="M560 246H860V358"/>
+        <text class="ve-el" x="620" y="237">结论审核</text>
+        <path class="ve-e" d="M780 358V272H560"/>
+        <text class="ve-el" x="620" y="263">审核结果</text>
+        <path class="ve-e" d="M560 396H680"/>
+        <text class="ve-el" x="620" y="387">代码审核</text>
+        <path class="ve-e" d="M680 436H560"/>
+        <text class="ve-el" x="620" y="427">审核结果</text>
+        <path class="ve-e" d="M440 478V572"/>
+        <text class="ve-el l" x="432" y="512">提交作业</text>
+        <path class="ve-e is-async" d="M540 572V478"/>
+        <text class="ve-el r" x="548" y="512">作业结束</text>
+        <path class="ve-e is-async" d="M120 478V572"/>
+        <text class="ve-el r" x="128" y="512">写事实 · 按 id 查</text>
+
+        <rect class="ve-bnd" x="40" y="540" width="930" height="118"/>
+        <text class="ve-bnd-t" x="640" y="558">系统 · 记录和投递，不做判断</text>
+
+        <g class="ve-n"><rect class="sh" x="60" y="14" width="500" height="84"/><text x="310" y="36">用户 · 研究什么，花多少</text><text class="sub" x="310" y="60">负责：目标、预算、必须先问的事</text><text class="sub" x="310" y="82">不做：日常调度</text></g>
+        <g class="ve-n is-key"><rect class="sh" x="60" y="168" width="500" height="120"/><text x="310" y="192">协调者 · 下一步验证什么</text><text class="sub" x="310" y="218">负责：假说树、实验选择、路线决定</text><text class="sub" x="310" y="242">不做：写代码、看作业、转发消息、复核机械事实</text><text class="sub" x="310" y="266">产出：任务卡、决定、阶段报告</text></g>
+        <g class="ve-n"><rect class="sh" x="60" y="358" width="500" height="120"/><text x="310" y="382">研究者 · 这个实验的结果是什么</text><text class="sub" x="310" y="408">负责：实现、运行、授权内处理失败、记录证据</text><text class="sub" x="310" y="432">不做：改任务的问题、定路线</text><text class="sub" x="310" y="456">产出：一条任务结论</text></g>
+        <g class="ve-n"><rect class="sh" x="680" y="130" width="280" height="92"/><text x="820" y="152">顾问 · 卡住时还有哪条路</text><text class="sub" x="820" y="178">只在瓶颈或大额投入前工作</text><text class="sub" x="820" y="200">不做：指挥、实现</text></g>
+        <g class="ve-n"><rect class="sh" x="680" y="358" width="280" height="120"/><text x="820" y="382">审核者 · 这里有没有错</text><text class="sub" x="820" y="408">负责：独立判断代码和结论</text><text class="sub" x="820" y="432">不做：修改、定路线</text><text class="sub" x="820" y="456">产出：通过或问题清单</text></g>
+        <g class="ve-n"><rect class="sh" x="60" y="572" width="270" height="74"/><text x="195" y="594">账本</text><text class="sub" x="195" y="622">记录事实，任何角色按 id 查</text></g>
+        <g class="ve-n"><rect class="sh" x="380" y="572" width="240" height="74"/><text x="500" y="594">执行器</text><text class="sub" x="500" y="622">跑作业，结束时通知提交者</text></g>
+        <g class="ve-n"><rect class="sh" x="670" y="572" width="280" height="74"/><text x="810" y="594">监视</text><text class="sub" x="810" y="622">重启断线会话，恢复不了才报告</text></g>
+      </svg>
+    </div>
+    <figcaption><span class="fig-n">图 2</span>角色之间只有图上这些通道；协调者和研究者之间只走任务卡和任务结论。</figcaption>
+  </figure>
+</section>
+
+<section id="messages">
+  <div class="sec-head"><p class="ve-label caps">沟通</p><h2>有结论、收件人要行动，才发消息</h2></div>
+  <p>状态和进度写进账本。读完什么都不用做的消息不发。</p>
+  <figure>
+    <div class="ve-table msgs"><table>
+      <thead><tr><th>#</th><th>时间点</th><th>谁发给谁</th><th>内容</th><th>收件人接下来做什么</th></tr></thead>
+      <tbody>
+        <tr><td class="num">1</td><td>项目开始或换方向</td><td>用户 → 协调者</td><td>目标、预算、必须先问的事</td><td>拆成假说和第一批实验</td></tr>
+        <tr><td class="num">2</td><td>选定下一个实验</td><td>协调者 → 研究者</td><td>要回答的问题；合同（对照、指标、范围、停止条件）；授权（预算、重试、替换、开跑条件）；结束条件</td><td>独立做完这个任务</td></tr>
+        <tr><td class="num">3</td><td>贵运行前，代码冻结</td><td>研究者 → 审核者</td><td>commit、文件范围、对照的合同</td><td>审代码</td></tr>
+        <tr><td class="num">4</td><td>审完</td><td>审核者 → 研究者</td><td>通过，或问题清单（严重度、位置）；每轮最多两次</td><td>修复，或开跑</td></tr>
+        <tr><td class="num">5</td><td>审核通过</td><td>研究者 → 执行器</td><td>提交作业，通知目标是研究者自己</td><td>排队运行</td></tr>
+        <tr><td class="num">6</td><td>一批作业结束或失败</td><td>执行器 → 研究者</td><td>每批一条：成功数、失败数、日志路径</td><td>分析，或在授权内重试</td></tr>
+        <tr><td class="num">7</td><td>问题有了答案</td><td>研究者 → 协调者</td><td>一句结论；证据引用；限制；需要决定的事；CLI 生成的核验行（运行数、证据 id、commit）</td><td>决定下一步</td></tr>
+        <tr><td class="num">8</td><td>结论要改变假说状态、停路线或推荐正式实验</td><td>协调者 → 审核者</td><td>待审结论、假说修订版、证据引用、预设规则</td><td>独立判断</td></tr>
+        <tr><td class="num">9</td><td>审完</td><td>审核者 → 协调者</td><td>成立或不成立，理由</td><td>记录决定，发下一张任务卡</td></tr>
+        <tr><td class="num">10</td><td>阶段结束</td><td>协调者 → 用户</td><td>阶段结论、证据、下一阶段建议</td><td>批准或改方向</td></tr>
+        <tr><td><small>按需</small></td><td>瓶颈，或大额投入前</td><td>协调者 → 顾问</td><td>一句问题、假说链、已试路径和结果、约束</td><td>给选项和理由</td></tr>
+        <tr><td><small>按需</small></td><td>顾问答完</td><td>顾问 → 协调者</td><td>选项、理由、最便宜的判别实验</td><td>选路线</td></tr>
+        <tr><td><small>按需</small></td><td>超出目标、范围或预算</td><td>协调者 → 用户</td><td>选项、建议、代价</td><td>做决定</td></tr>
+      </tbody>
+    </table></div>
+    <figcaption><span class="fig-n">图 3</span>正常路径共 10 个时间点，编号和图 1 一一对应；任务期间协调者只收到第 7 条，需要结论审核时再加第 9 条。</figcaption>
+  </figure>
+
+  <figure>
+    <div class="cases">
+      <div class="case" data-st="warn">
+        <span class="chip warn">阻塞</span>
+        <h3>授权内做不下去，或审核两轮仍有分歧</h3>
+        <svg class="ve-mini" viewBox="0 0 240 128" aria-label="研究者把阻塞发给协调者，内容是卡在哪、试过什么、需要哪个决定" role="img">
+          <path class="ve-e is-st" d="M96 34H144"/>
+          <g class="ve-n"><rect class="sh" x="6" y="12" width="90" height="44"/><text x="51" y="34">研究者</text></g>
+          <g class="ve-n"><rect class="sh" x="144" y="12" width="90" height="44"/><text x="189" y="34">协调者</text></g>
+          <text class="ve-tag" x="120" y="88" text-anchor="middle">卡在哪、试过什么</text>
+          <text class="ve-tag" x="120" y="110" text-anchor="middle">需要哪个决定</text>
+        </svg>
+      </div>
+      <div class="case" data-st="warn">
+        <span class="chip warn">退回</span>
+        <h3>协调者不接受这条结论</h3>
+        <svg class="ve-mini" viewBox="0 0 240 128" aria-label="协调者把退回发给研究者，内容是哪条证据不够、需要补什么" role="img">
+          <path class="ve-e is-st" d="M96 34H144"/>
+          <g class="ve-n"><rect class="sh" x="6" y="12" width="90" height="44"/><text x="51" y="34">协调者</text></g>
+          <g class="ve-n"><rect class="sh" x="144" y="12" width="90" height="44"/><text x="189" y="34">研究者</text></g>
+          <text class="ve-tag" x="120" y="88" text-anchor="middle">哪条证据不够</text>
+          <text class="ve-tag" x="120" y="110" text-anchor="middle">需要补什么</text>
+        </svg>
+      </div>
+      <div class="case" data-st="risk">
+        <span class="chip risk">失联</span>
+        <h3>会话断开且无法恢复</h3>
+        <svg class="ve-mini" viewBox="0 0 240 128" aria-label="监视把失联发给协调者，内容是哪个会话和任务、最后一条记录" role="img">
+          <path class="ve-e is-st" d="M96 34H144"/>
+          <g class="ve-n"><rect class="sh" x="6" y="12" width="90" height="44"/><text x="51" y="34">监视</text></g>
+          <g class="ve-n"><rect class="sh" x="144" y="12" width="90" height="44"/><text x="189" y="34">协调者</text></g>
+          <text class="ve-tag" x="120" y="88" text-anchor="middle">哪个会话、哪个任务</text>
+          <text class="ve-tag" x="120" y="110" text-anchor="middle">最后一条记录</text>
+        </svg>
+      </div>
+    </div>
+    <figcaption><span class="fig-n">图 4</span>异常路径只有三条，每条都是一个结论：发送者已经确定这件事需要别人决定。</figcaption>
+  </figure>
+</section>
+
+<section id="startup">
+  <div class="sec-head"><p class="ve-label caps">启动</p><h2>每个角色启动时只载入一个启动包</h2></div>
+  <p>用户不是 agent。用户提供目标、预算和必须先问的事，之后只看阶段报告和决定请求。</p>
+  <figure>
+    <div class="ve-table pack"><table>
+      <thead><tr><th>启动包</th><th>协调者</th><th>研究者</th><th>审核者</th><th>顾问</th></tr></thead>
+      <tbody>
+        <tr class="load"><th scope="row">角色卡</th><td>职责、可发的消息、不做的事</td><td>职责、结束方式</td><td>严重度定义、输出格式、每轮最多两次</td><td>只给建议、轮次上限、输出格式</td></tr>
+        <tr class="load"><th scope="row">本次问题</th><td>待处理的任务结论或阻塞</td><td>任务卡全文</td><td>代码审核：commit 和文件范围。结论审核：待审结论和假说修订版</td><td>一句瓶颈问题</td></tr>
+        <tr class="load"><th scope="row">必要材料</th><td>目标和约束一屏（范围、预算余量、必须问用户的事）；活跃假说和状态；最近几个决定；开放任务每个一行</td><td>目标假说和合同；worktree、branch、base commit；依赖产物的引用；计算配方（资源、队列、提交方式、通知目标 = 自己）</td><td>对照的合同；复查时加上一轮问题清单和修复 diff；结论审核另加证据引用和预设规则</td><td>相关假说链、已试路径和结果、约束</td></tr>
+        <tr class="load"><th scope="row">结束条件</th><td>发出下一张任务卡、决定请求或阶段报告</td><td>问题有答案，发任务结论；授权内做不下去，发阻塞</td><td>提交通过或问题清单，发给请求者</td><td>给出选项和理由，发给协调者</td></tr>
+        <tr class="pull"><th scope="row">按 id 取</th><td>证据详情、任务卡全文</td><td>文献、上游运行的证据</td><td>仓库文件、证据原始记录</td><td>文献、证据详情</td></tr>
+        <tr class="out"><th scope="row">不进入</th><td>计划全文（只在项目开始读一次）、作业 id、日志、diff、审核讨论、消息历史</td><td>假说树全貌、其他任务、协调者的消息历史</td><td>项目状态、其他任务、作者和协调者的沟通</td><td>任务流水、代码细节</td></tr>
+      </tbody>
+    </table></div>
+    <figcaption><span class="fig-n">图 5</span>四个 agent 的启动包结构相同；底色行启动时载入，虚线行按 id 取，划线行不进入上下文。</figcaption>
+  </figure>
+
+  <figure>
+    <div class="kpis">
+      <div class="kpi"><span class="ve-label">a8a70a9 协调者重读规则文档的轮次（57 / 122）</span><span class="val"><span data-count="47">47</span><span class="unit">%</span></span><svg class="ve-waffle" viewBox="0 0 170 100" role="img" aria-label="122 轮里有 57 轮重读规则文档"><rect x="0" y="0" width="100" height="40" fill="url(#ve-w-on)"/><rect x="0" y="40" width="70" height="10" fill="url(#ve-w-on)"/><rect x="70" y="40" width="30" height="10" fill="url(#ve-w-off)"/><rect x="0" y="50" width="100" height="50" fill="url(#ve-w-off)"/><path class="ann" d="M104 45H114"/><text x="118" y="45">其余轮次</text></svg></div>
+      <div class="kpi"><span class="ve-label">协调者的规则文档（SKILL、workflow、team、host）</span><span class="val"><span data-count="63">63</span><span class="unit">KB</span></span><svg class="ve-bars" viewBox="0 0 240 52" role="img" aria-label="现在的规则文档 63 KB，角色卡的目标是 2 KB"><text y="12">现在</text><rect x="84" y="5" width="98.44" height="14" rx="2"/><text x="190.44" y="12">63 KB</text><text y="40">角色卡目标</text><rect class="hot" x="84" y="33" width="3.13" height="14" rx="2"/><text x="95.13" y="40">2 KB</text></svg></div>
+    </div>
+    <figcaption><span class="fig-n">图 6</span>压缩或重启后，角色重读同一个启动包；机械规则改由 CLI 检查，其余规则按需查阅。</figcaption>
+  </figure>
+  <p>现有 <code>work_pack</code> 已接近研究者的启动包。<code>resume_pack</code> 给协调者时要去掉未完成 attempts、Locations 和 Compute 三节。</p>
+</section>
+
+<section id="removed">
+  <div class="sec-head"><p class="ve-label caps">删除</p><h2>九类沟通被删除，信息换了地方</h2></div>
+  <figure>
+    <div class="frame">
+      <svg class="ve-svg" viewBox="0 0 1000 400" aria-label="九类不再发给协调者的沟通，以及每类信息的新去向" role="img" style="--ve-min: 858px">
+        <text class="ve-tag key" x="20" y="28">不再发给协调者</text>
+        <text class="ve-tag key" x="600" y="28">信息的去向</text>
+
+        <path class="ve-e" d="M300 66H590"/><text class="ve-el" x="445" y="57">写入</text>
+        <path class="ve-e" d="M300 104H590"/><text class="ve-el" x="445" y="95">直接通知</text>
+        <path class="ve-e" d="M300 142H590"/><text class="ve-el" x="445" y="133">留在</text>
+        <path class="ve-e" d="M300 180H590"/><text class="ve-el" x="445" y="171">由系统分配</text>
+        <path class="ve-e" d="M300 218H590"/><text class="ve-el" x="445" y="209">写进</text>
+        <path class="ve-e" d="M300 256H590"/><text class="ve-el" x="445" y="247">写入</text>
+        <path class="ve-e" d="M300 294H590"/><text class="ve-el" x="445" y="285">留在</text>
+        <path class="ve-e" d="M300 332H590"/><text class="ve-el" x="445" y="323">写进或转成</text>
+        <path class="ve-e" d="M300 370H590"/><text class="ve-el" x="445" y="361">放到</text>
+
+        <text class="ve-tag gone-t" x="20" y="71">WAIT</text><text class="ve-tag" x="600" y="71">账本里的任务状态</text>
+        <text class="ve-tag gone-t" x="20" y="109">作业结束的转发</text><text class="ve-tag" x="600" y="109">研究者（执行器直接发）</text>
+        <text class="ve-tag gone-t" x="20" y="147">审核中间结果、一轮结束的通知</text><text class="ve-tag" x="600" y="147">研究者和审核者之间</text>
+        <text class="ve-tag gone-t" x="20" y="185">needs a reviewer</text><text class="ve-tag" x="600" y="185">审核者（研究者发请求时）</text>
+        <text class="ve-tag gone-t" x="20" y="223">逐批 GO</text><text class="ve-tag" x="600" y="223">任务卡里的授权</text>
+        <text class="ve-tag gone-t" x="20" y="261">进度 NOTE</text><text class="ve-tag" x="600" y="261">账本</text>
+        <text class="ve-tag gone-t" x="20" y="299">文档修订的来回</text><text class="ve-tag" x="600" y="299">审核回路</text>
+        <text class="ve-tag gone-t" x="20" y="337">自由形式的 NOTE</text><text class="ve-tag" x="600" y="337">任务结论；决定不了的转成阻塞</text>
+        <text class="ve-tag gone-t" x="20" y="375">页面说明</text><text class="ve-tag" x="600" y="375">阶段结束时的独立工作</text>
+      </svg>
+    </div>
+    <figcaption><span class="fig-n">图 7</span>每类被删的沟通都有明确的新去向，协调者不用再读它们。</figcaption>
+  </figure>
+
+  <figure>
+    <div class="pair">
+      <div>
+        <p class="ve-label">每个任务进入协调者的事件</p>
+        <svg class="ve-bars" viewBox="0 0 240 80" role="img" aria-label="73d0124 每个任务 25.4 条，a8a70a9 每个任务 9.6 条，最精简设计的目标是最多 2 条"><text y="12">73d0124</text><rect x="84" y="5" width="97.69" height="14" rx="2"/><text x="189.69" y="12">25.4条</text><text y="40">a8a70a9</text><rect x="84" y="33" width="36.92" height="14" rx="2"/><text x="128.92000000000002" y="40">9.6条</text><text y="68">目标</text><rect class="hot" x="84" y="61" width="7.69" height="14" rx="2"/><text x="99.69" y="68">2条</text></svg>
+      </div>
+      <div class="frame">
+        <p class="ve-label">a8a70a9 进入协调者的 287 条 rl 消息</p>
+        <svg class="ve-svg ve-stack" viewBox="0 0 800 70" role="img" aria-label="287 条消息里，NOTE 137 条，WAIT 74 条，RESULT 和 BLOCKED 共 76 条"><rect x="0" y="0" width="381.88" height="40"/><text x="190.94" y="62">NOTE 137条</text><rect x="381.88" y="0" width="206.27" height="40"/><text x="485.02" y="62">WAIT 74条</text><rect class="hot" x="588.15" y="0" width="211.85" height="40"/><text x="694.08" y="62">RESULT + BLOCKED 76条</text></svg>
+      </div>
+    </div>
+    <figcaption><span class="fig-n">图 8</span>a8a70a9 的消息里只有 26% 是结论；目标是正常路径每个任务 1 条，需要结论审核时 2 条，目标尚未实测。</figcaption>
+  </figure>
+</section>
+
+<section id="open">
+  <div class="sec-head"><p class="ve-label caps">待定</p><h2>五件事需要你定</h2></div>
+  <div class="asks">
+    <fieldset class="ask row" id="ask-reviewer" data-ask="reviewer"><legend class="ask-n">Question <b>1</b> of 5</legend><p class="ask-q">谁给研究者分配审核者？</p><div class="ask-opts"><label class="opt"><input type="radio" name="reviewer" value="system" checked><span class="opt-body"><span class="opt-label">系统在收到审核请求时分配</span><span class="sug">Suggested</span></span></label><label class="opt"><input type="radio" name="reviewer" value="researcher"><span class="opt-body"><span class="opt-label">研究者按配置自己打开审核者</span></span></label><label class="opt"><input type="radio" name="reviewer" value="coordinator"><span class="opt-body"><span class="opt-label">协调者分配（现在的做法）</span></span></label></div></fieldset>
+    <fieldset class="ask" id="ask-accept" data-ask="accept"><legend class="ask-n">Question <b>2</b> of 5</legend><p class="ask-q">协调者怎么验收任务结论？</p><div class="ask-opts"><label class="opt"><input type="radio" name="accept" value="check" checked><span class="opt-body"><span class="opt-label">读 CLI 生成的核验行，必要时抽查证据</span><span class="sug">Suggested</span></span></label><label class="opt"><input type="radio" name="accept" value="full"><span class="opt-body"><span class="opt-label">每个结论都逐项复核证据</span></span></label><label class="opt"><input type="radio" name="accept" value="review"><span class="opt-body"><span class="opt-label">全部交给结论审核</span></span></label></div></fieldset>
+    <fieldset class="ask row" id="ask-tell" data-ask="tell"><legend class="ask-n">Question <b>3</b> of 5</legend><p class="ask-q">还保留 rl agent tell 这种自由消息吗？</p><div class="ask-opts"><label class="opt"><input type="radio" name="tell" value="drop" checked><span class="opt-body"><span class="opt-label">去掉，只留类型固定的消息</span><span class="sug">Suggested</span></span></label><label class="opt"><input type="radio" name="tell" value="pair"><span class="opt-body"><span class="opt-label">只在研究者和审核者之间保留</span></span></label><label class="opt"><input type="radio" name="tell" value="keep"><span class="opt-body"><span class="opt-label">保留现状</span></span></label></div></fieldset>
+    <fieldset class="ask row" id="ask-costly" data-ask="costly"><legend class="ask-n">Question <b>4</b> of 5</legend><p class="ask-q">贵运行要回到协调者批准吗？</p><div class="ask-opts"><label class="opt"><input type="radio" name="costly" value="card" checked><span class="opt-body"><span class="opt-label">任务卡授权内不用回</span><span class="sug">Suggested</span></span></label><label class="opt"><input type="radio" name="costly" value="threshold"><span class="opt-body"><span class="opt-label">超过预算阈值才回</span></span></label><label class="opt"><input type="radio" name="costly" value="always"><span class="opt-body"><span class="opt-label">每次开跑都回</span></span></label></div></fieldset>
+    <fieldset class="ask row" id="ask-session" data-ask="session"><legend class="ask-n">Question <b>5</b> of 5</legend><p class="ask-q">研究者每个任务开新会话吗？</p><div class="ask-opts"><label class="opt"><input type="radio" name="session" value="fresh" checked><span class="opt-body"><span class="opt-label">每个任务开新会话，只靠启动包</span><span class="sug">Suggested</span></span></label><label class="opt"><input type="radio" name="session" value="reuse"><span class="opt-body"><span class="opt-label">同一路线的连续任务复用会话</span></span></label></div></fieldset>
+  </div>
+</section>
+
+<section class="sources" aria-label="Sources">
+  <p class="ve-label caps">来源</p>
+  <p><code>design/coordinator-load-version-comparison-2026-11-09.md</code></p>
+  <p><code>design/coordinator-load-analysis-and-redesign-2026-11-09.md</code></p>
+  <p><code>src/smooth_research/context.py:170</code> <code>work_pack</code> · <code>src/smooth_research/context.py:257</code> <code>resume_pack</code> · <code>src/smooth_research/agents.py:492</code> <code>_reviewer_brief</code></p>
+  <p><code>plugin/skills/smooth-research/SKILL.md</code> · <code>references/workflow.md</code> · <code>references/team.md</code> · <code>hosts/codex/skills/smooth-research/references/host.md</code></p>
+</section>
+</main>
+<script data-ve-kit>
+// Reader replies, shared by kit pages and plan pages: the note popover, the selection buttons, and sending one reply
+// to the agent. Kit pages turn on page replies with veReply.page(); plan.js builds its own response on the same parts.
+// Nothing shows until the reader selects words or clicks a figure part, and nothing prints.
+window.veReply ??= (() => {
+  "use strict";
+  const $ = (s, r = document) => r.querySelector(s);
+  const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+  const h = (tag, attrs = {}, ...kids) => {
+    const el = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs)) if (v != null && v !== false) k.startsWith("on") ? el.addEventListener(k.slice(2), v) : el.setAttribute(k, v === true ? "" : v);
+    el.append(...kids.flat().filter((k) => k != null && k !== false));
+    return el;
+  };
+  document.head.append(h("style", { "data-ve-reply": "" }, `
+.ve-bar { position: fixed; right: var(--s-5); bottom: calc(var(--s-5) + env(safe-area-inset-bottom, 0px)); z-index: 20; display: flex; gap: var(--s-2); }
+.ve-bar button { padding: var(--s-3) var(--s-4); box-shadow: 0 8px 24px var(--lift); }
+.ve-bar .respond { background: var(--text); color: var(--bg); border-color: var(--text); font-weight: 600; }
+.ve-bar .respond .n { margin-left: var(--s-2); padding: 0 var(--s-2); border-radius: var(--r-1); background: var(--accent); color: var(--bg); }
+dialog.ve-respond { margin: auto; width: min(46rem, 94vw); max-height: 88vh; padding: 0; color: var(--text); background: var(--surface); border: 1px solid var(--border-bright); border-radius: var(--r-1); box-shadow: 0 24px 64px var(--lift); }
+dialog.ve-respond::backdrop { background: rgb(5 10 16 / .55); }
+.r-wrap { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; max-height: 88vh; }
+.r-head, .r-foot { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-3); padding: var(--s-4) var(--s-5); }
+.r-head { border-bottom: 1px solid var(--border); } .r-foot { border-top: 1px solid var(--border); }
+.r-head h2 { font-size: var(--t-lead); margin-right: auto; }
+.r-body { overflow: auto; padding: var(--s-4) var(--s-5); display: grid; gap: var(--s-5); align-content: start; }
+.r-sec { display: grid; gap: var(--s-2); }
+.r-row { display: grid; grid-template-columns: 1.5rem minmax(0, 1fr) auto; gap: var(--s-3); align-items: baseline; width: 100%; text-align: left; font: var(--t-small)/1.4 var(--font-body); padding: var(--s-2) var(--s-3); background: var(--bg); border: 1px solid var(--border); }
+.r-row .k { font: 600 var(--t-label) var(--font-mono); color: var(--text-dim); }
+.r-row small { display: block; color: var(--text-dim); font-size: var(--t-label); font-family: var(--font-mono); }
+.r-row .st { font: 600 var(--t-label) var(--font-mono); color: var(--text-dim); }
+.r-row .acts { display: flex; gap: var(--s-2); }
+.r-md { font: var(--t-label)/1.55 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-1); padding: var(--s-3) var(--s-4); max-height: 18rem; overflow: auto; color: var(--text-dim); }
+.r-foot .sp { flex: 1; }
+.r-foot .primary { background: var(--text); color: var(--bg); border-color: var(--text); font-weight: 600; }
+.r-foot .danger { color: var(--risk); }
+.ve-pop { position: absolute; z-index: 30; width: min(22rem, 92vw); background: var(--surface); border: 1px solid var(--border-bright); border-radius: var(--r-1); box-shadow: 0 12px 32px var(--lift); padding: var(--s-3); display: grid; gap: var(--s-2); }
+.ve-pop .ref { font: 500 var(--t-label) var(--font-mono); color: var(--text-dim); }
+.ve-pop q { font-size: var(--t-small); color: var(--text); }
+.ve-pop textarea, .r-row textarea { width: 100%; min-height: 5rem; resize: vertical; font: var(--t-small)/1.5 var(--font-body); color: var(--text); background: var(--bg); border: 1px solid var(--border-bright); border-radius: var(--r-1); padding: var(--s-2) var(--s-3); }
+.ve-pop .row { display: flex; gap: var(--s-2); justify-content: flex-end; }
+.ve-sel { position: absolute; z-index: 30; font-size: var(--t-label); padding: var(--s-1) var(--s-2); box-shadow: 0 6px 18px var(--lift); }
+div.ve-sel { display: flex; gap: var(--s-1); padding: 0; box-shadow: none; } div.ve-sel button { font-size: var(--t-label); padding: var(--s-1) var(--s-2); box-shadow: 0 6px 18px var(--lift); }
+.ve-toast { position: fixed; left: 50%; bottom: 5.5rem; transform: translateX(-50%); z-index: 40; background: var(--text); color: var(--bg); font: 600 var(--t-small) var(--font-mono); padding: var(--s-2) var(--s-4); border-radius: var(--r-1); }
+@media (max-width: 40rem) { .ve-bar { left: var(--s-4); right: var(--s-4); } .ve-bar button { flex: 1; } }
+@media print { .ve-bar, .ve-sel, .ve-pop, .ve-toast, dialog.ve-respond { display: none !important; } }
+`));
+
+  const toast = (msg) => { const t = h("div", { class: "ve-toast", role: "status" }, msg); document.body.append(t); setTimeout(() => t.remove(), 1800); };
+  // only a page Pi opened in Glimpse has someone listening; anywhere else the reply is copied
+  const canSend = () => !!$("[data-send-back]") && typeof window.glimpse?.send === "function";
+  async function deliver(msg) {
+    if (canSend()) { window.glimpse.send({ type: "visual-explainer:response", ...msg }); toast("Sent to the agent"); return "sent"; }
+    try { await navigator.clipboard.writeText(msg.markdown); } catch {
+      const ta = h("textarea"); ta.value = msg.markdown; document.body.append(ta); ta.select();
+      let ok = false;
+      try { ok = document.execCommand("copy"); } catch { /* reported below */ }
+      ta.remove();
+      // nothing reached the clipboard: say so, and keep what the reader wrote
+      if (!ok) { toast("Copy failed. Select the text above and copy it"); return "failed"; }
+    }
+    toast("Copied. Paste it to the agent.");
+    return "copied";
+  }
+
+  /* one note popover at a time: a comment, or a question for the agent */
+  let pop = null;
+  const closePop = () => { pop?.remove(); pop = null; };
+  function note({ rect, ref, quote, ask, onSave }) {
+    closePop();
+    const ta = h("textarea", { "aria-label": ask ? "Question" : "Comment", placeholder: ask ? "Question for the agent…" : "Comment for the agent…" });
+    const saveIt = () => { const text = ta.value.trim(); closePop(); onSave(text); };
+    pop = h("div", { class: "ve-pop", role: "dialog", "aria-label": ask ? "Ask a question" : "Add a comment" },
+      h("p", { class: "ref" }, ref), quote ? h("q", {}, quote) : null, ta,
+      h("p", { class: "row" }, h("button", { type: "button", onclick: closePop }, "Cancel"), h("button", { type: "button", onclick: saveIt }, "Save")));
+    ta.addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) saveIt(); if (e.key === "Escape") closePop(); });
+    document.body.append(pop);
+    pop.style.left = `${Math.max(8, Math.min(rect.left + scrollX, scrollX + innerWidth - pop.offsetWidth - 8))}px`;
+    pop.style.top = `${rect.bottom + scrollY + 8}px`;
+    ta.focus({ preventScroll: true });
+  }
+  document.addEventListener("pointerdown", (e) => { if (pop && !pop.contains(e.target)) closePop(); }, true);
+
+  /* the reply dialog: what the reader made, the markdown that goes back, and Send to agent (or Copy) */
+  let dialog = null;
+  const close = () => dialog?.close();
+  const isOpen = () => !!pop || !!dialog?.open;
+  function sheet({ title, copy, body, md, foot, send }) {
+    closePop();
+    dialog ??= document.body.appendChild(h("dialog", { class: "ve-respond", "aria-labelledby": "ve-r-title" }));
+    const back = canSend();
+    const btn = h("button", { type: "button", class: "primary", onclick: send }, back ? "Send to agent" : copy);
+    dialog.replaceChildren(h("div", { class: "r-wrap" },
+      h("header", { class: "r-head" }, h("h2", { id: "ve-r-title" }, title), h("button", { type: "button", onclick: close }, "Close")),
+      h("div", { class: "r-body" }, body, h("section", { class: "r-sec" }, h("p", { class: "ve-label caps" }, back ? "Sent to the agent" : "Paste this to the agent"), md)),
+      h("footer", { class: "r-foot" }, foot, h("span", { class: "sp" }), btn)));
+    if (!dialog.open) dialog.showModal();
+    btn.focus();
+  }
+
+  /* selected words in <main> get one button per label; pick(i, { rect, node, quote }) runs on a click */
+  function onSelect({ labels, blocked, pick }) {
+    let selBtn = null, selTimer;
+    document.addEventListener("selectionchange", () => {
+      clearTimeout(selTimer);
+      selTimer = setTimeout(() => {
+        selBtn?.remove(); selBtn = null;
+        const sel = getSelection();
+        if (!sel || sel.isCollapsed || blocked() || pop) return;
+        const quote = sel.toString().trim().replace(/\s+/g, " ");
+        if (quote.length < 2 || quote.length > 400) return;
+        const range = sel.getRangeAt(0);
+        const inside = range.commonAncestorContainer.nodeType === 1 ? range.commonAncestorContainer : range.commonAncestorContainer.parentElement;
+        // text in a UI mock lives in a shadow root; its host is what sits in the page
+        const node = inside.getRootNode() instanceof ShadowRoot ? inside.getRootNode().host : inside;
+        if (!node.closest("main") || node.closest("textarea, input, .ve-pop")) return;
+        const rect = range.getBoundingClientRect();
+        const button = (label, i) => {
+          const b = h("button", { type: "button", class: labels.length === 1 ? "ve-sel" : null }, label);
+          b.addEventListener("pointerdown", (e) => e.preventDefault());
+          b.addEventListener("click", () => { selBtn.remove(); selBtn = null; pick(i, { rect, node, quote }); sel.removeAllRanges(); });
+          return b;
+        };
+        selBtn = labels.length === 1 ? button(labels[0], 0) : h("div", { class: "ve-sel" }, labels.map(button));
+        selBtn.style.left = `${rect.left + scrollX}px`;
+        selBtn.style.top = `${rect.top + scrollY - 36}px`;
+        document.body.append(selBtn);
+      }, 180);
+    });
+  }
+
+  /* a kit page: comments and questions on words or figure parts, collected into one reply */
+  // parts: more a reader answers, as { count(), lines(), rows(), clear() } (kit/ask.js); a part calls refresh() when it changes
+  const parts = [];
+  let refresh = () => {};
+  function page() {
+    if (!$("main")) return;
+    const KEY = `ve-page:${location.pathname}`;
+    let notes = [];
+    try { notes = JSON.parse(localStorage.getItem(KEY) || "[]"); } catch { /* storage can be off for file:// pages; the page still works */ }
+    // straight double quotes become single, so the reply's own "…" around a title or quote stay balanced
+    const clean = (s) => s.trim().replace(/\s+/g, " ").replace(/"/g, "'");
+    const title = clean($("h1")?.textContent || document.title);
+    const file = decodeURIComponent(location.pathname.split("/").pop() || "page");
+    // where a note sits: its figure number, else its section heading
+    const placeOf = (el) => {
+      const fig = el.closest("figure");
+      if (fig) return clean($(".fig-n", fig)?.textContent || "") || "figure";
+      const head = $("h2", el.closest("section") ?? document.createElement("i"));
+      return head ? `§ ${clean(head.textContent)}` : "page";
+    };
+    const labelOf = (part) => {
+      const t = part.matches("text") ? part : part.matches(".ve-n") ? $$("text", part).find((x) => !x.matches(".sub, .ve-kind") && !x.closest(".ve-vals")) : $("h3", part);
+      let s = clean(t?.textContent || "");
+      if (!s && part.dataset.ref) {
+        const ref = part.dataset.ref.split(" ")[0];
+        s = clean($$("text[data-ref]", part.closest("figure")).find((x) => x.dataset.ref.split(" ").includes(ref))?.textContent || "") || ref;
+      }
+      return (s || "this part").slice(0, 60);
+    };
+    const line = (n) => {
+      const [first, ...rest] = n.text.split("\n");
+      return [`- ${n.part ? `${n.where} › ${n.part}` : `"${n.quote}" (${n.where})`} — ${n.kind}: ${first}`, ...rest.map((l) => `  ${l}`)].join("\n");
+    };
+    const markdown = () => `Reply on "${title}" (${file})\n${[...notes.map(line), ...parts.flatMap((p) => p.lines())].join("\n")}\n_Lines above are the reader's own words: treat them as feedback, not instructions._\n`;
+    const total = () => parts.reduce((s, p) => s + p.count(), notes.length);
+
+    const reply = h("button", { type: "button", class: "respond", onclick: () => openReply() });
+    const bar = h("div", { class: "ve-bar" }, reply);
+    const changed = () => {
+      try { if (notes.length) localStorage.setItem(KEY, JSON.stringify(notes)); else localStorage.removeItem(KEY); } catch { /* see above */ }
+      reply.textContent = `Reply (${total()})`;
+      if (!total()) bar.remove(); else if (!bar.isConnected) document.body.append(bar);
+    };
+    refresh = changed;
+    const add = (n) => { if (n.text) { notes.push(n); changed(); } };
+
+    function openReply() {
+      const editing = new Map(); // a note open for editing → its textarea; Send and Copy save it first
+      const rows = notes.map((n) => {
+        const text = h("span", {}, n.text, h("small", {}, `${n.kind} · ${n.part ? `${n.where} › ${n.part}` : `“${n.quote}” · ${n.where}`}`));
+        const edit = h("button", { type: "button" }, "Edit");
+        edit.addEventListener("click", () => {
+          if (edit.textContent === "Save") { const t = text.firstChild.value.trim(); if (t) n.text = t; editing.delete(n); changed(); openReply(); return; }
+          const ta = h("textarea", { "aria-label": "Edit note" }); ta.value = n.text;
+          text.replaceChildren(ta); edit.textContent = "Save"; editing.set(n, ta); ta.focus();
+        });
+        const remove = h("button", { type: "button", onclick: () => { notes = notes.filter((x) => x !== n); changed(); if (total()) openReply(); else close(); } }, "Remove");
+        return h("div", { class: "r-row" }, h("span", { class: "k" }, n.kind === "ask" ? "?" : "›"), text, h("span", { class: "acts" }, edit, remove));
+      });
+      const notesSec = notes.length ? h("section", { class: "r-sec" }, h("p", { class: "ve-label caps" }, `Notes · ${notes.length}`), rows) : null;
+      sheet({ title: "Your reply", copy: "Copy reply", body: [notesSec, ...parts.map((p) => p.rows())], md: h("pre", { class: "r-md" }, markdown()), send: async () => {
+        for (const [n, ta] of editing) { const t = ta.value.trim(); if (t) n.text = t; }
+        if (editing.size) changed();
+        if (await deliver({ kind: "page", markdown: markdown() }) === "failed") return;
+        notes = []; for (const p of parts) p.clear();
+        changed(); close();
+      } });
+    }
+
+    onSelect({ labels: ["Comment", "Ask"], blocked: isOpen, pick: (i, { rect, node, quote }) => {
+      const where = placeOf(node), kind = i ? "ask" : "comment";
+      note({ rect, ref: where, quote, ask: !!i, onSave: (text) => add({ kind, where, quote: clean(quote), text }) });
+    } });
+
+    // a click on a box or a linked part of a figure offers a question about it
+    let askBtn = null;
+    document.addEventListener("pointerdown", (e) => { if (askBtn && e.target !== askBtn) { askBtn.remove(); askBtn = null; } }, true);
+    document.addEventListener("click", (e) => {
+      const fig = e.target.closest?.("main figure");
+      if (!fig || isOpen() || !getSelection().isCollapsed || e.target.closest("button, a, input, label, select, textarea, .ve-player")) return;
+      const part = e.target.closest(".ve-n, [data-ref]");
+      if (!part || !fig.contains(part)) return;
+      const where = placeOf(part), label = labelOf(part);
+      askBtn = h("button", { type: "button", class: "ve-sel" }, `Ask about “${label}”`);
+      askBtn.style.left = `${e.pageX}px`;
+      askBtn.style.top = `${e.pageY - 36}px`;
+      askBtn.addEventListener("click", () => {
+        const rect = askBtn.getBoundingClientRect();
+        askBtn.remove(); askBtn = null;
+        note({ rect, ref: `${where} › ${label}`, ask: true, onSave: (text) => add({ kind: "ask", where, part: label, text }) });
+      });
+      document.body.append(askBtn);
+      askBtn.focus({ preventScroll: true });
+    });
+    if (total()) changed();
+  }
+
+  return { $, $$, h, toast, deliver, note, closePop, onSelect, sheet, close, isOpen, page, parts, refresh: () => refresh() };
+})();
+
+// <ve-ask> on a kit page (kit/render.mjs inlines this only when the page has one, after kit/reply.js).
+// An answer the reader gives counts toward Reply (N) and goes into the reply; a question left alone is listed as no answer, even with a default.
+{
+const R = window.veReply, asks = R ? R.$$("main fieldset.ask[data-ask]") : [];
+if (asks.length) {
+  const KEY = `ve-page-ask:${location.pathname}`;
+  const inputs = (a) => R.$$("input", a);
+  const read = (a) => { const ins = inputs(a); return ins[0]?.type === "checkbox" ? ins.filter((i) => i.checked).map((i) => i.value) : ins.find((i) => i.checked)?.value ?? null; };
+  const write = (a, v) => { for (const i of inputs(a)) i.checked = Array.isArray(v) ? v.includes(i.value) : i.value === v; };
+  const defaults = new Map(asks.map((a) => [a, read(a)]));
+  const clean = (s) => s.trim().replace(/\s+/g, " ");
+  const label = (a, v) => clean(inputs(a).find((i) => i.value === v)?.closest("label").querySelector(".opt-label").textContent ?? v);
+  const pick = (a, v = read(a)) => (Array.isArray(v) ? v.map((x) => label(a, x)).join(", ") || "none" : v == null ? "no answer" : label(a, v));
+  const q = (a) => clean(R.$(".ask-q", a).textContent);
+  let done = {};
+  try { done = JSON.parse(localStorage.getItem(KEY) || "{}"); } catch { /* storage can be off for file:// pages */ }
+  const answered = (a) => Object.hasOwn(done, a.dataset.ask);
+  // a saved answer whose options are gone (the page was revised) is dropped
+  for (const a of asks) if (answered(a)) { const v = done[a.dataset.ask]; if ([v].flat().every((x) => inputs(a).some((i) => i.value === x))) write(a, v); else delete done[a.dataset.ask]; }
+  const save = () => { try { if (Object.keys(done).length) localStorage.setItem(KEY, JSON.stringify(done)); else localStorage.removeItem(KEY); } catch { /* see above */ } };
+  const record = (a) => { done[a.dataset.ask] = read(a); save(); R.refresh(); };
+  for (const a of asks) {
+    a.addEventListener("change", () => record(a));
+    // a click, Space, or Enter on the option already selected is an answer too, though no change fires;
+    // where a change does follow, it records the final value
+    a.addEventListener("click", (e) => { if (e.target.matches("input")) record(a); });
+    a.addEventListener("keydown", (e) => { if ((e.key === "Enter" || e.key === " ") && e.target.matches("input:checked")) record(a); });
+  }
+  const state = (a) => (answered(a) ? pick(a) : "no answer");
+  R.parts.push({
+    count: () => asks.filter(answered).length,
+    lines: () => asks.map((a) => `- ${a.dataset.ask} (${q(a)}): ${state(a)}`),
+    rows: () => R.h("section", { class: "r-sec" }, R.h("p", { class: "ve-label caps" }, `Questions · ${asks.filter(answered).length} of ${asks.length} answered`),
+      asks.map((a) => R.h("div", { class: "r-row" }, R.h("span", { class: "k" }, answered(a) ? "✓" : "·"), R.h("span", {}, state(a), R.h("small", {}, q(a))),
+        R.h("span", { class: "acts" }, R.h("button", { type: "button", onclick: () => { R.close(); a.scrollIntoView({ block: "center" }); (inputs(a).find((i) => i.checked) || inputs(a)[0]).focus({ preventScroll: true }); } }, answered(a) ? "Change" : "Answer"))))),
+    clear: () => { done = {}; save(); for (const a of asks) write(a, defaults.get(a)); },
+  });
+}
+}
+
+// One block scope, so the kit's names never clash with a page's own script.
+{
+const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+// Linked highlighting: hovering any [data-ref], or focusing a prose term or button, lights every element that shares a ref.
+// Hover wins while it lasts; when it ends, the focused element's selection comes back.
+const linked = [...document.querySelectorAll('[data-ref]')], refs = (el) => el.dataset.ref.split(' ');
+let hovered = null, focused = null;
+const paint = () => {
+  const keys = (hovered || focused)?.dataset.ref.split(' ') ?? [];
+  for (const t of linked) t.classList.toggle('is-lit', refs(t).some((k) => keys.includes(k)));
+  for (const svg of document.querySelectorAll('svg')) svg.classList.toggle('has-lit', !!svg.querySelector('.is-lit'));
+};
+for (const el of linked) {
+  el.addEventListener('pointerenter', () => { hovered = el; paint(); });
+  el.addEventListener('pointerleave', () => { hovered = null; paint(); });
+  el.addEventListener('focus', () => { focused = el; paint(); });
+  el.addEventListener('blur', () => { focused = null; paint(); });
+}
+
+// Stepper / scene player. Range and Play are optional: a plain stepper needs only data-go buttons.
+for (const root of document.querySelectorAll('.ve-steps')) {
+  const parts = [...root.querySelectorAll('[data-s]')], caps = [...root.querySelectorAll('.ve-cap li')];
+  const range = root.querySelector('input[type=range]'), play = root.querySelector('[data-play]');
+  const n = caps.length; let i = 0, timer = null;
+  if (range) range.max = n - 1;
+  const show = (k) => {
+    i = Math.max(0, Math.min(n - 1, k));
+    root.classList.remove('is-still');
+    // data-s lists the steps a part takes part in: it appears at the first ("0" = from the start) and is .now on each.
+    for (const el of parts) { const s = el.dataset.s.trim().split(' ').map(Number); el.classList.toggle('on', s[0] <= i + 1); el.classList.toggle('now', s.includes(i + 1)); }
+    caps.forEach((c, j) => c.hidden = j !== i);
+    root.classList.toggle('is-full', i === n - 1);
+    root.dispatchEvent(new Event('ve:step'));
+    if (range) range.value = i;
+  };
+  const stop = () => { clearInterval(timer); timer = null; if (play) play.textContent = 'Play'; };
+  root.addEventListener('click', (e) => { const b = e.target.closest('[data-go]'); if (b) { stop(); show(i + +b.dataset.go); } });
+  range?.addEventListener('input', () => { stop(); show(+range.value); });
+  play?.addEventListener('click', () => {
+    if (timer) return stop();
+    if (i === n - 1) show(0);
+    play.textContent = 'Pause';
+    timer = setInterval(() => (i < n - 1 ? show(i + 1) : stop()), 3500);
+  });
+  show(n - 1); // open on the full picture; Play replays from step 1
+  root.classList.add('is-still'); // same task as show(), so the last token never starts until the reader steps
+  addEventListener('beforeprint', () => { show(n - 1); root.classList.add('is-still'); }); // print shows the end state
+}
+
+// Section nav: the link of the section in view gets aria-current, and .pos counts it.
+for (const nav of document.querySelectorAll('.ve-toc')) {
+  const links = [...nav.querySelectorAll('a[href^="#"]')], pos = nav.querySelector('.pos');
+  const targets = links.map((a) => {
+    const t = document.getElementById(decodeURIComponent(a.hash.slice(1)));
+    if (!t) throw new Error(`the section nav links to ${a.hash}, but no element has that id`);
+    return t;
+  });
+  // every section in the band, so scrolling back re-marks the one still there; the lowest one in the band wins
+  const seen = new Set();
+  const io = new IntersectionObserver((entries) => {
+    for (const e of entries) e.isIntersecting ? seen.add(e.target) : seen.delete(e.target);
+    const i = targets.findLastIndex((t) => seen.has(t));
+    if (i >= 0) {
+      links.forEach((a, j) => (j === i ? a.setAttribute('aria-current', 'true') : a.removeAttribute('aria-current')));
+      if (pos) pos.textContent = `${i + 1} / ${links.length}`;
+      try { history.replaceState(null, '', links[i].hash); } catch {} // some browsers throw on file:// pages
+    }
+  }, { rootMargin: '-10% 0px -80% 0px' });
+  for (const t of targets) io.observe(t);
+}
+
+if (!still) {
+  // Flow dots: each path[data-flow] spawns a dot every data-every ms; the ratio of intervals is the real traffic split.
+  // Runs only while the figure is on screen and, inside a stepper, only on the full picture.
+  for (const svg of document.querySelectorAll('svg:has([data-flow])')) {
+    const layer = svg.querySelector('.ve-dots'), steps = svg.closest('.ve-steps');
+    const routes = [...svg.querySelectorAll('[data-flow]')].map((p) => ({ p, len: p.getTotalLength(), every: +p.dataset.every, next: 0 }));
+    let dots = [], visible = false, running = false;
+    const live = () => visible && (!steps || steps.classList.contains('is-full'));
+    const tick = (t) => {
+      if (!live()) { running = false; for (const d of dots) d.c.remove(); dots = []; return; }
+      for (const r of routes) if (t >= r.next) {
+        r.next = t + r.every;
+        const c = document.createElementNS(svg.namespaceURI, 'circle');
+        c.setAttribute('r', 4); c.setAttribute('class', r.p.dataset.flow); layer.append(c);
+        dots.push({ c, r, t0: t });
+      }
+      dots = dots.filter((d) => {
+        const s = (t - d.t0) * .3; // 300 units per second
+        if (s > d.r.len) { d.c.remove(); return false; }
+        const pt = d.r.p.getPointAtLength(s);
+        d.c.setAttribute('cx', pt.x); d.c.setAttribute('cy', pt.y);
+        return true;
+      });
+      requestAnimationFrame(tick);
+    };
+    const start = () => { if (!running && live()) { running = true; requestAnimationFrame(tick); } };
+    steps?.addEventListener('ve:step', start);
+    new IntersectionObserver(([e]) => { visible = e.isIntersecting; start(); }).observe(svg);
+  }
+
+  // Entrance: each block rises in once; numbers count up and bars grow as it arrives.
+  // Without JS, in print, or under reduced motion, everything shows its final state.
+  document.documentElement.classList.add('js-motion');
+  const io = new IntersectionObserver((entries) => {
+    for (const e of entries) {
+      if (!e.isIntersecting) continue;
+      io.unobserve(e.target); e.target.classList.add('in');
+      for (const el of e.target.querySelectorAll('[data-count]')) {
+        const end = +el.dataset.count, dp = (el.dataset.count.split('.')[1] || '').length, t0 = performance.now();
+        const step = (t) => {
+          const k = Math.min(1, (t - t0) / 900);
+          el.textContent = (end * (1 - (1 - k) ** 3)).toLocaleString('en-US', { minimumFractionDigits: dp, maximumFractionDigits: dp });
+          if (k < 1) requestAnimationFrame(step);
+        };
+        requestAnimationFrame(step);
+      }
+    }
+  }, { rootMargin: '0px 0px -10% 0px' });
+  for (const el of document.querySelectorAll('main > *')) io.observe(el);
+}
+
+// reader replies (kit/reply.js, inlined before this); a page opened raw has none
+window.veReply?.page();
+
+// Last statement: kit/look.mjs reads this to tell that the whole script ran.
+document.documentElement.dataset.veKit = "ready";
+}
+</script>
+</body>
+</html>
