@@ -16,7 +16,6 @@ header h1{font-size:clamp(1.9rem,3.2vw,2.6rem);max-width:none}
 .pack tr.load td{background:color-mix(in srgb,var(--text) 6%,transparent)}
 .pack tr.pull td{outline:1px dashed var(--border-bright);outline-offset:-3px}
 .pack tr.out td{color:var(--text-dim);text-decoration:line-through}
-.asks{display:grid;gap:var(--s-5)}
 .chan td,.chan th{vertical-align:top}
 .chan small{display:block}
 .chan tbody th{white-space:nowrap;text-align:left;font-weight:600}
@@ -207,7 +206,7 @@ header h1{font-size:clamp(1.9rem,3.2vw,2.6rem);max-width:none}
 
 <section id="messages">
   <div class="sec-head"><p class="ve-label caps">沟通</p><h2>有结论、收件人要行动，才发消息</h2></div>
-  <p>状态和进度写进账本。读完什么都不用做的消息不发。</p>
+  <p>状态和进度写进账本。读完什么都不用做的消息不发。每种消息和任务包的具体内容见<a href="smooth-research-message-examples.html">样例页</a>。</p>
   <figure>
     <div class="ve-table msgs"><table>
       <thead><tr><th>#</th><th>时间点</th><th>谁发给谁</th><th>内容</th><th>收件人接下来做什么</th></tr></thead>
@@ -401,7 +400,7 @@ header h1{font-size:clamp(1.9rem,3.2vw,2.6rem);max-width:none}
 </section>
 
 <section id="open">
-  <div class="sec-head"><p class="ve-label caps">决定</p><h2>五件事已定，一件还要你选</h2></div>
+  <div class="sec-head"><p class="ve-label caps">决定</p><h2>六件事都已定</h2></div>
   <div class="ve-table"><table>
     <thead><tr><th>问题</th><th>决定</th></tr></thead>
     <tbody>
@@ -410,15 +409,10 @@ header h1{font-size:clamp(1.9rem,3.2vw,2.6rem);max-width:none}
       <tr><td>自由消息</td><td>协调者到其他角色、研究者和审核者之间可以自由发；发给协调者的只有固定类型和格式（图 5）</td></tr>
       <tr><td>贵运行要回协调者吗</td><td>任务卡授权内不用回；超出授权就发阻塞</td></tr>
       <tr><td>怎么回答协调者的自由提问</td><td>固定类型“答复”：引用那条消息的 id，每条最多答复一次</td></tr>
+      <tr><td>研究者要不要开新会话</td><td>每个任务开新会话，只靠启动包；退回或阻塞解除时回到原会话继续同一任务；取消“不压缩直接继续”</td></tr>
     </tbody>
   </table></div>
   <p>落到代码：<code>rl task deliver</code> 从账本生成核验行，包括运行状态、证据 id、审核是否通过、branch head 是否等于通过测试的 commit（<code>verification_lines</code> 现在只做最后一项）。<code>rl agent tell</code> 和 <code>rl msg</code> 拒绝会话发给协调者的消息。<code>_reviewer_brief</code> 和 <code>_advisor_brief</code> 去掉 tell coordinator 的步骤，由 <code>rl review answer</code> 和 <code>rl advise answer</code> 发固定消息。</p>
-  <div class="asks">
-    <ve-ask id="session" q="研究者每个任务开新会话吗？">
-      <ve-opt value="fresh" default>每个任务开新会话，只靠启动包</ve-opt>
-      <ve-opt value="reuse">同一路线的连续任务复用会话</ve-opt>
-    </ve-ask>
-  </div>
 </section>
 
 <section class="sources" aria-label="Sources">
