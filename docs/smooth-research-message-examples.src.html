@@ -37,13 +37,13 @@ header h1{font-size:clamp(1.9rem,3.2vw,2.6rem);max-width:none}
 </style>
 </head>
 <body>
-<nav class="ve-toc" aria-label="Sections"><div><a href="#card">任务卡</a><a href="#pack">启动包</a><a href="#run">作业</a><a href="#result">结论</a><a href="#review">审核</a><a href="#need">按需</a><a href="#except">异常</a><a href="#user">用户</a><a href="#moved">去向</a></div><span class="pos"></span></nav>
+<nav class="ve-toc" aria-label="Sections"><div><a href="#card">设计</a><a href="#pack">启动包</a><a href="#run">作业</a><a href="#result">结论</a><a href="#review">审核</a><a href="#need">按需</a><a href="#except">异常</a><a href="#user">用户</a><a href="#moved">去向</a></div><span class="pos"></span></nav>
 <main>
 <header>
   <p class="eyebrow">Smooth Research · 最精简设计 · 消息和任务包样例</p>
   <h1>T-0047 实际 17 条消息，按新设计只剩任务卡和任务结论</h1>
-  <p class="lead">每种消息和任务包都用 bypass-lora 的真实记录举例。<b>原文</b>取自账本或运行日志；<b>预计</b>是按新规则改写的，尚未实现。</p>
-  <p class="meta">2026-11-09 · 配套页：<a href="smooth-research-minimal-workflow.html">最精简工作流</a> · 数据来自快照 restart-method-preparation-20261108 和 Miyabi 运行日志</p>
+  <p class="lead">每种消息和任务包都用 bypass-lora 的真实记录举例。<b>原文</b>取自账本或运行日志；<b>预计</b>是按新规则改写的，尚未实现。加入科学家后，设计、结论审核和咨询都由科学家发起，协调者只核查设计是否符合计划和预算。</p>
+  <p class="meta">2026-11-10 · 加入科学家角色 · 配套页：<a href="smooth-research-minimal-workflow.html">最精简工作流</a> · 数据来自快照 restart-method-preparation-20261108 和 Miyabi 运行日志</p>
 </header>
 
 <figure>
@@ -135,15 +135,50 @@ header h1{font-size:clamp(1.9rem,3.2vw,2.6rem);max-width:none}
 </figure>
 
 <section id="card">
-  <div class="sec-head"><p class="ve-label caps">任务卡</p><h2>任务卡一次写全，研究者中途不用回协调者</h2></div>
+  <div class="sec-head"><p class="ve-label caps">设计和任务卡</p><h2>科学家交来设计，协调者核查四项后发任务卡</h2></div>
+  <figure>
+    <div class="pair">
+      <div class="spec">
+        <div class="spec-h"><span class="chip warn">预计</span><b>设计交付 E-0035@1</b><span>科学家 → 协调者 · 依据 E-0035、DOC-0441@1、D-0081、RV-0117</span></div>
+        <dl>
+          <dt>实验</dt><dd>E-0035@1（合同 DOC-0441@1，3,412 字）SEG 读写四格：新 seed 匹配训练与单候选筛选</dd>
+          <dt>检验</dt><dd>H-0035@1（H5.1）、H-0036@1（H5.2）</dd>
+          <dt>来自</dt><dd>D-0081（11-07 05:51）：以 H5 承接旧分段和 M 线；四格训练先过实现审核和成本稳定性预检</dd>
+          <dt>预测</dt><dd>seed 6 选候选：Δ≥1 pp 且 G≥2 pp。通过筛选：seed 6/7/8 至少两次 Δ&gt;0，平均 G≥2 pp，每个 seed G≥−1 pp，且都有合格对照。否则不通过；原合同写“交协调者决定”，新设计改由科学家决定停止配方扩张或回到诊断</dd>
+          <dt>审核</dt><dd>设计审核 pass（新设计要求）。原记录没有审合同，只有结论审核 RV-0117 判断能否放行准备</dd>
+          <dt>预计花费</dt><dd>首段 ≤0.25 node·h；全部预检 ≤1.0；seed 6 加准备 ≤4；总计 ≤8；逐阶段放行</dd>
+          <dt>前置任务</dt><dd>T-0037（数据资产审计）、T-0038（旧状态归一化的实现），都已验收。原记录的依赖指向实验 E-0033、E-0034</dd>
+        </dl>
+      </div>
+      <div class="spec">
+        <div class="spec-h"><span class="chip warn">预计</span><b>协调者核查</b><span>只看四项，不评方法</span></div>
+        <dl>
+          <dt>计划</dt><dd>H5 在用户 11-07 指定的新计划里</dd>
+          <dt>用户约束</dt><dd>总预算 200 node·h、信息权限不扩张；合同写明不打开 A2</dd>
+          <dt>预算和优先级</dt><dd>先放行首段 0.25 node·h；后续阶段按合同的放行规则和实测成本放行</dd>
+          <dt>审核状态</dt><dd>设计审核 pass；新训练路径的代码审核由研究者在任务里请求</dd>
+        </dl>
+        <div class="gen">
+          <p class="ve-label">核查通过后发出的任务卡</p>
+          <dl>
+            <dt>T-0041</dt><dd>E-0035 训练实现与首段预检：审核、A0、prepare、smoke 及计时</dd>
+            <dt>T-0047</dt><dd>Stage C：seed 6 六臂跨 warmup 的 1500 步前缀（图 3）</dd>
+          </dl>
+        </div>
+      </div>
+    </div>
+    <figcaption><span class="fig-n">图 2</span>设计交付带着合同、预测、审核状态和预计花费；协调者只核查计划、约束、预算和审核状态，方法问题在设计审核里已经解决。</figcaption>
+  </figure>
+
   <figure>
     <div class="spec">
-      <div class="spec-h"><span class="chip warn">预计</span><b>任务卡 T-0047</b><span>协调者 → 研究者 · 选定下一个实验时 · 约 1,700 字（DOC-0505 是 3,267 字）</span></div>
+      <div class="spec-h"><span class="chip warn">预计</span><b>任务卡 T-0047</b><span>协调者 → 研究者 · 按合同放行 Stage C 时 · 约 1,700 字（DOC-0505 是 3,267 字）</span></div>
       <dl>
         <dt>任务</dt><dd>E-0035 Stage C：seed 6 六臂跨 warmup 1500 步前缀 · researcher-norm</dd>
-        <dt>问题</dt><dd>六臂 seed 6 的 1500 步前缀能否在 strict 2g 上完整跑完，跨臂初始状态是否一致？这是诊断，不改变假说状态。</dd>
+        <dt>问题</dt><dd>六臂 seed 6 的 1500 步前缀能否在 strict 2g 上完整跑完，跨臂初始状态是否一致？这是诊断，不改变假设状态。</dd>
+        <dt>工作目录</dt><dd><code>research/work/T-0047/</code>，目录整体归这个任务；交付时把要留的文件登记成产出</dd>
       </dl>
-      <p class="sec">合同 <small>实验 E-0035@1（DOC-0441@1）· 决定 D-0090</small></p>
+      <p class="sec">合同 <small>实验 E-0035@1（DOC-0441@1）· 按合同的放行规则和 T-0041 的实测成本放行，原记录写成决定 D-0090</small></p>
       <dl>
         <dt>代码</dt><dd>不可变 commit <code>4437d484</code> 的只读 snapshot，审核 RV-0122；不改 src、tests、PBS，不重跑 A0</dd>
         <dt>入口</dt><dd><code>research/notes/T-0041-run.pbs</code> 的 prefix 入口；环境 <code>envs/3c916b51337d-cuda</code>；封存政策 <code>98957394…</code>；<code>e35_runspec.py</code> 不支持 prefix，按已有 C-prefix 草案编辑 JSON</dd>
@@ -169,7 +204,7 @@ header h1{font-size:clamp(1.9rem,3.2vw,2.6rem);max-width:none}
         <dt>任务结论</dt><dd>六臂和 validity 都有结果时交付：逐臂完整、部分或未执行，全部失败，总用量，按实测算的全长预算</dd>
       </dl>
     </div>
-    <figcaption><span class="fig-n">图 2</span>任务卡写全问题、合同、授权和结束条件；标“事后补入”的五条在实际运行中是协调者看到中途结果后才说的（见图 15）。</figcaption>
+    <figcaption><span class="fig-n">图 3</span>任务卡写全问题、合同、授权和结束条件；标“事后补入”的五条在实际运行中是协调者看到中途结果后才说的（见图 16）。</figcaption>
   </figure>
 
   <figure>
@@ -182,12 +217,12 @@ header h1{font-size:clamp(1.9rem,3.2vw,2.6rem);max-width:none}
         <tr><td>MSG-1267</td><td>All StageC/failed/partial/analysis cost counts; .63681 bounds only the initial six requests</td><td>并入“预算”一行，这条消息不再单独发</td></tr>
       </tbody>
     </table></div>
-    <figcaption><span class="fig-n">图 3</span>DOC-0505 和紧跟的 MSG-1267 里只有四处要改，都是让研究者回协调者或补充预算口径的句子；其余内容照搬。</figcaption>
+    <figcaption><span class="fig-n">图 4</span>DOC-0505 和紧跟的 MSG-1267 里只有四处要改，都是让研究者回协调者或补充预算口径的句子；其余内容照搬。</figcaption>
   </figure>
 </section>
 
 <section id="pack">
-  <div class="sec-head"><p class="ve-label caps">启动包</p><h2>研究者的启动包约减半，审核者基本不变</h2></div>
+  <div class="sec-head"><p class="ve-label caps">启动包</p><h2>研究者的启动包约减半，科学家从数据库启动</h2></div>
   <p>新会话收到的第一条提示不变：<code>[smooth-research] researcher-norm: your assignment is T-0047. Run `rl agent brief researcher-norm` and follow it.</code></p>
   <figure>
     <div class="ve-table tight"><table>
@@ -195,10 +230,10 @@ header h1{font-size:clamp(1.9rem,3.2vw,2.6rem);max-width:none}
       <tbody>
         <tr><td>角色说明</td><td class="num">6,689</td><td class="num">约 2,000</td><td>换成角色卡：职责、可发的消息、结束方式</td></tr>
         <tr><td>Task</td><td class="num">840</td><td class="num">约 500</td><td>删掉 coordinator 行，写明通知目标是自己</td></tr>
-        <tr><td>Locations</td><td class="num">340</td><td class="num">340</td><td>worktree、branch、base commit</td></tr>
-        <tr><td>任务卡（Request DOC-0505）</td><td class="num">3,291</td><td class="num">约 1,700</td><td>图 2</td></tr>
+        <tr><td>Locations</td><td class="num">340</td><td class="num">约 370</td><td>worktree、branch、base commit，加一行工作目录 <code>research/work/T-0047/</code></td></tr>
+        <tr><td>任务卡（Request DOC-0505）</td><td class="num">3,291</td><td class="num">约 1,700</td><td>图 3</td></tr>
         <tr><td>Experiment</td><td class="num">1,551</td><td class="num">1,551</td><td>合同，不变</td></tr>
-        <tr><td>Hypothesis</td><td class="num">485</td><td class="num">485</td><td>目标假说，不变</td></tr>
+        <tr><td>Hypothesis</td><td class="num">485</td><td class="num">485</td><td>目标假设，不变</td></tr>
         <tr><td>Decisions on these targets</td><td class="num">1,176</td><td class="num">0</td><td>任务卡写决定 id，需要时按 id 取</td></tr>
         <tr><td>Runs of these experiments</td><td class="num">未显示</td><td class="num">0</td><td>按 id 取</td></tr>
         <tr><td>Compute resources</td><td class="num">1,591 *</td><td class="num">约 600</td><td>只留本任务的资源、队列和提交方式</td></tr>
@@ -206,17 +241,25 @@ header h1{font-size:clamp(1.9rem,3.2vw,2.6rem);max-width:none}
         <tr><td><b>合计</b></td><td class="num"><b>14,396 以上</b></td><td class="num"><b>约 7,200</b></td><td></td></tr>
       </tbody>
     </table></div>
-    <figcaption><span class="fig-n">图 4</span>研究者的启动包从 14,396 字以上降到约 7,200 字，减掉的是角色说明和别的任务的决定。现在一列是 T-0047 的 brief，查看时用了 <code>head -150</code>，所以 Runs、Compute、Constraints 没显示；带 * 的两行用 T-0073 的实测。</figcaption>
+    <figcaption><span class="fig-n">图 5</span>研究者的启动包从 14,396 字以上降到约 7,200 字，减掉的是角色说明和别的任务的决定。现在一列是 T-0047 的 brief，查看时用了 <code>head -150</code>，所以 Runs、Compute、Constraints 没显示；带 * 的两行用 T-0073 的实测。</figcaption>
   </figure>
 
   <figure>
-    <div class="trio">
+    <div class="pair">
       <div class="spec">
         <div class="spec-h"><b>协调者</b><span>启动或压缩后载入</span></div>
-        <div class="bars"><ve-bars unit="K" max="70" label="协调者现在约 69,500 字，含 63 KB 规则文档；预计约 6,300 字"><ve-bar value="69.5">现在</ve-bar><ve-bar value="6.3" hot>预计</ve-bar></ve-bars></div>
+        <div class="bars"><ve-bars unit="K" max="70" label="协调者现在约 69,500 字，含 63 KB 规则文档；预计约 4,500 字"><ve-bar value="69.5">现在</ve-bar><ve-bar value="4.5" hot>预计</ve-bar></ve-bars></div>
         <dl>
-          <dt>载入</dt><dd>角色卡；待处理的任务结论（727 字）；目标和约束一屏；活跃假说（362 字）；最近决定（1,476 字）；开放任务每个一行</dd>
-          <dt>去掉</dt><dd>规则文档 63 KB（122 轮里有 57 轮重读）；未完成 attempts；Locations；Compute；暂停路线（2,198 字，按 id 取）</dd>
+          <dt>载入</dt><dd>角色卡；待处理的任务结论（727 字）或设计交付；目标和约束一屏；开放任务每个一行</dd>
+          <dt>去掉</dt><dd>规则文档 63 KB（122 轮里有 57 轮重读）；活跃假设（362 字）和最近决定（1,476 字），改归科学家；未完成 attempts；Locations；Compute；暂停路线（2,198 字，按 id 取）</dd>
+        </dl>
+      </div>
+      <div class="spec">
+        <div class="spec-h"><b>科学家</b><span>新角色 · 启动或压缩后从数据库载入</span></div>
+        <div class="bars"><ve-bars unit="K" max="115" label="现在协调者靠 114,805 字的交接文档恢复研究状态；科学家预计约 8,000 字"><ve-bar value="114.8">交接文档</ve-bar><ve-bar value="8" hot>预计</ve-bar></ve-bars></div>
+        <dl>
+          <dt>载入</dt><dd>角色卡（约 2,000 字）；假设树每个假设一行（44 个，3,113 字）；最近决定（1,476 字）；待判定的任务结论（727 字）；未判定的实验每个一行（7 个，681 字）</dd>
+          <dt>去掉</dt><dd>交接文档（183 KB）；作业 id、日志、diff；代码审核的讨论</dd>
         </dl>
       </div>
       <div class="spec">
@@ -236,7 +279,7 @@ header h1{font-size:clamp(1.9rem,3.2vw,2.6rem);max-width:none}
         </dl>
       </div>
     </div>
-    <figcaption><span class="fig-n">图 5</span>变化最大的是协调者的规则文档和顾问的证据包；审核包已经是按需读文件，基本不变。柱子的单位是千字。</figcaption>
+    <figcaption><span class="fig-n">图 6</span>变化最大的是协调者的规则文档和顾问的证据包；科学家是新角色，从数据库读假设树，不读交接文档；审核包已经是按需读文件，基本不变。柱子的单位是千字。</figcaption>
   </figure>
 </section>
 
@@ -269,7 +312,7 @@ Acknowledge: notify_ack(id="N-20261108-014313-b534", ack_token="...")
 Ledger export (smooth-research JSONL): .../miyabi-mcp --project-dir /work/xg24i002/x10041/bypass-lora ledger --format smooth-research --jsonl</pre>
       </div>
     </div>
-    <figcaption><span class="fig-n">图 6</span>提交作业只改 notify 的投递目标；通知文字不变，确认和记账都由研究者完成。T-0047 每个作业一条通知，共 9 条；也可以一批作业一条（T-0011 的十个作业用了一条）。</figcaption>
+    <figcaption><span class="fig-n">图 7</span>提交作业只改 notify 的投递目标；通知文字不变，确认和记账都由研究者完成。T-0047 每个作业一条通知，共 9 条；也可以一批作业一条（T-0011 的十个作业用了一条）。</figcaption>
   </figure>
 </section>
 
@@ -302,7 +345,7 @@ Ledger export (smooth-research JSONL): .../miyabi-mcp --project-dir /work/xg24i0
         </div>
       </div>
     </div>
-    <figcaption><span class="fig-n">图 7</span>核验行是用 T-0047 的账本快照实际算出来的。研究者自己写的部分只剩结论、证据引用、限制和待决定。</figcaption>
+    <figcaption><span class="fig-n">图 8</span>核验行是用 T-0047 的账本快照实际算出来的。研究者自己写的部分只剩结论、证据引用、限制和待决定。</figcaption>
   </figure>
   <p>核验行如实显示账本里的情况：T-0047 只有 Result，没有 Evidence，所以证据是 0 条；9 个 attempt 的审核状态都是 stale，这 3 个路径在任务卡里已说明不在执行路径上。</p>
   <p>落到代码需要加三样：Run 记下所属任务（现在只能靠 <code>request_id</code> 前缀 T-0047- 认）；任务卡的预算写成结构化字段（上限和已耗），否则算不出 0.4416665 / 1.0；固定类型的消息不截断（现在 <code>NOTICE_CHARS=600</code>）。<code>rl task deliver</code> 现有 <code>--summary</code>、<code>--output</code>、<code>--verified</code>，预计改成 <code>--conclusion</code>、<code>--evidence</code>、<code>--limits</code>、<code>--decide</code>。</p>
@@ -352,7 +395,7 @@ Ledger export (smooth-research JSONL): .../miyabi-mcp --project-dir /work/xg24i0
         <pre class="raw">RV-0126: pass, 0 finding(s), 0 of medium or higher; see the answer. Static recheck at frozen f6de998cd6f87ebcc5a259eae69dfebabef17628 resolves all three RV-0125 findings; original answer preserved. New writer tests make 16 subprocess calls rather than the hand estimate of 15; numerical loop counts unchanged. No tests or PBS executed; runtime validation remains pending.</pre>
       </div>
     </div>
-    <figcaption><span class="fig-n">图 8</span>审核结果的格式不变，只发给研究者；审核包也不变，少的是协调者转手的那些消息。</figcaption>
+    <figcaption><span class="fig-n">图 9</span>审核结果的格式不变，只发给研究者；审核包也不变，少的是协调者转手的那些消息。</figcaption>
   </figure>
 
   <figure>
@@ -369,16 +412,16 @@ Ledger export (smooth-research JSONL): .../miyabi-mcp --project-dir /work/xg24i0
         </tbody>
       </table></div>
     </div>
-    <figcaption><span class="fig-n">图 9</span>15:25 到 15:48 之间围绕 RV-0125 的 19 条消息里，17 条经过协调者或发给协调者，新设计全部删除。</figcaption>
+    <figcaption><span class="fig-n">图 10</span>15:25 到 15:48 之间围绕 RV-0125 的 19 条消息里，17 条经过协调者或发给协调者，新设计全部删除。</figcaption>
   </figure>
 </section>
 
 <section id="need">
-  <div class="sec-head"><p class="ve-label caps">按需</p><h2>结论审核、咨询和答复都有固定字段</h2></div>
+  <div class="sec-head"><p class="ve-label caps">按需</p><h2>结论审核和咨询改由科学家发起</h2></div>
   <figure>
     <div class="pair">
       <div class="spec">
-        <div class="spec-h"><span class="chip ok">原文</span><b>结论审核请求 RV-0111</b><span>协调者 → 审核者 · 审核包 11,719 字</span></div>
+        <div class="spec-h"><span class="chip ok">原文</span><b>结论审核请求 RV-0111</b><span>原记录由协调者发出，新设计由科学家请求 · 审核包 11,719 字</span></div>
         <dl>
           <dt>命令</dt><dd><code>rl review conclusion --target H-0030 --target H-0031 --proposal &lt;文件&gt;</code></dd>
           <dt>问题</dt><dd>Do the records support this conclusion, at this evidence level and within this scope?</dd>
@@ -387,7 +430,7 @@ Ledger export (smooth-research JSONL): .../miyabi-mcp --project-dir /work/xg24i0
         </dl>
       </div>
       <div class="spec">
-        <div class="spec-h"><span class="chip warn">预计</span><b>结论审核结果 RV-0111</b><span>审核者 → 协调者 · 固定类型</span></div>
+        <div class="spec-h"><span class="chip warn">预计</span><b>结论审核结果 RV-0111</b><span>审核者 → 科学家</span></div>
         <dl>
           <dt>结果</dt><dd>不成立（issues）· 3 条发现，1 条 medium</dd>
           <dt>理由</dt><dd>F1：解释段把 H-QVU 对 X-01 写成同预算比较，但 rank 和写入位置是一起变的（r17 对 r32）</dd>
@@ -399,22 +442,22 @@ Ledger export (smooth-research JSONL): .../miyabi-mcp --project-dir /work/xg24i0
         </div>
       </div>
     </div>
-    <figcaption><span class="fig-n">图 10</span>结论审核的请求基本不变；结果加一句理由，回合是否结束由账本算出，不再单独通知。</figcaption>
+    <figcaption><span class="fig-n">图 11</span>结论审核由科学家请求，结果回科学家，不经协调者；请求基本不变，结果加一句理由，回合是否结束由账本算出。</figcaption>
   </figure>
 
   <figure>
     <div class="pair">
       <div class="spec">
-        <div class="spec-h"><span class="chip warn">预计</span><b>咨询 AD-0007</b><span>协调者 → 顾问 · 约 21,600 字（现在 155,715 字）</span></div>
+        <div class="spec-h"><span class="chip warn">预计</span><b>咨询 AD-0007</b><span>科学家 → 顾问 · 约 21,600 字（现在 155,715 字）</span></div>
         <dl>
           <dt>问题</dt><dd>除了已试过的 tap、eta 和 init，X-tap 侧支做什么改动最有可能比 X-01 至少高 1 pp，并缩小和 all-7 LoRA r7 的 0.8 pp 差距？最便宜的判别 dev 筛选是什么？</dd>
-          <dt>假说链</dt><dd>H-0021，及其已试路径（12,974 字）和存活解释（1,269 字）</dd>
+          <dt>假设链</dt><dd>H-0021，及其已试路径（12,974 字）和存活解释（1,269 字）</dd>
           <dt>约束</dt><dd>H-0021 暂停 inconclusive；用户要求再做一轮咨询；项目约 165 / 200 node·h 可用</dd>
           <dt>按 id 取</dt><dd>关键证据、诊断结果、产物索引</dd>
         </dl>
       </div>
       <div class="spec">
-        <div class="spec-h"><span class="chip ok">原文内容 · 加字段名</span><b>建议 AD-0007</b><span>顾问 → 协调者 · MSG-1012，432 字</span></div>
+        <div class="spec-h"><span class="chip ok">原文内容 · 加字段名</span><b>建议 AD-0007</b><span>顾问 → 科学家 · 原文 MSG-1012 发给协调者，432 字</span></div>
         <dl>
           <dt>建议</dt><dd>continue：normalized-X 的 q/v/up 写入筛选，r17（629,000 参数），配同参数 T0 和保留的 LoRA r7</dd>
           <dt>上限</dt><dd>初始 1.3 node·h，含条件覆盖对照时 2.0</dd>
@@ -424,7 +467,7 @@ Ledger export (smooth-research JSONL): .../miyabi-mcp --project-dir /work/xg24i0
         </dl>
       </div>
     </div>
-    <figcaption><span class="fig-n">图 11</span>建议消息的内容已经接近固定格式；进度性的 MSG-1011（302 字）不再发送。</figcaption>
+    <figcaption><span class="fig-n">图 12</span>建议消息的内容已经接近固定格式，新设计发给科学家；进度性的 MSG-1011（302 字）不再发送。</figcaption>
   </figure>
 
   <figure>
@@ -441,16 +484,32 @@ Ledger export (smooth-research JSONL): .../miyabi-mcp --project-dir /work/xg24i0
         </dl>
       </div>
     </div>
-    <figcaption><span class="fig-n">图 12</span>答复引用提问的 id，一段话说完。这次提问本身已不必要：合同里写了初次单实例不超过 5 分钟，新设计下研究者按授权直接申请。</figcaption>
+    <figcaption><span class="fig-n">图 13</span>答复引用提问的 id，一段话说完。这次提问本身已不必要：合同里写了初次单实例不超过 5 分钟，新设计下研究者按授权直接申请。</figcaption>
   </figure>
 </section>
 
 <section id="except">
   <div class="sec-head"><p class="ve-label caps">异常</p><h2>异常消息写明卡在哪、要谁决定</h2></div>
   <figure>
-    <div class="trio">
+    <div class="pair">
       <div class="spec">
-        <div class="spec-h"><span class="chip warn">阻塞</span><b>T-0041</b><span>研究者 → 协调者 · 原文 MSG-1155，1,293 字</span></div>
+        <div class="spec-h"><span class="chip warn">设计阻塞</span><b>T-0007</b><span>研究者 → 科学家 · 预计，依据 MSG-0132、MSG-0135、MSG-0136</span></div>
+        <dl>
+          <dt>哪条不成立</dt><dd>E-0007@2 的实现检查：F 线 batch 1 和 batch 8 的答案 NLL 平均绝对差 0.088，门槛 0.05。其余检查通过：top-1 一致率 99.27%，两种 batch 的 EM 相同</dd>
+          <dt>依据</dt><dd>ATT-0050-1、RES-0042、EV-0038；CPU 和 CUDA 交叉熵的差异已在 ATT-0047、ATT-0048 修复</dd>
+          <dt>需要</dt><dd>判断这是评估实现错误还是 BF16 数值误差，以及合同的判读接下来怎么走</dd>
+        </dl>
+        <div class="gen">
+          <p class="ve-label">答复 · 科学家 → 研究者 · 原文 MSG-0135 由协调者发出，649 字</p>
+          <dl>
+            <dt>对照</dt><dd>calibration 前 256 条，E=16 的 M 线和 F 线以 float32 加载，比较 batch 1 和 batch 8</dd>
+            <dt>判读</dt><dd>FP32 下平均绝对差降到 1e-3 量级：判为 BF16 数值误差，按其余分支判定；仍有明显差异：按实现错误排查</dd>
+            <dt>授权</dt><dd>登记在 E-0007 下，E-0007 总用量不超过 0.05 node·h；仍在授权内，所以不经协调者</dd>
+          </dl>
+        </div>
+      </div>
+      <div class="spec">
+        <div class="spec-h"><span class="chip warn">授权阻塞</span><b>T-0041</b><span>研究者 → 协调者 · 原文 MSG-1155，1,293 字</span></div>
         <dl>
           <dt>卡在哪</dt><dd>ATT-0439-1 登记时 code-review 是 stale：六个文件（seg_data、seg_eval、seg_model、e35_check、e35_runspec、test_e35_registry）只被结论为 blocking 的 RV-0118 覆盖</dd>
           <dt>试过</dt><dd>六个文件的 blake2b 和 RV-0118 记录相同，自 78625aa 未变；RV-0118 没有针对它们的发现；没有用 <code>--no-review</code></dd>
@@ -478,7 +537,7 @@ Ledger export (smooth-research JSONL): .../miyabi-mcp --project-dir /work/xg24i0
         </dl>
       </div>
     </div>
-    <figcaption><span class="fig-n">图 13</span>三种异常的字段值都来自真实消息。账本里没有“恢复失败”的记录，失联用的是最接近的一条：会话停在权限对话框。</figcaption>
+    <figcaption><span class="fig-n">图 14</span>四种异常的字段值都来自真实消息。设计阻塞取自 E-0007 的实现检查：原记录里协调者自己看了结果、设计了 FP32 对照，新设计下这是科学家的事。账本里没有“恢复失败”的记录，失联用的是最接近的一条：会话停在权限对话框。</figcaption>
   </figure>
 </section>
 
@@ -487,7 +546,7 @@ Ledger export (smooth-research JSONL): .../miyabi-mcp --project-dir /work/xg24i0
   <figure>
     <div class="pair">
       <div class="spec">
-        <div class="spec-h"><span class="chip warn">预计</span><b>阶段报告</b><span>协调者 → 用户 · 依据 restart-stageC-20261108.md 的开头</span></div>
+        <div class="spec-h"><span class="chip warn">预计</span><b>阶段报告</b><span>协调者 → 用户 · 结论取自科学家的阶段结论 · 依据 restart-stageC-20261108.md 的开头</span></div>
         <dl>
           <dt>结论</dt><dd>T-0047 六臂 1500 步前缀和离线 validity 都已验收；仅技术通过，不是完整训练收益或 prefix C 资格。T-0049 四个 fixture 的 fit 和局部求积收敛已验收，MC 未在该实验运行。</dd>
           <dt>证据</dt><dd>RES-0424..0429、RES-0431、EV-0203</dd>
@@ -498,7 +557,7 @@ Ledger export (smooth-research JSONL): .../miyabi-mcp --project-dir /work/xg24i0
         </dl>
       </div>
       <div class="spec">
-        <div class="spec-h"><span class="chip warn">预计</span><b>决定请求</b><span>协调者 → 用户 · 依据 constraints.md 的 2026-11-02 记录</span></div>
+        <div class="spec-h"><span class="chip warn">预计</span><b>决定请求</b><span>协调者 → 用户 · 选项和建议来自科学家 · 依据 constraints.md 的 2026-11-02 记录</span></div>
         <dl>
           <dt>情况</dt><dd>E-0027 记为 inconclusive：三个 seed 的 BoolQ gain 平均 +2.933 pp，门槛 +3 pp</dd>
           <dt>选项</dt><dd>① 在 dev 上加 seed。② 等 E-0028、E-0029 的结论，再在分段协议上用 A2 做一次预先登记的确认</dd>
@@ -508,7 +567,7 @@ Ledger export (smooth-research JSONL): .../miyabi-mcp --project-dir /work/xg24i0
         </dl>
       </div>
     </div>
-    <figcaption><span class="fig-n">图 14</span>阶段报告把完整记录留在文件里，消息里只放结论、证据、花费和下一步。决定请求过去在对话里发，账本没有原文，这里按用户决定的记录还原。</figcaption>
+    <figcaption><span class="fig-n">图 15</span>阶段报告把完整记录留在文件里，消息里只放结论、证据、花费和下一步。决定请求过去在对话里发，账本没有原文，这里按用户决定的记录还原。</figcaption>
   </figure>
 </section>
 
@@ -535,16 +594,17 @@ Ledger export (smooth-research JSONL): .../miyabi-mcp --project-dir /work/xg24i0
         <tr><td>MSG-1297</td><td class="nw">协调者 → 研究者</td><td class="num">1,069</td><td>核对 validity；诊断量只描述，不加门槛</td><td><span class="chip warn">有实质内容</span> 合同的不做项</td></tr>
       </tbody>
     </table></div>
-    <figcaption><span class="fig-n">图 15</span>15 条里 10 条是状态、转述和放行；5 条是协调者看到中途结果后加的要求。</figcaption>
+    <figcaption><span class="fig-n">图 16</span>15 条里 10 条是状态、转述和放行；5 条是协调者看到中途结果后加的要求。</figcaption>
   </figure>
-  <p>这 5 条是新设计真正的代价。协调者不再看中途结果，这些要求只有三个去处：写任务卡时想到；研究者自己想到；交付时被核验行、抽查或结论审核发现，然后退回。</p>
-  <p>T-0047 里这几条的实际影响不同。两次 guard 拒绝一共只花 0.000139 node·h，没有 MSG-1282 的建议，代价也很小。MSG-1273 和 MSG-1296 是证据口径上的要求，协调者写卡时没写，新设计下要靠交付时检查。</p>
+  <p>这 5 条是新设计真正的代价。协调者不再看中途结果，这些要求只有四个去处：科学家写合同时想到，或在设计审核里被审核者指出；协调者写任务卡时想到；研究者自己想到；交付时被核验行、抽查或结论审核发现，然后退回。</p>
+  <p>T-0047 里这几条的实际影响不同。两次 guard 拒绝一共只花 0.000139 node·h，没有 MSG-1282 的建议，代价也很小。MSG-1273、MSG-1296 和 MSG-1297 是证据口径上的要求，属于方法问题，新设计下应在设计审核里写进合同，漏掉的要靠交付时检查。</p>
 </section>
 
 <section class="sources" aria-label="Sources">
   <p class="ve-label caps">来源</p>
   <p>bypass-lora 账本快照 <code>research/snapshots/restart-method-preparation-20261108/snapshot.json</code>：Message、Task、Run、Attempt、Result、Usage、Ticket、Session</p>
   <p><code>research/tasks/E-0035-prefix-stability.md</code>（DOC-0505）· <code>research/packages/RV-0125.request.md</code> · <code>research/packages/RV-0111.request.md</code> · <code>research/packages/advice-round-4.request.md</code> · <code>research/reviews/RV-0125.md</code> · <code>research/reviews/RV-0126.md</code> · <code>research/reviews/RV-0111.md</code> · <code>research/advice/AD-0007.md</code> · <code>research/reports/restart-stageC-20261108.md</code> · <code>docs/constraints.md</code></p>
+  <p><code>research/experiments/E-0035.md</code>（DOC-0441@1）· D-0081 · RV-0117 · T-0007 的 MSG-0132、MSG-0135、MSG-0136 · 交接文档 <code>research/tasks/restart-coordinator-handoff.md</code>（183,007 字节，114,805 字）· 假设树和未判定实验按每条一行计数</p>
   <p>Miyabi 运行日志：researcher-norm 的 Claude 会话 46cd0c89（brief、job_submit），协调者的 Codex 会话 01a1b483（作业通知、resume pack）</p>
   <p><code>src/smooth_research/context.py:170</code> <code>work_pack</code> · <code>src/smooth_research/context.py:257</code> <code>resume_pack</code> · <code>src/smooth_research/agents.py:492</code> <code>_reviewer_brief</code> · <code>src/smooth_research/agents.py:527</code> <code>_advisor_brief</code> · <code>src/smooth_research/delegate.py:43</code> <code>prompt_for</code> · <code>src/smooth_research/tasks.py:222</code> <code>verification_lines</code></p>
 </section>
