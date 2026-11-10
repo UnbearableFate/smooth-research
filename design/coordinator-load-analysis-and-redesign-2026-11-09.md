@@ -2,6 +2,8 @@
 
 日期 2026-11-09，2026-11-10 增补 5.11 至 5.13 和第 8 章第 6 至 8 项。插件版本 `a8a70a9`，文中行号都对应这个版本。第 5 章以后是建议，尚未实现，执行时按实际情况调整并更新本文。和 `73d0124` 的对比见[版本对比报告](coordinator-load-version-comparison-2026-11-09.md)。
 
+2026-11-10 更新：整合后的新设计见 [`design/new/smooth-research-redesign-2026-11-10.md`](new/smooth-research-redesign-2026-11-10.md)。它取代本文 5.1、5.2、5.4、5.8、5.11 至 5.13 和第 6 至 9 章；本文其余部分和它冲突时，以新文档为准。
+
 ## 1. 核心内容总结
 
 Bypass-LoRA 的一个 Codex 协调会话在约 33 小时内发出 2,558 次请求，平均每次输入 16.3 万 token，占审计可见 12.3 亿 token 的 34%，Claude 会话未计入。两份报告对插件行为的描述与源码相符。
@@ -122,9 +124,9 @@ watcher 读 Codex 日志时已经经过 `token_count` 和 `token_usage_record`�
 
 ## 5. 新设计建议
 
-2026-11-09 更新：用户否决了原 5.2 的唤醒和静默方案。5.2 已按最精简设计改写，完整定义见 `docs/smooth-research-minimal-workflow.html`，每种消息和任务包的样例见 `docs/smooth-research-message-examples.html`。5.3、5.4、5.7 和第 6 至 8 章里凡是提到 `Message.wake`、静默、`--ask` 或空闲 reviewer 自动接单的内容，都以这两页为准。
+2026-11-09 更新：用户否决了原 5.2 的唤醒和静默方案。5.2 已按最精简设计改写，完整定义见 `design/new/smooth-research-minimal-workflow.html`，每种消息和任务包的样例见 `design/new/smooth-research-message-examples.html`。5.3、5.4、5.7 和第 6 至 8 章里凡是提到 `Message.wake`、静默、`--ask` 或空闲 reviewer 自动接单的内容，都以这两页为准。
 
-2026-11-10 更新：新增 5.11 科学家角色、5.12 数据模型和 5.13 文档归属，数据表之间的关系见 `docs/smooth-research-data-relations.html`。5.1 第 1 条里的路线决策改由科学家做；5.8 的短状态文件由 5.12 的数据库恢复取代。
+2026-11-10 更新：新增 5.11 科学家角色、5.12 数据模型和 5.13 文档归属，数据表之间的关系见 `design/new/smooth-research-data-relations.html`。5.1 第 1 条里的路线决策改由科学家做；5.8 的短状态文件由 5.12 的数据库恢复取代。
 
 ### 5.1 设计规则
 
@@ -299,7 +301,7 @@ watcher 读取 Codex 日志的 compaction 次数和上下文大小，超过阈�
 
 运行记录（Run、Attempt、Result）由执行任务和准备任务产生，研究者经 CLI 写入。
 
-由定义得出的规则如下。关系图和每条规则的账本数据见 `docs/smooth-research-data-relations.html`。
+由定义得出的规则如下。关系图和每条规则的账本数据见 `design/new/smooth-research-data-relations.html`。
 
 1. 准备工作是任务，不建实验。现在运行必须挂实验（`schema.py:104`），实验必须检验假设（`research.py:209`），`SKILL.md:64` 又把 E0 定为结构与实现检查，要跑东西的准备只能建成 E0 实验。bypass-lora 的 14 个 E0 实验全是实现检查、冒烟、审计、工具验证和计时入口，H5 的 10 条检验边都来自它们。新规则下 `Run.experiment_id` 可空，运行一律用新边 `OF_TASK` 挂到任务，新实验不再用 E0。
 2. 写不成命题的方向留在 plan 里，不进假设表。“实现正确”不是假设，归实现任务的验收。
