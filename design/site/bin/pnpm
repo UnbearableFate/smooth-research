@@ -1,0 +1,3 @@
+#!/bin/sh
+# pnpm through corepack, without a global install
+exec corepack pnpm@9.15.4 "$@"

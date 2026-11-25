@@ -1,0 +1,1166 @@
+<!doctype html>
+<html lang="zh" data-register="blueprint">
+<head>
+<title>协调者每个假设只收一条结论</title>
+<link rel="stylesheet" href="kit.css" data-ve-kit>
+<style>
+header h1{font-size:clamp(1.9rem,3.2vw,2.6rem);max-width:none}
+.msgs td:first-child,.msgs td:nth-child(3){white-space:nowrap}
+.life{stroke:var(--border-bright);stroke-width:1;stroke-dasharray:2 5;fill:none}
+.awake{fill:var(--text-dim)}
+.gone-t{text-decoration:line-through}
+.pair{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr));gap:var(--s-5);align-items:start}
+.pair pre{margin:0}
+.pack td,.pack th{vertical-align:top}
+.pack td{min-width:10em}
+.pack tbody th{white-space:nowrap;text-align:left;font-weight:600}
+.pack tr.load td{background:color-mix(in srgb,var(--text) 6%,transparent)}
+.pack tr.pull td{outline:1px dashed var(--border-bright);outline-offset:-3px}
+.pack tr.out td{color:var(--text-dim);text-decoration:line-through}
+.chan td,.chan th{vertical-align:top}
+.chan small{display:block}
+.chan tbody th{white-space:nowrap;text-align:left;font-weight:600}
+.chan td.disc{background:color-mix(in srgb,var(--text) 6%,transparent)}
+.chan td.fixed{outline:1.5px solid var(--accent);outline-offset:-3px}
+.chan td.none,.chan td.self{color:var(--text-dim)}
+.z-prot{fill:none;stroke:var(--text-dim);stroke-width:1.5}
+.z-seal{fill:color-mix(in srgb,var(--text) 7%,transparent);stroke:var(--accent);stroke-width:1.75}
+.lead-ln{stroke:var(--border-bright);stroke-width:1;fill:none}
+.hold-a{fill:color-mix(in srgb,var(--text) 16%,transparent);stroke:var(--text-dim);stroke-width:1}
+.hold-r{fill:none;stroke:var(--text-dim);stroke-width:1.5}
+.wait{fill:none;stroke:var(--text-dim);stroke-width:1;stroke-dasharray:4 4}
+.rnd{fill:var(--border-bright)}
+.rv{fill:var(--bg);stroke:var(--text);stroke-width:1.5}
+.ho{stroke:var(--accent);stroke-width:2.5;fill:none}
+.gate{fill:var(--accent)}
+.gate-off{fill:none;stroke:var(--text-dim);stroke-width:1.5;stroke-dasharray:4 3}
+.track{stroke:var(--border-bright);stroke-width:1.5;fill:none}
+</style>
+</head>
+<body>
+<nav class="ve-toc" aria-label="Sections"><div><a href="#roles">角色</a><a href="#scientist">科学家</a><a href="#code">代码</a><a href="#handover">交接</a><a href="#messages">沟通</a><a href="#checks">检查</a><a href="#startup">启动</a><a href="#removed">删除</a><a href="#open">决定</a></div><span class="pos"></span></nav>
+<main>
+<header>
+  <p class="eyebrow">Smooth Research · 最精简设计草案</p>
+  <h1>科学家写代码，研究者交结论，协调者每个假设只收一条</h1>
+  <p class="lead">协调者按假设分配，给大致预算。科学家负责一个假设：<b>写实验代码和实验清单、建任务、验收任务、写决定</b>。代码没有方法问题就交给研究者，审核回合跟着任务走。会话不常驻，每个会话开在 herdr 的一个面板里，待办里有事时由监视唤醒。用户看由记录生成的研究页，有问题在协调者的面板里问。</p>
+  <p class="meta">2026-11-10 起草，11-24 按评审修订，11-25 定下第 43 至 48 项 · 草案，尚未实现 · 消息格式见<a href="smooth-research-message-design.html">消息设计页</a> · 数据来自 bypass-lora 快照</p>
+</header>
+
+<figure class="ve-steps">
+  <div class="frame">
+    <svg class="ve-svg" viewBox="0 0 1000 936" aria-label="一个假设的泳道图，时间向下。协调者发出假设任务后不再运行，直到科学家交来假设结论。科学家写代码和小测试，审核者 B 审核，没有方法问题就把任务交给研究者 C，B 的审核回合随任务转给 C。科学家不等结果，把代码 2 交给审核者 D 和研究者 E。结果齐了，科学家启动结论审核 F，写决定。">
+      <path class="life" d="M190 66V880"/>
+      <path class="life" d="M490 66V870"/>
+      <path class="life" d="M640 66V178M640 198V800"/>
+      <path class="life" d="M790 66V660"/>
+      <path class="life" d="M930 66V584"/>
+
+      <rect class="ve-bnd" data-s="2" x="598" y="176" width="84" height="276"/>
+      <text class="ve-bnd-t" data-s="2" x="606" y="192">回合 B</text>
+      <rect class="ve-bnd" data-s="5" x="296" y="352" width="88" height="356"/>
+      <text class="ve-bnd-t" data-s="5" x="304" y="368">代码 2</text>
+
+      <rect class="awake" data-s="1" x="182" y="88" width="16" height="28"/>
+      <rect class="awake" data-s="1" x="482" y="96" width="16" height="24"/>
+      <rect class="awake" data-s="2" x="482" y="120" width="16" height="96"/>
+      <rect class="awake" data-s="2" x="632" y="204" width="16" height="12"/>
+      <rect class="awake" data-s="3" x="632" y="216" width="16" height="28"/>
+      <rect class="awake" data-s="3" x="482" y="216" width="16" height="84"/>
+      <rect class="awake" data-s="3" x="632" y="262" width="16" height="34"/>
+      <rect class="awake" data-s="4" x="482" y="300" width="16" height="30"/>
+      <rect class="awake" data-s="4" x="782" y="320" width="16" height="40"/>
+      <rect class="awake" data-s="5" x="482" y="330" width="16" height="62"/>
+      <rect class="awake" data-s="6" x="782" y="360" width="16" height="84"/>
+      <rect class="awake" data-s="6" x="632" y="398" width="16" height="40"/>
+      <rect class="awake" data-s="7" x="782" y="444" width="16" height="34"/>
+      <rect class="awake" data-s="7" x="922" y="464" width="16" height="110"/>
+      <rect class="awake" data-s="8" x="782" y="566" width="16" height="86"/>
+      <rect class="awake" data-s="8" x="482" y="640" width="16" height="64"/>
+      <rect class="awake" data-s="9" x="632" y="730" width="16" height="52"/>
+      <rect class="awake" data-s="9" x="482" y="704" width="16" height="80"/>
+      <rect class="awake" data-s="10" x="482" y="784" width="16" height="72"/>
+      <rect class="awake" data-s="10" x="182" y="840" width="16" height="30"/>
+
+      <path class="ve-e is-hot" pathLength="1" data-s="1" d="M198 102H482"/>
+      <path class="ve-e" pathLength="1" data-s="2" d="M498 210H632"/>
+      <path class="ve-e" pathLength="1" data-s="3" d="M632 240H498"/>
+      <path class="ve-e" pathLength="1" data-s="3" d="M498 268H632"/>
+      <path class="ve-e" pathLength="1" data-s="3" d="M632 292H498"/>
+      <path class="ve-e" pathLength="1" data-s="4" d="M498 326H782"/>
+      <path class="ve-e" pathLength="1" data-s="5" d="M482 380H384"/>
+      <path class="ve-e" pathLength="1" data-s="6" d="M782 404H648"/>
+      <path class="ve-e" pathLength="1" data-s="6" d="M648 436H782"/>
+      <path class="ve-e" pathLength="1" data-s="7" d="M798 470H922"/>
+      <path class="ve-e is-async" data-s="7" d="M922 570H798"/>
+      <path class="ve-e" pathLength="1" data-s="8" d="M782 648H498"/>
+      <path class="ve-e" pathLength="1" data-s="8" d="M384 676H482"/>
+      <path class="ve-e" pathLength="1" data-s="9" d="M498 736H632"/>
+      <path class="ve-e" pathLength="1" data-s="9" d="M632 778H498"/>
+      <path class="ve-e is-hot" pathLength="1" data-s="10" d="M482 846H198"/>
+
+      <text class="ve-el" data-s="1" x="265" y="93">假设任务</text>
+      <text class="ve-el" data-s="2" x="548" y="201">请求审核</text>
+      <text class="ve-el" data-s="3" x="548" y="231">发现带类别</text>
+      <text class="ve-el" data-s="3" x="548" y="259">改后复查</text>
+      <text class="ve-el" data-s="3" x="548" y="283">方法类已关闭</text>
+      <text class="ve-el" data-s="4" x="548" y="317">交接</text>
+      <text class="ve-el" data-s="5" x="433" y="371">交给 D</text>
+      <text class="ve-el" data-s="6" x="732" y="395">修复后复查</text>
+      <text class="ve-el" data-s="6" x="732" y="427">通过</text>
+      <text class="ve-el" data-s="7" x="860" y="461">登记并提交</text>
+      <text class="ve-el" data-s="7" x="860" y="561">作业结束</text>
+      <text class="ve-el" data-s="8" x="718" y="639">任务结论 + 核验行</text>
+      <text class="ve-el" data-s="8" x="433" y="667">E 的任务结论</text>
+      <text class="ve-el" data-s="9" x="565" y="727">请求结论审核</text>
+      <text class="ve-el" data-s="9" x="565" y="769">成立或不成立</text>
+      <text class="ve-el" data-s="10" x="330" y="837">假设结论 + 核验行</text>
+
+      <text class="ve-tag" data-s="2" x="472" y="146" text-anchor="end">写短决定和实验</text>
+      <text class="ve-tag" data-s="2" x="472" y="168" text-anchor="end">代码 1、清单和说明</text>
+      <text class="ve-tag" data-s="2" x="472" y="190" text-anchor="end">CPU 小测试，几秒</text>
+      <text class="ve-tag" data-s="3" x="690" y="240">科学家段</text>
+      <text class="ve-tag" data-s="3" x="690" y="260">最多 3 次</text>
+      <text class="ve-tag" data-s="4" x="806" y="330">持有者 A → C</text>
+      <text class="ve-tag" data-s="4" x="806" y="350">回合 B 一起转来</text>
+      <text class="ve-tag" data-s="5" x="340" y="410" text-anchor="middle">审核者 D</text>
+      <text class="ve-tag" data-s="5" x="340" y="432" text-anchor="middle">研究者 E</text>
+      <text class="ve-tag" data-s="5" x="340" y="470" text-anchor="middle">过程同</text>
+      <text class="ve-tag" data-s="5" x="340" y="490" text-anchor="middle">第 2–8 步</text>
+      <text class="ve-tag" data-s="6" x="590" y="420" text-anchor="end">研究者段</text>
+      <text class="ve-tag" data-s="6" x="590" y="440" text-anchor="end">最多 3 次</text>
+      <text class="ve-tag" data-s="6" x="652" y="476">B 的会话结束</text>
+      <text class="ve-tag" data-s="8" x="806" y="606">写运行、结果、证据</text>
+      <text class="ve-tag" data-s="8" x="506" y="700">验收，CLI 合并</text>
+      <text class="ve-tag" data-s="9" x="656" y="752">F：审核包</text>
+      <text class="ve-tag" data-s="9" x="656" y="772">由 CLI 生成</text>
+      <text class="ve-tag" data-s="10" x="506" y="814">写决定</text>
+      <text class="ve-tag" data-s="10" x="506" y="868">A 的会话结束</text>
+      <text class="ve-tag" data-s="10" x="206" y="888">接收，排下一个假设</text>
+
+      <g class="ve-dim" data-s="5">
+        <path class="ext" d="M482 392H458M482 640H458"/>
+        <path class="ln" d="M464 392V640M460 396l8-8M460 644l8-8"/>
+        <text x="424" y="506">A 不运行</text>
+        <text x="424" y="526">等唤醒</text>
+      </g>
+      <g class="ve-dim" data-s="7">
+        <path class="ext" d="M922 470H896M922 570H896"/>
+        <path class="ln" d="M902 470V570M898 474l8-8M898 574l8-8"/>
+        <text x="852" y="512">作业运行</text>
+        <text x="852" y="532">C 不轮询</text>
+      </g>
+      <g class="ve-dim is-key" data-s="10">
+        <path class="ext" d="M182 102H144M182 846H144"/>
+        <path class="ln" d="M150 102V846M146 106l8-8M146 850l8-8"/>
+        <text x="100" y="454">假设期间</text>
+        <text x="100" y="474">0 条消息</text>
+        <text x="100" y="494">进入协调者</text>
+      </g>
+
+      <g class="ve-co" data-s="1" transform="translate(30 102)"><circle r="11"/><text>1</text></g>
+      <g class="ve-co" data-s="2" transform="translate(30 210)"><circle r="11"/><text>2</text></g>
+      <g class="ve-co" data-s="3" transform="translate(30 268)"><circle r="11"/><text>3</text></g>
+      <g class="ve-co" data-s="4" transform="translate(30 326)"><circle r="11"/><text>4</text></g>
+      <g class="ve-co" data-s="5" transform="translate(30 380)"><circle r="11"/><text>5</text></g>
+      <g class="ve-co" data-s="6" transform="translate(30 420)"><circle r="11"/><text>6</text></g>
+      <g class="ve-co" data-s="7" transform="translate(30 470)"><circle r="11"/><text>7</text></g>
+      <g class="ve-co" data-s="8" transform="translate(30 648)"><circle r="11"/><text>8</text></g>
+      <g class="ve-co" data-s="9" transform="translate(30 736)"><circle r="11"/><text>9</text></g>
+      <g class="ve-co" data-s="10" transform="translate(30 846)"><circle r="14"/><text>10</text></g>
+
+      <g class="ve-n is-key"><rect class="sh" x="140" y="14" width="100" height="52"/><text x="190" y="32">协调者</text><text class="sub" x="190" y="52">按假设分配</text></g>
+      <g class="ve-n"><rect class="sh" x="440" y="14" width="100" height="52"/><text x="490" y="32">科学家 A</text><text class="sub" x="490" y="52">每个假设一个</text></g>
+      <g class="ve-n"><rect class="sh" x="582" y="14" width="116" height="52"/><text x="640" y="32">审核者</text><text class="sub" x="640" y="52">每回合一个会话</text></g>
+      <g class="ve-n"><rect class="sh" x="740" y="14" width="100" height="52"/><text x="790" y="32">研究者 C</text><text class="sub" x="790" y="52">每个任务一个</text></g>
+      <g class="ve-n"><rect class="sh" x="885" y="14" width="90" height="52"/><text x="930" y="32">执行器</text><text class="sub" x="930" y="52">跑作业</text></g>
+
+      <rect class="awake" x="300" y="902" width="16" height="20"/>
+      <text class="ve-tag" x="324" y="917">正在运行</text>
+      <path class="life" d="M420 900V922"/>
+      <text class="ve-tag" x="432" y="917">不运行，不消耗 token</text>
+      <path class="ve-e is-hot" d="M620 912H660"/>
+      <text class="ve-tag" x="670" y="917">协调者的主路径</text>
+      <path class="ve-e is-async" d="M800 912H840"/>
+      <text class="ve-tag" x="850" y="917">系统通知</text>
+    </svg>
+  </div>
+  <div class="ve-player">
+    <ol class="ve-cap">
+      <li data-n="1/10">协调者放行一个排队中的假设任务：目标假设、优先级、大致预算、并行上限（最多 10 个研究者）。监视为它启动科学家 A，协调者结束本轮。</li>
+      <li data-n="2/10">A 从数据库读启动包，为新实验写一条短决定。然后写代码 1、实验清单和简要说明，跑几秒钟的 CPU 小测试，开审核回合。监视启动审核者 B。</li>
+      <li data-n="3/10">B 给每条发现标严重度和类别。方法问题由 A 修改，B 复查，直到方法类发现全部关闭。</li>
+      <li data-n="4/10">A 交接任务，CLI 在这一刻封存设计提交，监视启动研究者 C。任务、分支、工作树和 B 的审核回合一起转给 C，之后 B 复查 C 的修复。</li>
+      <li data-n="5/10">A 不等结果。它写不依赖代码 1 结果的代码 2，交给审核者 D 和研究者 E，然后结束本轮，待办里有事才被唤醒。</li>
+      <li data-n="6/10">C 修工程问题，B 复查，直到没有 medium 以上的发现。冒烟和计时算试跑，可以先跑。回合通过后，B 的会话结束。</li>
+      <li data-n="7/10">C 登记并提交证据运行，不轮询。一批作业结束，执行器运行一条 rl 命令，在 Attempt 上记下结束；C 的待办里出现“作业结束”，监视唤醒 C。</li>
+      <li data-n="8/10">C 写运行、结果和证据，向 A 交任务结论，E 也一样。监视唤醒 A。A 读 CLI 生成的核验行，验收；CLI 先在合并提交上跑语义测试，通过了才把主线移过去。</li>
+      <li data-n="9/10">结果齐了，A 起草改假设状态的决定，开结论审核，监视启动审核者 F。审核包由 CLI 从记录生成，请求不带说明。</li>
+      <li data-n="10/10">F 通过后，A 写决定，向协调者交假设结论，交付条件由 CLI 检查。协调者接收，放行下一个假设任务，A 的会话结束。</li>
+    </ol>
+    <button data-go="-1" aria-label="上一步">←</button>
+    <button data-play aria-label="播放">▶</button>
+    <input type="range" aria-label="步骤">
+    <button data-go="1" aria-label="下一步">→</button>
+  </div>
+  <figcaption><span class="fig-n">图 1</span>一个假设里，协调者只发一个假设任务、只收一条假设结论；代码审核、交接、作业、任务验收和结论审核都在科学家、审核者和研究者之间完成。会话由监视启动和唤醒。</figcaption>
+</figure>
+
+<section id="roles">
+  <div class="sec-head"><p class="ve-label caps">角色</p><h2>每个角色只回答一个问题</h2></div>
+  <figure>
+    <div class="frame">
+      <svg class="ve-svg" viewBox="0 0 1000 860" aria-label="六个角色各自的职责和它们之间仅有的消息通道。用户和协调者之间是计划、答复、提问、假设树、决定请求和讲解，都在协调者的面板里说，用户的答复由协调者记下；协调者和科学家之间是假设任务和假设结论；科学家和研究者之间是任务卡和任务结论；审核者和顾问只和请求者往来。研究数据库、执行器和监视属于系统，监视在记录变了时重画研究页。">
+        <path class="ve-e" d="M440 98V170"/>
+        <text class="ve-el l" x="432" y="138">计划 · 答复 · 提问</text>
+        <path class="ve-e" d="M560 170V98"/>
+        <text class="ve-el r" x="568" y="138">假设树 · 决定请求 · 讲解</text>
+        <path class="ve-e is-hot" d="M440 304V360"/>
+        <text class="ve-el l" x="432" y="336">假设任务 · 退回</text>
+        <path class="ve-e is-hot" d="M560 360V304"/>
+        <text class="ve-el r" x="568" y="328">假设结论</text>
+        <path class="ve-e" d="M640 360V304"/>
+        <text class="ve-el r" x="648" y="344">决定请求 · 阶段结论</text>
+        <path class="ve-e" d="M330 404H250"/>
+        <text class="ve-el" x="290" y="395">咨询</text>
+        <path class="ve-e" d="M250 444H330"/>
+        <text class="ve-el" x="290" y="435">建议</text>
+        <path class="ve-e" d="M670 404H750"/>
+        <text class="ve-el" x="710" y="395">请求审核</text>
+        <path class="ve-e" d="M750 444H670"/>
+        <text class="ve-el" x="710" y="435">审核结果</text>
+        <path class="ve-e" d="M440 480V540"/>
+        <text class="ve-el l" x="432" y="504">任务卡 · 退回<tspan x="432" dy="1.3em">阻塞和疑问的答复</tspan></text>
+        <path class="ve-e" d="M560 540V480"/>
+        <text class="ve-el r" x="568" y="504">任务结论<tspan x="568" dy="1.3em">阻塞 · 疑问</tspan></text>
+        <path class="ve-e" d="M670 584H750"/>
+        <text class="ve-el" x="710" y="575">复查</text>
+        <path class="ve-e" d="M750 624H670"/>
+        <text class="ve-el" x="710" y="615">审核结果</text>
+        <path class="ve-e" d="M440 660V754"/>
+        <text class="ve-el l" x="432" y="700">提交作业</text>
+        <path class="ve-e is-async" d="M560 754V660"/>
+        <text class="ve-el r" x="568" y="700">作业结束</text>
+
+        <rect class="ve-bnd" x="30" y="720" width="940" height="124"/>
+        <text class="ve-bnd-t" x="42" y="738">系统 · 记录和投递，不做判断</text>
+
+        <g class="ve-n"><rect class="sh" x="330" y="14" width="340" height="84"/><text x="500" y="36">用户 · 研究什么，约束是什么</text><text class="sub" x="500" y="60">负责：计划；批准树和排期，答复决定请求</text><text class="sub" x="500" y="82">看研究页，在协调者的面板里说；不做日常调度</text></g>
+        <g class="ve-n"><rect class="sh" x="330" y="170" width="340" height="134"/><text x="500" y="192">协调者 · 先做哪个假设，给多少预算</text><text class="sub" x="500" y="216">负责：假设任务和排期、预算、并行上限</text><text class="sub" x="500" y="240">不做：核查设计、验收任务、合并代码、裁决争议</text><text class="sub" x="500" y="264">也做：给用户讲项目，细节交给只读子代理</text><text class="sub" x="500" y="288">产出：假设任务、给用户的说明和术语表</text></g>
+        <g class="ve-n is-key"><rect class="sh" x="330" y="360" width="340" height="120"/><text x="500" y="382">科学家 · 这个假设怎么检验</text><text class="sub" x="500" y="406">负责：实验代码和清单、任务、验收、决定</text><text class="sub" x="500" y="430">不做：跑真实模型、修工程问题、等作业</text><text class="sub" x="500" y="454">产出：设计提交、任务卡、决定、假设结论</text></g>
+        <g class="ve-n"><rect class="sh" x="30" y="374" width="220" height="100"/><text x="140" y="396">顾问 · 卡住时还有哪条路</text><text class="sub" x="140" y="422">瓶颈、大额投入前，或裁决升级</text><text class="sub" x="140" y="446">不做：指挥、实现</text></g>
+        <g class="ve-n"><rect class="sh" x="750" y="360" width="220" height="300"/><text x="860" y="474">审核者 · 这里有没有错</text><text class="sub" x="860" y="500">独立判断代码、修复和结论</text><text class="sub" x="860" y="524">每条发现标严重度和类别</text><text class="sub" x="860" y="548">一个回合一个会话</text><text class="sub" x="860" y="572">交接时随任务转给研究者</text></g>
+        <g class="ve-n"><rect class="sh" x="330" y="540" width="340" height="120"/><text x="500" y="562">研究者 · 这段代码得出什么结果</text><text class="sub" x="500" y="586">负责：修工程问题、跑作业、写运行和证据</text><text class="sub" x="500" y="610">不做：改方法、判定和预测</text><text class="sub" x="500" y="634">产出：一条任务结论</text></g>
+        <g class="ve-n"><rect class="sh" x="50" y="754" width="250" height="72"/><text x="175" y="776">研究数据库 · CLI</text><text class="sub" x="175" y="802">记事实、生成核验行、检查、合并</text></g>
+        <g class="ve-n"><rect class="sh" x="360" y="754" width="280" height="72"/><text x="500" y="776">执行器</text><text class="sub" x="500" y="802">跑作业，结束时用 rl 命令记下</text></g>
+        <g class="ve-n"><rect class="sh" x="680" y="754" width="280" height="72"/><text x="820" y="776">监视</text><text class="sub" x="820" y="802">按待办唤醒，超时上报，重画研究页</text></g>
+      </svg>
+    </div>
+    <figcaption><span class="fig-n">图 2</span>角色之间的主要通道：协调者只和科学家往来，研究者的结论和阻塞都回建任务的科学家，审核结果回任务当前的持有者。公共准备任务的阻塞是例外，它进协调者的待办，由协调者交给一个短的科学家会话（图 13）。用户只在协调者的面板里说话，协调者兼任讲解，不另设角色；阶段报告不再由协调者写，它是研究页上的一节，由记录生成。每个会话开在 herdr 的一个面板里。</figcaption>
+  </figure>
+</section>
+
+<section id="scientist">
+  <div class="sec-head"><p class="ve-label caps">科学家</p><h2>一个假设一个科学家会话，交出结论就结束</h2></div>
+  <p>一个科学家负责一个假设，或者一组放在同一个实验里检验的假设，再加上它为这个实验拆出的子假设。在这个范围里，需要什么实验、什么任务、写什么代码，都由它决定。每开一个新实验，它先写一条短决定，实验用 <code>MOTIVATED_BY</code> 指回这条决定。对话断了，或者监视清掉对话重开，新对话都持同一个假设任务启动，从这些记录接着做，不需要交接文件。假设之间的前提关系记成边，上游的结论变了，CLI 会通知受影响的科学家；它决定停的，交一条“停止”的假设结论，不判定，只把假设改成暂停或退役。</p>
+  <figure>
+    <div class="frame">
+      <svg class="ve-svg" viewBox="0 0 1000 270" aria-label="H2.1.2.1 往下细化了五代，每代在上一代判定后派生，按新规则各交给一个新会话；整条链约 42 小时。下方是三种短会话：拆假设树、给复合假设下结论、写阶段结论，各挂在协调者建的一个任务上。">
+        <text class="ve-tag" x="11" y="26">H2.1.2.1 往下的细化链：每代在上一代判定后派生</text>
+        <path class="ve-e" d="M131 72H213"/>
+        <text class="ve-el" x="172" y="63">新会话</text>
+        <path class="ve-e" d="M333 72H415"/>
+        <text class="ve-el" x="374" y="63">新会话</text>
+        <path class="ve-e" d="M535 72H617"/>
+        <text class="ve-el" x="576" y="63">新会话</text>
+        <path class="ve-e" d="M737 72H819"/>
+        <text class="ve-el" x="778" y="63">新会话</text>
+        <g class="ve-n"><rect class="sh" x="11" y="44" width="120" height="56"/><text x="71" y="64">H-0014</text><text class="sub" x="71" y="86">第 1 代</text></g>
+        <g class="ve-n"><rect class="sh" x="213" y="44" width="120" height="56"/><text x="273" y="64">H-0019</text><text class="sub" x="273" y="86">第 2 代</text></g>
+        <g class="ve-n"><rect class="sh" x="415" y="44" width="120" height="56"/><text x="475" y="64">H-0020</text><text class="sub" x="475" y="86">第 3 代</text></g>
+        <g class="ve-n"><rect class="sh" x="617" y="44" width="120" height="56"/><text x="677" y="64">H-0029</text><text class="sub" x="677" y="86">第 4 代</text></g>
+        <g class="ve-n"><rect class="sh" x="819" y="44" width="170" height="56"/><text x="904" y="64">H-0032 · H-0033</text><text class="sub" x="904" y="86">第 5 代</text></g>
+        <g class="ve-dim is-key">
+          <path class="ext" d="M11 104V132M989 104V132"/>
+          <path class="ln" d="M11 126H989M7 130l8-8M985 130l8-8"/>
+          <text x="500" y="120">约 42 小时：11-01 16:30 至 11-03 10:10</text>
+        </g>
+        <text class="ve-tag" x="11" y="174">短会话：协调者建任务并放行，交出结论就结束</text>
+        <g class="ve-n"><rect class="sh" x="11" y="190" width="310" height="64"/><text x="166" y="210">拆假设树</text><text class="sub" x="166" y="236">项目开始或换方向：拆树任务</text></g>
+        <g class="ve-n"><rect class="sh" x="345" y="190" width="310" height="64"/><text x="500" y="210">给复合假设下结论</text><text class="sub" x="500" y="236">子假设都判定后：一个假设任务</text></g>
+        <g class="ve-n"><rect class="sh" x="679" y="190" width="310" height="64"/><text x="834" y="210">写阶段结论</text><text class="sub" x="834" y="236">阶段结束后：阶段结论任务</text></g>
+      </svg>
+    </div>
+    <div class="kpis">
+      <div class="kpi"><span class="ve-label">一个假设从建立到定下状态，中位</span><span class="val">6.3<span class="unit">小时</span></span><ve-bars unit="h" max="42" label="单个假设从建立到定下状态中位 6.3 小时，最长 19.3 小时；H2.1.2.1 整条细化链约 42 小时"><ve-bar value="6.3">中位</ve-bar><ve-bar value="19.3">最长</ve-bar><ve-bar value="42" hot>整条链</ve-bar></ve-bars></div>
+      <div class="kpi"><span class="ve-label">31 个已判定的假设里，只用了一个非 E0 实验的</span><span class="val"><span data-count="21">21</span><span class="unit">个</span></span><ve-waffle value="68" note="用了更多实验" label="31 个已判定的假设里，21 个只用了一个非 E0 实验，约 68%"></ve-waffle></div>
+    </div>
+    <figcaption><span class="fig-n">图 3</span>每个科学家会话交出一个结论就结束：判定后派生的子假设开新会话，拆树、复合假设和阶段结论用短会话：拆树任务（<code>tree</code>）、普通的假设任务和阶段结论任务（<code>phase</code>），都由协调者建并放行，监视为它启动科学家。一个会话做完 H2.1.2.1 整条链要约 42 小时，单个假设中位只要 6.3 小时。</figcaption>
+  </figure>
+  <figure>
+    <ve-flow label="最初的假设树由拆树任务生成。协调者读一次计划填约束，建拆树任务；科学家读计划全文，用子代理查文献，建树；审核者必经；协调者接收并排出第一阶段；用户批准。新颖性或可行性不足的假设被标记后随树交回，由协调者转给用户决定。">
+      <ve-node id="co1" at="1 1" sub="读一次计划，填约束">协调者</ve-node>
+      <ve-node id="sci" at="2 1" sub="读计划全文，建树" key>科学家</ve-node>
+      <ve-node id="rev" at="3 1" sub="必经，四个问题">审核者</ve-node>
+      <ve-node id="co2" at="4 1" sub="接收，排第一阶段">协调者</ve-node>
+      <ve-node id="user" at="5 1" sub="批准或修改">用户</ve-node>
+      <ve-node id="sub" at="2 2" sub="搜和读，不写记录">子代理</ve-node>
+      <ve-node id="flag" at="4 2" sub="新颖性或可行性不足">被标记的假设</ve-node>
+      <ve-edge from="co1" to="sci" label="拆树任务"/>
+      <ve-edge from="sci" to="rev" label="树"/>
+      <ve-edge from="rev" to="co2" label="通过"/>
+      <ve-edge from="co2" to="user" label="树和排期" hot/>
+      <ve-edge from="sci" to="sub" label="查文献"/>
+      <ve-edge from="flag" to="co2" label="随树交回"/>
+    </ve-flow>
+    <figcaption><span class="fig-n">图 4</span>拆树任务：科学家建树，协调者不判断树拆得好不好，质量靠必经的审核和用户的批准。被标记的假设不由科学家删改，它们作为决定请求和树一起交给用户，决定之前不进排期。用户在协调者的面板里批准，由协调者记下；批准之前，CLI 拒绝放行第一阶段的任务。</figcaption>
+  </figure>
+  <div class="ve-table tree"><table>
+    <thead><tr><th>拆树时</th><th>规则</th></tr></thead>
+    <tbody>
+      <tr><th scope="row">科学家交回的东西</th><td>假设记录，每个有命题、范围、出自计划哪一节，和一句目的：检验它是为了回答什么（<code>purpose</code>，研究页用）；没进树的内容和理由；公共的准备任务清单；每个假设的大致花费和先做哪几个的建议；一条记下为什么这样拆的决定</td></tr>
+      <tr><th scope="row">公共的准备任务</th><td>科学家只列出；协调者接收树时把它们建成项目下的排队任务，算进第一阶段，用户批准后和假设任务一起放行</td></tr>
+      <tr><th scope="row">树的深度</th><td>只拆到一个便宜的实验能检验为止，远的分支标成候选；更细的子假设等结果出来再派生</td></tr>
+      <tr><th scope="row">查文献</th><td>科学家用自己会话里的子代理去搜和读，核对以后自己记录。说一个假设已经有人做过，至少要读过那篇论文的相关部分</td></tr>
+      <tr><th scope="row">新颖性或可行性不足</th><td>科学家不删改这个假设。它打上标记，写明缺哪一样、依据和选项，随树交回协调者；协调者转给用户决定。核心主张被标记时，不必把树拆完，先交回</td></tr>
+      <tr><th scope="row">审核的四个问题</th><td>每个假设是不是可以检验的命题；有没有漏掉明显的竞争解释；计划里的每条主张有没有对应；新颖性和可行性的判断有没有核对过的出处</td></tr>
+      <tr><th scope="row">审核过不去</th><td>三次后仍有 medium 以上的发现，交给顾问裁决</td></tr>
+    </tbody>
+  </table></div>
+  <p>同一个科学家设计、写代码、再判定，就有事后改门槛的风险。所以判定函数、预测和实验清单在交接时随设计提交封存，要改就开新修订版并写明原因；改假设状态前还要独立的结论审核（图 10），请求不带作者的说明。</p>
+</section>
+
+<section id="code">
+  <div class="sec-head"><p class="ve-label caps">代码</p><h2>代码就是设计：科学家写实验代码和判定，研究者修工程问题</h2></div>
+  <p>科学家交出五样东西：任务分支上的设计提交；挂在实验上的简要说明；固定方法和判定含义的语义测试；机器可读的实验清单；受保护范围清单。实验的定义以设计提交里的代码和实验清单为准，说明只留不读代码也要知道的部分，不再写长合同。</p>
+  <figure>
+    <div class="kpis">
+      <div class="kpi"><span class="ve-label">代码审核留下 high 的 9 次里，代码和封存合同对不上的</span><span class="val"><span data-count="7">7</span><span class="unit">次</span></span><ve-bars unit="次" max="9" label="95 次代码审核里 9 次留下 high；7 次是代码和合同对不上，其中 6 次在分析和判定代码"><ve-bar value="9">留下 high</ve-bar><ve-bar value="7">合同不符</ve-bar><ve-bar value="6" hot>分析和判定</ve-bar></ve-bars></div>
+      <div class="kpi"><span class="ve-label">协调者发给研究者的 348 条消息里，写代码文件、函数或参数的</span><span class="val"><span data-count="60">60</span><span class="unit">条</span></span><ve-waffle value="17" note="其余消息" label="348 条消息里有 60 条提到代码文件、函数或命令参数，约 17%"></ve-waffle></div>
+      <div class="kpi"><span class="ve-label">44 个实验合同里改过版本的</span><span class="val"><span data-count="7">7</span><span class="unit">个</span></span><ve-waffle value="16" note="没改过" label="44 个实验合同里 7 个改过版本，约 16%"></ve-waffle></div>
+    </div>
+    <figcaption><span class="fig-n">图 5</span>设计写成文字、再由研究者翻译回代码时，错多出在判定这一层；判定函数由科学家自己写，这类翻译错误会减少。</figcaption>
+  </figure>
+
+  <figure>
+    <div class="frame">
+      <svg class="ve-svg" viewBox="0 0 1000 404" aria-label="设计提交分三层。外层研究者按需要改，但运行配置要和实验清单一致；受保护范围里只做语义测试不变的修补；语义测试、判定规则、预测和实验清单只有科学家能改。下方是挂在实验上的简要说明。">
+        <path class="lead-ln" d="M580 64H610"/>
+        <path class="lead-ln" d="M560 150H610"/>
+        <path class="lead-ln" d="M540 236H610"/>
+        <path class="lead-ln" d="M560 282H610"/>
+        <path class="lead-ln" d="M580 362H610"/>
+
+        <rect class="ve-bnd" x="20" y="24" width="560" height="286"/>
+        <text class="ve-bnd-t" x="32" y="42">设计提交 · 在任务分支上</text>
+        <text class="ve-tag" x="40" y="72">作业脚本 · 运行配置 · 检查点 · 日志 · 路径</text>
+
+        <rect class="z-prot" x="40" y="92" width="520" height="198"/>
+        <text class="ve-bnd-t" x="52" y="112">受保护范围 · 按符号</text>
+        <text class="ve-tag" x="60" y="140">方法核心</text>
+        <text class="ve-tag" x="60" y="162">实验清单：各臂、seed、超参、数据划分、停止条件</text>
+        <text class="ve-tag" x="60" y="184">分析和判定代码</text>
+
+        <rect class="z-seal" x="60" y="200" width="480" height="70"/>
+        <text class="ve-tag key" x="76" y="228">语义测试 · 判定规则 · 预测 · 实验清单</text>
+        <text class="ve-tag" x="76" y="252">交接时随设计提交封存</text>
+
+        <text class="ve-el r" x="620" y="60">研究者：按需要改</text>
+        <text class="ve-tag" x="620" y="82">运行配置要和实验清单一致，CLI 核对</text>
+        <text class="ve-el r" x="620" y="146">研究者：只做修补</text>
+        <text class="ve-tag" x="620" y="168">语义测试不变，并且通过</text>
+        <text class="ve-tag" x="620" y="190">审核者复查时判断是否涉及方法</text>
+        <text class="ve-el r" x="620" y="232">研究者不能改：发设计阻塞</text>
+        <text class="ve-tag" x="620" y="254">科学家开新修订版，写明原因</text>
+        <text class="ve-tag" x="620" y="286">验收时核验行列出这一层相对设计提交的 diff</text>
+
+        <g class="ve-n"><rect class="sh" x="20" y="330" width="560" height="60"/><text x="300" y="350">简要说明 · 挂在实验上</text><text class="sub" x="300" y="374">假设和目标 · 预测 · 方法和实验设计 · 结果对应的下一步 · 大致花费</text></g>
+        <text class="ve-tag" x="620" y="366">不读代码也能从数据库看懂假设树</text>
+      </svg>
+    </div>
+    <figcaption><span class="fig-n">图 6</span>研究者改得越靠里，限制越多：受保护范围外按需要改，范围内只做语义测试不变的修补，语义测试、判定规则、预测和实验清单只有科学家能改。运行用的配置由 CLI 按实验清单核对。</figcaption>
+  </figure>
+
+  <figure>
+    <div class="cases">
+      <div class="case" data-st="risk">
+        <span class="chip risk">方法 · 任何严重度</span>
+        <h3>会改变实验的含义</h3>
+        <svg class="ve-mini" viewBox="0 0 240 128" aria-label="方法类发现交给科学家，交接前必须关闭；例如对照组学习率用错，即使只标 medium">
+          <path class="ve-e is-st" d="M96 34H144"/>
+          <g class="ve-n"><rect class="sh" x="6" y="12" width="90" height="44"/><text x="51" y="34">发现</text></g>
+          <g class="ve-n"><rect class="sh" x="144" y="12" width="90" height="44"/><text x="189" y="34">科学家</text></g>
+          <text class="ve-tag" x="120" y="88" text-anchor="middle">交接前必须关闭</text>
+          <text class="ve-tag" x="120" y="110" text-anchor="middle">例：对照组学习率用错</text>
+        </svg>
+      </div>
+      <div class="case" data-st="warn">
+        <span class="chip warn">工程 · medium 以上</span>
+        <h3>不改变含义，影响结果</h3>
+        <svg class="ve-mini" viewBox="0 0 240 128" aria-label="medium 以上的工程类发现随任务交给研究者，证据运行前修完；例如 RV-0036 的检查点没绑定到最终运行">
+          <path class="ve-e is-st" d="M96 34H144"/>
+          <g class="ve-n"><rect class="sh" x="6" y="12" width="90" height="44"/><text x="51" y="34">发现</text></g>
+          <g class="ve-n"><rect class="sh" x="144" y="12" width="90" height="44"/><text x="189" y="34">研究者</text></g>
+          <text class="ve-tag" x="120" y="88" text-anchor="middle">随任务交接，开跑前修完</text>
+          <text class="ve-tag" x="120" y="110" text-anchor="middle">例：RV-0036 检查点</text>
+        </svg>
+      </div>
+      <div class="case" data-st="ok">
+        <span class="chip ok">工程 · low</span>
+        <h3>不影响开跑</h3>
+        <svg class="ve-mini" viewBox="0 0 240 128" aria-label="low 的工程类发现随任务交给研究者，可以带着登记证据运行">
+          <path class="ve-e is-st" d="M96 34H144"/>
+          <g class="ve-n"><rect class="sh" x="6" y="12" width="90" height="44"/><text x="51" y="34">发现</text></g>
+          <g class="ve-n"><rect class="sh" x="144" y="12" width="90" height="44"/><text x="189" y="34">研究者</text></g>
+          <text class="ve-tag" x="120" y="88" text-anchor="middle">随任务交接</text>
+          <text class="ve-tag" x="120" y="110" text-anchor="middle">可以带着登记证据运行</text>
+        </svg>
+      </div>
+    </div>
+    <figcaption><span class="fig-n">图 7</span>交接看类别，开跑看严重度：方法问题不论轻重，都由科学家在交接前关闭；工程问题随任务交给研究者，登记证据运行前修到没有 medium 以上。定位落在受保护范围内的发现默认是方法类。</figcaption>
+  </figure>
+  <p>科学家只跑 CPU 上、玩具尺寸、几秒钟跑完的测试；真实模型上的 A0、冒烟和计时都归研究者。如果小测试也只能走作业（例如 Miyabi 的登录节点不跑负载），科学家提交一个短作业，结束通知只带通过或失败。小测试、冒烟和计时都算试跑：不用等审核，时长有上限，结果不能当证据。实验清单里的臂才是证据运行，登记时 CLI 核对审核和配置。</p>
+</section>
+
+<section id="handover">
+  <div class="sec-head"><p class="ve-label caps">交接</p><h2>一段代码一个任务，审核回合跟着任务走</h2></div>
+  <p>科学家建任务后先持有它写代码，任务的分支 <code>sr/T-xxxx</code> 和工作树从这时开始，工作目录 <code>research/work/T-xxxx/</code> 在工作树里。交接时持有者换成研究者，分支、工作树和开放的审核回合一起转过去，研究者的会话直接在任务的工作树里启动。研究者交任务结论后，科学家读核验行验收：CLI 先把任务分支和当时的主线合成一个合并提交，在它上面跑语义测试，通过了才把主线移过去；不接受就退回，研究者接着做。登记成产出的小文件要提交在任务分支上，交付时 CLI 检查，不然删掉工作树就丢了。</p>
+  <figure>
+    <div class="frame">
+      <svg class="ve-svg" viewBox="0 0 1000 360" aria-label="同一假设下三个任务的时间线。T-1 先由科学家 A 持有，交接后由研究者 C 持有，审核回合 B 分科学家段和研究者段。A 交接后写代码 2，T-2 交给研究者 E，回合 D。T-3 依赖 T-1 的结果，T-1 验收前认领被拒，验收后 A 才认领。">
+        <text class="ve-tag" x="140" y="55" text-anchor="end">科学家 A</text>
+        <text class="ve-tag" x="140" y="115" text-anchor="end">T-1 · 代码 1</text>
+        <text class="ve-tag" x="140" y="148" text-anchor="end">回合 B</text>
+        <text class="ve-tag" x="140" y="195" text-anchor="end">T-3 · 依赖 T-1</text>
+        <text class="ve-tag" x="140" y="255" text-anchor="end">T-2 · 代码 2</text>
+        <text class="ve-tag" x="140" y="288" text-anchor="end">回合 D</text>
+
+        <rect class="awake" x="160" y="42" width="258" height="16"/>
+        <rect class="awake" x="422" y="42" width="138" height="16"/>
+        <path class="life" d="M560 50H780"/>
+        <rect class="awake" x="780" y="42" width="180" height="16"/>
+        <text class="ve-tag" x="289" y="34" text-anchor="middle">代码 1</text>
+        <text class="ve-tag" x="491" y="34" text-anchor="middle">代码 2</text>
+        <text class="ve-tag" x="670" y="34" text-anchor="middle">不运行，等唤醒</text>
+        <text class="ve-tag" x="870" y="34" text-anchor="middle">验收并合并 T-1，认领 T-3</text>
+
+        <rect class="hold-a" x="160" y="102" width="260" height="16"/>
+        <text class="ve-tag" x="290" y="115" text-anchor="middle">A 持有</text>
+        <rect class="hold-r" x="420" y="102" width="340" height="16"/>
+        <text class="ve-tag" x="590" y="115" text-anchor="middle">C 持有</text>
+        <path class="ho" d="M420 94V126"/>
+        <text class="ve-tag key" x="420" y="88" text-anchor="middle">交接</text>
+
+        <rect class="rnd" x="200" y="140" width="210" height="8"/>
+        <rect class="rnd" x="430" y="140" width="170" height="8"/>
+        <circle class="rv" cx="230" cy="144" r="5"/>
+        <circle class="rv" cx="340" cy="144" r="5"/>
+        <circle class="rv" cx="520" cy="144" r="5"/>
+        <circle class="rv" cx="594" cy="144" r="5"/>
+        <text class="ve-tag" x="305" y="166" text-anchor="middle">科学家段</text>
+        <text class="ve-tag" x="515" y="166" text-anchor="middle">研究者段</text>
+
+        <path class="ve-e" d="M780 60V180"/>
+        <text class="ve-el r" x="788" y="96">验收 T-1 后才能认领</text>
+        <rect class="wait" x="430" y="182" width="350" height="16"/>
+        <text class="ve-x" x="446" y="195">✕</text>
+        <text class="ve-tag" x="615" y="195" text-anchor="middle">认领被拒：T-1 未验收</text>
+        <rect class="hold-a" x="780" y="182" width="180" height="16"/>
+        <text class="ve-tag" x="870" y="195" text-anchor="middle">A 持有</text>
+
+        <rect class="hold-a" x="420" y="242" width="140" height="16"/>
+        <text class="ve-tag" x="490" y="255" text-anchor="middle">A 持有</text>
+        <rect class="hold-r" x="560" y="242" width="320" height="16"/>
+        <text class="ve-tag" x="720" y="255" text-anchor="middle">E 持有</text>
+        <path class="ho" d="M560 234V266"/>
+        <text class="ve-tag key" x="560" y="228" text-anchor="middle">交接</text>
+
+        <rect class="rnd" x="450" y="280" width="100" height="8"/>
+        <rect class="rnd" x="570" y="280" width="150" height="8"/>
+        <circle class="rv" cx="480" cy="284" r="5"/>
+        <circle class="rv" cx="640" cy="284" r="5"/>
+        <circle class="rv" cx="712" cy="284" r="5"/>
+        <text class="ve-tag" x="500" y="306" text-anchor="middle">科学家段</text>
+        <text class="ve-tag" x="645" y="306" text-anchor="middle">研究者段</text>
+
+        <path class="ve-axis" d="M160 324H960"/>
+        <text class="ve-axis-t" x="960" y="316" text-anchor="end">时间 →</text>
+
+        <rect class="hold-a" x="160" y="336" width="24" height="12"/>
+        <text class="ve-tag" x="192" y="347">科学家持有</text>
+        <rect class="hold-r" x="300" y="336" width="24" height="12"/>
+        <text class="ve-tag" x="332" y="347">研究者持有</text>
+        <rect class="wait" x="440" y="336" width="24" height="12"/>
+        <text class="ve-tag" x="472" y="347">已建，不能认领</text>
+        <circle class="rv" cx="610" cy="342" r="5"/>
+        <text class="ve-tag" x="622" y="347">一次审核</text>
+        <rect class="awake" x="710" y="336" width="24" height="12"/>
+        <text class="ve-tag" x="742" y="347">科学家在运行</text>
+      </svg>
+    </div>
+    <div class="frame">
+      <p class="ve-label">bypass-lora：同一假设下的 51 对任务</p>
+      <ve-stack unit="对" label="51 对任务里，9 对时间重叠且互不依赖，5 对有依赖，37 对先后进行"><ve-bar value="9" hot>重叠、无依赖</ve-bar><ve-bar value="5">有依赖</ve-bar><ve-bar value="37">先后进行</ve-bar></ve-stack>
+    </div>
+    <figcaption><span class="fig-n">图 8</span>交接时任务的持有者从 A 换成研究者，审核回合跟着任务走；A 只并行做不依赖未出结果的工作，依赖的任务要等前置任务验收后才能认领。bypass-lora 的 51 对任务里，9 对这样并行过。</figcaption>
+  </figure>
+  <figure>
+    <ve-flow label="科学家验收任务时，CLI 先把任务分支和主线合成一个合并提交，在它上面跑语义测试，通过了才把主线移过去；有冲突或测试不通过，主线不动，记成合并冲突，进科学家的待办，由一个小任务解决后再验收。">
+      <ve-node id="br" at="1 1" sub="按任务建">任务分支和工作树</ve-node>
+      <ve-node id="acc" at="2 1" sub="科学家读核验行" key>验收</ve-node>
+      <ve-node id="cli" at="3 1" sub="先在合并提交上测">CLI 合并</ve-node>
+      <ve-node id="main" at="4 1" sub="新任务从这里开分支">主线</ve-node>
+      <ve-node id="conf" at="3 2" sub="主线不动，进待办">合并冲突</ve-node>
+      <ve-node id="fix" at="2 2" sub="研究者解决">小任务</ve-node>
+      <ve-edge from="br" to="acc" label="任务结论"/>
+      <ve-edge from="acc" to="cli" label="验收"/>
+      <ve-edge from="cli" to="main" label="测试通过才移" hot/>
+      <ve-edge from="cli" to="conf" label="冲突或测试失败"/>
+      <ve-edge from="conf" to="fix" label="开小任务"/>
+      <ve-edge from="fix" to="acc" label="解决后再验收"/>
+    </ve-flow>
+    <figcaption><span class="fig-n">图 9</span>验收即合并，先测再移主线：协调者不碰代码，合并由 CLI 在科学家验收时做，语义测试在合并提交上通过了，主线才移过去，所以坏的合并不会进主线。冲突和测试失败不自动处理，交给验收它的科学家。只能走作业的项目，这次测试是验收它的科学家提交的一个短作业，任务在它结束前处于“合并中”；结束记下时，CLI 按结果移主线或记成合并冲突。前置任务验收后才能认领，所以后面的任务拿得到前面的代码。</figcaption>
+  </figure>
+
+  <figure>
+    <div class="frame">
+      <svg class="ve-svg" viewBox="0 0 1000 290" aria-label="一个审核回合是审核者 B 的一个会话，分科学家段和研究者段，每段最多三次审核。交接时任务和回合从科学家 A 转给研究者 C，B 不变。三次用满还过不去时，科学家段（还有未关闭的方法类发现）交给顾问裁决，研究者段（还有 medium 以上的发现）升级给科学家。">
+        <text class="ve-tag key" x="310" y="64" text-anchor="middle">科学家段 · 最多 3 次</text>
+        <text class="ve-tag key" x="690" y="64" text-anchor="middle">研究者段 · 最多 3 次</text>
+
+        <path class="ve-e" d="M190 118H430"/>
+        <text class="ve-el" x="310" y="109">审核请求、复查</text>
+        <path class="ve-e" d="M430 150H190"/>
+        <text class="ve-el" x="310" y="141">发现，带类别</text>
+        <path class="ve-e" d="M810 118H570"/>
+        <text class="ve-el" x="690" y="109">复查请求</text>
+        <path class="ve-e" d="M570 150H810"/>
+        <text class="ve-el" x="690" y="141">发现、通过</text>
+        <path class="ve-e is-hot" d="M115 160V214H885V160"/>
+        <text class="ve-el" x="500" y="205">交接：方法类 0 条未关闭，任务和回合转给 C</text>
+
+        <rect class="ve-bnd" x="410" y="84" width="180" height="88"/>
+        <text class="ve-bnd-t" x="420" y="100">回合 B · 一个会话</text>
+
+        <g class="ve-n"><rect class="sh" x="40" y="108" width="150" height="52"/><text x="115" y="126">科学家 A</text><text class="sub" x="115" y="146">交接前持有任务</text></g>
+        <g class="ve-n"><rect class="sh" x="430" y="108" width="140" height="52"/><text x="500" y="126">审核者 B</text><text class="sub" x="500" y="146">交接后不换</text></g>
+        <g class="ve-n"><rect class="sh" x="810" y="108" width="150" height="52"/><text x="885" y="126">研究者 C</text><text class="sub" x="885" y="146">交接后持有任务</text></g>
+
+        <text class="ve-tag" x="310" y="252" text-anchor="middle">三次用满仍有方法类发现</text>
+        <text class="ve-tag" x="310" y="272" text-anchor="middle">CLI 开顾问单裁决</text>
+        <text class="ve-tag" x="500" y="252" text-anchor="middle">通过后</text>
+        <text class="ve-tag" x="500" y="272" text-anchor="middle">B 的会话结束</text>
+        <text class="ve-tag" x="690" y="252" text-anchor="middle">三次用满仍有 medium 以上</text>
+        <text class="ve-tag" x="690" y="272" text-anchor="middle">CLI 升级给科学家 A</text>
+      </svg>
+    </div>
+    <div class="kpis">
+      <div class="kpi"><span class="ve-label">bypass-lora 的 128 次审核里，第二次审核</span><span class="val"><span data-count="45">45</span><span class="unit">次</span></span><ve-bars unit="次" max="128" label="128 次审核里，45 次是第二次，只升级过 4 次"><ve-bar value="128">全部审核</ve-bar><ve-bar value="45">第二次</ve-bar><ve-bar value="4" hot>升级</ve-bar></ve-bars></div>
+      <div class="kpi"><span class="ve-label">33 次结论审核里发现了问题的</span><span class="val"><span data-count="16">16</span><span class="unit">次</span></span><ve-waffle value="48" note="没发现问题" label="33 次结论审核里，16 次发现了问题，约 48%"></ve-waffle></div>
+    </div>
+    <figcaption><span class="fig-n">图 10</span>交接只换审核的另一方，审核者 B 不变；每段最多三次审核。三次用满还过不去时升级，“过不去”按回合的种类算：科学家段是还有未关闭的方法类发现，不论严重度；研究者段和树审核是还有 medium 以上的发现；结论审核是还没有通过。科学家段、结论审核和树审核交给顾问裁决，研究者段升级给建任务的科学家。结论审核和树审核也是最多三次。bypass-lora 只升级过 4 次，结论审核有一半发现了问题。</figcaption>
+  </figure>
+  <p>结论审核：改假设状态、停一条路线或推荐正式实验之前，科学家开结论审核。审核包由 CLI 从记录生成：决定草稿、引用的证据、封存的预测和判定函数的修订版、核验行。科学家不另写材料，请求也不带说明，免得把作者的看法带给审核者。没有通过的结论审核，CLI 不接受改假设状态的决定。三次后仍未通过，由顾问裁决：撤销的发现按裁决关闭，维持的发现要改。</p>
+  <div class="ve-table kinds"><table>
+    <thead><tr><th>任务</th><th>谁写代码</th><th>审核</th><th>怎么验收</th></tr></thead>
+    <tbody>
+      <tr><th scope="row">执行任务</th><td>科学家写，研究者修工程问题</td><td>科学家段和研究者段，每段最多三次</td><td>科学家读核验行；验收即合并，先在合并提交上测</td></tr>
+      <tr><th scope="row">快速通道</th><td>代码不变，或只在受保护范围外改</td><td>不开新回合。条件由 CLI 判断：受保护范围没改，臂在实验清单里，花费低于小上限。运行仍由研究者做，续用上一个任务的研究者会话，或新开一个；科学家不自己提交</td><td>同执行任务</td></tr>
+      <tr><th scope="row">准备任务</th><td>研究者写；科学家只写要求和一条检查命令</td><td>产出里有后面实验要用的核心代码时才审</td><td>检查命令通过</td></tr>
+      <tr><th scope="row">公共的准备任务</th><td>研究者写；拆树时只列出，协调者接收树时建成项目下的排队任务，用户批准后放行</td><td>同准备任务；阻塞和研究者段的升级进协调者的待办，由它交给一个短的科学家会话</td><td>检查命令在交付的提交上通过，CLI 就验收并合并，不需要科学家判断</td></tr>
+    </tbody>
+  </table></div>
+  <p>已验收的准备任务产出、公共基线和数据版本登记成可复用的产物，每个一行，进科学家的启动包。在新的代码区域写第一个实验之前，先开一个准备任务，让研究者交一份环境事实清单：模块名、张量形状、单批显存、单步耗时。</p>
+  <p>落到代码：现有 <code>handoff</code> 是同一个角色换会话的旧做法，要求一份交接文档，释放任务，并默认给协调者发 HANDOFF。新版本不兼容旧项目（11-25），<code>rl task handoff</code> 和按会话建的工作树一起删掉。新的交接用 <code>rl task dispatch</code>；它不带新文档，因为说明已经挂在实验上；也不发消息，由监视为任务启动研究者会话。同一个角色换一段对话或换模型叫换人，新对话从启动包恢复，不写交接文档。审核单要记下所属任务、当前段和每条发现的类别；<code>_route</code> 改为把回合交给监视，在 herdr 的面板里启动会话，会话名取自审核单 id；无头的 <code>rl review run</code> 删掉。工作树改成按任务建（<code>worktrees.py</code>），验收时由 CLI 先测再合并。</p>
+</section>
+
+<section id="messages">
+  <div class="sec-head"><p class="ve-label caps">沟通</p><h2>有结论、收件人要行动，才发消息</h2></div>
+  <p>状态和进度写进研究数据库，读完什么都不用做的消息不发。每条消息都有类型，只带主记录、ask、定位和一句说明；通知不存成消息，待办从记录状态查询，详见<a href="smooth-research-message-design.html">消息设计页</a>，每种消息的具体内容见那里的<a href="smooth-research-message-design.html#examples">范例</a>。</p>
+  <figure>
+    <div class="ve-table msgs"><table>
+      <thead><tr><th>#</th><th>时间点</th><th>谁发给谁</th><th>主记录上的内容</th><th>收件人接下来做什么</th></tr></thead>
+      <tbody>
+        <tr><td><small>开始</small></td><td>项目开始或换方向</td><td>用户 → 协调者</td><td>计划：目标、预算、必须先问的事</td><td>读一次计划填约束，建拆树任务</td></tr>
+        <tr><td><small>开始</small></td><td>拆树任务放行</td><td>协调者 → 科学家</td><td>拆树任务：计划、约束、要交回的东西</td><td>读计划全文，用子代理查文献，建假设树</td></tr>
+        <tr><td><small>开始</small></td><td>树建好</td><td>科学家 → 审核者</td><td>树审核，必经</td><td>回答四个问题</td></tr>
+        <tr><td><small>开始</small></td><td>审核通过</td><td>科学家 → 协调者</td><td>树：假设、没进树的内容、公共的准备任务、花费估计和排序建议、被标记的假设</td><td>接收，排出第一阶段的排队任务</td></tr>
+        <tr><td><small>开始</small></td><td>排期排好</td><td>协调者 → 用户</td><td>假设树和第一阶段的排期；被标记的假设作为决定请求</td><td>批准或修改，对被标记的假设做决定；批准之前 CLI 拒绝放行</td></tr>
+        <tr><td><small>开始</small></td><td>用户答复</td><td>用户 → 协调者</td><td>在协调者的面板里说：批准，或要改的地方；协调者用 <code>rl request answer --by user</code> 记下</td><td>批准：放行第一阶段；要改：退回给科学家</td></tr>
+        <tr><td class="num">1</td><td>排到一个假设</td><td>协调者 → 科学家</td><td>放行假设任务：目标假设、优先级、预算信封、并行上限、排在这里的理由</td><td>决定实验和任务</td></tr>
+        <tr><td class="num">2</td><td>一段代码写好，小测试通过</td><td>科学家 → 审核者</td><td>开审核回合：设计提交、说明、实验清单、受保护范围、语义测试</td><td>审代码，每条发现标严重度和类别</td></tr>
+        <tr><td class="num">3</td><td>审完</td><td>审核者 → 科学家</td><td>通过，或问题清单</td><td>修方法问题，再请复查</td></tr>
+        <tr><td class="num">4</td><td>方法类发现全部关闭</td><td>科学家 → 研究者</td><td>交接任务（<code>rl task dispatch</code>），带任务卡：要回答的问题；设计提交、说明和实验清单，停止条件就是清单里的 <code>stop_when</code>；受保护范围；授权（大致预算、重试、替换、开跑条件）；结束条件；工作树；开放的审核回合</td><td>修工程问题，运行</td></tr>
+        <tr><td class="num">5</td><td>交接之后</td><td>科学家 → 审核者</td><td>下一段不依赖未出结果的代码，同第 2 步</td><td>同第 2 至 4 步</td></tr>
+        <tr><td class="num">6</td><td>修复完成</td><td>研究者 → 审核者</td><td>复查请求（<code>--recheck-of</code>）</td><td>复查</td></tr>
+        <tr><td class="num">6</td><td>审完</td><td>审核者 → 研究者</td><td>通过，或问题清单</td><td>修复，或开跑</td></tr>
+        <tr><td class="num">7</td><td>审核通过</td><td>研究者 → 执行器</td><td>登记并提交证据运行；作业通知用执行器的 <code>command</code> 方式，运行一条 rl 命令</td><td>排队运行</td></tr>
+        <tr><td class="num">7</td><td>一批作业结束或失败</td><td>执行器 → CLI → 研究者</td><td>执行器运行的 rl 命令在 Attempt 上记下成功数、失败数、日志路径；研究者的待办里出现“作业结束”</td><td>分析，或在授权内重试</td></tr>
+        <tr><td class="num">8</td><td>问题有了答案</td><td>研究者 → 科学家</td><td>任务结论：一句结论、证据引用、限制、CLI 生成的核验行</td><td>读核验行，必要时抽查证据，验收并合并</td></tr>
+        <tr><td class="num">9</td><td>结果齐了</td><td>科学家 → 审核者</td><td>开结论审核，审核包由 CLI 生成，不带说明</td><td>独立判断</td></tr>
+        <tr><td class="num">9</td><td>审完</td><td>审核者 → 科学家</td><td>成立或不成立，理由</td><td>写决定</td></tr>
+        <tr><td class="num">10</td><td>决定写完</td><td>科学家 → 协调者</td><td>假设结论：决定、给用户读的解读（做了什么、意味着什么，最多三句）、大致花费、建议的下一步、核验行</td><td>接收，排下一个假设</td></tr>
+        <tr><td><small>阶段</small></td><td>阶段里的假设任务都接收或取消了，或阶段预算用到了</td><td>CLI → 协调者</td><td>阶段结束：阶段记录里的假设任务和预算</td><td>建并放行阶段结论任务（<code>phase</code>）</td></tr>
+        <tr><td><small>阶段</small></td><td>阶段结论写完</td><td>科学家（短会话）→ 协调者</td><td>交付阶段结论任务：判定了哪些假设、依据什么、下一阶段建议；挑出对整个项目重要的发现，每条引用决定，写一句为什么</td><td>接收，按建议排下一阶段</td></tr>
+        <tr><td><small>阶段</small></td><td>阶段结论任务交付</td><td>CLI → 用户</td><td>阶段报告：研究页上这一阶段的一节，有阶段结论、挑出的发现、花费、下一阶段建议；协调者不写</td><td>看报告；要改方向就在协调者的面板里说。报告不挡下一阶段</td></tr>
+        <tr><td><small>按需</small></td><td>复合假设的子假设都判定了</td><td>CLI → 协调者</td><td>子假设已全部判定：父假设、子假设的决定</td><td>给父假设建一个假设任务并放行，科学家引用子假设的决定下结论</td></tr>
+        <tr><td><small>按需</small></td><td>瓶颈，或大额投入前</td><td>科学家 → 顾问</td><td>一句问题、假设链、已试路径和结果、约束</td><td>给选项和理由</td></tr>
+        <tr><td><small>按需</small></td><td>顾问答完</td><td>顾问 → 科学家</td><td>选项、理由、最便宜的判别实验</td><td>选路线</td></tr>
+        <tr><td><small>按需</small></td><td>审核回合里要先问清</td><td>审核者 ↔ 发现的负责人</td><td>审核讨论：条目挂在回合或发现上</td><td>回答或提方案；结果写进发现</td></tr>
+        <tr><td><small>按需</small></td><td>协调者提了问题</td><td>其他角色 → 协调者</td><td>答复：挂在提问上；每条提问最多答复一次</td><td>继续判断</td></tr>
+        <tr><td><small>按需</small></td><td>三次审核后仍未通过</td><td>CLI → 顾问</td><td>裁决包：双方的说法和引用的证据</td><td>对每条发现给出维持或撤销</td></tr>
+        <tr><td><small>按需</small></td><td>超出科学家的权限</td><td>科学家 → 协调者</td><td>决定请求：卡在哪、选项、建议、代价；预算是其中一种</td><td>自己定，或转给用户</td></tr>
+        <tr><td><small>按需</small></td><td>超出目标、范围或预算</td><td>协调者 → 用户</td><td>决定请求：选项、建议、代价</td><td>做决定</td></tr>
+      </tbody>
+    </table></div>
+    <figcaption><span class="fig-n">图 11</span>正常路径的步号和图 1 对应；一个假设里，协调者只收第 10 步的假设结论，审核、作业、任务结论和结论审核的结果都回科学家或研究者。</figcaption>
+  </figure>
+
+  <figure>
+    <div class="cases">
+      <div class="case" data-st="warn">
+        <span class="chip warn">设计阻塞</span>
+        <h3>要改语义测试、判定、预测或实验清单</h3>
+        <svg class="ve-mini" viewBox="0 0 240 128" aria-label="研究者把设计阻塞直接发给科学家，科学家答复，一共 2 条消息；经协调者转要 4 条">
+          <path class="ve-e is-off" d="M46 64V30H80"/>
+          <path class="ve-e is-off" d="M160 30H194V64"/>
+          <path class="ve-e is-st" d="M86 78H154"/>
+          <path class="ve-e is-st" d="M154 98H86"/>
+          <g class="ve-n is-off"><rect class="sh" x="80" y="12" width="80" height="36"/><text x="120" y="30">协调者</text></g>
+          <g class="ve-n"><rect class="sh" x="6" y="64" width="80" height="44"/><text x="46" y="86">研究者</text></g>
+          <g class="ve-n"><rect class="sh" x="154" y="64" width="80" height="44"/><text x="194" y="86">科学家</text></g>
+          <text class="ve-tag" x="120" y="124" text-anchor="middle">直接 2 条，经协调者 4 条</text>
+        </svg>
+      </div>
+      <div class="case" data-st="warn">
+        <span class="chip warn">授权阻塞</span>
+        <h3>任务卡的授权内做不下去</h3>
+        <svg class="ve-mini" viewBox="0 0 240 128" aria-label="研究者把授权阻塞发给建任务的科学家，内容是卡在哪、试过什么、需要的决定">
+          <path class="ve-e is-st" d="M96 34H144"/>
+          <g class="ve-n"><rect class="sh" x="6" y="12" width="90" height="44"/><text x="51" y="34">研究者</text></g>
+          <g class="ve-n"><rect class="sh" x="144" y="12" width="90" height="44"/><text x="189" y="34">科学家</text></g>
+          <text class="ve-tag" x="120" y="88" text-anchor="middle">卡在哪、试过什么</text>
+          <text class="ve-tag" x="120" y="110" text-anchor="middle">需要的决定</text>
+        </svg>
+      </div>
+      <div class="case" data-st="warn">
+        <span class="chip warn">决定请求</span>
+        <h3>超出科学家的权限</h3>
+        <svg class="ve-mini" viewBox="0 0 240 128" aria-label="科学家给协调者发决定请求，内容是卡在哪、选项、建议和代价；预算是其中一种">
+          <path class="ve-e is-st" d="M96 34H144"/>
+          <g class="ve-n"><rect class="sh" x="6" y="12" width="90" height="44"/><text x="51" y="34">科学家</text></g>
+          <g class="ve-n"><rect class="sh" x="144" y="12" width="90" height="44"/><text x="189" y="34">协调者</text></g>
+          <text class="ve-tag" x="120" y="88" text-anchor="middle">卡在哪、选项、建议、代价</text>
+          <text class="ve-tag" x="120" y="110" text-anchor="middle">预算是其中一种</text>
+        </svg>
+      </div>
+      <div class="case" data-st="warn">
+        <span class="chip warn">审核升级</span>
+        <h3>三次审核后还过不去</h3>
+        <svg class="ve-mini" viewBox="0 0 240 128" aria-label="三次审核后还过不去：科学家段是还有方法类发现，研究者段和树审核是还有 medium 以上，结论审核是没通过。CLI 把研究者段的升级发给科学家，把科学家段、结论审核和树审核的升级交给顾问裁决">
+          <path class="ve-e is-st" d="M104 42V56H48V70"/>
+          <path class="ve-e is-st" d="M136 42V56H164V70"/>
+          <g class="ve-n"><rect class="sh" x="80" y="6" width="80" height="36"/><text x="120" y="24">CLI</text></g>
+          <g class="ve-n"><rect class="sh" x="6" y="70" width="84" height="52"/><text x="48" y="88">科学家</text><text class="sub" x="48" y="110">研究者段</text></g>
+          <g class="ve-n"><rect class="sh" x="94" y="70" width="140" height="52"/><text x="164" y="88">顾问裁决</text><text class="sub" x="164" y="110">科学家段、结论、树</text></g>
+        </svg>
+      </div>
+      <div class="case" data-st="warn">
+        <span class="chip warn">退回</span>
+        <h3>科学家不接受任务结论</h3>
+        <svg class="ve-mini" viewBox="0 0 240 128" aria-label="科学家把任务结论退回研究者，内容是哪条证据不够、需要补什么">
+          <path class="ve-e is-st" d="M96 34H144"/>
+          <g class="ve-n"><rect class="sh" x="6" y="12" width="90" height="44"/><text x="51" y="34">科学家</text></g>
+          <g class="ve-n"><rect class="sh" x="144" y="12" width="90" height="44"/><text x="189" y="34">研究者</text></g>
+          <text class="ve-tag" x="120" y="88" text-anchor="middle">哪条证据不够</text>
+          <text class="ve-tag" x="120" y="110" text-anchor="middle">需要补什么</text>
+        </svg>
+      </div>
+      <div class="case" data-st="warn">
+        <span class="chip warn">退回</span>
+        <h3>协调者不接受假设结论</h3>
+        <svg class="ve-mini" viewBox="0 0 240 128" aria-label="协调者把假设结论退回科学家，内容是哪一项不符合，依据核验行">
+          <path class="ve-e is-st" d="M96 34H144"/>
+          <g class="ve-n"><rect class="sh" x="6" y="12" width="90" height="44"/><text x="51" y="34">协调者</text></g>
+          <g class="ve-n"><rect class="sh" x="144" y="12" width="90" height="44"/><text x="189" y="34">科学家</text></g>
+          <text class="ve-tag" x="120" y="88" text-anchor="middle">哪一项不符合</text>
+          <text class="ve-tag" x="120" y="110" text-anchor="middle">依据核验行</text>
+        </svg>
+      </div>
+      <div class="case" data-st="risk">
+        <span class="chip risk">超时上报</span>
+        <h3>待办超过期限没有人处理</h3>
+        <svg class="ve-mini" viewBox="0 0 240 128" aria-label="监视把超时的待办逐级上报：先提醒本人，再到建任务的一方、协调者、用户；会话失联是它的特例">
+          <path class="ve-e is-st" d="M96 34H134"/>
+          <g class="ve-n"><rect class="sh" x="6" y="12" width="90" height="44"/><text x="51" y="34">监视</text></g>
+          <g class="ve-n"><rect class="sh" x="134" y="12" width="100" height="44"/><text x="184" y="34">逐级往上</text></g>
+          <text class="ve-tag" x="120" y="88" text-anchor="middle">本人、建任务方、协调者、用户</text>
+          <text class="ve-tag" x="120" y="110" text-anchor="middle">会话失联是它的特例</text>
+        </svg>
+      </div>
+      <div class="case" data-st="warn">
+        <span class="chip warn">疑问</span>
+        <h3>只想问清一处用意</h3>
+        <svg class="ve-mini" viewBox="0 0 240 128" aria-label="研究者向科学家发疑问，科学家答一句，记在任务上，任务回到执行中">
+          <path class="ve-e is-st" d="M96 34H144"/>
+          <g class="ve-n"><rect class="sh" x="6" y="12" width="90" height="44"/><text x="51" y="34">研究者</text></g>
+          <g class="ve-n"><rect class="sh" x="144" y="12" width="90" height="44"/><text x="189" y="34">科学家</text></g>
+          <text class="ve-tag" x="120" y="88" text-anchor="middle">问的是哪一处</text>
+          <text class="ve-tag" x="120" y="110" text-anchor="middle">答一句，任务回到执行中</text>
+        </svg>
+      </div>
+      <div class="case" data-st="warn">
+        <span class="chip warn">合并冲突</span>
+        <h3>验收时分支合并不进主线</h3>
+        <svg class="ve-mini" viewBox="0 0 240 128" aria-label="验收时合并有冲突，或合并提交上的语义测试不通过，主线不动，CLI 把它记在任务上，进验收它的科学家的待办">
+          <path class="ve-e is-st" d="M96 34H144"/>
+          <g class="ve-n"><rect class="sh" x="6" y="12" width="90" height="44"/><text x="51" y="34">CLI</text></g>
+          <g class="ve-n"><rect class="sh" x="144" y="12" width="90" height="44"/><text x="189" y="34">科学家</text></g>
+          <text class="ve-tag" x="120" y="88" text-anchor="middle">冲突的文件或失败的测试</text>
+          <text class="ve-tag" x="120" y="110" text-anchor="middle">主线不动，开小任务解决</text>
+        </svg>
+      </div>
+      <div class="case" data-st="warn">
+        <span class="chip warn">上游结论变了</span>
+        <h3>前提假设有了新的判定</h3>
+        <svg class="ve-mini" viewBox="0 0 240 128" aria-label="一条决定改了某个假设的状态，CLI 通知以它为前提、还没判定的假设的科学家">
+          <path class="ve-e is-st" d="M96 34H144"/>
+          <g class="ve-n"><rect class="sh" x="6" y="12" width="90" height="44"/><text x="51" y="34">CLI</text></g>
+          <g class="ve-n"><rect class="sh" x="144" y="12" width="90" height="44"/><text x="189" y="34">科学家</text></g>
+          <text class="ve-tag" x="120" y="88" text-anchor="middle">哪个假设、哪条决定</text>
+          <text class="ve-tag" x="120" y="110" text-anchor="middle">继续、改设计还是停</text>
+        </svg>
+      </div>
+      <div class="case" data-st="warn">
+        <span class="chip warn">用量到线</span>
+        <h3>用量越过信封的一条线</h3>
+        <svg class="ve-mini" viewBox="0 0 240 128" aria-label="已记录的用量越过信封的一条线，CLI 提醒科学家；最高一条线也提醒协调者；不拒绝任何运行">
+          <path class="ve-e is-st" d="M96 34H144"/>
+          <g class="ve-n"><rect class="sh" x="6" y="12" width="90" height="44"/><text x="51" y="34">CLI</text></g>
+          <g class="ve-n"><rect class="sh" x="144" y="12" width="90" height="44"/><text x="189" y="34">科学家</text></g>
+          <text class="ve-tag" x="120" y="88" text-anchor="middle">已用、排队中的、信封</text>
+          <text class="ve-tag" x="120" y="110" text-anchor="middle">最高一条线也给协调者</text>
+        </svg>
+      </div>
+      <div class="case" data-st="warn">
+        <span class="chip warn">作业超时</span>
+        <h3>过了预计结束时间还没有记录</h3>
+        <svg class="ve-mini" viewBox="0 0 240 128" aria-label="作业过了预计结束时间还没有结束的记录，CLI 提醒提交作业的研究者去执行器查">
+          <path class="ve-e is-st" d="M96 34H144"/>
+          <g class="ve-n"><rect class="sh" x="6" y="12" width="90" height="44"/><text x="51" y="34">CLI</text></g>
+          <g class="ve-n"><rect class="sh" x="144" y="12" width="90" height="44"/><text x="189" y="34">研究者</text></g>
+          <text class="ve-tag" x="120" y="88" text-anchor="middle">哪些作业</text>
+          <text class="ve-tag" x="120" y="110" text-anchor="middle">去执行器查，记下状态</text>
+        </svg>
+      </div>
+      <div class="case" data-st="risk">
+        <span class="chip risk">会话需要决定</span>
+        <h3>停在权限对话框上</h3>
+        <svg class="ve-mini" viewBox="0 0 240 128" aria-label="会话停在权限对话框上（herdr 报 blocked），监视把它发给协调者；协调者判断不了再问用户。协调者自己的会话停住时，直接进用户的待办">
+          <path class="ve-e is-st" d="M96 34H144"/>
+          <g class="ve-n"><rect class="sh" x="6" y="12" width="90" height="44"/><text x="51" y="34">监视</text></g>
+          <g class="ve-n"><rect class="sh" x="144" y="12" width="90" height="44"/><text x="189" y="34">协调者</text></g>
+          <text class="ve-tag" x="120" y="88" text-anchor="middle">哪个会话、它要什么</text>
+          <text class="ve-tag" x="120" y="110" text-anchor="middle">判断不了再问用户</text>
+        </svg>
+      </div>
+    </div>
+    <figcaption><span class="fig-n">图 12</span>异常路径有十三条；研究者遇到的问题都发给建任务的科学家，进入协调者的只有决定请求、最高一条用量线、会话需要决定、报上来的超时，和公共准备任务的阻塞（协调者把它交给一个短的科学家会话）。协调者自己的会话停住时，直接进用户的待办。</figcaption>
+  </figure>
+
+  <figure>
+    <div class="ve-table chan"><table>
+      <thead><tr><th>发件人 ＼ 收件人</th><th>协调者</th><th>科学家</th><th>研究者</th><th>审核者</th><th>顾问</th></tr></thead>
+      <tbody>
+        <tr><th scope="row">协调者</th><td class="self">—</td><td class="fixed disc"><b>通知＋对话</b><small>拆树任务、假设任务、阶段结论任务、交给科学家的公共准备任务、退回、决定请求的答复；提问</small></td><td class="disc"><b>对话</b><small>提问</small></td><td class="disc"><b>对话</b><small>提问</small></td><td class="disc"><b>对话</b><small>提问</small></td></tr>
+        <tr><th scope="row">科学家</th><td class="fixed disc"><b>通知＋对话</b><small>树、假设结论、决定请求、阶段结论；答复</small></td><td class="self">—</td><td class="fixed"><b>通知</b><small>任务卡、阻塞和疑问的答复、退回</small></td><td class="fixed disc"><b>通知＋对话</b><small>审核请求；审核讨论</small></td><td class="disc"><b>对话</b><small>咨询</small></td></tr>
+        <tr><th scope="row">研究者</th><td class="fixed disc"><b>通知＋对话</b><small>公共准备任务的阻塞；答复</small></td><td class="fixed"><b>通知</b><small>任务结论、设计阻塞、授权阻塞、疑问</small></td><td class="self">—</td><td class="fixed disc"><b>通知＋对话</b><small>复查请求；审核讨论</small></td><td class="none">无</td></tr>
+        <tr><th scope="row">审核者</th><td class="disc"><b>对话</b><small>答复</small></td><td class="fixed disc"><b>通知＋对话</b><small>审核结论；审核讨论</small></td><td class="fixed disc"><b>通知＋对话</b><small>审核结论；审核讨论</small></td><td class="self">—</td><td class="none">无</td></tr>
+        <tr><th scope="row">顾问</th><td class="disc"><b>对话</b><small>答复</small></td><td class="fixed disc"><b>通知＋对话</b><small>裁决意见；建议</small></td><td class="none">无</td><td class="none">无</td><td class="self">—</td></tr>
+        <tr><th scope="row">系统</th><td class="fixed"><b>通知</b><small>树和排期已批准、阶段结束、子假设已全部判定、用量到线、会话需要决定、超时上报、公共准备任务的研究者段升级</small></td><td class="fixed"><b>通知</b><small>研究者段的审核升级、合并冲突、上游结论变了、用量到线、超时上报；自己提交的测试作业的结束和超时</small></td><td class="fixed"><b>通知</b><small>作业结束、作业超时、超时上报</small></td><td class="fixed"><b>通知</b><small>测试作业结束</small></td><td class="fixed"><b>通知</b><small>要裁决的审核升级</small></td></tr>
+      </tbody>
+    </table></div>
+    <figcaption><span class="fig-n">图 13</span>描边格是通知，由记录的状态变化触发，不存成消息；底色格是对话，存成挂在主记录上的条目。每格都有固定类型，没有自由文本（11-10）。给用户的事项在用户的待办里。通知的完整列表见<a href="smooth-research-message-design.html#notices">消息设计页</a>。</figcaption>
+  </figure>
+</section>
+
+<section id="checks">
+  <div class="sec-head"><p class="ve-label caps">检查</p><h2>CLI 在十五处检查，预算只显示不拒绝</h2></div>
+  <p>机械事实由 CLI 算出，模型判断解释和路线。验收时读 CLI 生成的核验行，必要时按 id 抽查证据。</p>
+  <figure>
+    <div class="frame">
+      <svg class="ve-svg" viewBox="0 0 1000 376" aria-label="一个任务从建立到写决定要过的主要检查：认领、交接、登记运行、验收和改假设状态；预算处没有检查，只显示用量并到线提醒。另一道检查在发给协调者的消息上，只收固定类型。">
+        <path class="track" d="M30 100H970"/>
+        <text class="ve-tag" x="50" y="88" text-anchor="middle">建任务</text>
+        <text class="ve-tag" x="180" y="88" text-anchor="middle">写代码、小测试</text>
+        <text class="ve-tag" x="340" y="88" text-anchor="middle">修工程问题</text>
+        <text class="ve-tag" x="650" y="88" text-anchor="middle">运行、交任务结论</text>
+        <text class="ve-tag" x="810" y="88" text-anchor="middle">写决定</text>
+
+        <rect class="gate" x="95" y="72" width="10" height="56"/>
+        <text class="ve-el" x="100" y="60">认领</text>
+        <text class="ve-tag" x="100" y="150" text-anchor="middle">前置任务</text>
+        <text class="ve-tag" x="100" y="170" text-anchor="middle">都已验收</text>
+        <text class="ve-tag risk" x="100" y="194" text-anchor="middle">否则拒绝认领</text>
+
+        <rect class="gate" x="255" y="72" width="10" height="56"/>
+        <text class="ve-el" x="260" y="60">交接</text>
+        <text class="ve-tag" x="260" y="150" text-anchor="middle">设计提交上测试通过</text>
+        <text class="ve-tag" x="260" y="170" text-anchor="middle">审核覆盖设计提交</text>
+        <text class="ve-tag" x="260" y="190" text-anchor="middle">方法类 0 条未关闭</text>
+        <text class="ve-tag risk" x="260" y="214" text-anchor="middle">否则拒绝；通过即封存</text>
+
+        <rect class="gate" x="415" y="72" width="10" height="56"/>
+        <text class="ve-el" x="420" y="60">登记运行</text>
+        <text class="ve-tag" x="420" y="150" text-anchor="middle">审核覆盖当前提交</text>
+        <text class="ve-tag" x="420" y="170" text-anchor="middle">配置和实验清单一致</text>
+        <text class="ve-tag" x="420" y="190" text-anchor="middle">方法类、medium+ 0 条</text>
+        <text class="ve-tag risk" x="420" y="214" text-anchor="middle">否则拒绝登记</text>
+
+        <rect class="gate-off" x="555" y="72" width="10" height="56"/>
+        <text class="ve-el" x="560" y="60">预算</text>
+        <text class="ve-tag" x="560" y="150" text-anchor="middle">不检查</text>
+        <text class="ve-tag" x="560" y="170" text-anchor="middle">只显示，到线提醒</text>
+        <text class="ve-tag" x="560" y="194" text-anchor="middle">不拒绝</text>
+
+        <rect class="gate" x="735" y="72" width="10" height="56"/>
+        <text class="ve-el" x="740" y="60">验收</text>
+        <text class="ve-tag" x="740" y="150" text-anchor="middle">合并提交上语义测试通过</text>
+        <text class="ve-tag" x="740" y="170" text-anchor="middle">之后才移主线</text>
+        <text class="ve-tag risk" x="740" y="194" text-anchor="middle">否则合并冲突，主线不动</text>
+
+        <rect class="gate" x="875" y="72" width="10" height="56"/>
+        <text class="ve-el" x="880" y="60">改假设状态</text>
+        <text class="ve-tag" x="880" y="150" text-anchor="middle">决定引用证据</text>
+        <text class="ve-tag" x="880" y="170" text-anchor="middle">结论审核已通过</text>
+        <text class="ve-tag risk" x="880" y="194" text-anchor="middle">否则拒绝写入</text>
+
+        <path class="track" d="M30 290H450"/>
+        <text class="ve-tag" x="30" y="278">任意会话</text>
+        <text class="ve-tag" x="450" y="278" text-anchor="end">协调者</text>
+        <rect class="gate" x="235" y="262" width="10" height="56"/>
+        <text class="ve-el" x="240" y="250">发给协调者</text>
+        <text class="ve-tag" x="240" y="340" text-anchor="middle">只收固定类型</text>
+        <text class="ve-tag risk" x="240" y="362" text-anchor="middle">否则拒绝发送</text>
+
+        <rect class="gate" x="580" y="274" width="10" height="32"/>
+        <text class="ve-tag" x="602" y="295">不满足时 CLI 拒绝</text>
+        <rect class="gate-off" x="780" y="274" width="10" height="32"/>
+        <text class="ve-tag" x="802" y="295">只显示，不拒绝</text>
+      </svg>
+    </div>
+    <figcaption><span class="fig-n">图 14</span>图上是一个任务要过的主要检查：认领、交接、登记运行、验收和改假设状态，发给协调者的消息另有一道；放行、交付和导入结果等其余检查见下表。CLI 不提交作业，所以它拒绝的是登记。预算不检查，只显示用量，到线提醒。</figcaption>
+  </figure>
+  <div class="ve-table checks"><table>
+    <thead><tr><th>时刻</th><th>CLI 检查</th><th>不满足时</th></tr></thead>
+    <tbody>
+      <tr><th scope="row">放行任务</th><td>假设任务和公共的准备任务：最近一次拆树任务的树和排期已得到用户批准</td><td>拒绝放行</td></tr>
+      <tr><th scope="row">认领任务</th><td>每个前置任务已验收</td><td>拒绝认领</td></tr>
+      <tr><th scope="row">交接给研究者</th><td>执行任务：设计提交上有通过的测试记录；审核覆盖设计提交，回合里没有未关闭的方法类发现；实验清单能解析。准备任务：有 <code>done_check</code></td><td>拒绝交接。通过时封存设计提交</td></tr>
+      <tr><th scope="row">登记运行</th><td>试跑：时长不超过上限。证据运行：审核覆盖当前提交，没有未关闭的方法类发现，也没有未关闭的 medium 以上发现；臂在实验清单里，配置的摘要和清单一致</td><td>拒绝登记，或登记成“偏离设计”的运行，不能当证据</td></tr>
+      <tr><th scope="row">导入结果</th><td>运行自己报出来的实际配置和实验清单一致</td><td>标成偏离设计，不能当证据</td></tr>
+      <tr><th scope="row">写证据</th><td>引用的运行都是证据运行，没有偏离设计</td><td>拒绝写入</td></tr>
+      <tr><th scope="row">交付任务</th><td>有一句结论和限制；执行任务的结论引用证据；登记的产出都已提交在任务分支上</td><td>拒绝交付</td></tr>
+      <tr><th scope="row">验收任务</th><td>任务分支和主线的合并没有冲突，语义测试在合并提交上通过，之后主线才移到合并提交；准备任务还要 <code>done_check</code> 在交付的提交上通过；公共的准备任务在交付时由 CLI 验收</td><td>合并的问题记成合并冲突，主线不动，进科学家的待办；<code>done_check</code> 不通过时拒绝验收</td></tr>
+      <tr><th scope="row">改假设状态</th><td>有一条引用证据的决定，复合假设的决定引用子假设的决定；结论审核已通过</td><td>拒绝写入</td></tr>
+      <tr><th scope="row">交付假设结论</th><td>结论审核通过；挂在它下面的任务都已结束：验收并合并，或已取消；决定引用证据。复合假设的假设任务引用子假设的决定，可以没有执行任务；“停止”的结论引用上游的决定或决定请求的答复；有解读的两段：做了什么、意味着什么</td><td>拒绝交付</td></tr>
+      <tr><th scope="row">交付拆树任务</th><td>每个假设有命题、范围、出处和目的；主父边连成树；计划的每一节有对应的假设，或列在没进树的内容里；被标记的假设带着依据和选项；树审核已通过</td><td>拒绝交付</td></tr>
+      <tr><th scope="row">交付阶段结论任务</th><td>有一条 <code>phase</code> 类的决定，指向这个阶段；挑出的发现引用的决定都在这个阶段里</td><td>拒绝交付</td></tr>
+      <tr><th scope="row">发给协调者</th><td>消息是固定类型</td><td>拒绝发送</td></tr>
+      <tr><th scope="row">发通知</th><td>每个定位能解析；定位不超过 8 个；说明不超过 300 字符</td><td>拒绝发送，提示写进哪类记录</td></tr>
+      <tr><th scope="row">写对话条目</th><td>每个定位能解析；定位不超过 8 个；正文不限长</td><td>拒绝写入</td></tr>
+      <tr><th scope="row">快速通道</th><td>相对上次通过的审核，受保护范围没改；臂在实验清单里；预计花费低于小上限。都满足时，交接和登记证据运行不要求新的审核回合，上次通过的审核代替“审核覆盖”</td><td>走正常流程</td></tr>
+      <tr><th scope="row">预算</th><td>不检查，只显示用量；越过信封的一条线时提醒</td><td>不拒绝</td></tr>
+    </tbody>
+  </table></div>
+
+  <figure>
+    <div class="pair">
+      <div>
+        <p class="ve-label">任务结论的核验行 · 科学家读</p>
+<pre><code>T-x delivered by researcher-C · branch sr/T-x, &lt;n&gt; commits after design &lt;commit&gt;
+attempts   &lt;n&gt; ended: &lt;n&gt; success, 0 needs-check
+arms       &lt;n&gt;/&lt;n&gt; match design, 0 deviations
+results    &lt;n&gt; complete; evidence EV-a, EV-b
+review     RV-y passed · method 0 open · engineering 0 medium+
+protected  &lt;path::symbol&gt; changed after design (+&lt;n&gt; −&lt;n&gt;), rechecked in RV-y; semantic tests unchanged, passed at head
+mainline   protected scope unchanged on main since design
+usage      about &lt;n&gt; MIG·h used, about &lt;n&gt; queued or running (card: about &lt;n&gt;); &lt;n&gt; attempts unreported
+outputs    research/work/T-x/: &lt;n&gt; files registered</code></pre>
+      </div>
+      <div>
+        <p class="ve-label">假设结论的核验行 · 协调者读</p>
+<pre><code>H-x by scientist-H-x · decision D-y: challenged
+review       conclusion review RV-z passed
+experiments  E-a@1 sealed at handover; E-b@2 revised before first evidence run (reason in D-w)
+tasks        &lt;n&gt; accepted and merged, &lt;n&gt; cancelled, 0 open
+usage        about &lt;n&gt; MIG·h (envelope: about &lt;n&gt;); &lt;n&gt; attempts unreported
+affects      H-p (running), H-q (queued)
+next         proposed children H-x.1, H-x.2 (D-y)</code></pre>
+      </div>
+    </div>
+    <figcaption><span class="fig-n">图 15</span>验收只读核验行：运行、和实验清单是否一致、证据、审核、受保护范围的 diff、主线的变化和用量，都由 CLI 从研究数据库算出，必要时再按 id 抽查。<code>affects</code> 列出受这个结论影响的假设。“停止”的结论，第一行写成 <code>decision D-y: stopped, H-x paused</code>（或 <code>retired</code>）。格式是示意。</figcaption>
+  </figure>
+  <p>落到代码：<code>claim</code> 现在只在回执里提示未完成的前置任务，delivered 也算完成，要改成前置任务验收前拒绝认领。<code>verification_lines</code> 现在只核对分支头是不是测试通过的 commit，要补上运行、证据、审核、受保护范围的 diff 和用量。<code>run register</code> 现在只核对合同里的臂名，登记不拦截；要改成按实验清单核对配置，并区分试跑和证据运行。<code>task accept</code> 现在只提示要合并哪个分支，要改成由 CLI 先在合并提交上跑语义测试，通过了再移主线。<code>tell</code> 和 <code>send</code> 拒绝发给协调者的非固定类型消息。</p>
+</section>
+
+<section id="startup">
+  <div class="sec-head"><p class="ve-label caps">启动</p><h2>每个角色启动时只载入一个启动包</h2></div>
+  <p>用户不是 agent。用户提供目标、预算和必须先问的事，先批准假设树和第一阶段的排期，批准之前 CLI 拒绝放行；之后看研究页上的阶段报告，答复转来的决定请求，阶段报告不挡下一阶段。用户不运行写命令：答复都在协调者的面板里说，由协调者用 <code>rl request answer --by user</code> 记下；用户不在时，事项留在用户的待办里。用户运行 <code>rl resume</code> 把项目接着跑起来：它确认 herdr 里有协调者的面板（没有就开一个，从启动包启动）、监视在运行，并打印项目状态和等用户决定的事；没有 herdr 时它拒绝启动。用户从下表的三处了解项目。每个启动包的具体内容和范例见<a href="smooth-research-packs.html">启动包页</a>。</p>
+  <div class="ve-table follow"><table>
+    <thead><tr><th>用户看哪里</th><th>看到什么</th><th>怎么来的</th></tr></thead>
+    <tbody>
+      <tr><th scope="row">研究页 <code>docs/research.html</code></th><td>四节。现在：每个在做的假设走到哪一步、在等谁、等了多久，超时的事项和停了的监视。发现：最上面是阶段结论挑出的发现，按阶段分节，每个阶段那一节就是阶段报告；再是通过结论审核的假设结论，“不确定”的折叠；最后是还没下结论的中间结果。等你决定：用户的待办。树和花费：一行一个假设，点开看目的、实验、结果、证据和决定</td><td>由记录生成。页上的字由知道的角色在写记录时写，新写的只有假设的目的、假设结论的解读和阶段结论挑出的发现，协调者不为页面写字。写命令不碰页面；监视看到最新的 Event 编号变了就重画，<code>rl view</code> 立即画一次。页面不进 git，照 bypass-lora 的 <code>hypothesis-tree.html</code> 做</td></tr>
+      <tr><th scope="row"><code>rl status</code></th><td>“现在”和“等你决定”的短版，加上次阶段报告以后新出的假设结论；监视在不在运行</td><td>读时算出，不启动任何东西</td></tr>
+      <tr><th scope="row">协调者的面板</th><td>问进度、结果和细节；答复决定请求；提改方向、加减假设、调预算这类要求</td><td>协调者读记录和研究页。代码、日志、审核讨论和运行输出由它开只读子代理去读，只拿回答案和定位；看到问题向负责的科学家提问，不自己改。用户要的说明写进 <code>docs/explanations/&lt;topic&gt;.md</code>，术语表 <code>docs/glossary.md</code> 也由它维护</td></tr>
+    </tbody>
+  </table></div>
+  <figure>
+    <div class="ve-table pack"><table>
+      <thead><tr><th>启动包</th><th>协调者</th><th>科学家</th><th>研究者</th><th>审核者</th><th>顾问</th></tr></thead>
+      <tbody>
+        <tr class="load"><th scope="row">角色卡</th><td>职责、可发的消息、不做的事、怎么给用户讲</td><td>职责、可发的消息、决定的写法、测试的限制</td><td>职责、可发的消息、能改什么、结束方式</td><td>严重度和类别的定义、输出格式、每段最多三次</td><td>只给建议或裁决、轮次上限、输出格式</td></tr>
+        <tr class="load"><th scope="row">本次的卡</th><td>项目：目标和约束一屏</td><td>假设任务卡；短会话是拆树任务、阶段结论任务或交给它的公共准备任务的卡</td><td>任务卡全文，含授权文件</td><td>审核单</td><td>顾问单：一句瓶颈问题，或要裁决的回合</td></tr>
+        <tr class="load"><th scope="row">待办</th><td colspan="5">每个包都有，从记录状态查询，规则表见<a href="smooth-research-message-design.html#notices">消息设计页</a></td></tr>
+        <tr class="load"><th scope="row">必要材料</th><td>阶段和排期表：假设任务每个一行，带状态、优先级、理由和大致用量；标了“暂不做”的候选假设；最近接收的两个假设任务</td><td>假设树每个假设一行，标出本假设的前提和以它为前提的假设；本假设和祖先的决定；本假设下的实验和任务状态；可复用的产物每个一行</td><td>记录里还在运行的作业，排在最前；开放的审核回合和发现；工作树、分支、设计提交；依赖产物的引用；计算配方，作业通知用 <code>command</code> 方式记进数据库</td><td>设计审核：设计提交、说明、实验清单、受保护范围、语义测试。复查：上一轮发现和修复 diff。结论审核：CLI 生成的审核包</td><td>咨询：相关假设链、已试路径和结果、约束。裁决：CLI 生成的裁决包</td></tr>
+        <tr class="pull"><th scope="row">按 id 取</th><td>假设结论全文、决定</td><td>证据详情、审核和顾问记录、文献</td><td>文献、上游证据</td><td>仓库文件、证据原始记录</td><td>文献、证据详情</td></tr>
+        <tr class="out"><th scope="row">不进入</th><td>计划全文（开始时读一次）、代码、日志、diff、审核讨论、消息历史；给用户讲细节时由只读子代理去读</td><td>作业 id、日志、工程类审核讨论、交接文档</td><td>假设树全貌、其他任务、协调者和科学家的消息历史</td><td>项目状态、作者之间的沟通</td><td>任务流水、代码细节</td></tr>
+      </tbody>
+    </table></div>
+    <figcaption><span class="fig-n">图 16</span>五个 agent 的启动包结构相同；底色行启动时载入，虚线行按 id 取，划线行不进入上下文。</figcaption>
+  </figure>
+
+  <figure>
+    <div class="kpis">
+      <div class="kpi"><span class="ve-label">bypass-lora 的假设树，44 个假设每个一行</span><span class="val"><span data-count="5">5</span><span class="unit">KB</span></span><ve-bars unit="KB" max="184" label="协调者的交接文档 183 KB，假设树每个假设一行共 5 KB"><ve-bar value="183">交接文档</ve-bar><ve-bar value="5" hot>假设树</ve-bar></ve-bars></div>
+      <div class="kpi"><span class="ve-label">协调者的启动包，预计</span><span class="val">4.5<span class="unit">k 字符</span></span><ve-bars unit="k" max="70" label="协调者的启动包现在约 69,500 字符，预计降到约 4,500 字符"><ve-bar value="69.5">现在</ve-bar><ve-bar value="4.5" hot>预计</ve-bar></ve-bars></div>
+      <div class="kpi"><span class="ve-label">科学家的启动包，估计</span><span class="val"><span data-count="8">8</span><span class="unit">k 字符</span></span><ve-bars unit="k" max="4" label="科学家的启动包约 8,000 字符：角色卡约 2,000，假设树 3,113，其余约 2,900 是相关的决定、实验和任务"><ve-bar value="2">角色卡</ve-bar><ve-bar value="3.1" hot>假设树</ve-bar><ve-bar value="2.9">决定和任务</ve-bar></ve-bars></div>
+    </div>
+    <figcaption><span class="fig-n">图 17</span>清掉对话、压缩或重启后，角色重读同一个启动包；科学家从数据库读假设树，不读交接文档。启动包大小是估计。</figcaption>
+  </figure>
+  <figure>
+    <ve-flow label="记录进入等某人处理的状态，规则表算出等谁，监视往对应会话的 herdr 面板里提交一行提醒：续用原来的对话，或先清掉对话再让它读启动包；一项待办超过期限就逐级上报。">
+      <ve-node id="rec" at="1 1" sub="例：T-0042 已交付">记录状态变了</ve-node>
+      <ve-node id="todo" at="2 1" sub="规则表算出等谁">待办</ve-node>
+      <ve-node id="watch" at="3 1" sub="往面板里提交提醒" key>监视</ve-node>
+      <ve-node id="resume" at="4 1" sub="空闲短，或上下文小">续用原来的对话</ve-node>
+      <ve-node id="fresh" at="4 2" sub="空闲久且上下文大">清掉，读启动包</ve-node>
+      <ve-node id="esc" at="3 2" sub="逐级报到用户">超时上报</ve-node>
+      <ve-edge from="rec" to="todo" label="等某人处理"/>
+      <ve-edge from="todo" to="watch" label="会话没在运行"/>
+      <ve-edge from="watch" to="resume" label="续用" hot/>
+      <ve-edge from="watch" to="fresh" label="清掉"/>
+      <ve-edge from="watch" to="esc" label="超过期限"/>
+    </ve-flow>
+    <figcaption><span class="fig-n">图 18</span>会话不常驻：手头没事就结束本轮，面板留着；待办里有事时，监视往面板里提交一行提醒（<code>herdr agent prompt</code>），续用原来的对话；空闲超过缓存的保留时间、上下文又大时，先清掉对话，让它读启动包。不在每轮结束时清，也不用主动压缩代替清掉。阈值用试运行的数据定。</figcaption>
+  </figure>
+  <div class="ve-table wake"><table>
+    <thead><tr><th>只用 herdr</th><th>怎么做</th></tr></thead>
+    <tbody>
+      <tr><th scope="row">唤醒</th><td>监视往会话的面板里提交一行提醒；每一拍也按待办检查一遍，作为兜底。往协调者的面板里提交另有规则，见下表</td></tr>
+      <tr><th scope="row">清掉重开</th><td>提醒之前先清掉对话（Claude Code 是 <code>/clear</code>，别的 agent 用各自的命令），让它运行 <code>rl pack</code> 读启动包；续用失败也清掉重开</td></tr>
+      <tr><th scope="row">不在每轮结束时清</th><td>科学家常常几分钟后就有下一件事，比如审核回来、作业结束，这时缓存还热，清掉反而要重读代码。任务做到一半，宿主自动压缩照常</td></tr>
+      <tr><th scope="row">不用主动压缩</th><td>压缩要把整段对话读一遍再写摘要，摘要留下什么不受控，而这里靠记录恢复。bypass-lora 的协调者重读文档的 57 个 turn 里，有 47 个就在压缩的同一个或下一个 turn</td></tr>
+      <tr><th scope="row">还没有会话</th><td>新的审核回合、刚交接的任务、刚放行的假设任务：监视按配置选模型，在项目的 herdr 工作区里开一个面板，启动 agent（<code>herdr agent start</code>），让它读启动包。审核者和顾问也开在面板里；配置成 <code>manual</code> 的照旧由人来做</td></tr>
+      <tr><th scope="row">没有 herdr</th><td><code>rl resume</code> 和监视拒绝启动，提示先装 herdr。无头方式去掉：<code>rl delegate</code>、<code>rl review run</code>、<code>rl advise run</code> 和 <code>adapters.py</code> 里的 <code>claude -p</code>、<code>codex exec</code>、<code>pi -p</code> 调用都删掉</td></tr>
+    </tbody>
+  </table></div>
+  <p>herdr 是单点：它的服务停了，比如机器重启，所有会话一起停。用户运行 <code>rl resume</code>，监视在新面板里按启动包重开有待办的会话，所以“从数据库重新开始”这条路仍然要常走。测试用一个假的 herdr。角色之间不直接启动对方，也不直接说话，它们只读写研究数据库。内部交流不改用 A2A：它要求每个 agent 是一个 HTTP 服务，标准化的又正是这里删掉的消息和任务状态。</p>
+  <div class="ve-table watch"><table>
+    <thead><tr><th>监视看到的情况</th><th>处理</th></tr></thead>
+    <tbody>
+      <tr><th scope="row">机器重启、herdr 停了，或全部关掉以后</th><td>用户运行一次 <code>rl resume</code>：确认 herdr 里有协调者的面板，监视启动，再按待办在新面板里把各个会话叫起来</td></tr>
+      <tr><th scope="row">监视自己停了</th><td>监视每一拍写一次心跳；心跳过期时，任何 <code>rl</code> 命令和会话启动时的提示都提醒“监视没有在运行，运行 rl resume”；<code>rl status</code> 显示监视在不在运行</td></tr>
+      <tr><th scope="row">待办里有事，会话没有在运行</th><td>唤醒</td></tr>
+      <tr><th scope="row">一轮对话出错</th><td>可以重试的错误按退避重试；重试用尽后按超时上报</td></tr>
+      <tr><th scope="row">对话进程退出</th><td>下次唤醒时在面板里重新启动，续用或清掉重开</td></tr>
+      <tr><th scope="row">会话空闲超过缓存的保留时间，上下文又大</th><td>提醒之前先清掉对话，让它读启动包</td></tr>
+      <tr><th scope="row">订阅额度低</th><td>监视自己换人：结束旧对话，用同角色的下一个模型按启动包新开，不写交接文档</td></tr>
+      <tr><th scope="row">会话停在权限对话框上（herdr 报 blocked）</th><td>记成“会话需要决定”，发给协调者；协调者判断不了再问用户。协调者自己的会话停住时，直接进用户的待办</td></tr>
+      <tr><th scope="row">协调者有待办，用户也在它的面板里说话</th><td>只有协调者空闲、用户已经几分钟没说话时，才提交提醒；否则先等着，同时发一条 herdr 通知。监视记得哪几轮是它叫起来的，其余的都算用户说的话。用户在时不清掉协调者的对话。协调者只有这一个面板，同一时间只有一段协调者对话，没有无头接手，也不要协调者锁</td></tr>
+      <tr><th scope="row">一项待办超过期限</th><td>逐级上报：本人、建任务的一方、协调者、用户</td></tr>
+      <tr><th scope="row">最新的 Event 编号变了</th><td>重画研究页</td></tr>
+    </tbody>
+  </table></div>
+  <ul>
+    <li>任何角色清掉对话、压缩或重启后，重读同一个启动包。</li>
+    <li>科学家的对话断了，新对话持同一个假设任务启动。试运行时，每个科学家在假设中途至少强制清掉重开一次对话。</li>
+    <li>研究者的对话断了，监视在下次唤醒时按启动包重开。任务、分支和工作树都在任务上。</li>
+    <li>一直没有人处理的事项走超时上报，最后会到用户。</li>
+  </ul>
+  <p>落到代码：现有 <code>work_pack</code> 已接近研究者的启动包。<code>resume_pack</code> 给协调者时要去掉未完成 attempts、Locations 和 Compute 三节，开放任务换成假设任务每个一行。科学家的启动包要新写，从数据库读假设树、本假设和祖先的决定、本假设下的实验和任务。监视（<code>watch.py</code>）现在把对话框、出错、停滞和额度低都报给协调者；改完以后它按待办往 herdr 的面板里提交提醒，按规则清掉对话，自己换模型，每一拍写一次心跳，记录变了就重画研究页，只把需要判断的事发给协调者。研究页的旧写法（<code>explain.py</code> 读的 <code>explanation.yaml</code>、<code>rl view --todo</code> 和 <code>--stamp</code>、过期检查）和写命令之后的刷新（<code>cli.py:95</code> 的 <code>_refresh_page</code>）都删掉。</p>
+</section>
+
+<section id="removed">
+  <div class="sec-head"><p class="ve-label caps">删除</p><h2>十九类内容不再进入协调者，信息换了地方</h2></div>
+  <figure>
+    <div class="frame">
+      <svg class="ve-svg" viewBox="0 0 1000 728" aria-label="十九类不再进入协调者的内容，以及每类信息的新去向">
+        <text class="ve-tag key" x="20" y="28">不再进入协调者</text>
+        <text class="ve-tag key" x="600" y="28">信息的去向</text>
+
+        <path class="ve-e" d="M330 62H590"/><text class="ve-el" x="460" y="53">写入</text>
+        <path class="ve-e" d="M330 98H590"/><text class="ve-el" x="460" y="89">直接发给</text>
+        <path class="ve-e" d="M330 134H590"/><text class="ve-el" x="460" y="125">留在</text>
+        <path class="ve-e" d="M330 170H590"/><text class="ve-el" x="460" y="161">由请求者启动</text>
+        <path class="ve-e" d="M330 206H590"/><text class="ve-el" x="460" y="197">写进</text>
+        <path class="ve-e" d="M330 242H590"/><text class="ve-el" x="460" y="233">写入</text>
+        <path class="ve-e" d="M330 278H590"/><text class="ve-el" x="460" y="269">留在</text>
+        <path class="ve-e" d="M330 314H590"/><text class="ve-el" x="460" y="305">换成</text>
+        <path class="ve-e" d="M330 350H590"/><text class="ve-el" x="460" y="341">改成</text>
+        <path class="ve-e" d="M330 386H590"/><text class="ve-el" x="460" y="377">换成</text>
+        <path class="ve-e" d="M330 422H590"/><text class="ve-el" x="460" y="413">改由</text>
+        <path class="ve-e" d="M330 458H590"/><text class="ve-el" x="460" y="449">改发给</text>
+        <path class="ve-e" d="M330 494H590"/><text class="ve-el" x="460" y="485">改发给</text>
+        <path class="ve-e" d="M330 530H590"/><text class="ve-el" x="460" y="521">改发给</text>
+        <path class="ve-e" d="M330 566H590"/><text class="ve-el" x="460" y="557">写进</text>
+        <path class="ve-e" d="M330 602H590"/><text class="ve-el" x="460" y="593">换成</text>
+        <path class="ve-e" d="M330 638H590"/><text class="ve-el" x="460" y="629">改由</text>
+        <path class="ve-e" d="M330 674H590"/><text class="ve-el" x="460" y="665">改交给</text>
+        <path class="ve-e" d="M330 710H590"/><text class="ve-el" x="460" y="701">改由</text>
+
+        <text class="ve-tag gone-t" x="20" y="67">WAIT</text><text class="ve-tag" x="600" y="67">研究数据库里的任务状态</text>
+        <text class="ve-tag gone-t" x="20" y="103">作业结束的转发</text><text class="ve-tag" x="600" y="103">研究者的待办（执行器用 rl 命令记下）</text>
+        <text class="ve-tag gone-t" x="20" y="139">审核中间结果、一回合结束的通知</text><text class="ve-tag" x="600" y="139">审核回合：请求者和审核者之间</text>
+        <text class="ve-tag gone-t" x="20" y="175">needs a reviewer</text><text class="ve-tag" x="600" y="175">审核会话（一条 rl review request）</text>
+        <text class="ve-tag gone-t" x="20" y="211">逐批 GO</text><text class="ve-tag" x="600" y="211">任务卡里的授权</text>
+        <text class="ve-tag gone-t" x="20" y="247">进度 NOTE</text><text class="ve-tag" x="600" y="247">研究数据库</text>
+        <text class="ve-tag gone-t" x="20" y="283">文档修订的来回</text><text class="ve-tag" x="600" y="283">审核回路</text>
+        <text class="ve-tag gone-t" x="20" y="319">发给协调者的自由 NOTE</text><text class="ve-tag" x="600" y="319">固定类型；决定不了的转成给科学家的阻塞</text>
+        <text class="ve-tag gone-t" x="20" y="355">页面说明、阶段报告、论文草稿</text><text class="ve-tag" x="600" y="355">研究页由记录生成；论文另开写作任务</text>
+        <text class="ve-tag gone-t" x="20" y="391">设计交付和逐个核查</text><text class="ve-tag" x="600" y="391">设计审核和结论审核（科学家请求）</text>
+        <text class="ve-tag gone-t" x="20" y="427">执行任务的任务卡</text><text class="ve-tag" x="600" y="427">科学家在假设任务的预算内写</text>
+        <text class="ve-tag gone-t" x="20" y="463">任务结论和验收</text><text class="ve-tag" x="600" y="463">科学家，读核验行验收</text>
+        <text class="ve-tag gone-t" x="20" y="499">授权阻塞、设计阻塞</text><text class="ve-tag" x="600" y="499">建任务的科学家</text>
+        <text class="ve-tag gone-t" x="20" y="535">结论审核的结果、顾问的建议</text><text class="ve-tag" x="600" y="535">科学家（请求者）</text>
+        <text class="ve-tag gone-t" x="20" y="571">代码细节：文件、函数、参数</text><text class="ve-tag" x="600" y="571">设计提交里的代码</text>
+        <text class="ve-tag gone-t" x="20" y="607">交接文档的读写</text><text class="ve-tag" x="600" y="607">数据库里的假设树和决定</text>
+        <text class="ve-tag gone-t" x="20" y="643">合并任务分支</text><text class="ve-tag" x="600" y="643">CLI，在科学家验收时先测再合并</text>
+        <text class="ve-tag gone-t" x="20" y="679">审核升级的裁决</text><text class="ve-tag" x="600" y="679">顾问裁决；研究者段给科学家</text>
+        <text class="ve-tag gone-t" x="20" y="715">换模型、重启会话</text><text class="ve-tag" x="600" y="715">监视，按规则处理</text>
+      </svg>
+    </div>
+    <figcaption><span class="fig-n">图 19</span>每类被删或改道的内容都有明确的新去向，协调者不用再读它们；设计、任务和代码这几类在上一版里还经过协调者。页面说明、阶段报告和论文草稿在 11-25 改：研究页由记录生成，页上的字由写记录的角色写，阶段报告是页上的一节；论文不再边研究边写，要写时另开写作任务或 skill。</figcaption>
+  </figure>
+
+  <figure>
+    <p class="ve-label">进入协调者的消息</p>
+    <ve-bars unit="条" max="680" label="快照里进入协调者的消息有 674 条；新设计的目标约 31 条，每个已判定的假设一条假设结论"><ve-bar value="674">快照</ve-bar><ve-bar value="31" hot>目标</ve-bar></ve-bars>
+    <div class="frame">
+      <p class="ve-label">快照里进入协调者的 674 条消息</p>
+      <ve-stack unit="条" label="674 条里，NOTE 468 条，WAIT 140 条，RESULT 66 条"><ve-bar value="140">WAIT</ve-bar><ve-bar value="66" hot>RESULT</ve-bar><ve-bar value="468">NOTE</ve-bar></ve-stack>
+    </div>
+    <figcaption><span class="fig-n">图 20</span>快照里进入协调者的 674 条消息只有 66 条是 RESULT；目标是每个已判定的假设一条假设结论，31 个假设约 31 条，另加决定请求、阶段结论和答复。目标尚未实测。</figcaption>
+  </figure>
+</section>
+
+<section id="open">
+  <div class="sec-head"><p class="ve-label caps">决定</p><h2>八十七件事已定，没有待确认的</h2></div>
+  <div class="ve-table"><table>
+    <thead><tr><th>日期</th><th>已定</th><th>取代了什么</th></tr></thead>
+    <tbody>
+      <tr><td>11-09</td><td>负载来自角色之间的沟通，先删沟通；否决 <code>Message.wake</code> 和静默分级</td><td>11-09 文档原 5.2</td></tr>
+      <tr><td>11-09</td><td>任务有结论、收件人要行动时才发消息；进入协调者的只有固定类型；协调者可以发自由消息（11-10 改成“提问”）；“答复”引用原消息，每条最多一次</td><td>发给协调者的自由 NOTE</td></tr>
+      <tr><td>11-09</td><td>一个审核回合一个会话，谁请求谁启动</td><td>11-09 文档 5.4 的审核路由</td></tr>
+      <tr><td>11-09</td><td>验收时读 CLI 生成的核验行，必要时抽查证据</td><td>模型手工核对</td></tr>
+      <tr><td>11-09</td><td>任务卡授权内的运行不用回去问</td><td>逐批 GO</td></tr>
+      <tr><td>11-09</td><td>研究者每个任务开新会话；退回或阻塞解除时回到原会话；取消“不压缩直接继续”</td><td>—</td></tr>
+      <tr><td>11-09</td><td>研究工作从数据库恢复，主要靠假设树，不靠长交接文档</td><td>11-09 文档 5.8 的短状态文件</td></tr>
+      <tr><td>11-09</td><td>agent 生成的文档都挂在数据库记录上</td><td>—</td></tr>
+      <tr><td>11-09</td><td>新角色科学家，负责假设、实验设计和决定</td><td>协调者的设计职能</td></tr>
+      <tr><td>11-10</td><td>五张表的定义，见<a href="smooth-research-data-relations.html">关系页</a></td><td>—</td></tr>
+      <tr><td>11-10</td><td>设计不成立的阻塞直接发给科学家</td><td>经协调者转达</td></tr>
+      <tr><td>11-10</td><td>工作文件放在任务的工作目录；协调者没有工作目录</td><td>—</td></tr>
+      <tr><td>11-10</td><td>代码即设计（图 6、图 7）</td><td>科学家写合同，研究者翻译成代码</td></tr>
+      <tr><td>11-10</td><td>以假设为单位分配科学家；判定后派生的子假设交给新会话（图 3）</td><td>科学家和协调者一样长期存在</td></tr>
+      <tr><td>11-10</td><td>协调者按假设分配和给预算；科学家自己建任务、验收任务</td><td>协调者逐个核查设计；协调者验收每个任务</td></tr>
+      <tr><td>11-10</td><td>没有方法问题就交接；审核回合随任务转给研究者；科学家交出任务后继续做不需要等待的工作（图 8、图 10）</td><td>交接条件“没有重大问题”</td></tr>
+      <tr><td>11-10</td><td>计算预算是努力义务，大致符合即可（图 14）</td><td>超出预算时 CLI 拒绝提交作业</td></tr>
+      <tr><td>11-10</td><td>消息只带主记录、ask、定位和一句说明；CLI 在发送时校验定位，在读取时展开（<a href="smooth-research-message-design.html#format">消息设计页</a>）</td><td>正文里夹着编号的长消息</td></tr>
+      <tr><td>11-10</td><td>说明最多 2 句、300 字符（11-24 改成只限 300 字符）</td><td>不限长的 NOTE</td></tr>
+      <tr><td>11-10</td><td>没有无类型的消息；协调者的自由消息改成“提问”，带主记录和定位（图 13）</td><td>协调者的自由消息</td></tr>
+      <tr><td>11-10</td><td>通知不写 Message，待办从记录状态查询；Message 只存对话条目（<a href="smooth-research-message-design.html#pending">消息设计页</a>）</td><td>收件箱、游标和确认</td></tr>
+      <tr><td>11-10</td><td>保留审核讨论，记在审核回合上，结果写进发现的状态和条件（<a href="smooth-research-message-design.html#review">消息设计页</a>）</td><td>审核者和研究者之间的自由消息</td></tr>
+      <tr><td>11-24</td><td>会话不常驻：手头没事就结束本轮，监视按待办唤醒，续用原来的对话或按启动包新开；不依赖 herdr，herdr 是可选的显示层（11-25 改成只用 herdr，第 46 项）</td><td>常驻会话，靠 herdr 往会话里打提醒</td></tr>
+      <tr><td>11-24</td><td>agent 之间的内部交流不改用 A2A</td><td>—</td></tr>
+      <tr><td>11-24</td><td>验收即合并，冲突交给验收它的科学家；分支和工作树按任务建</td><td>协调者合并；工作树按会话建</td></tr>
+      <tr><td>11-24</td><td>监视的上报逐类定去向：换模型由监视做，“会话需要决定”发给协调者；交接和换人分开叫</td><td>监视都报给协调者；<code>handoff</code> 一词两用</td></tr>
+      <tr><td>11-24</td><td>准备任务由研究者写代码，按检查命令验收；公共的准备任务挂在项目下；启动包列出可复用的产物；新代码区域先交环境事实清单</td><td>—</td></tr>
+      <tr><td>11-24</td><td>科学家段和结论审核的升级交给顾问裁决，协调者不再收审核升级</td><td>升级给协调者</td></tr>
+      <tr><td>11-24</td><td>前提关系记成边；上游结论变了由 CLI 通知受影响的科学家；核验行加 <code>affects</code></td><td>—</td></tr>
+      <tr><td>11-24</td><td>假设任务可以提前排队，带一句理由；候选假设可以标“暂不做”；阶段记成记录，阶段结束由 CLI 通知</td><td>排到了才建假设任务</td></tr>
+      <tr><td>11-24</td><td>假设树和第一阶段的排期先由用户批准</td><td>—</td></tr>
+      <tr><td>11-24</td><td>预算申请扩成决定请求</td><td>预算申请</td></tr>
+      <tr><td>11-24</td><td>设计提交带实验清单，登记运行和导入结果时由 CLI 核对；提前停止的条件写进清单</td><td>合同开头的 <code>arms:</code> 清单</td></tr>
+      <tr><td>11-24</td><td>定位落在受保护范围内的发现默认是方法类；受保护的单位是符号</td><td>按整个文件保护</td></tr>
+      <tr><td>11-24</td><td>交接时封存设计提交；运行分试跑和证据运行，准备任务的运行另列一类；CLI 拒绝的是登记</td><td>“第一次运行前封存”；“拒绝提交”</td></tr>
+      <tr><td>11-24</td><td>作业过了预计结束时间进研究者的待办；研究者的启动包先列还在运行的作业</td><td>固定等 60 分钟后提醒协调者</td></tr>
+      <tr><td>11-24</td><td>待办由一张规则表算出；每条没结束的记录都要有人等；待办超时逐级上报，最后到用户</td><td>记录上的一个“等谁”字段；只有“失联”一种异常</td></tr>
+      <tr><td>11-24</td><td>快速通道：条件由 CLI 判断，满足时不开新的审核回合</td><td>每个任务都走全套流程</td></tr>
+      <tr><td>11-24</td><td>用量到线提醒，不拒绝；显示还在排队的用量和没报用量的运行数</td><td>—</td></tr>
+      <tr><td>11-24</td><td>实施顺序：先手工试一个假设，先做核验行和待办；按假设任务切换新旧规则（11-25 改：不兼容旧项目，不再切换，数据模型排到前面，第 48 项）</td><td>原来的顺序</td></tr>
+      <tr><td>11-24</td><td>小问题：去掉 <code>DESIGNED_IN</code>；说明只限 300 字符；结论审核请求不带说明；结论不手抄数字；研究者可以发“疑问”；假设结论的交付条件由 CLI 检查</td><td>说明最多 2 句；协调者读核验行验收假设结论</td></tr>
+      <tr><td>11-24</td><td>通知、待办、启动包和数据库的配合：发件人只写记录的字段；通知一行，不存；待办是规则表的查询；启动包读时生成（<a href="smooth-research-packs.html">启动包页</a>）</td><td>—</td></tr>
+      <tr><td>11-24</td><td><code>rl pack</code> 只给 agent 读启动包，所有角色都用它；<code>rl resume</code> 给用户，把项目接着跑起来并拉起监视；<code>rl inbox --item N</code> 展开一项（11-25：<code>rl resume</code> 也确认 herdr 里有协调者的面板，第 46 项）</td><td><code>rl resume</code>、<code>rl context --purpose work</code>、<code>rl agent brief</code> 三个给 agent 的入口</td></tr>
+      <tr><td>11-24</td><td>每个启动包同样的五块；预算是协调者约 4,500 字符、科学家约 8,000、研究者约 4,500、审核者约 2,500；角色卡、本次的卡和待办不裁</td><td>工作包和恢复包共用一个 4,000 token 的目标</td></tr>
+      <tr><td>11-24</td><td>科学家的包里假设树全给，超过约 150 个假设才裁；协调者的包里不放假设树；研究者的包里不放假设树和命题</td><td>—</td></tr>
+      <tr><td>11-24</td><td>授权文件放全文，简要说明只给编号；续用时只发一行通知，新开和压缩之后才读整个包</td><td>—</td></tr>
+      <tr><td>11-24</td><td>最初的假设树由拆树任务生成：协调者建任务，科学家读计划建树，审核必经，协调者接收并排期，用户批准；协调者不判断树的质量</td><td>协调者自己读计划、自己建假设</td></tr>
+      <tr><td>11-24</td><td>科学家在拆树时给每个假设估大致花费，并建议先做哪几个；顺序和预算仍由协调者定</td><td>—</td></tr>
+      <tr><td>11-24</td><td>拆树时科学家自己查文献，用自己会话里的子代理；新颖性或可行性不足的假设标记后交回协调者，由协调者通知用户决定</td><td>开始时请顾问查文献</td></tr>
+      <tr><td>11-24</td><td>交接后的审核次数：科学家段和研究者段各最多三次；结论审核和树审核也是三次（图 10；用户定）</td><td>建议的每段两次</td></tr>
+      <tr><td>11-24</td><td>并行上限：每个假设任务同时最多 10 个研究者，不写就是 10，协调者可以写更小的数（用户定）</td><td>建议的默认 2</td></tr>
+      <tr><td>11-24</td><td>假设分配记成任务类型 <code>hypothesis</code>：任务卡写目标假设、优先级、预算信封、并行上限、排期理由；科学家建的任务用 <code>PART_OF</code> 挂在它下面；假设结论就是它的交付</td><td>—</td></tr>
+      <tr><td>11-24</td><td>科学家发给研究者的只有固定类型：任务卡、阻塞和疑问的答复、退回（图 13）</td><td>协调者发给研究者的长消息</td></tr>
+      <tr><td>11-24</td><td>文档的三条约束：必填的主人和封闭的 <code>doc_type</code>；主人结束后只读，修订次数有上限；恢复包只读数据库和挂在记录上的文档</td><td>—</td></tr>
+      <tr><td>11-24</td><td>任务类型是 <code>hypothesis</code>、<code>prep</code>、<code>execute</code> 和 <code>tree</code>；设计和实现并入执行任务（同日第 32 项又加了阶段结论任务 <code>phase</code>）</td><td>设计任务和实现任务分开</td></tr>
+      <tr><td>11-24</td><td>待办规则表的每一行写明 ask 对应的 CLI 命令，执行后事项从待办消失（<a href="smooth-research-message-design.html#notices">消息设计页</a>图 8）</td><td>—</td></tr>
+      <tr><td>11-24</td><td>通知记录：Event 里记通知了谁、哪条记录、送达还是暂存，不存正文</td><td>—</td></tr>
+      <tr><td>11-24</td><td>定位的写法：子项用 <code>#</code>；代码用 <code>提交:路径::符号</code>；文件用 DOC 或登记过的产出；每条最多 8 个</td><td>—</td></tr>
+      <tr><td>11-24</td><td>任务卡和结论的字段：CLI 要检查或显示的放字段，要整段读的放文件；授权沿用封存的授权文件，加 <code>start_when</code>、<code>done_when</code> 和 <code>stop_when</code>（<a href="smooth-research-message-design.html#examples">消息设计页的范例</a>；<code>stop_when</code> 同日改为只写在实验清单里，第 37 项）</td><td>—</td></tr>
+      <tr><td>11-24</td><td>没有 herdr 时，用户开着的交互会话就是协调者；用户不在时，监视用无头对话处理协调者的待办；同一时间只运行一段协调者对话（11-25 由第 46 项取代：只用 herdr，协调者只有一个面板）</td><td>—</td></tr>
+      <tr><td>11-24</td><td>提醒用户：<code>rl resume</code>、<code>rl status</code> 和会话启动时的提示显示用户的待办；有 herdr 时再发一条 herdr 通知（11-25 起总有 herdr）</td><td>—</td></tr>
+      <tr><td>11-24</td><td>续用还是新开：空闲超过提示缓存的保留时间，并且上下文超过一个 token 数，才新开；两个数在试运行时定（11-25：新开就是清掉对话再读启动包，第 47 项）</td><td>—</td></tr>
+      <tr><td>11-24</td><td>待办的期限按通知类型设，默认值在试运行时定；等作业的期限取预计结束时间</td><td>—</td></tr>
+      <tr><td>11-24</td><td>新的名字照设计用：<code>ASSUMES</code>、阶段记录、<code>done_check</code>、<code>stop_when</code>、运行的三个类别、合并状态、“会话需要决定”、“换人”、<code>tree</code>、新颖性和可行性标记；实现时可以改</td><td>—</td></tr>
+      <tr><td>11-24</td><td>实验清单是设计提交里的一个 YAML 或 Python 文件；配置的摘要由清单算出，登记时 CLI 重算比对</td><td>—</td></tr>
+      <tr><td>11-24</td><td>试跑的时长上限和快速通道的花费上限是项目配置里各一个数</td><td>—</td></tr>
+      <tr><td>11-24</td><td>预算的线在信封的 80%、100%、150%（图 14）</td><td>—</td></tr>
+      <tr><td>11-24</td><td>裁决以后科学家仍不同意，向协调者发决定请求；涉及用户约束的由协调者转给用户</td><td>—</td></tr>
+      <tr><td>11-24 复查</td><td>文内前后不一致、照字面实现会卡住的地方直接改：拆树任务和给用户的事项补进规则表和各角色的待办；升级条件按回合的种类算，树审核也交顾问裁决（图 10）；交接要审核覆盖设计提交，未关闭的方法类发现不论严重度都挡住证据运行；快速通道、交付任务和准备任务的检查补进检查表（图 14 下的表）；对话条目不限长；取消的任务不挡假设结论的交付；复合假设的决定引用子假设的决定；预计结束时间只记在 Attempt 上；任务类型列全；分支在第一次认领时建，登记的产出提交在任务分支上；启动包总表按五块排（图 16）；协调者自己的会话停住时报给用户；科学家上限记在阶段记录上</td><td>各处原来的写法</td></tr>
+      <tr><td>11-24</td><td>作业结束：执行器的通知用 <code>command</code> 方式投递，运行一条 rl 命令，在 Attempt 上记下作业结束或失败；规则表把“作业结束”放进提交者的待办，监视唤醒它；预计结束时间留作通知丢了时的兜底（图 1）</td><td>执行器把通知直接发给提交作业的会话，靠 herdr 打进标签页</td></tr>
+      <tr><td>11-24</td><td>复合假设的结论用一个普通的假设任务，决定引用子假设的决定就能交付；阶段结论用新任务类型 <code>phase</code>；两种都由协调者建任务并放行（图 3）</td><td>协调者“开一个短的科学家会话”</td></tr>
+      <tr><td>11-24</td><td>公共的准备任务：拆树的科学家只列出；协调者接收树时建成项目下的排队任务，算进第一阶段，用户批准后放行；<code>done_check</code> 通过时由 CLI 验收并合并；阻塞和研究者段的升级经协调者交给一个短的科学家会话</td><td>由第一个依赖它的科学家确认</td></tr>
+      <tr><td>11-24</td><td>用户在协调者的交互会话里答复，协调者用 <code>rl request answer --by user</code> 记下；树和排期批准前 <code>rl task release</code> 拒绝放行；阶段报告不挡下一阶段；交互会话一段时间没有输入就当用户不在，监视用无头对话处理协调者的待办，两边共用一把协调者锁（11-25 改：用户在协调者的面板里说话，无头对话接手和协调者锁去掉，第 45、46 项）</td><td>—</td></tr>
+      <tr><td>11-24</td><td>验收时先在合并提交上跑语义测试，通过了才移主线；不通过记成合并冲突，主线不动；只能走作业的项目，测试作业跑完前任务处于“合并中”（图 9）</td><td>先合并进主线，再在主线上测</td></tr>
+      <tr><td>11-24</td><td>快速通道里运行仍由研究者做，科学家不自己提交</td><td>很小的运行由科学家像测试作业那样自己提交</td></tr>
+      <tr><td>11-24</td><td>停止条件只写在实验清单的 <code>stop_when</code> 里，随设计提交封存；授权文件只写运行上的限制（重试、预算、<code>report_when</code>）；任务包显示清单里的 <code>stop_when</code></td><td>授权文件也写 <code>stop_when</code></td></tr>
+      <tr><td>11-24</td><td>中途停下的假设任务交一条“停止”的假设结论：不判定，把假设改成 <code>paused</code> 或 <code>retired</code>，引用上游的决定或决定请求的答复；协调者可以取消排队中的假设任务；阶段结束改成“假设任务都接收或取消了”</td><td>—</td></tr>
+      <tr><td>11-24</td><td>交接的命令改名 <code>rl task dispatch</code>，和旧流程的 <code>rl task handoff</code>（换人）分开（11-25：<code>rl task handoff</code> 删掉，第 48 项）</td><td><code>rl task hand-over</code></td></tr>
+      <tr><td>11-24</td><td>监视每一拍写心跳；心跳过期时，任何 rl 命令和会话启动时的提示都提醒运行 <code>rl resume</code>；<code>rl status</code> 显示监视的状态；先不装成系统服务</td><td>—</td></tr>
+      <tr><td>11-24</td><td>阶段结论是一种新类别的决定 <code>phase</code>：<code>DECIDES</code> 指向阶段记录，<code>BASED_ON</code> 引用阶段里各假设的决定；不改假设状态</td><td>—</td></tr>
+      <tr><td>11-24</td><td><code>BASED_ON</code> 的目标加上任务，只用来引用任务上的决定请求和答复；<code>DECIDES</code> 仍不指向任务</td><td>—</td></tr>
+      <tr><td>11-25</td><td>研究页由记录生成：页上的字由知道的角色在写记录时写，新字段是假设的目的、假设结论的解读和阶段结论挑出的发现，协调者不写；阶段报告是页上这一阶段的一节，由 CLI 生成；写命令不碰页面，监视在记录变了时重画；页面不进 git；照 bypass-lora 的 <code>hypothesis-tree.html</code> 做模板（第 43 项）</td><td>协调者写的 <code>explanation.yaml</code>；写命令同步刷新页面；协调者写阶段报告</td></tr>
+      <tr><td>11-25</td><td>不再边研究边写论文草稿；<code>rl manuscript</code> 删掉；要写论文时另开写作任务或 skill，读当时的数据库（第 44 项）</td><td>阶段收尾时协调者往论文草稿里填正文</td></tr>
+      <tr><td>11-25</td><td>协调者兼任给用户的讲解，不另设角色：细节由只读子代理去读，只拿回答案；用户要的说明和术语表由它写；监视只在协调者空闲、用户几分钟没说话时往它的面板里提交提醒（第 45 项）</td><td>用户在协调者的交互会话里说话；另设讲解员（11-25 讨论过，没有采用）</td></tr>
+      <tr><td>11-25</td><td>只用 herdr：每个会话开在一个面板里，审核者和顾问也是；没有 herdr 时拒绝启动；无头方式和协调者锁去掉（第 46 项）</td><td>无头和 herdr 两种后端（评审 3 选 B）；原第 15 项；第 34 项的无头接手</td></tr>
+      <tr><td>11-25</td><td>对话用清掉重开，不用主动压缩：空闲超过缓存时间、上下文又大时，监视在提醒之前清掉对话，让它读启动包；不在每轮结束时清；用户在时不清协调者的对话（第 47 项）</td><td>—</td></tr>
+      <tr><td>11-25</td><td>这次重新设计不兼容之前的项目：新版本只建新项目，schema 5 之前的数据库一律拒绝并提示用旧版插件；旧命令、旧代码、到 4 为止的迁移和旧夹具都删掉；只限这一次，升级机制（打开时备份并迁移、<code>rl upgrade</code>）保留，5 以后照常迁移；冻结 schema-5 夹具；试运行用新项目（第 48 项）</td><td>整合文档 10.4 原来的迁移和按假设任务切换新旧规则（评审 19）</td></tr>
+    </tbody>
+  </table></div>
+  <p>11-24 的各行来自评审 <code>design/analysis/smooth-research-redesign-review-2026-11-24.md</code> 的 19 条意见和 7 个小问题，意见 3 选 B。从“交接后的审核次数”到“裁决以后科学家仍不同意”的十九行，是整合文档第 14 章原来的待确认事项，也在 11-24 定下：审核每段最多三次、并行上限 10 由用户定，其余照建议。“11-24 复查”一行是同一天复查时直接改的地方；最后十行是复查提出的第 31 至 40 项，用户当天照建议定下（整合文档 14.1）。启动包和待办的具体构成见<a href="smooth-research-packs.html#decide">启动包页</a>。同步这几页时又发现两处要用户定的：阶段结论的决定指向什么，“停止”的结论怎么引用决定请求的答复（整合文档 14.2，第 41、42 项）。用户当天照建议定下，是 11-24 的最后两行。11-25 用户又定了第 43 至 48 项（整合文档 14.3），是表里最后六行：研究页由记录生成，不再边研究边写论文草稿，协调者兼任讲解，只用 herdr，清掉重开代替主动压缩，这次重新设计不兼容之前的项目（只限这一次，升级机制保留）。更早的行里被它们改过的地方，标了“11-25”。现在没有待确认的事项，之后的新问题从第 49 项接着编号。</p>
+  <p>上一版页面列的五处待确认细节已经处理：“证据待判定”的通知不再需要，因为科学家自己验收；设计阻塞由持有任务卡的科学家直接改授权，超出信封才发决定请求；“退回设计”取消，协调者不再核查设计；阶段结束由 CLI 通知，协调者建一个阶段结论任务（<code>phase</code>），由科学家写阶段结论；进入科学家的消息并入通道表（图 13），审核讨论记在审核回合上。</p>
+  <p>实施顺序见整合文档第 15 章（11-25 改）：先按角色计量 token，再手工试一个假设；然后做新的数据模型，同时删掉旧命令和旧代码；再做核验行、待办、CLI 检查、消息、只用 herdr 的会话和监视、启动包和 <code>rl resume</code>、研究页和 <code>rl status</code>、角色卡，最后用一个新项目试运行。不兼容旧项目以后，核验行和待办不必为旧流程先做，直接做在新的数据模型上。</p>
+</section>
+
+<section class="sources" aria-label="Sources">
+  <p class="ve-label caps">来源</p>
+  <p><code>design/site/content/smooth-research-redesign-2026-11-10.md</code>（本页依据的整合文档）· <code>design/analysis/coordinator-load-analysis-and-redesign-2026-11-09.md</code> 第 1 至 4 章 · <code>design/analysis/smooth-research-redesign-review-2026-11-24.md</code>（11-24 的评审）· <a href="smooth-research-message-design.html">消息设计页</a>（整合文档第 8 章）· 整合文档 14.3（11-25 定的第 43 至 48 项）</p>
+  <p>bypass-lora 快照 <code>research/snapshots/restart-method-preparation-20261108/snapshot.json</code>：44 个假设、54 个任务、128 次审核、1,324 条消息 · 交接文档 <code>research/tasks/restart-coordinator-handoff.md</code> 183,007 字节 · 研究页的模板 <code>docs/explanations/hypothesis-tree.html</code> 和它的生成器 <code>research/notes/hypothesis-tree-generator/</code></p>
+  <p><code>src/smooth_research/tasks.py:87</code> <code>claim</code> · <code>tasks.py:178</code> <code>handoff</code> · <code>tasks.py:222</code> <code>verification_lines</code> · <code>reviews.py:184</code> <code>_route</code></p>
+  <p><code>src/smooth_research/context.py:170</code> <code>work_pack</code> · <code>context.py:257</code> <code>resume_pack</code> · <code>agents.py:297</code> <code>tell</code> · <code>messages.py:43</code> <code>send</code> · <code>worktrees.py:67</code> <code>prepare_worktree</code> · <code>watch.py</code> · <code>runs.py:59</code> <code>register</code> · miyabi-mcp 的 <code>deliver.py</code>（<code>command</code> 投递）</p>
+  <p><code>src/smooth_research/explain.py</code> · <code>cli.py:95</code> <code>_refresh_page</code> · <code>manuscript.py</code> · <code>adapters.py</code>（<code>claude -p</code>、<code>codex exec</code>、<code>pi -p</code>）· 本机 <code>herdr agent</code> 的命令帮助</p>
+</section>
+</main>
+</body>
+</html>

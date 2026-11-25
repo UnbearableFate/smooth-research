@@ -1,0 +1,606 @@
+<!doctype html>
+<html lang="zh" data-register="blueprint">
+<head>
+<title>启动包和待办从记录生成</title>
+<link rel="stylesheet" href="kit.css" data-ve-kit>
+<style>
+header h1{font-size:clamp(1.9rem,3.2vw,2.6rem);max-width:none}
+.pair{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,340px),1fr));gap:var(--s-5);align-items:start}
+.pair pre{margin:0}
+.store-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,230px),1fr));gap:var(--s-4)}
+.store{border:1.5px solid var(--border-bright);border-radius:var(--r-1);padding:var(--s-3) var(--s-4)}
+.store h3{margin:var(--s-2) 0 var(--s-1)}
+.store p{margin:0 0 var(--s-2)}
+.store code{overflow-wrap:anywhere}
+.st{display:inline-block;padding:0 .45em;border:1.5px solid var(--text);border-radius:2px;font-size:.8em;line-height:1.55;white-space:nowrap}
+.st.file{border-style:dashed}
+.st.git{border:3px double var(--text)}
+.st.none{border-style:dotted;border-color:var(--text-dim);color:var(--text-dim)}
+.new{margin-left:.35em;font-size:.75em;font-weight:600;color:var(--accent)}
+.pk{display:grid;gap:var(--s-2)}
+.pk .blk{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:var(--s-4);align-items:start;border:1.5px solid var(--border-bright);border-radius:var(--r-1);padding:var(--s-3)}
+.pk .blk.gen{border-style:dashed}
+.pk .blk.keep{border-width:2.5px}
+.pk pre{margin:0;padding:0;border:0;background:none;white-space:pre-wrap;overflow-wrap:anywhere}
+.pk .src p{margin:0 0 var(--s-1);color:var(--text-dim)}
+.pk .src p b{color:var(--text)}
+.pk .src .st{margin-left:.45em}
+@media (max-width:820px){.pk .blk{grid-template-columns:minmax(0,1fr)}}
+.legend{display:flex;flex-wrap:wrap;gap:var(--s-4);margin:0 0 var(--s-3);color:var(--text-dim);font-size:var(--t-small)}
+.legend span.box{display:inline-block;width:1.6em;height:.9em;border:1.5px solid var(--border-bright);border-radius:2px;vertical-align:-.1em;margin-right:.4em}
+.legend span.box.gen{border-style:dashed}
+.legend span.box.keep{border-width:2.5px}
+.wrote td:first-child,.confirm td:first-child,.others th{white-space:nowrap}
+.others th{text-align:left}
+</style>
+</head>
+<body>
+<nav class="ve-toc" aria-label="Sections"><div><a href="#stores">存哪</a><a href="#inbox">待办</a><a href="#anatomy">结构</a><a href="#coordinator">协调者</a><a href="#scientist">科学家</a><a href="#researcher">研究者</a><a href="#others">审核和顾问</a><a href="#wake">唤醒</a><a href="#decide">决定</a></div><span class="pos"></span></nav>
+<main>
+<header>
+  <p class="eyebrow">Smooth Research · 启动包和待办</p>
+  <h1>发件人只写几个字段，收件人读到的包由 CLI 从记录拼出来</h1>
+  <p class="lead">通知只有一行，不存。待办（mailbox）是一次查询。<b>启动包在读的时候生成</b>，所以它永远和数据库一致。</p>
+  <p class="meta">2026-11-24 定，11-25 按第 43 至 48 项改 · 尚未实现 · 依据整合文档 7.7、8.11、11.2 和 11.5 · 消息的格式见<a href="smooth-research-message-design.html">消息设计页</a> · 范例里的编号和内容是示意</p>
+</header>
+
+<figure class="ve-steps">
+  <ve-flow label="协调者放行假设任务时只写记录。CLI 检查后写入研究数据库，规则表算出这件事在等科学家，监视在 herdr 里开一个面板，带一行通知启动科学家，科学家的启动包由 CLI 从记录生成。">
+    <ve-node id="co" at="1 1" sub="只写卡上的五项" data-s="1">协调者</ve-node>
+    <ve-node id="cli" at="2 1" sub="检查，再写入" data-s="1 2">CLI</ve-node>
+    <ve-node id="db" at="3 1" shape="db" sub="记录和 Event" key data-s="2 3 5 6">研究数据库</ve-node>
+    <ve-node id="todo" at="4 1" sub="查询，不存" data-s="3">科学家的待办</ve-node>
+    <ve-node id="watch" at="4 2" sub="一行通知，不存" data-s="4">监视</ve-node>
+    <ve-node id="sci" at="3 2" sub="开在新面板里" data-s="4 5 6">科学家</ve-node>
+    <ve-node id="pack" at="2 2" sub="读时生成，不存" data-s="5">启动包</ve-node>
+    <ve-edge from="co" to="cli" label="放行" data-s="1"/>
+    <ve-edge from="cli" to="db" label="写状态和 Event" data-s="2"/>
+    <ve-edge from="db" to="todo" label="规则表查询" async data-s="3"/>
+    <ve-edge from="todo" to="watch" label="有事" data-s="4"/>
+    <ve-edge from="watch" to="sci" label="唤醒" data-s="4"/>
+    <ve-edge from="sci" to="pack" label="rl pack" data-s="5"/>
+    <ve-edge from="sci" to="db" label="经 CLI 读和写" hot data-s="5 6"/>
+  </ve-flow>
+  <div class="ve-player">
+    <ol class="ve-cap">
+      <li data-n="1/6">协调者用 <code>rl task release</code> 放行假设任务 T-0040。它写过的只有卡上的五项：目标假设、优先级、预算信封、并行上限、排期理由。</li>
+      <li data-n="2/6">CLI 检查后改 T-0040 的状态，写一条 Event。它不写 Message，也不写“发给谁”。</li>
+      <li data-n="3/6">规则表按新状态算出：T-0040 在等一位科学家。这一项出现在科学家的待办里。待办是查询，不是一张表。</li>
+      <li data-n="4/6">监视看到待办里有事，又没有对应的会话，就按配置选模型，在 herdr 里开一个面板启动它，只带一行通知。</li>
+      <li data-n="5/6">科学家运行 <code>rl pack</code>。CLI 从记录拼出启动包：角色卡、任务卡、待办、假设树、祖先的决定、可复用的产物。</li>
+      <li data-n="6/6">科学家开始工作，它写的实验、任务和决定都经 CLI 进数据库。交出假设结论时，这一项离开它的待办，进协调者的待办。</li>
+    </ol>
+    <button data-go="-1" aria-label="上一步">←</button>
+    <button data-play aria-label="播放">▶</button>
+    <input type="range" aria-label="步骤">
+    <button data-go="1" aria-label="下一步">→</button>
+  </div>
+  <figcaption><span class="fig-n">图 1</span>一次“交办”没有哪一步在传递正文：发件人改记录，规则表算出等谁，收件人读的东西由 CLI 当场从记录生成。</figcaption>
+</figure>
+
+<section id="stores">
+  <div class="sec-head"><p class="ve-label caps">存哪</p><h2>五样东西里只有两样要存</h2></div>
+  <figure>
+    <div class="store-grid">
+      <div class="store"><span class="st">研究数据库</span><h3>记录</h3><p>事实和状态：假设、实验、任务、决定、证据、运行、审核单。各角色经 CLI 写。</p><code>T-0040.state</code> <code>E-0035.design_commit</code></div>
+      <div class="store"><span class="st">研究数据库</span><h3>对话条目</h3><p>提问和答复、审核讨论、顾问咨询。它们本身就是内容，存成 Message，挂在主记录上。</p><code>MSG-0201 · subject E-0035</code></div>
+      <div class="store"><span class="st none">不存</span><h3>通知</h3><p>一行：类型、主记录、ask、说明。只用来把会话叫醒。Event 里记通知了谁、送达还是暂存。</p><code>hypothesis-task T-0040 · test H-0014</code></div>
+      <div class="store"><span class="st none">不存</span><h3>待办</h3><p>现在等某个角色做的事，也就是 mailbox。规则表对记录状态的一次查询，命令是 <code>rl inbox</code>。</p><code>rl inbox --role coordinator</code></div>
+      <div class="store"><span class="st none">不存</span><h3>启动包</h3><p>一段新对话开始时读的一屏：角色卡、本次的卡、待办、必要材料。CLI 读时生成，命令是 <code>rl pack</code>。</p><code>rl pack</code></div>
+    </div>
+    <figcaption><span class="fig-n">图 2</span>要存的只有记录和对话条目。通知、待办和启动包都能从记录算出来，所以不存，也就不会和记录对不上。</figcaption>
+  </figure>
+  <div class="ve-table wrote"><table>
+    <thead><tr><th>这一程</th><th>发件人运行的命令</th><th>发件人写下的东西</th><th>收件人读到的</th></tr></thead>
+    <tbody>
+      <tr><td>协调者 → 科学家</td><td><code>rl task create --kind hypothesis</code>，<code>rl task release</code></td><td>假设任务卡的五项，约 150 字符</td><td>假设任务包，约 8,000 字符</td></tr>
+      <tr><td>科学家 → 研究者</td><td><code>rl task dispatch</code></td><td>一句说明，最多 300 字符。实验、说明、实验清单、授权文件在交接前已经是记录和文件</td><td>任务包，约 4,500 字符</td></tr>
+      <tr><td>CLI → 协调者</td><td>没有发件人：协调者运行 <code>rl pack</code></td><td>无</td><td>恢复包，约 4,500 字符</td></tr>
+      <tr><td>科学家 → 审核者</td><td><code>rl review request</code></td><td>审核问题一句，定位，说明（结论审核不带说明）</td><td>审核包，约 2,500 字符，不含代码</td></tr>
+      <tr><td>研究者 → 科学家</td><td><code>rl task deliver</code></td><td>一句结论、限制、定位、说明</td><td>待办里的一项，带核验行</td></tr>
+    </tbody>
+  </table></div>
+  <p>字符数是估计：恢复包和假设任务包的大小来自整合文档第 11 章，其余两个是按范例估的。</p>
+</section>
+
+<section id="inbox">
+  <div class="sec-head"><p class="ve-label caps">待办</p><h2>待办是 <code>rl inbox</code> 的一次查询，每项最多四行</h2></div>
+  <p>待办就是 mailbox。命令名不变，但它不再读消息表：它拿规则表去查记录状态。一项做完，记录状态一变，这一项就没有了，不需要确认，也没有游标。</p>
+  <figure>
+    <div class="pair">
+      <div>
+        <p class="ve-label">协调者</p>
+<pre><code>inbox · coordinator · 2 项
+1 hypothesis-conclusion  T-0040
+  ask   accept T-0040
+  from  scientist-H-0014 · 4 分钟
+  note  先看 D-0102 的建议：H-0051 更便宜。
+2 session-needs-decision  T-0044
+  ask   answer researcher-E
+  from  watch · 1 分钟
+  note  它要运行 pip install，约束里没有写。</code></pre>
+      </div>
+      <div>
+        <p class="ve-label">科学家</p>
+<pre><code>inbox · scientist-H-0014 · 3 项
+1 task-conclusion  T-0042
+  ask   accept T-0042
+  from  researcher-C · 2 分钟
+  note  先看 EV-0102：提升只出现在 seed 0。
+2 review-verdict  RV-0041
+  ask   dispatch T-0046
+  from  reviewer-D · 9 分钟
+3 usage-line  T-0040
+  ask   adjust, or request
+  at    80% · 3.2 / 4 MIG·h</code></pre>
+      </div>
+      <div>
+        <p class="ve-label">研究者</p>
+<pre><code>inbox · researcher-C · 2 项
+1 job-overdue  T-0042
+  ask   check the executor
+  job   ATT-0230-1 · 过了 40 分钟
+2 block-answer  T-0042
+  ask   continue T-0042
+  from  scientist-H-0014 · 6 分钟
+  note  允许换 1g，条件写在 replacements 里。</code></pre>
+      </div>
+      <div>
+        <p class="ve-label">用户运行 <code>rl resume</code></p>
+<pre><code>bypass-lora · 阶段 S-2 · 已用约 7.4 / 20 MIG·h
+监视    已启动，按待办唤醒 2 个会话
+协调者  herdr 面板已开
+研究页  docs/research.html
+等你决定 · 2 项
+1 阶段报告 S-1   不挡下一阶段
+  看：研究页的 S-1 一节；要改方向就告诉协调者
+2 决定请求  T-0041（转自 scientist-H-0016）
+  选项 A 换 512 token 重评，多约 0.4 MIG·h
+  选项 B 只报 256 token 的结论
+  建议 A
+答复：在协调者的面板里说</code></pre>
+      </div>
+    </div>
+    <figcaption><span class="fig-n">图 3</span>每个角色的待办是同一种格式：类型和主记录、ask、谁发的和等了多久、一句说明。用户运行 <code>rl resume</code>，看到项目状态和等自己决定的事；监视和协调者的 herdr 面板也由它拉起来。用户不运行写命令，在协调者的面板里答复，由协调者记下。阶段报告是研究页上这一阶段的一节，协调者不另写（11-25）。</figcaption>
+  </figure>
+  <figure>
+    <div class="pair">
+      <div>
+        <p class="ve-label">看其中一项：<code>rl inbox --item 1</code></p>
+<pre><code>task-conclusion  researcher-C → scientist-H-0014
+subject  T-0042
+ask      accept T-0042
+note     先看 EV-0102：提升只出现在 seed 0。
+
+T-0042      delivered · 3 attempts, 3 success
+EV-0101     from RES-0230 · W-02 vs Base, seeds 0-2
+EV-0102     from RES-0231 · W-02 gain by seed
+RV-0036#F2  engineering · low · open
+DOC-0031    T-0042 analysis note, rev 2</code></pre>
+      </div>
+      <div>
+        <p class="ve-label">同一屏的下半：核验行</p>
+<pre><code>attempts   3 ended: 3 success, 0 needs-check
+arms       2 arms × 3 seeds match design
+results    2 complete; evidence EV-0101, EV-0102
+review     RV-0037 passed · method 0 open
+protected  unchanged since handover
+mainline   protected scope unchanged on main
+usage      about 1.2 MIG·h used, 0 queued
+next       rl task accept T-0042 | rl task return T-0042</code></pre>
+      </div>
+    </div>
+    <figcaption><span class="fig-n">图 4</span>打开一项时，CLI 给每个定位加一行，再加核验行和下一步的命令。这些都是读的时候从记录算的，发件人只写了上面的四个字段。</figcaption>
+  </figure>
+  <div class="ve-table wrote"><table>
+    <thead><tr><th>命令</th><th>谁用</th><th>做什么</th></tr></thead>
+    <tbody>
+      <tr><td><code>rl pack</code></td><td>agent</td><td>打印调用它的会话的启动包。所有角色都用它，包括协调者</td></tr>
+      <tr><td><code>rl inbox</code></td><td>agent</td><td>查自己的待办；<code>--item N</code> 展开一项</td></tr>
+      <tr><td><code>rl resume</code></td><td>用户</td><td>把这个项目接着跑起来：确认 herdr 里有协调者的面板（没有就开一个，从启动包启动）、监视在运行；打印项目状态和等用户决定的事<span class="new">11-25 改</span></td></tr>
+      <tr><td><code>rl status</code></td><td>用户</td><td>只看项目状态、等用户决定的事和监视在不在运行，不启动任何东西。项目状态是研究页“现在”一节的短版，再加上次阶段报告以后新出的假设结论</td></tr>
+      <tr><td><code>rl view</code></td><td>用户</td><td>立即重画研究页；监视在运行时会自己重画<span class="new">11-25</span></td></tr>
+    </tbody>
+  </table></div>
+  <p>用户不运行写命令：在协调者的面板里答复，协调者用 <code>rl request answer --by user</code> 记下。用户也在这个面板里问项目的事：协调者读记录和研究页来讲，问到代码、日志或审核讨论，就开一个只读子代理去读，只拿回答案和定位（整合文档 7.7）。交接的命令叫 <code>rl task dispatch</code>；旧的 <code>rl task handoff</code> 删掉了，不会再被打错。</p>
+  <p>机器重启或全部关掉以后，用户运行一次 <code>rl resume</code>，监视就按待办在新面板里把各个会话叫起来。监视每一拍写一次心跳；心跳过期时，任何 <code>rl</code> 命令和会话启动时的提示都提醒运行 <code>rl resume</code>。新版本不兼容旧项目：<code>rl resume --role coordinator</code>、<code>rl context --purpose work</code>、<code>rl agent brief</code> 都删掉，角色卡只写 <code>rl pack</code>（整合文档 10.4）。</p>
+</section>
+
+<section id="anatomy">
+  <div class="sec-head"><p class="ve-label caps">结构</p><h2>每个启动包都是同样的五块</h2></div>
+  <figure>
+    <p class="legend"><span><span class="box keep"></span>不会被裁掉</span><span><span class="box gen"></span>查询生成，超预算时先裁最旧的</span></p>
+    <div class="pk">
+      <div class="blk keep"><pre><code>## 角色卡
+你是谁，回答哪个问题，能发什么，不做什么，常用命令</code></pre><div class="src"><p><b>固定文字</b><span class="st file">插件里的文件</span></p><p>每个角色一份。它取代每次重读 SKILL.md。</p></div></div>
+      <div class="blk keep"><pre><code>## 本次的卡
+这个会话负责的那一件事：项目、假设任务、任务、审核单或顾问单</code></pre><div class="src"><p><b>记录的字段</b><span class="st">研究数据库</span></p><p>发件人写的就是这一块。别的块都不是它写的。</p></div></div>
+      <div class="blk keep"><pre><code>## 待办
+现在等你做的事，每项最多四行</code></pre><div class="src"><p><b>规则表的查询</b><span class="st none">不存</span></p><p>和 <code>rl inbox</code> 是同一个查询。</p></div></div>
+      <div class="blk gen"><pre><code>## 必要材料
+按角色不同：排期表、假设树、祖先的决定、审核发现、可复用的产物</code></pre><div class="src"><p><b>查询</b><span class="st none">不存</span></p><p>每条记录一行。更细的内容按 id 取。</p></div></div>
+      <div class="blk keep"><pre><code>## 按 id 取
+还能查什么，用哪条命令；哪些东西不在包里</code></pre><div class="src"><p><b>固定文字</b><span class="st file">插件里的文件</span></p><p>写明“这里没有日志”，会话就不会自己去翻。</p></div></div>
+    </div>
+    <figcaption><span class="fig-n">图 5</span>启动包按这个顺序拼，到预算为止。角色卡、本次的卡、待办和最后两行不裁；必要材料超出预算时，先裁最旧的条目，并写明裁了几条。</figcaption>
+  </figure>
+  <figure>
+    <div class="kpis">
+      <div class="kpi"><span class="ve-label">协调者的恢复包，预计</span><span class="val">4.5<span class="unit">k 字符</span></span><ve-bars unit="k" max="8" label="协调者的恢复包约 4,500 字符：角色卡 1,300，目标和约束 600，待办 500，排期和候选 1,900，其余 200"><ve-bar value="1.3">角色卡</ve-bar><ve-bar value="0.6">约束</ve-bar><ve-bar value="0.5">待办</ve-bar><ve-bar value="1.9" hot>排期候选</ve-bar></ve-bars></div>
+      <div class="kpi"><span class="ve-label">科学家的假设任务包，估计</span><span class="val"><span data-count="8">8</span><span class="unit">k 字符</span></span><ve-bars unit="k" max="8" label="科学家的假设任务包约 8,000 字符：角色卡 2,000，任务卡和待办 800，假设树 3,100，决定和任务 1,500，产物 400"><ve-bar value="2">角色卡</ve-bar><ve-bar value="0.8">卡和待办</ve-bar><ve-bar value="3.1" hot>假设树</ve-bar><ve-bar value="1.5">决定任务</ve-bar></ve-bars></div>
+      <div class="kpi"><span class="ve-label">研究者的任务包，估计</span><span class="val">4.5<span class="unit">k 字符</span></span><ve-bars unit="k" max="8" label="研究者的任务包约 4,500 字符：角色卡 1,500，任务卡和授权 1,100，待办和审核发现 700，产物和计算 900"><ve-bar value="1.5">角色卡</ve-bar><ve-bar value="1.1" hot>卡和授权</ve-bar><ve-bar value="0.7">待办发现</ve-bar><ve-bar value="0.9">产物计算</ve-bar></ve-bars></div>
+    </div>
+    <figcaption><span class="fig-n">图 6</span>三个包的大小和各块的份量。协调者和科学家的总数来自整合文档第 11 章；各块的拆分和研究者的数字是按下面的范例估的。</figcaption>
+  </figure>
+</section>
+
+<section id="coordinator">
+  <div class="sec-head"><p class="ve-label caps">协调者</p><h2>恢复包：待办、排期和候选假设，没有代码</h2></div>
+  <p>没有人给协调者“发”这个包。它的对话清掉重开、压缩或重启以后，协调者运行 <code>rl pack</code>，CLI 从记录生成。协调者的面板也是用户说话的地方，用户在的时候，监视不清掉它的对话（整合文档 7.7）。下面是 T-0040 刚交付时的样子。</p>
+  <figure>
+    <p class="legend"><span><span class="box keep"></span>不会被裁掉</span><span><span class="box gen"></span>查询生成，可以裁</span></p>
+    <div class="pk">
+      <div class="blk keep"><pre><code># 恢复包 · 协调者 · 2026-11-24 09:12
+只读了记录，没有查询执行器
+
+## 角色卡
+你是协调者。你决定先做哪个假设、给多少预算、
+同时开几个科学家。
+你收到的只有十二种：树、树和排期已批准、
+假设结论、决定请求、阶段结论、阶段结束、
+子假设已全部判定、用量到线、会话需要决定、
+超时上报、公共准备任务的阻塞、答复。
+用户的答复由你用 rl request answer --by user 记下。
+你不核查设计，不验收执行任务，不合并代码，
+不裁决审核争议，自己不读代码和日志。
+只有用户能定的事，写成决定请求转给用户。
+用户也在这个面板里问你。讲进度和结果，
+读记录和研究页；问到代码、日志、审核讨论，
+开只读子代理去读，只拿回答案和定位。
+命令：rl inbox · rl queue · rl task create|release
+      rl task accept|return · rl request answer</code></pre><div class="src"><p><b>固定文字</b><span class="st file">插件里的文件</span></p><p>约 1,300 字符，比 11-24 多了怎么给用户讲的三行。压缩后不用再读 SKILL.md。</p></div></div>
+      <div class="blk keep"><pre><code>## 目标和约束
+目标      判断 W-02 相对 Base 的提升是否稳定
+范围      dev 集；不做正式实验
+资源上限  约 60 MIG·h；node·h 约 6
+先问用户  换数据集；推荐正式实验；超过上限
+全文      DOC-0002 第 3 版</code></pre><div class="src"><p><b>本次的卡：项目</b><span class="st file">文件</span></p><p><code>docs/constraints.md</code> 的头一屏。全文按 id 取，计划全文不进包。</p></div></div>
+      <div class="blk keep"><pre><code>## 待办（1 项）
+1 hypothesis-conclusion  T-0040
+  ask   accept T-0040
+  from  scientist-H-0014 · 4 分钟
+  note  先看 D-0102 的建议：H-0051 更便宜。</code></pre><div class="src"><p><b>规则表的查询</b><span class="st none">不存</span></p><p>T-0040 的状态是“已交付”，所以它在这里。接收以后这一项消失。</p></div></div>
+      <div class="blk gen"><pre><code>## 阶段 S-2：W-02 的提升稳不稳
+预算约 20 MIG·h · 已用约 7.4 · 排队和运行中 0
+科学家 0 个在工作，上限 2
+
+## 排期：假设任务每个一行
+T-0040 H-0014 已交付  P1 1.2/4   H-0016、H-0017 的前提
+T-0041 H-0016 排队    P2 —/2.4   复用 E-0035 的训练结果
+T-0043 H-0017 排队    P3 —/3     等 H-0014 的结论
+最近接收：T-0038 H-0012 inconclusive（D-0099）</code></pre><div class="src"><p><b>阶段记录和假设任务的字段</b><span class="st">研究数据库</span></p><p>状态、优先级、信封和理由是协调者自己写的字段，所以重启后看得到。用量从 Usage 读时合计。已接收的只列最近两个。</p></div></div>
+      <div class="blk gen"><pre><code>## 候选假设：还没有假设任务
+H-0051 seed 0 的提升来自数据顺序      D-0102 建议
+H-0052 训练到 4,000 步后提升才稳定    D-0102 建议
+暂不做 H-0019 换更大的评估集（要换数据集，先问用户）</code></pre><div class="src"><p><b>假设记录</b><span class="st">研究数据库</span></p><p><code>disposition</code> 是 candidate、又没有假设任务的假设。来源是哪条决定建议的。</p></div></div>
+      <div class="blk keep"><pre><code>## 按 id 取
+假设结论和决定：rl show T-x / D-x · 假设树：rl tree
+这里没有：计划全文、代码、日志、diff、审核讨论</code></pre><div class="src"><p><b>固定文字</b><span class="st file">插件里的文件</span></p><p>协调者的包里不放整棵假设树，只放排期和候选。给用户讲到代码和日志时，由只读子代理去读，材料不进协调者的上下文（整合文档 7.7）。</p></div></div>
+    </div>
+    <figcaption><span class="fig-n">图 7</span>协调者的恢复包只回答它要决定的事：现在有什么等我，在做什么，还能排什么，钱花到哪了。现在的 <code>resume_pack</code> 里的未完成 attempt、位置和计算资源三节都去掉。</figcaption>
+  </figure>
+</section>
+
+<section id="scientist">
+  <div class="sec-head"><p class="ve-label caps">科学家</p><h2>假设任务包：协调者只写了卡上的五项</h2></div>
+  <figure>
+    <div class="pair">
+      <div>
+        <p class="ve-label">协调者运行的命令</p>
+<pre><code>rl task create --kind hypothesis \
+  --targets H-0014 --priority 1 \
+  --envelope "4 MIG·h" --parallel 2 \
+  --reason "H-0014 是 H-0016、H-0017 的前提"
+rl task release T-0040</code></pre>
+      </div>
+      <div>
+        <p class="ve-label">监视开新面板时带的一行通知</p>
+<pre><code>[smooth-research] hypothesis-task T-0040
+ask: test H-0014 · 运行 rl pack</code></pre>
+      </div>
+    </div>
+    <figcaption><span class="fig-n">图 8</span>协调者没有写一段“任务说明”。它写的是五个字段，科学家读到的其余内容都来自别的记录。</figcaption>
+  </figure>
+  <figure>
+    <p class="legend"><span><span class="box keep"></span>不会被裁掉</span><span><span class="box gen"></span>查询生成，可以裁</span></p>
+    <div class="pk">
+      <div class="blk keep"><pre><code># 启动包 · 科学家 scientist-H-0014 · T-0040
+
+## 角色卡
+你是科学家，负责一个假设。你决定做哪些实验和任务，
+写实验代码、实验清单、语义测试和简要说明，
+验收任务，最后写改假设状态的决定。
+代码写好先跑 CPU 小测试，再开审核回合；
+没有方法类发现就交接给研究者。
+交出任务后不等结果：有不依赖未出结果的工作就接着做，
+没有就结束本轮。
+改假设状态前开结论审核，请求不带说明。
+结论带两段解读：做了什么、意味着什么，不抄数字。
+提出子假设时写一句目的。
+你不跑真实模型，不修工程问题，不等作业。
+你无权决定的事发决定请求。
+命令：rl experiment add · rl task create
+      rl review request · rl task dispatch
+      rl task accept|return · rl decide --draft
+      rl request · rl task deliver T-0040</code></pre><div class="src"><p><b>固定文字</b><span class="st file">插件里的文件</span></p><p>约 2,000 字符：职责、可发的消息、决定的写法、测试的限制。</p></div></div>
+      <div class="blk keep"><pre><code>## 假设任务卡 T-0040
+目标假设  H-0014（H2.1.2.1）
+  命题    同样的训练预算下，W-02 在 dev 上的准确率
+          在 seed 0-2 上都高于 Base
+  范围    dev 集，256 token
+优先级    1
+预算信封  约 4 MIG·h，已用 0
+并行上限  同时最多 2 个研究者
+排期理由  H-0014 是 H-0016、H-0017 的前提</code></pre><div class="src"><p><b>协调者写的五项</b><span class="st">研究数据库</span></p><p>优先级、信封、并行上限、理由是 T-0040 的字段；目标假设是 <code>TARGETS</code> 边，命题和范围读自 <code>H-0014</code>。已用量读时合计。</p></div></div>
+      <div class="blk keep"><pre><code>## 待办（1 项）
+1 hypothesis-task  T-0040
+  ask   test H-0014
+  from  coordinator · 刚刚</code></pre><div class="src"><p><b>规则表的查询</b><span class="st none">不存</span></p><p>以后的任务结论、审核结论、阻塞和用量到线都出现在这里。</p></div></div>
+      <div class="blk gen"><pre><code>## 假设树：每个假设一行
+▶ 你的假设 · ↑ 祖先 · ◇ 它的前提 · ◆ 以它为前提的
+  H1       challenged    分段写入能降低干扰
+↑ H2        inconclusive  bypass 结构在低秩下仍有增益
+↑ H2.1      challenged    写入位置决定增益
+↑ H2.1.2    inconclusive  W-02 的写入范围决定提升
+▶ H2.1.2.1  untested      W-02 在 dev 上稳定优于 Base
+◆ H2.1.2.2  candidate     512 token 的评估下提升仍在
+◆ H2.1.2.3  candidate     提升不依赖学习率
+  H3        supported     …
+  （共 44 行）</code></pre><div class="src"><p><b>假设记录</b><span class="st">研究数据库</span></p><p>标签、状态和标题。主父边决定缩进，<code>ASSUMES</code> 边两个方向都标：◇ 是它的前提，◆ 是以它为前提的。bypass-lora 的 44 行约 3,100 字符。</p></div></div>
+      <div class="blk gen"><pre><code>## 本假设和祖先的决定
+D-0099 H2.1.2 inconclusive · 3 个 seed 里 1 个为正；
+       建议先判定提升是否稳定
+D-0087 H2.1 challenged · 换写入位置后增益消失
+D-0031 H2 inconclusive · 低秩下只有一个设置为正
+
+## 本假设下的实验和任务
+还没有</code></pre><div class="src"><p><b>决定、实验、任务</b><span class="st">研究数据库</span></p><p>决定每条一两行：判定和理由的第一句。复合假设的包再加子假设的决定。对话新开或清掉重开时，这一块告诉科学家做到哪了。</p></div></div>
+      <div class="blk gen"><pre><code>## 可复用的产物
+A-03 Base 检查点，seed 0-2，step 4000      T-0012
+A-07 dev 评估集 v3，256 token              T-0015
+A-09 环境事实清单：模块名、形状、显存、耗时  T-0009</code></pre><div class="src"><p><b>准备任务的产出</b><span class="st">研究数据库</span><span class="new">新</span></p><p>已验收、标成可复用的产出，每个一行。动手前先看有没有现成的。</p></div></div>
+      <div class="blk keep"><pre><code>## 按 id 取
+证据和结果：rl show EV-x / RES-x
+审核和顾问：rl show RV-x / AD-x · 文献：rl paper show
+这里没有：作业 id、日志、工程类审核讨论</code></pre><div class="src"><p><b>固定文字</b><span class="st file">插件里的文件</span></p></div></div>
+    </div>
+    <figcaption><span class="fig-n">图 9</span>科学家的包里最大的一块是假设树。它让科学家知道自己的假设在哪、祖先怎么判的、谁在等它的结论，不用读交接文档。只能走作业的项目，包里再加计算配方，给测试作业用。</figcaption>
+  </figure>
+</section>
+
+<section id="researcher">
+  <div class="sec-head"><p class="ve-label caps">研究者</p><h2>任务包：授权全文放进去，实验不抄</h2></div>
+  <figure>
+    <div class="pair">
+      <div>
+        <p class="ve-label">科学家交接时运行的命令</p>
+<pre><code>rl task dispatch T-0042 \
+  --note "F1 关系到结果能不能用，开跑前先修。"</code></pre>
+      </div>
+      <div>
+        <p class="ve-label">这之前科学家已经写好的记录和文件</p>
+<pre><code>E-0035        实验：问题、假设、设计提交、
+              实验清单、受保护范围、语义测试
+DOC-0030      简要说明，挂在 E-0035 上
+T-0042        任务，指向 E-0035，挂在 T-0040 下
+DOC-0033      授权文件，挂在 T-0042 上
+c9f78b9       代码，在分支 sr/T-0042 上</code></pre>
+      </div>
+    </div>
+    <figcaption><span class="fig-n">图 10</span>交接这一步只多写一句说明。CLI 在这一刻检查交接条件，封存设计提交，把任务的持有者换成研究者。</figcaption>
+  </figure>
+  <figure>
+    <p class="legend"><span><span class="box keep"></span>不会被裁掉</span><span><span class="box gen"></span>查询生成，可以裁</span></p>
+    <div class="pk">
+      <div class="blk keep"><pre><code># 启动包 · 研究者 researcher-C · T-0042
+
+## 角色卡
+你是研究者，负责一个任务。你修工程问题，
+登记和提交运行，取回结果，写运行、结果和证据，
+最后交任务结论。
+受保护范围以外按需要改；范围以内只做语义测试
+不变的修补。语义测试、判定规则、预测和实验清单
+你不能改：要改就发设计阻塞。
+授权内做不下去发授权阻塞；只想问清一处发疑问。
+冒烟和计时是试跑，不用等审核，结果不能当证据。
+证据运行要审核覆盖当前提交，配置和实验清单一致。
+提交作业后记下预计结束时间，结束本轮。
+命令：rl run register|record|import-result
+      rl evidence add · rl review request --recheck-of
+      rl task block · rl task deliver T-0042</code></pre><div class="src"><p><b>固定文字</b><span class="st file">插件里的文件</span></p><p>约 1,500 字符：职责、能改什么、结束方式。</p></div></div>
+      <div class="blk keep"><pre><code>## 任务卡 T-0042
+问题      W-02 是否在 seed 0-2 上都优于 Base？
+实验      E-0035@1 · 说明 DOC-0030
+设计提交  c9f78b9，交接时封存 · 分支 sr/T-0042
+实验清单  src/e0035/arms.py
+          2 个臂 × seed 0-2 · 指标 dev_acc
+停止条件  第一个 seed 的正对照不通过就停
+          （实验清单的 stop_when）
+受保护    src/train.py::masked_loss
+          src/e0035/arms.py
+          src/e0035/analysis.py::decide
+语义测试  test_decide_semantics · 12 passed @ c9f78b9
+工作树    ../bypass-lora-worktrees/T-0042
+交来的人  scientist-H-0014 · 假设任务 T-0040</code></pre><div class="src"><p><b>实验和任务的字段</b><span class="st">研究数据库</span></p><p>问题、设计提交、实验清单和它的 <code>stop_when</code>、受保护范围、语义测试都读自 <code>E-0035</code>，任务上不抄。说明只给编号，要读时再取。</p></div></div>
+      <div class="blk keep"><pre><code>## 授权：DOC-0033 第 1 版，全文
+scope: E-0035@1，两臂，seed 0-2
+budget: 约 2 MIG·h
+retries: 节点故障或排队超时可重提，每个 seed 最多 2 次
+replacements: 无
+start_when: 冒烟通过
+done_when: 3 个 seed 都有结果，decide() 输出判定表
+report_when: 要改语义测试、判定、预测或实验清单；
+             预计超过约 3 MIG·h</code></pre><div class="src"><p><b>授权文件</b><span class="st file">文件</span></p><p>科学家写的，随任务封存。它很短，而且研究者每一步都要对照，所以全文放进包。停止条件会改变证据，不写在这里，只写在实验清单里。</p></div></div>
+      <div class="blk keep"><pre><code>## 待办（2 项）
+1 task-card  T-0042
+  ask   fix engineering findings, run, deliver
+  note  F1 关系到结果能不能用，开跑前先修。
+2 review-verdict  RV-0036
+  ask   fix, then request a recheck
+  from  reviewer-B</code></pre><div class="src"><p><b>规则表的查询</b><span class="st none">不存</span></p><p>第 1 项的说明就是科学家交接时写的那一句。</p></div></div>
+      <div class="blk gen"><pre><code>## 还在运行的作业
+没有
+
+## 开放的审核回合 RV-0036：研究者段，已用 0 / 3 次
+F1 工程 · medium · 开放
+   c9f78b9:src/train.py::save_checkpoint
+   恢复训练时，检查点路径没区分 seed
+F2 工程 · low · 开放
+   c9f78b9:src/train.py::log_step
+   日志没记数据顺序的种子</code></pre><div class="src"><p><b>Attempt 和发现子项</b><span class="st">研究数据库</span></p><p>“还在运行的作业”排在材料的最前面，对话新开或清掉重开时让研究者先去核对。回合随任务转来。</p></div></div>
+      <div class="blk gen"><pre><code>## 依赖的产物
+A-03 Base 检查点，seed 0-2，step 4000
+A-07 dev 评估集 v3，256 token
+
+## 计算
+miyabi-g · jobs mcp:miyabi-pbs · 代码用 archive 暂存
+作业通知：command 方式，执行器运行 rl 命令
+          记下作业结束，监视再叫醒你
+步骤：rl compute steps --attempt &lt;ATT&gt;</code></pre><div class="src"><p><b>产物和配置</b><span class="st">研究数据库</span><span class="st file">文件</span></p><p>产物来自 <code>DEPENDS_ON</code> 的任务。计算配方读自 <code>smooth-research.yaml</code>。作业结束记在 Attempt 上，进你的待办。</p></div></div>
+      <div class="blk keep"><pre><code>## 按 id 取
+文献和上游证据：rl show P-x / EV-x
+约束：docs/constraints.md
+这里没有：假设树、别的任务、协调者和科学家的讨论</code></pre><div class="src"><p><b>固定文字</b><span class="st file">插件里的文件</span></p></div></div>
+    </div>
+    <figcaption><span class="fig-n">图 11</span>研究者的包围着一个任务转：做什么、能改什么、授权到哪、哪些发现要修。它不放假设树，研究者不需要知道别的假设。</figcaption>
+  </figure>
+</section>
+
+<section id="others">
+  <div class="sec-head"><p class="ve-label caps">审核和顾问</p><h2>审核包不带作者的说法，结论审核连说明也不带</h2></div>
+  <figure>
+    <p class="legend"><span><span class="box keep"></span>不会被裁掉</span><span><span class="box gen"></span>查询生成，可以裁</span></p>
+    <div class="pk">
+      <div class="blk keep"><pre><code># 启动包 · 审核者 reviewer-F · RV-0045
+结论审核，第 1 / 3 次
+
+## 角色卡
+你独立判断这个结论成不成立。
+每条发现写严重度和类别，写明证据和位置。
+你只读不改。三次以后还过不去，回合升级：
+研究者段交给科学家，其余交给顾问裁决。</code></pre><div class="src"><p><b>固定文字</b><span class="st file">插件里的文件</span></p><p>严重度和类别的定义、输出格式。</p></div></div>
+      <div class="blk keep"><pre><code>## 审核单 RV-0045
+问题      D-0102 把 H-0014 判为 challenged，证据支持吗？
+决定草稿  D-0102 · H-0014 challenged
+          理由：预测要求 3 个 seed 都为正，只有 seed 0 为正
+封存的预测  E-0035@1，交接时封存
+            三个 seed 上 W-02 都高于 Base
+判定函数  c9f78b9:src/e0035/analysis.py::decide
+          封存后没有改过</code></pre><div class="src"><p><b>审核单、决定草稿、实验的修订</b><span class="st">研究数据库</span><span class="st git">git</span></p><p>科学家只写了问题和决定草稿。请求不带说明。</p></div></div>
+      <div class="blk gen"><pre><code>## 引用的证据
+EV-0101 W-02 对 Base，seed 0-2          RES-0230
+EV-0102 各 seed 的提升                   RES-0231
+判定表  research/work/T-0042/out/decision.json
+
+## 核验行
+T-0042 accepted · arms 2 arms × 3 seeds match design
+review RV-0037 passed · protected unchanged</code></pre><div class="src"><p><b>证据、结果、核验行</b><span class="st none">不存</span></p><p>审核包由 CLI 从记录生成，科学家不另写材料。</p></div></div>
+      <div class="blk keep"><pre><code>## 按 id 取
+证据的原始记录：rl show RES-x · 仓库文件直接读
+这里没有：项目状态、假设树、作者之间的沟通</code></pre><div class="src"><p><b>固定文字</b><span class="st file">插件里的文件</span></p></div></div>
+    </div>
+    <figcaption><span class="fig-n">图 12</span>结论审核包里没有一句作者的解释。审核者看到的是草稿、封存的预测、判定函数和证据，自己得出结论。</figcaption>
+  </figure>
+  <div class="ve-table others"><table>
+    <thead><tr><th>包</th><th>本次的卡</th><th>必要材料</th><th>不放</th></tr></thead>
+    <tbody>
+      <tr><th scope="row">拆树（科学家）</th><td>拆树任务卡：计划的编号、约束、要交回的东西</td><td>计划全文，只有这个包放；换方向时再加现有的树、已有的决定和换方向的原因</td><td>代码、运行、日志</td></tr>
+      <tr><th scope="row">短会话（科学家）</th><td>阶段结论任务卡：阶段和它包含的任务；或交给它的公共准备任务的卡：要求、<code>done_check</code>、阻塞原因</td><td>阶段结论：阶段里假设任务的结论、决定和用量，假设树每个假设一行。公共准备任务：它的 Attempt 和开放的审核回合</td><td>日志、交接文档</td></tr>
+      <tr><th scope="row">设计审核</th><td>审核单：问题、被审的提交和文件、所属任务、第几次</td><td>说明的编号、实验清单、受保护范围、语义测试；代码直接读仓库</td><td>假设树、项目状态</td></tr>
+      <tr><th scope="row">复查</th><td>审核单，指向上一次审核</td><td>上一轮的发现和它们的状态；修复的 diff</td><td>和设计审核相同</td></tr>
+      <tr><th scope="row">结论审核</th><td>审核单：问题、决定草稿</td><td>封存的预测、判定函数的修订、引用的证据、核验行</td><td>作者的说明和推理</td></tr>
+      <tr><th scope="row">顾问咨询</th><td>顾问单：一句瓶颈问题</td><td>相关的假设链、已试的路径和结果、约束、最近的文献</td><td>任务流水、代码细节</td></tr>
+      <tr><th scope="row">顾问裁决</th><td>顾问单，指向升级的审核回合</td><td>每条未关闭的发现；审核者和科学家在回合里的说法；引用的证据</td><td>回合以外的讨论</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="wake">
+  <div class="sec-head"><p class="ve-label caps">唤醒</p><h2>续用只读一项，清掉重开才读整个包</h2></div>
+  <p>每个会话开在 herdr 的一个面板里，审核者和顾问也是。监视往面板里提交一行提醒（<code>herdr agent prompt</code>）；还没有会话时，开一个面板启动 agent（<code>herdr agent start</code>）。往协调者的面板里提交要等它空闲、用户几分钟没说话，否则先等着，发一条 herdr 通知（整合文档 7.7）。没有 herdr 时，<code>rl resume</code> 和监视拒绝启动（11.2，11-25 改）。</p>
+  <figure>
+    <div class="cases">
+      <div class="case" data-st="ok">
+        <span class="chip ok">续用</span>
+        <h3>原来的对话还在</h3>
+        <svg class="ve-mini" viewBox="0 0 240 128" aria-label="续用原来的对话时，监视只发一行通知，会话只读待办里的这一项">
+          <path class="ve-e is-st" d="M96 34H144"/>
+          <g class="ve-n"><rect class="sh" x="6" y="12" width="90" height="44"/><text x="51" y="34">一行通知</text></g>
+          <g class="ve-n"><rect class="sh" x="144" y="12" width="90" height="44"/><text x="189" y="34">读这一项</text></g>
+          <text class="ve-tag" x="120" y="88" text-anchor="middle">rl inbox --item 1</text>
+          <text class="ve-tag" x="120" y="110" text-anchor="middle">约 600 字符</text>
+        </svg>
+      </div>
+      <div class="case" data-st="warn">
+        <span class="chip warn">清掉重开</span>
+        <h3>空闲久，上下文大</h3>
+        <svg class="ve-mini" viewBox="0 0 240 128" aria-label="空闲超过缓存时间、上下文又大时，监视在提醒之前清掉对话，会话运行 rl pack，读整个启动包">
+          <path class="ve-e is-st" d="M96 34H144"/>
+          <g class="ve-n"><rect class="sh" x="6" y="12" width="90" height="44"/><text x="51" y="34">清掉对话</text></g>
+          <g class="ve-n"><rect class="sh" x="144" y="12" width="90" height="44"/><text x="189" y="34">读启动包</text></g>
+          <text class="ve-tag" x="120" y="88" text-anchor="middle">/clear，再 rl pack</text>
+          <text class="ve-tag" x="120" y="110" text-anchor="middle">4,500 到 8,000 字符</text>
+        </svg>
+      </div>
+      <div class="case" data-st="warn">
+        <span class="chip warn">压缩</span>
+        <h3>对话被压缩之后</h3>
+        <svg class="ve-mini" viewBox="0 0 240 128" aria-label="对话压缩之后，会话重读同一个启动包，不重读 SKILL.md">
+          <path class="ve-e is-st" d="M96 34H144"/>
+          <g class="ve-n"><rect class="sh" x="6" y="12" width="90" height="44"/><text x="51" y="34">压缩</text></g>
+          <g class="ve-n"><rect class="sh" x="144" y="12" width="90" height="44"/><text x="189" y="34">读启动包</text></g>
+          <text class="ve-tag" x="120" y="88" text-anchor="middle">rl pack</text>
+          <text class="ve-tag" x="120" y="110" text-anchor="middle">不重读 SKILL.md</text>
+        </svg>
+      </div>
+    </div>
+    <figcaption><span class="fig-n">图 13</span>三种情况读的东西不一样多。续用时会话已经知道自己是谁，只需要这一项；清掉重开和压缩之后，启动包把角色、任务和待办一次给全。监视不在每轮结束时清，也不用主动压缩代替清掉；任务做到一半时，宿主照常自动压缩。用户在的时候不清协调者的对话（11-25，第 47 项）。</figcaption>
+  </figure>
+</section>
+
+<section id="decide">
+  <div class="sec-head"><p class="ve-label caps">决定</p><h2>这些在 11-24 定下，11-25 又改了几项</h2></div>
+  <div class="ve-table confirm"><table>
+    <thead><tr><th>编号</th><th>问题</th><th>决定</th></tr></thead>
+    <tbody>
+      <tr><td class="num">24</td><td>命令名</td><td><code>rl pack</code> 只给 agent：任何会话运行它，读到自己的启动包。<code>rl resume</code> 给用户：把项目接着跑起来，拉起监视，打印项目状态和等用户决定的事。<code>rl inbox</code> 查待办，<code>--item N</code> 展开一项（11-25：<code>rl resume</code> 也确认 herdr 里有协调者的面板；用户还有 <code>rl view</code>，第 43、46 项）</td></tr>
+      <tr><td class="num">25</td><td>各包的预算</td><td>协调者约 4,500 字符，科学家约 8,000，研究者约 4,500，审核者约 2,500（不含代码）。角色卡、本次的卡和待办不裁，必要材料先裁最旧的</td></tr>
+      <tr><td class="num">26</td><td>科学家的包里假设树给多少</td><td>全给，每个假设一行。超过约 150 个假设时，只给祖先链、兄弟、前提和以它为前提的假设，其余用 <code>rl tree</code> 取</td></tr>
+      <tr><td class="num">27</td><td>协调者的包里放不放假设树</td><td>不放。只放排期、候选假设和最近接收的两个假设任务，整棵树按 id 取</td></tr>
+      <tr><td class="num">28</td><td>研究者的包里放不放假设</td><td>不放假设树和命题，只放实验的问题和所属的假设任务编号</td></tr>
+      <tr><td class="num">29</td><td>授权文件和简要说明哪个放全文</td><td>授权文件放全文，简要说明只给编号。授权每一步都要对照，说明读一次就够</td></tr>
+      <tr><td class="num">30</td><td>续用时发不发整个包</td><td>不发。续用只发一行通知，会话读待办里的这一项；新开和压缩之后才读整个包（11-25：新开就是清掉对话再读启动包，第 47 项）</td></tr>
+      <tr><td class="num">31</td><td>作业结束怎么通知</td><td>执行器用 <code>command</code> 方式运行一条 rl 命令，在 Attempt 上记下作业结束；提交者的待办里出现“作业结束”，监视叫醒它。研究者的包里不再写通知目标</td></tr>
+      <tr><td class="num">32、33</td><td>短会话挂在哪</td><td>阶段结论用任务类型 <code>phase</code>；公共准备任务的阻塞和升级由协调者交给一个短的科学家会话。两种短会话的包见上表</td></tr>
+      <tr><td class="num">34</td><td>用户怎么答复</td><td>在协调者的交互会话里答复，协调者用 <code>rl request answer --by user</code> 记下。阶段报告不挡下一阶段（11-25 改：用户在协调者的面板里说话，用户不在时也不再由无头对话接手，第 45、46 项）</td></tr>
+      <tr><td class="num">37</td><td>停止条件写在哪</td><td>只写在实验清单的 <code>stop_when</code> 里，随设计提交封存。任务卡显示它，授权文件不写</td></tr>
+      <tr><td class="num">39</td><td>交接的命令名</td><td><code>rl task dispatch</code>，和旧流程的 <code>rl task handoff</code>（换人）分开（11-25：<code>rl task handoff</code> 删掉，第 48 项）</td></tr>
+      <tr><td class="num">40</td><td>监视停了谁知道</td><td>监视每一拍写心跳。心跳过期时，任何 <code>rl</code> 命令和会话启动时的提示都提醒运行 <code>rl resume</code>；<code>rl status</code> 显示监视在不在运行</td></tr>
+      <tr><td class="num">43</td><td>研究页谁写，什么时候生成</td><td>页由记录生成，字由知道的角色在写记录时写，协调者不写；阶段报告是页上这一阶段的一节。写命令不碰页面，监视在最新的 Event 编号变了时重画，<code>rl view</code> 立即重画；页面放在 <code>docs/research.html</code>，不进 git。<code>rl status</code> 打印“现在”和“等你决定”的短版，再加上次阶段报告以后新出的假设结论</td></tr>
+      <tr><td class="num">45</td><td>谁给用户讲解</td><td>协调者兼任，不另设角色。代码、日志、审核讨论由只读子代理去读，只拿回答案和定位，这一条写进了角色卡。监视只在协调者空闲、用户几分钟没说话时往它的面板里提交提醒</td></tr>
+      <tr><td class="num">46</td><td>唤醒的后端</td><td>只用 herdr：每个会话开在一个面板里，审核者和顾问也是；没有 herdr 时拒绝启动；无头方式和协调者锁去掉</td></tr>
+      <tr><td class="num">47</td><td>醒来比空等贵</td><td>用清掉重开，不用主动压缩：空闲超过缓存时间、上下文又大时，监视在提醒之前清掉对话，让它读启动包；不在每轮结束时清；用户在时不清协调者的对话</td></tr>
+      <tr><td class="num">48</td><td>旧项目</td><td>这次重新设计不兼容之前的项目：新版本只建新项目，schema 5 之前的数据库一律拒绝；只限这一次，升级机制保留。<code>rl resume --role coordinator</code>、<code>rl context --purpose work</code>、<code>rl agent brief</code> 和 <code>rl task handoff</code> 都删掉，角色卡只写 <code>rl pack</code></td></tr>
+    </tbody>
+  </table></div>
+  <p>第 24 至 30 项是整合文档第 14 章原来的编号；第 31 至 40 项是复查时提出的，记在 14.1 节；第 43 至 48 项在 11-25 定下，记在 14.3 节，这里列出和启动包有关的五项（第 44 项去掉论文草稿，和启动包无关）。它们都记在第 13 章。范例用中文写，是为了方便核对内容；实际的包和现在的 CLI 输出一样是英文。</p>
+</section>
+
+<section class="sources" aria-label="Sources">
+  <p class="ve-label caps">来源</p>
+  <p><code>design/site/content/smooth-research-redesign-2026-11-10.md</code> 7.7、8.5 至 8.8、8.11、8.12、10.4、第 11 章、14.1、14.3 ·<a href="smooth-research-message-design.html">消息设计页</a> · <a href="smooth-research-minimal-workflow.html">工作流页</a></p>
+  <p><code>src/smooth_research/context.py:257</code> <code>resume_pack</code> · <code>context.py:170</code> <code>work_pack</code> · <code>context.py:90</code> <code>_assemble</code> · <code>delegate.py:42</code> <code>prompt_for</code> · <code>agents.py:492</code> <code>_reviewer_brief</code> · <code>messages.py:137</code> <code>inbox</code></p>
+</section>
+</main>
+</body>
+</html>

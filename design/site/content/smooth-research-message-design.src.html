@@ -1,0 +1,1150 @@
+<!doctype html>
+<html lang="zh" data-register="blueprint">
+<head>
+<title>消息只指向记录</title>
+<link rel="stylesheet" href="kit.css" data-ve-kit>
+<style>
+header h1{font-size:clamp(1.9rem,3.2vw,2.6rem);max-width:none}
+.life{stroke:var(--border-bright);stroke-width:1;stroke-dasharray:2 5;fill:none}
+.awake{fill:var(--text-dim)}
+.pair{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr));gap:var(--s-5);align-items:start}
+.pair pre{margin:0}
+.anat{display:grid;gap:var(--s-2)}
+.anat .fld{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:var(--s-4);align-items:center;border:1.5px solid var(--border-bright);border-radius:var(--r-1);padding:var(--s-2) var(--s-3)}
+.anat .fld.cli{border-style:dashed}
+.anat code{white-space:pre-wrap;overflow-wrap:anywhere;background:none;padding:0}
+.anat p{margin:0;color:var(--text-dim)}
+.anat p b{display:block;color:var(--text)}
+@media (max-width:640px){.anat .fld{grid-template-columns:1fr}}
+.notices td:first-child,.notices td:nth-child(4){white-space:nowrap}
+.pend th{white-space:nowrap;text-align:left}
+.rail{stroke:var(--border-bright);stroke-width:1.5;fill:none}
+.dot{fill:var(--st)}
+.bar-on{fill:var(--st)}
+.bar-off{fill:none;stroke:var(--border-bright);stroke-width:1.5}
+.cut{stroke:var(--st);stroke-width:2;fill:none}
+.store-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,250px),1fr));gap:var(--s-4)}
+.store{border:1.5px solid var(--border-bright);border-radius:var(--r-1);padding:var(--s-3) var(--s-4)}
+.store h3{margin:var(--s-2) 0 var(--s-1)}
+.store p{margin:0 0 var(--s-2)}
+.store code{overflow-wrap:anywhere}
+.st{display:inline-block;padding:0 .45em;border:1.5px solid var(--text);border-radius:2px;font-size:.8em;line-height:1.55;white-space:nowrap}
+.st.file{border-style:dashed}
+.st.git{border:3px double var(--text)}
+.st.none{border-style:dotted;border-color:var(--text-dim);color:var(--text-dim)}
+.new{margin-left:.35em;font-size:.75em;font-weight:600;color:var(--accent)}
+.ex{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.3fr);gap:var(--s-5);align-items:start}
+@media (max-width:900px){.ex{grid-template-columns:minmax(0,1fr)}}
+.ex h3{margin:var(--s-1) 0 var(--s-2)}
+.ex .why{margin:0 0 var(--s-3);color:var(--text-dim)}
+.ex pre{margin:0 0 var(--s-3)}
+.ex td code{overflow-wrap:anywhere}
+.ex td:first-child{white-space:nowrap}
+.seq a text{text-decoration:underline;text-underline-offset:3px}
+</style>
+</head>
+<body>
+<nav class="ve-toc" aria-label="Sections"><div><a href="#format">格式</a><a href="#locators">定位</a><a href="#notices">通知</a><a href="#pending">待办</a><a href="#review">讨论</a><a href="#examples">范例</a><a href="#decide">决定</a></div><span class="pos"></span></nav>
+<main>
+<header>
+  <p class="eyebrow">Smooth Research · 消息设计</p>
+  <h1>消息只带定位和一句说明，事实都在记录里</h1>
+  <p class="lead">通知由记录的状态变化触发，不存成消息；收件人的待办从记录状态查询。<b>只有对话要存</b>：审核讨论和协调者的提问挂在主记录上。</p>
+  <p class="meta">2026-11-10 起草，11-24 按评审修订 · 草案，尚未实现 · 依据整合文档第 8 章 · 角色和流程见<a href="smooth-research-minimal-workflow.html">工作流页</a> · 数据来自 bypass-lora 快照</p>
+</header>
+
+<figure class="ve-steps">
+  <div class="frame">
+    <svg class="ve-svg" viewBox="0 0 1000 740" aria-label="一条任务结论通知的过程，时间向下。研究者 C 只写主记录、ask、定位和说明；CLI 校验定位，把状态和说明写进研究数据库，不写 Message；CLI 给科学家 A 发一行提醒；A 从研究数据库查待办，CLI 按定位展开；A 验收后事项从待办消失。">
+      <path class="life" d="M110 66V680"/>
+      <path class="life" d="M330 66V680"/>
+      <path class="life" d="M545 66V352M545 388V680"/>
+      <path class="life" d="M745 66V680"/>
+      <path class="life" d="M920 66V680"/>
+
+      <rect class="awake" data-s="1" x="102" y="96" width="16" height="40"/>
+      <rect class="awake" data-s="1" x="322" y="104" width="16" height="24"/>
+      <rect class="awake" data-s="2" x="322" y="128" width="16" height="108"/>
+      <rect class="awake" data-s="3" x="322" y="236" width="16" height="80"/>
+      <rect class="awake" data-s="4" x="322" y="412" width="16" height="16"/>
+      <rect class="awake" data-s="4" x="912" y="420" width="16" height="24"/>
+      <rect class="awake" data-s="5" x="912" y="444" width="16" height="116"/>
+      <rect class="awake" data-s="6" x="912" y="560" width="16" height="90"/>
+      <rect class="awake" data-s="6" x="322" y="608" width="16" height="40"/>
+
+      <path class="ve-e" pathLength="1" data-s="1" d="M118 112H322"/>
+      <path class="ve-e" pathLength="1" data-s="2" d="M338 180H537"/>
+      <path class="ve-e" pathLength="1" data-s="2" d="M338 220H737"/>
+      <path class="ve-e is-hot" pathLength="1" data-s="3" d="M338 300H537"/>
+      <path class="ve-e is-async" data-s="4" d="M338 420H912"/>
+      <path class="ve-e" pathLength="1" data-s="5" d="M912 500H553"/>
+      <path class="ve-e is-hot" pathLength="1" data-s="5" d="M553 532H912"/>
+      <path class="ve-e" pathLength="1" data-s="6" d="M912 616H338"/>
+      <path class="ve-e" pathLength="1" data-s="6" d="M338 640H537"/>
+
+      <text class="ve-el" data-s="1" x="220" y="103">rl task deliver</text>
+      <text class="ve-el" data-s="2" x="440" y="171">查 4 条记录</text>
+      <text class="ve-el" data-s="2" x="645" y="211">查提交和文档</text>
+      <text class="ve-el" data-s="3" x="440" y="291">写状态和说明</text>
+      <text class="ve-el" data-s="4" x="830" y="411">一行提醒</text>
+      <text class="ve-el" data-s="5" x="830" y="491">rl inbox</text>
+      <text class="ve-el" data-s="5" x="830" y="523">待办 + 展开</text>
+      <text class="ve-el" data-s="6" x="830" y="607">rl task accept</text>
+      <text class="ve-el" data-s="6" x="440" y="631">写 accepted</text>
+
+      <text class="ve-tag" data-s="1" x="126" y="150">主记录 T-0042</text>
+      <text class="ve-tag" data-s="1" x="126" y="170">ask accept</text>
+      <text class="ve-tag" data-s="1" x="126" y="190">定位 6 个</text>
+      <text class="ve-tag" data-s="1" x="126" y="210">说明 1 句</text>
+      <text class="ve-tag" data-s="2" x="346" y="246">6 个定位都能解析</text>
+      <text class="ve-tag risk" data-s="2" x="346" y="264">有一个不通就拒绝</text>
+      <text class="ve-tag" data-s="3" x="561" y="296">T-0042 delivered</text>
+      <text class="ve-tag" data-s="3" x="561" y="316">等 scientist A 验收</text>
+      <text class="ve-tag" data-s="3" x="561" y="336">说明记在这次变化上</text>
+      <text class="ve-tag" data-s="3" x="603" y="375">不写</text>
+      <text class="ve-tag" data-s="4" x="904" y="446" text-anchor="end">提醒不存</text>
+      <text class="ve-tag" data-s="4" x="904" y="466" text-anchor="end">送不到也不丢</text>
+      <text class="ve-tag" data-s="5" x="904" y="558" text-anchor="end">T-0042 等你验收</text>
+      <text class="ve-tag" data-s="5" x="904" y="578" text-anchor="end">每个定位一行</text>
+      <text class="ve-tag" data-s="6" x="561" y="660">T-0042 accepted</text>
+      <text class="ve-tag key" data-s="6" x="904" y="664" text-anchor="end">待办里没了</text>
+
+      <g class="ve-co" data-s="1" transform="translate(24 112)"><circle r="11"/><text>1</text></g>
+      <g class="ve-co" data-s="2" transform="translate(24 200)"><circle r="11"/><text>2</text></g>
+      <g class="ve-co" data-s="3" transform="translate(24 300)"><circle r="11"/><text>3</text></g>
+      <g class="ve-co" data-s="4" transform="translate(24 420)"><circle r="11"/><text>4</text></g>
+      <g class="ve-co" data-s="5" transform="translate(24 516)"><circle r="11"/><text>5</text></g>
+      <g class="ve-co" data-s="6" transform="translate(24 628)"><circle r="11"/><text>6</text></g>
+
+      <g class="ve-n is-gone" data-s="3"><rect class="sh" x="495" y="352" width="100" height="36"/><text x="545" y="370">Message</text></g>
+      <g class="ve-n"><rect class="sh" x="50" y="14" width="120" height="52"/><text x="110" y="32">研究者 C</text><text class="sub" x="110" y="52">发件人</text></g>
+      <g class="ve-n"><rect class="sh" x="280" y="14" width="100" height="52"/><text x="330" y="32">CLI</text><text class="sub" x="330" y="52">校验、写状态</text></g>
+      <g class="ve-n is-key"><rect class="sh" x="485" y="14" width="120" height="52"/><text x="545" y="32">研究数据库</text><text class="sub" x="545" y="52">记录和 Event</text></g>
+      <g class="ve-n"><rect class="sh" x="675" y="14" width="140" height="52"/><text x="745" y="32">代码库 · 文件</text><text class="sub" x="745" y="52">提交、文档</text></g>
+      <g class="ve-n"><rect class="sh" x="865" y="14" width="110" height="52"/><text x="920" y="32">科学家 A</text><text class="sub" x="920" y="52">收件人</text></g>
+
+      <rect class="awake" x="40" y="702" width="16" height="20"/>
+      <text class="ve-tag" x="64" y="717">正在运行</text>
+      <path class="life" d="M170 700V722"/>
+      <text class="ve-tag" x="182" y="717">不运行</text>
+      <path class="ve-e is-hot" d="M270 711H310"/>
+      <text class="ve-tag" x="320" y="717">状态和待办</text>
+      <path class="ve-e is-async" d="M440 711H480"/>
+      <text class="ve-tag" x="490" y="717">提醒，不存</text>
+    </svg>
+  </div>
+  <div class="ve-player">
+    <ol class="ve-cap">
+      <li data-n="1/6">研究者 C 交任务结论。它只写主记录 T-0042、ask、6 个定位和一句说明。</li>
+      <li data-n="2/6">CLI 逐个校验定位：记录在研究数据库里，提交和文档都存在。有一个不通，就拒绝发送。</li>
+      <li data-n="3/6">CLI 改 T-0042 的状态：已交付，等科学家 A 验收。说明记在这次状态变化上，不写 Message。</li>
+      <li data-n="4/6">CLI 请监视唤醒 A 的会话，带一行提醒。提醒不存；送不到或被截断，事项也还在待办里。</li>
+      <li data-n="5/6">A 查待办，看到 T-0042 等它验收。CLI 按定位从记录展开，每个定位一行。</li>
+      <li data-n="6/6">A 验收。CLI 先在合并提交上跑语义测试，通过了才把主线移过去。T-0042 的状态一变，事项就从待办里消失，不用确认，也没有游标。</li>
+    </ol>
+    <button data-go="-1" aria-label="上一步">←</button>
+    <button data-play aria-label="播放">▶</button>
+    <input type="range" aria-label="步骤">
+    <button data-go="1" aria-label="下一步">→</button>
+  </div>
+  <figcaption><span class="fig-n">图 1</span>一条通知从发出到消失：发件人只写定位和一句说明，事实留在记录里；通知不存，收件人的待办从记录状态查询。</figcaption>
+</figure>
+
+<section id="format">
+  <div class="sec-head"><p class="ve-label caps">格式</p><h2>发件人只写四个字段</h2></div>
+  <figure>
+    <div class="frame anat">
+      <div class="fld cli"><code>task-conclusion  researcher-C → scientist-H-0014</code><p><b>CLI 补上</b>类型、发件人和收件人</p></div>
+      <div class="fld"><code>subject  T-0042</code><p><b>主记录，恰好一个</b>只读它也能开始工作；读不懂时，发件人补主记录</p></div>
+      <div class="fld"><code>ask      accept T-0042</code><p><b>ask 由类型决定</b>对应一组 CLI 命令，执行后事项从待办消失</p></div>
+      <div class="fld"><code>refs     EV-0101 EV-0102 RV-0036#F2
+         c9f78b9:src/train.py::masked_loss
+         DOC-0031</code><p><b>定位最多 8 个</b>记录、代码、文件三种，发送时由 CLI 校验</p></div>
+      <div class="fld"><code>note     先看 EV-0102：提升只出现在 seed 0。</code><p><b>说明最多 300 字符</b>只写记录里没有的：先看哪个定位、为什么</p></div>
+    </div>
+    <figcaption><span class="fig-n">图 2</span>虚线行由 CLI 填，实线行由发件人写；说明只给阅读顺序，不抄记录里的数字。</figcaption>
+  </figure>
+
+  <figure>
+    <div class="kpis">
+      <div class="kpi"><span class="ve-label">带记录编号的旧消息</span><span class="val"><span data-count="88">88</span><span class="unit">%</span></span><ve-waffle value="88" note="其余 12%" label="快照里 88% 的消息已经带记录编号"></ve-waffle></div>
+      <div class="kpi"><span class="ve-label">定位占全部字符</span><span class="val"><span data-count="10">10</span><span class="unit">%</span></span><ve-bars unit="k" max="700" label="766,209 字符里，定位约 75k，其余约 691k 是叙述"><ve-bar value="75" hot>定位</ve-bar><ve-bar value="691">叙述</ve-bar></ve-bars></div>
+      <div class="kpi"><span class="ve-label">每条消息的字符</span><span class="val"><span data-count="464">464</span><span class="unit">中位数</span></span><ve-bars unit="字" max="1200" label="旧消息字符数中位数 464，p90 是 1,121；新的说明上限 300"><ve-bar value="464">中位数</ve-bar><ve-bar value="1121">p90</ve-bar><ve-bar value="300" hot>新上限</ve-bar></ve-bars></div>
+    </div>
+    <div class="frame">
+      <p class="ve-label">1,324 条旧消息，按长度</p>
+      <ve-stack unit="%" label="30% 的旧消息在 300 字符以内，37% 在 300 到 600 字符，33% 超过 600 字符"><ve-bar value="30" hot>300 以内</ve-bar><ve-bar value="37">300–600</ve-bar><ve-bar value="33">600 以上</ve-bar></ve-stack>
+    </div>
+    <figcaption><span class="fig-n">图 3</span>快照里的消息大多已经带编号，照样很长：定位只占字符的约 10%，300 字符以内的只有 30%。所以定位做成 CLI 校验的字段，说明设硬上限。</figcaption>
+  </figure>
+</section>
+
+<section id="locators">
+  <div class="sec-head"><p class="ve-label caps">定位</p><h2>定位在发送时校验，在读取时展开</h2></div>
+  <figure>
+    <div class="cases">
+      <div class="case" data-st="ok">
+        <span class="chip ok">通过</span>
+        <h3>记录</h3>
+        <svg class="ve-mini" viewBox="0 0 240 128" aria-label="记录定位 RV-0036#F2：CLI 在研究数据库里找到审核单 RV-0036 的发现 F2">
+          <path class="ve-e is-st" d="M120 46V74"/>
+          <text class="ve-el r" x="128" y="64">查研究数据库</text>
+          <g class="ve-n"><rect class="sh" x="30" y="8" width="180" height="38"/><text x="120" y="27">RV-0036#F2</text></g>
+          <g class="ve-n"><rect class="sh" x="30" y="74" width="180" height="38"/><text x="120" y="93">发现 F2 存在</text></g>
+        </svg>
+      </div>
+      <div class="case" data-st="ok">
+        <span class="chip ok">通过</span>
+        <h3>代码</h3>
+        <svg class="ve-mini" viewBox="0 0 240 128" aria-label="代码定位 c9f78b9:src/train.py::masked_loss：CLI 确认这个提交里有这个文件和符号">
+          <path class="ve-e is-st" d="M120 50V74"/>
+          <text class="ve-el r" x="128" y="66">查提交</text>
+          <g class="ve-n"><rect class="sh" x="10" y="4" width="220" height="46"/><text x="120" y="20">c9f78b9:src/train.py</text><text class="sub" x="120" y="38">::masked_loss</text></g>
+          <g class="ve-n"><rect class="sh" x="30" y="74" width="180" height="38"/><text x="120" y="93">提交里有这个符号</text></g>
+        </svg>
+      </div>
+      <div class="case" data-st="ok">
+        <span class="chip ok">钉住</span>
+        <h3>写分支名</h3>
+        <svg class="ve-mini" viewBox="0 0 240 128" aria-label="写分支名 sr/T-0042 时，CLI 换成当时的提交 c9f78b9，因为分支和行号都会变">
+          <path class="ve-e is-st" d="M120 50V74"/>
+          <text class="ve-el r" x="128" y="66">换成提交</text>
+          <g class="ve-n"><rect class="sh" x="10" y="4" width="220" height="46"/><text x="120" y="20">sr/T-0042:src/train.py</text><text class="sub" x="120" y="38">::masked_loss</text></g>
+          <g class="ve-n"><rect class="sh" x="30" y="74" width="180" height="38"/><text x="120" y="93">钉在 c9f78b9</text></g>
+        </svg>
+      </div>
+      <div class="case" data-st="ok">
+        <span class="chip ok">通过</span>
+        <h3>文件</h3>
+        <svg class="ve-mini" viewBox="0 0 240 128" aria-label="文件定位 DOC-0031：CLI 确认文档存在并挂在 T-0042 上；集群日志不写路径，从 Attempt 记录查">
+          <path class="ve-e is-st" d="M120 46V74"/>
+          <text class="ve-el r" x="128" y="64">查文档</text>
+          <g class="ve-n"><rect class="sh" x="30" y="8" width="180" height="38"/><text x="120" y="27">DOC-0031</text></g>
+          <g class="ve-n"><rect class="sh" x="30" y="74" width="180" height="38"/><text x="120" y="93">挂在 T-0042 上</text></g>
+        </svg>
+      </div>
+      <div class="case" data-st="risk">
+        <span class="chip risk">拒绝</span>
+        <h3>定位不通</h3>
+        <svg class="ve-mini" viewBox="0 0 240 128" aria-label="定位 EV-0999 在研究数据库里不存在，CLI 拒绝发送">
+          <path class="ve-e is-st" d="M120 46V74"/>
+          <text class="ve-x" x="120" y="64">✕</text>
+          <g class="ve-n"><rect class="sh" x="30" y="8" width="180" height="38"/><text x="120" y="27">EV-0999</text></g>
+          <g class="ve-n is-off"><rect class="sh" x="30" y="74" width="180" height="38"/><text x="120" y="93">研究数据库里没有</text></g>
+        </svg>
+      </div>
+      <div class="case" data-st="risk">
+        <span class="chip risk">拒绝</span>
+        <h3>说明超限</h3>
+        <svg class="ve-mini" viewBox="0 0 240 128" aria-label="说明有 420 字符，超过 300 字符的上限，CLI 拒绝发送并提示写进发现、证据或决定">
+          <path class="ve-e is-st" d="M120 46V74"/>
+          <text class="ve-x" x="120" y="64">✕</text>
+          <g class="ve-n"><rect class="sh" x="30" y="8" width="180" height="38"/><text x="120" y="27">note 420 字符</text></g>
+          <g class="ve-n"><rect class="sh" x="30" y="74" width="180" height="38"/><text x="120" y="93">写进发现、证据或决定</text></g>
+        </svg>
+      </div>
+    </div>
+    <figcaption><span class="fig-n">图 4</span>三种定位都在发送时解析：记录要存在，代码钉在提交上，文件是文档或登记过的产出；有一个不通或说明超限，CLI 拒绝发送。</figcaption>
+  </figure>
+
+  <figure>
+    <div class="pair">
+      <div><p class="ve-label">发件人写的</p><pre>subject  T-0042
+ask      accept T-0042
+refs     EV-0101 EV-0102 RV-0036#F2
+         c9f78b9:src/train.py::masked_loss
+         DOC-0031
+note     先看 EV-0102：提升只出现在 seed 0。</pre></div>
+      <div><p class="ve-label">收件人读到时，CLI 加的</p><pre>T-0042      delivered · 3 attempts, 3 success
+            about 1.2 MIG·h (card: about 2)
+EV-0101     from RES-0230 · W-02 vs Base, seeds 0-2
+EV-0102     from RES-0231 · W-02 gain by seed
+RV-0036#F2  engineering · low · open
+c9f78b9     sr/T-0042 has 4 commits after it
+DOC-0031    T-0042 analysis note, rev 2</pre></div>
+    </div>
+    <figcaption><span class="fig-n">图 5</span>说明以外的事实，都由 CLI 在读取时从记录生成，每个定位一行；定位发出后有变化的会标出来。任务结论和假设结论的核验行是这种展开的特例。</figcaption>
+  </figure>
+  <ul>
+    <li>分支和行号都会变，所以代码定位钉在提交上，用符号，不用行号。符号只对 Python 文件检查，其他文件只查路径。</li>
+    <li>集群上的日志不写路径，从 Attempt 记录查。</li>
+    <li>拒绝时，CLI 提示把内容写进哪类记录：发现、证据、决定，或挂在主记录上的文档。</li>
+  </ul>
+</section>
+
+<section id="notices">
+  <div class="sec-head"><p class="ve-label caps">通知</p><h2>状态变化就是通知，不再存成消息</h2></div>
+  <figure>
+    <div class="frame">
+      <svg class="ve-svg" viewBox="0 0 1000 360" aria-label="左边是现在：交付一个任务时，CLI 改 Task、写一条 RESULT 消息、写一条 Event，协调者从收件箱读消息。右边是新设计：CLI 改 Task 的状态和说明，写 Event 和通知记录，不写 Message；科学家从待办查询到 T-0042，另有一行不存的提醒。">
+        <rect class="ve-bnd" x="10" y="10" width="470" height="340"/>
+        <text class="ve-bnd-t" x="20" y="28">现在：同一件事写三遍</text>
+        <rect class="ve-bnd" x="520" y="10" width="470" height="340"/>
+        <text class="ve-bnd-t" x="530" y="28">新设计：只写状态</text>
+
+        <path class="ve-e" d="M245 80V110H90V150"/>
+        <path class="ve-e" d="M245 110V150"/>
+        <path class="ve-e" d="M245 110H400V150"/>
+        <path class="ve-e" d="M245 194V270"/>
+        <text class="ve-el r" x="98" y="134">改状态</text>
+        <text class="ve-el r" x="253" y="134">写 RESULT</text>
+        <text class="ve-el r" x="408" y="134">写 Event</text>
+        <text class="ve-el r" x="253" y="236">协调者读</text>
+
+        <path class="ve-e" d="M755 80V110H600V150"/>
+        <path class="ve-e is-gone" d="M755 110V150"/>
+        <text class="ve-x" x="755" y="136">✕</text>
+        <path class="ve-e" d="M755 110H910V150"/>
+        <path class="ve-e is-hot" d="M600 194V270"/>
+        <path class="ve-e is-hot" d="M660 292H850"/>
+        <path class="ve-e is-async" d="M845 50H985V292H970"/>
+        <text class="ve-el r" x="608" y="134">改状态</text>
+        <text class="ve-el r" x="918" y="134">写 Event</text>
+        <text class="ve-el r" x="608" y="236">查询</text>
+        <text class="ve-el" x="755" y="283">T-0042 等你验收</text>
+        <text class="ve-el l" x="977" y="236">一行提醒</text>
+        <text class="ve-tag" x="755" y="216" text-anchor="middle">通知不存</text>
+
+        <g class="ve-n"><rect class="sh" x="155" y="40" width="180" height="40"/><text x="245" y="60">rl task deliver</text></g>
+        <g class="ve-n"><rect class="sh" x="30" y="150" width="120" height="44"/><text x="90" y="172">Task</text></g>
+        <g class="ve-n"><rect class="sh" x="185" y="150" width="120" height="44"/><text x="245" y="172">Message</text></g>
+        <g class="ve-n"><rect class="sh" x="340" y="150" width="120" height="44"/><text x="400" y="172">Event</text></g>
+        <g class="ve-n"><rect class="sh" x="165" y="270" width="160" height="44"/><text x="245" y="292">收件箱 · 游标</text></g>
+
+        <g class="ve-n"><rect class="sh" x="665" y="40" width="180" height="40"/><text x="755" y="60">rl task deliver</text></g>
+        <g class="ve-n is-key"><rect class="sh" x="540" y="150" width="120" height="44"/><text x="600" y="164">Task</text><text class="sub" x="600" y="182">状态 · 说明</text></g>
+        <g class="ve-n is-gone"><rect class="sh" x="695" y="150" width="120" height="44"/><text x="755" y="172">Message</text></g>
+        <g class="ve-n"><rect class="sh" x="850" y="150" width="120" height="44"/><text x="910" y="164">Event</text><text class="sub" x="910" y="182">通知记录</text></g>
+        <g class="ve-n is-new"><rect class="sh" x="540" y="270" width="120" height="44"/><text x="600" y="292">待办</text></g>
+        <g class="ve-n"><rect class="sh" x="850" y="270" width="120" height="44"/><text x="910" y="292">科学家 A</text></g>
+
+        <text class="ve-tag" x="30" y="338">快照里 260 条消息这样生成</text>
+        <text class="ve-tag" x="540" y="338">事实只在 Task 和 Event 里</text>
+      </svg>
+    </div>
+    <figcaption><span class="fig-n">图 6</span>现在交付一个任务要写三遍：Task、发给协调者的 Message 和 Event；新设计只写 Task 和 Event，收件人从待办查到它，提醒不存。现在的写法见 <code>tasks.py:163-168</code>。</figcaption>
+  </figure>
+
+  <figure>
+    <div class="kpis">
+      <div class="kpi"><span class="ve-label">跟着任务状态自动生成的消息</span><span class="val"><span data-count="260">260</span><span class="unit">条</span></span><ve-bars unit="条" max="140" label="自动生成的消息里，WAIT 140 条，RESULT 66 条，TASK 54 条"><ve-bar value="140" hot>WAIT</ve-bar><ve-bar value="66">RESULT</ve-bar><ve-bar value="54">TASK</ve-bar></ve-bars></div>
+    </div>
+    <div class="frame">
+      <p class="ve-label">快照里的 1,324 条消息</p>
+      <ve-stack unit="条" label="1,324 条消息里，260 条是任务创建和状态变化时自动生成的，1,064 条是其他消息"><ve-bar value="260" hot>自动生成</ve-bar><ve-bar value="1064">其他</ve-bar></ve-stack>
+    </div>
+    <figcaption><span class="fig-n">图 7</span>快照里约每 5 条消息就有 1 条是任务创建或状态变化时自动写的；改成从记录查待办以后，这些都不用写。</figcaption>
+  </figure>
+
+  <figure>
+    <div class="ve-table notices"><table>
+      <thead><tr><th>通知</th><th>触发的状态变化</th><th>收件人</th><th>主记录</th><th>ask</th><th>何时从待办消失</th></tr></thead>
+      <tbody>
+        <tr><td>假设任务</td><td>协调者放行假设任务</td><td>科学家</td><td>假设任务</td><td>做这个假设</td><td>交出假设结论</td></tr>
+        <tr><td>拆树任务</td><td>协调者放行拆树任务</td><td>科学家</td><td>拆树任务</td><td>读计划，建假设树</td><td>交出树</td></tr>
+        <tr><td>阶段结论任务</td><td>协调者放行阶段结论任务</td><td>科学家</td><td>阶段结论任务</td><td>写阶段结论</td><td>交出阶段结论</td></tr>
+        <tr><td>审核请求</td><td>开审核回合：设计、复查、结论或树</td><td>审核者</td><td>审核单</td><td>审核</td><td>写下审核结论</td></tr>
+        <tr><td>审核结论</td><td>审核者写下结论</td><td>请求者，即任务当前的持有者</td><td>审核单</td><td>修改后请求复查；或交接、登记运行</td><td>发现处理完，或已交接、已登记</td></tr>
+        <tr><td>任务卡</td><td>科学家把任务交给研究者</td><td>研究者</td><td>执行任务</td><td>修工程问题，运行，交结论</td><td>交出任务结论</td></tr>
+        <tr><td>作业结束</td><td>执行器运行的 rl 命令在 Attempt 上记下一批作业结束或失败；验收时的测试作业不进待办，由 CLI 按结果移主线或记成合并冲突</td><td>提交者</td><td>任务</td><td>分析，或在授权内重试</td><td>结果已导入，或已重试</td></tr>
+        <tr><td>作业超时</td><td>作业过了预计结束时间，还没有结束的记录</td><td>提交者</td><td>任务</td><td>去执行器查，记下查到的状态</td><td>作业有了结束的记录</td></tr>
+        <tr><td>测试作业结束</td><td>挂在审核回合上的测试作业结束</td><td>审核者</td><td>审核单</td><td>读结果，继续审核</td><td>写下审核结论</td></tr>
+        <tr><td>任务结论</td><td>研究者交付任务</td><td>建任务的科学家；<br>公共的准备任务由 CLI 验收，不进待办</td><td>任务</td><td>验收（同时合并）或退回</td><td>验收或退回</td></tr>
+        <tr><td>退回</td><td>科学家退回任务</td><td>研究者</td><td>任务</td><td>补齐后再交</td><td>再次交付</td></tr>
+        <tr><td>设计阻塞、授权阻塞、疑问</td><td>研究者把任务标成阻塞</td><td>建任务的科学家；<br>公共的准备任务先到协调者</td><td>任务</td><td>改设计或授权，回答疑问，或取消任务；协调者只把公共准备任务交给科学家</td><td>阻塞解除或任务取消；协调者那里：已交给科学家</td></tr>
+        <tr><td>交给科学家的公共准备任务</td><td>协调者运行 <code>rl task release T-xxxx --to scientist</code></td><td>科学家（新开的短会话）</td><td>准备任务</td><td>答复阻塞、改要求或 <code>done_check</code>，或取消任务</td><td>阻塞解除或任务取消</td></tr>
+        <tr><td>阻塞和疑问的答复</td><td>科学家改了设计或授权，答了疑问，或取消任务</td><td>研究者</td><td>任务</td><td>按答复继续；取消时停下</td><td>任务回到执行中，或已取消</td></tr>
+        <tr><td>合并冲突</td><td>验收时合并有冲突，或合并提交上的语义测试不通过；主线不动</td><td>验收它的科学家</td><td>任务</td><td>开小任务解决</td><td>任务已合并</td></tr>
+        <tr><td>假设结论</td><td>科学家交付假设任务</td><td>协调者</td><td>假设任务</td><td>接收或退回</td><td>接收或退回</td></tr>
+        <tr><td>树</td><td>科学家交付拆树任务</td><td>协调者</td><td>拆树任务</td><td>排第一阶段，把树、排期和被标记的假设交给用户；或退回</td><td>交给用户，或退回</td></tr>
+        <tr><td>树和排期待批准</td><td>协调者把树和第一阶段的排期写成给用户的决定请求</td><td>用户</td><td>拆树任务</td><td>批准或修改，对被标记的假设做决定</td><td>用户答复，协调者记下</td></tr>
+        <tr><td>树和排期已批准</td><td>协调者记下用户的批准</td><td>协调者</td><td>拆树任务</td><td>放行第一阶段；要改的地方退回给科学家</td><td>第一阶段已放行，或已退回</td></tr>
+        <tr><td>退回</td><td>协调者退回假设结论</td><td>科学家</td><td>假设任务</td><td>补齐后再交</td><td>再次交付</td></tr>
+        <tr><td>决定请求</td><td>科学家在假设任务或拆树任务上写决定请求；预算是其中一种</td><td>协调者</td><td>假设任务或拆树任务</td><td>决定，或转给用户</td><td>请求有了答复，或已转给用户</td></tr>
+        <tr><td>转给用户的决定请求</td><td>协调者把决定请求转给用户</td><td>用户</td><td>假设任务或拆树任务</td><td>做决定</td><td>请求有了答复</td></tr>
+        <tr><td>决定请求的答复</td><td>协调者或用户答复了请求</td><td>科学家</td><td>假设任务</td><td>按答复继续</td><td>科学家继续工作</td></tr>
+        <tr><td>阶段结论</td><td>科学家交付阶段结论任务</td><td>协调者</td><td>阶段结论任务</td><td>接收，按建议排下一阶段；阶段报告由 CLI 生成</td><td>已接收</td></tr>
+        <tr><td>阶段结束</td><td>阶段里的假设任务都接收或取消了，或阶段预算用到了</td><td>协调者</td><td>阶段</td><td>建并放行阶段结论任务</td><td>阶段结论任务已放行</td></tr>
+        <tr><td>阶段报告</td><td>科学家交付阶段结论任务；报告是研究页上这一阶段的一节</td><td>用户</td><td>阶段</td><td>看报告；要改方向就告诉协调者。不挡下一阶段</td><td>下一份阶段报告出来，或用户答复</td></tr>
+        <tr><td>审核升级</td><td>三次审核后还过不去，按回合的种类算</td><td>研究者段：建任务的科学家，公共的准备任务先到协调者。<br>科学家段、结论审核和树审核：顾问（CLI 开顾问单）</td><td>审核单</td><td>科学家：决定未关闭的发现怎么处理。顾问：对每条发现给出维持或撤销</td><td>发现关闭，或任务改向</td></tr>
+        <tr><td>裁决意见</td><td>顾问交出裁决</td><td>请求审核的科学家</td><td>审核单</td><td>维持的发现：修改后开新回合，或发决定请求</td><td>发现关闭，或决定请求已发</td></tr>
+        <tr><td>子假设已全部判定</td><td>最后一个子假设有了判定</td><td>协调者</td><td>复合假设</td><td>给它建并放行一个假设任务</td><td>假设任务已放行</td></tr>
+        <tr><td>上游结论变了</td><td>一条决定改了某个假设的状态，而另一个未判定的假设以它为前提</td><td>受影响假设的科学家</td><td>受影响的假设任务</td><td>决定继续、改设计还是停</td><td>科学家写下一条短决定</td></tr>
+        <tr><td>用量到线</td><td>已记录的用量越过信封的一条线</td><td>科学家；最高一条线也给协调者</td><td>假设任务</td><td>调整计划，或发决定请求</td><td>写下处理方式，或信封改了</td></tr>
+        <tr><td>会话需要决定</td><td>会话停在权限对话框上（herdr 报 blocked）</td><td>协调者；<br>协调者自己的会话停住时是用户</td><td>那个会话的任务或审核单</td><td>回答，或转给用户</td><td>会话继续工作</td></tr>
+        <tr><td>超时上报</td><td>一项待办超过期限没有人处理；会话失联是它的特例</td><td>本人；再到建任务的一方、协调者、用户</td><td>那一项的主记录</td><td>处理这一项，或在原任务上重开会话</td><td>那一项离开待办</td></tr>
+      </tbody>
+    </table></div>
+    <figcaption><span class="fig-n">图 8</span>三十三种通知都有主记录和 ask；ask 做完，记录状态一变，事项就离开待办。这张表同时是待办的规则表，收件人是用户的几行进用户的待办。阶段报告没有人写：它是研究页上这一阶段的一节，由 CLI 从记录生成，科学家交付阶段结论任务时进用户的待办。作业结束由执行器运行的 rl 命令记在 Attempt 上，通知丢了有作业超时兜底。审核升级在研究者段发给科学家，在科学家段、结论审核和树审核交给顾问裁决。</figcaption>
+  </figure>
+
+  <figure>
+    <div class="cases">
+      <div class="case" data-st="ok">
+        <span class="chip ok">存成条目</span>
+        <h3>审核讨论</h3>
+        <svg class="ve-mini" viewBox="0 0 240 128" aria-label="审核讨论挂在发现 RV-0071#F1 上：审核者的提问和持有者的回答都是条目">
+          <path class="rail" d="M40 36V90M40 58H56M40 90H56"/>
+          <g class="ve-n is-st"><rect class="sh" x="10" y="4" width="160" height="32"/><text x="90" y="20">RV-0071#F1</text></g>
+          <g class="ve-n"><rect class="sh" x="56" y="46" width="176" height="24"/><text x="144" y="58">问 · 审核者</text></g>
+          <g class="ve-n"><rect class="sh" x="56" y="78" width="176" height="24"/><text x="144" y="90">答 · 持有者</text></g>
+          <text class="ve-tag" x="120" y="120" text-anchor="middle">方法类改找科学家</text>
+        </svg>
+      </div>
+      <div class="case" data-st="ok">
+        <span class="chip ok">存成条目</span>
+        <h3>提问和答复</h3>
+        <svg class="ve-mini" viewBox="0 0 240 128" aria-label="协调者的提问挂在它引用的主记录 H-0014 上，答复是同一主记录下的条目，每条提问最多答复一次">
+          <path class="rail" d="M40 36V90M40 58H56M40 90H56"/>
+          <g class="ve-n is-st"><rect class="sh" x="10" y="4" width="160" height="32"/><text x="90" y="20">H-0014</text></g>
+          <g class="ve-n"><rect class="sh" x="56" y="46" width="176" height="24"/><text x="144" y="58">提问 · 协调者</text></g>
+          <g class="ve-n"><rect class="sh" x="56" y="78" width="176" height="24"/><text x="144" y="90">答复 · 只一次</text></g>
+          <text class="ve-tag" x="120" y="120" text-anchor="middle">必须带主记录和定位</text>
+        </svg>
+      </div>
+      <div class="case" data-st="ok">
+        <span class="chip ok">存成条目</span>
+        <h3>咨询和建议</h3>
+        <svg class="ve-mini" viewBox="0 0 240 128" aria-label="科学家的咨询和顾问的建议挂在顾问单 AD-0009 上">
+          <path class="rail" d="M40 36V90M40 58H56M40 90H56"/>
+          <g class="ve-n is-st"><rect class="sh" x="10" y="4" width="160" height="32"/><text x="90" y="20">AD-0009</text></g>
+          <g class="ve-n"><rect class="sh" x="56" y="46" width="176" height="24"/><text x="144" y="58">咨询 · 科学家</text></g>
+          <g class="ve-n"><rect class="sh" x="56" y="78" width="176" height="24"/><text x="144" y="90">建议 · 顾问</text></g>
+          <text class="ve-tag" x="120" y="120" text-anchor="middle">顾问单已经是记录</text>
+        </svg>
+      </div>
+    </div>
+    <figcaption><span class="fig-n">图 9</span>只有对话要存：审核讨论、协调者的提问和顾问咨询本身就是内容，存成挂在主记录上的条目。条目不受 300 字符限制，提醒里的说明取条目的第一句。</figcaption>
+  </figure>
+</section>
+
+<section id="pending">
+  <div class="sec-head"><p class="ve-label caps">待办</p><h2>待办从记录状态查询，不用收件箱</h2></div>
+  <p>待办由一张规则表算出：每种通知一条规则，写明什么状态、等谁、要做什么、做完的标志。启动包、待办查询和监视都用这张表。一条记录可以同时等几个角色，所以“等谁”是算出来的，不是记录上的一个字段。待办打印出来的样子，以及它和启动包怎么配合，见<a href="smooth-research-packs.html#inbox">启动包页</a>。</p>
+  <figure>
+    <div class="ve-table pend"><table>
+      <thead><tr><th>谁</th><th>待办里有什么</th></tr></thead>
+      <tbody>
+        <tr><th scope="row">用户</th><td>待批准的假设树和排期；阶段报告；转来的决定请求；协调者自己的会话需要决定；报到用户的超时</td></tr>
+        <tr><th scope="row">协调者</th><td>交来的树、假设结论、决定请求、阶段结论；用户批准了、还没放行的树和排期；阶段结束；子假设已全部判定的复合假设；用量到最高一条线；会话需要决定；公共准备任务的阻塞和升级；报上来的超时；对它提问的答复</td></tr>
+        <tr><th scope="row">科学家</th><td>持有的假设任务、拆树任务、阶段结论任务，或交给它的公共准备任务，包括被退回的；交来的任务结论；阻塞和疑问；研究者段的升级；裁决意见；科学家段、结论审核和树审核的审核结论；等它回复的审核讨论；合并冲突；上游结论变了；用量到线；决定请求的答复；自己提交的测试作业结束或超时；报上来的超时；协调者的提问</td></tr>
+        <tr><th scope="row">研究者</th><td>持有的任务，包括被退回的；结束的作业和超时的作业；研究者段的审核结论；等它回复的审核讨论；阻塞和疑问的答复；协调者的提问</td></tr>
+        <tr><th scope="row">审核者</th><td>等它审的回合；挂在回合上、已经结束的测试作业；等它回复的审核讨论；协调者的提问</td></tr>
+        <tr><th scope="row">顾问</th><td>等它回答的顾问单，包括裁决；协调者的提问</td></tr>
+      </tbody>
+    </table></div>
+    <figcaption><span class="fig-n">图 10</span>每个角色的待办都是几类记录状态；协调者的待办就是固定的那几类，不会再堆积消息。用户也有待办，显示在 <code>rl resume</code>、<code>rl status</code>、研究页的“等你决定”一节和会话启动时的提示里，同时发一条 herdr 通知。用户不运行写命令：在协调者的面板里答复，协调者用 <code>rl request answer --by user</code> 记下。</figcaption>
+  </figure>
+
+  <figure>
+    <div class="cases">
+      <div class="case" data-st="ok">
+        <span class="chip ok">唤醒</span>
+        <h3>会话没在运行</h3>
+        <svg class="ve-mini" viewBox="0 0 240 128" aria-label="A 的会话没在运行，监视往 A 的 herdr 面板里提交一行提醒：续用原来的对话；空闲太久、上下文又大时，先清掉对话，再让它读启动包。A 验收后事项离开待办">
+          <path class="ve-e is-async is-st" d="M116 30H150"/>
+          <g class="ve-n"><rect class="sh" x="6" y="8" width="110" height="44"/><text x="61" y="24">T-0042</text><text class="sub" x="61" y="42">等 A 验收</text></g>
+          <g class="ve-n"><rect class="sh" x="150" y="8" width="84" height="44"/><text x="192" y="30">唤醒 A</text></g>
+          <text class="ve-tag" x="120" y="84" text-anchor="middle">续用，或清掉重开</text>
+          <text class="ve-tag" x="120" y="106" text-anchor="middle">验收后离开待办</text>
+        </svg>
+      </div>
+      <div class="case" data-st="warn">
+        <span class="chip warn">暂存</span>
+        <h3>卡在对话框</h3>
+        <svg class="ve-mini" viewBox="0 0 240 128" aria-label="A 卡在对话框时提醒先暂存，A 空闲后监视再提醒；事项一直在待办里">
+          <path class="ve-e is-async is-st" d="M116 30H150"/>
+          <g class="ve-n"><rect class="sh" x="6" y="8" width="110" height="44"/><text x="61" y="24">T-0042</text><text class="sub" x="61" y="42">等 A 验收</text></g>
+          <g class="ve-n is-off"><rect class="sh" x="150" y="8" width="84" height="44"/><text x="192" y="30">对话框</text></g>
+          <text class="ve-tag" x="120" y="84" text-anchor="middle">提醒先暂存</text>
+          <text class="ve-tag" x="120" y="106" text-anchor="middle">空闲时再提醒</text>
+        </svg>
+      </div>
+      <div class="case" data-st="warn">
+        <span class="chip warn">等着</span>
+        <h3>用户在协调者面板里</h3>
+        <svg class="ve-mini" viewBox="0 0 240 128" aria-label="T-0040 等协调者接收，但用户几分钟内在协调者的面板里说过话：监视先不往这个面板里提交提醒，发一条 herdr 通知；协调者空闲、用户几分钟没说话以后再提交。事项一直在待办里">
+          <path class="ve-e is-async is-st" d="M116 30H150"/>
+          <g class="ve-n"><rect class="sh" x="6" y="8" width="110" height="44"/><text x="61" y="24">T-0040</text><text class="sub" x="61" y="42">等协调者接收</text></g>
+          <g class="ve-n is-off"><rect class="sh" x="150" y="8" width="84" height="44"/><text x="192" y="24">协调者</text><text class="sub" x="192" y="42">用户在说话</text></g>
+          <text class="ve-tag" x="120" y="84" text-anchor="middle">提醒先等着，发 herdr 通知</text>
+          <text class="ve-tag" x="120" y="106" text-anchor="middle">空闲、用户没说话时再提交</text>
+        </svg>
+      </div>
+      <div class="case" data-st="warn">
+        <span class="chip warn">重开</span>
+        <h3>清掉对话重开</h3>
+        <svg class="ve-mini" viewBox="0 0 240 128" aria-label="A 的对话清掉重开后，启动包从记录查待办，之前没送到的提醒也在；herdr 停过、会话在新面板里重开时也一样">
+          <path class="ve-e is-st" d="M116 30H150"/>
+          <g class="ve-n"><rect class="sh" x="6" y="8" width="110" height="44"/><text x="61" y="24">T-0042</text><text class="sub" x="61" y="42">等 A 验收</text></g>
+          <g class="ve-n"><rect class="sh" x="150" y="8" width="84" height="44"/><text x="192" y="30">清掉重开</text></g>
+          <text class="ve-tag" x="120" y="84" text-anchor="middle">启动包查待办</text>
+          <text class="ve-tag" x="120" y="106" text-anchor="middle">没送到的也在</text>
+        </svg>
+      </div>
+      <div class="case" data-st="ok">
+        <span class="chip ok">不丢</span>
+        <h3>提醒被截断</h3>
+        <svg class="ve-mini" viewBox="0 0 240 128" aria-label="提醒只有一行，被截断也不丢内容，因为内容都在记录里">
+          <path class="ve-e is-async is-st" d="M116 30H150"/>
+          <g class="ve-n"><rect class="sh" x="6" y="8" width="110" height="44"/><text x="61" y="24">T-0042</text><text class="sub" x="61" y="42">等 A 验收</text></g>
+          <g class="ve-n"><rect class="sh" x="150" y="8" width="84" height="44"/><text x="192" y="30">A</text></g>
+          <text class="ve-tag" x="120" y="84" text-anchor="middle">提醒只有一行</text>
+          <text class="ve-tag" x="120" y="106" text-anchor="middle">内容都在记录里</text>
+        </svg>
+      </div>
+      <div class="case" data-st="ok">
+        <span class="chip ok">消失</span>
+        <h3>已经过时</h3>
+        <svg class="ve-mini" viewBox="0 0 240 128" aria-label="T-0042 已经验收，状态越过了 ask，事项不再显示，不需要确认">
+          <path class="ve-e is-off" d="M116 30H150"/>
+          <g class="ve-n is-st"><rect class="sh" x="6" y="8" width="110" height="44"/><text x="61" y="24">T-0042</text><text class="sub" x="61" y="42">已验收</text></g>
+          <g class="ve-n"><rect class="sh" x="150" y="8" width="84" height="44"/><text x="192" y="30">A</text></g>
+          <text class="ve-tag" x="120" y="84" text-anchor="middle">状态已越过 ask</text>
+          <text class="ve-tag" x="120" y="106" text-anchor="middle">不再显示</text>
+        </svg>
+      </div>
+      <div class="case" data-st="risk">
+        <span class="chip risk">上报</span>
+        <h3>超过期限没人处理</h3>
+        <svg class="ve-mini" viewBox="0 0 240 128" aria-label="T-0042 等 A 验收超过期限，监视先提醒 A 本人，再报给建任务的一方、协调者，最后报用户">
+          <path class="ve-e is-st" d="M116 30H150"/>
+          <g class="ve-n"><rect class="sh" x="6" y="8" width="110" height="44"/><text x="61" y="24">T-0042</text><text class="sub" x="61" y="42">等 A 验收</text></g>
+          <g class="ve-n"><rect class="sh" x="150" y="8" width="84" height="44"/><text x="192" y="30">监视</text></g>
+          <text class="ve-tag" x="120" y="84" text-anchor="middle">先提醒本人，再往上报</text>
+          <text class="ve-tag" x="120" y="106" text-anchor="middle">最后报到用户</text>
+        </svg>
+      </div>
+      <div class="case" data-st="warn">
+        <span class="chip warn">兜底</span>
+        <h3>作业结束由执行器记下</h3>
+        <svg class="ve-mini" viewBox="0 0 240 128" aria-label="执行器用 command 方式运行一条 rl 命令，在 Attempt 上记下作业结束，规则表把作业结束放进研究者 C 的待办；通知丢了时，过了预计结束时间还没有结束的记录，C 的待办里出现作业超时">
+          <path class="ve-e is-st" d="M116 30H150"/>
+          <g class="ve-n"><rect class="sh" x="6" y="8" width="110" height="44"/><text x="61" y="24">执行器</text><text class="sub" x="61" y="42">运行 rl 命令</text></g>
+          <g class="ve-n"><rect class="sh" x="150" y="8" width="84" height="44"/><text x="192" y="24">Attempt</text><text class="sub" x="192" y="42">已结束</text></g>
+          <text class="ve-tag" x="120" y="84" text-anchor="middle">记录一变，进 C 的待办</text>
+          <text class="ve-tag" x="120" y="106" text-anchor="middle">通知丢了，过预计时间也进</text>
+        </svg>
+      </div>
+    </div>
+    <figcaption><span class="fig-n">图 11</span>提醒送不到、被截断或已经过时，都不影响待办：事项跟着记录状态走，不需要游标和确认。唤醒就是监视往会话的 herdr 面板里提交一行提醒；空闲太久、上下文又大的对话先清掉，再读启动包。协调者的面板用户也在用：协调者空闲、用户几分钟没说话时才提交，否则先等着，发一条 herdr 通知。一项待办超过期限就逐级上报。作业结束由执行器用 <code>command</code> 方式运行一条 rl 命令记在 Attempt 上；通知丢了，过了预计结束时间进待办的是作业超时。超时上报靠监视；监视停了，心跳过期，任何 <code>rl</code> 命令和会话启动时的提示都提醒运行 <code>rl resume</code>。herdr 停了，会话一起停，也是运行 <code>rl resume</code>，在新面板里按启动包重开有待办的会话。</figcaption>
+  </figure>
+  <p>落到代码：<code>rl inbox</code>（<code>messages.py:137</code>）改成按记录状态查待办；<code>tasks.py:163-168</code>、<code>reviews.py</code> 和 <code>watch.py:355</code> 在状态变化时不再写 Message，Event 照写；启动包（<code>context.py:268</code>）显示待办，不再显示未读消息；监视判断“在等回复”（<code>watch.py:235</code>）和提醒协调者有未读消息（<code>watch.py:702</code>）的逻辑改成看待办。规则表是待办在代码里唯一的来源；<code>rl doctor</code> 检查每条没结束的记录都有人等，或在等一个带截止时间的外部事件。这次重新设计不兼容之前的项目（11-25）：为状态变化写 Message 的代码直接删掉，不留读旧格式的代码，schema 5 之前的数据库一律拒绝；只限这一次，升级机制保留（整合文档 10.4）。</p>
+</section>
+
+<section id="review">
+  <div class="sec-head"><p class="ve-label caps">讨论</p><h2>审核讨论保留，结果写进发现</h2></div>
+  <figure>
+    <div class="kpis">
+      <div class="kpi"><span class="ve-label">审核者和研究者之间的消息里，真正的讨论</span><span class="val"><span data-count="57">57</span><span class="unit">条</span></span><ve-bars unit="k" max="35" label="三类消息的字符数：讨论 34.6k，审核结论通知 29.5k，测试证据往返 21.2k"><ve-bar value="34.6" hot>讨论</ve-bar><ve-bar value="29.5">结论通知</ve-bar><ve-bar value="21.2">证据往返</ve-bar></ve-bars></div>
+    </div>
+    <div class="frame">
+      <p class="ve-label">审核者和研究者之间的 195 条消息，逐条读后分类</p>
+      <ve-stack unit="条" label="195 条里，讨论 57 条，审核结论通知 93 条，测试证据往返 45 条"><ve-bar value="57" hot>讨论</ve-bar><ve-bar value="93">审核结论通知</ve-bar><ve-bar value="45">测试证据往返</ve-bar></ve-stack>
+    </div>
+    <figcaption><span class="fig-n">图 12</span>195 条里有 57 条是真正的讨论；另外 138 条是审核记录里已有的结论，和本可由 CLI 挂到回合上的测试证据。</figcaption>
+  </figure>
+
+  <figure>
+    <div class="cases">
+      <div class="case" data-st="ok">
+        <span class="chip ok">RV-0070</span>
+        <h3>问清用意，不改代码</h3>
+        <svg class="ve-mini" viewBox="0 0 240 128" aria-label="RV-0070：审核者问一个权重字段是否有意这样输出，研究者同一分钟回答不是，提议只在笔记和证据里标注；审核者接受，不改代码，不开第二次审核">
+          <path class="ve-e is-st" d="M90 22H150"/>
+          <path class="ve-e is-st" d="M150 46H90"/>
+          <text class="ve-el" x="120" y="14">问</text>
+          <text class="ve-el" x="120" y="38">答</text>
+          <g class="ve-n"><rect class="sh" x="6" y="6" width="84" height="52"/><text x="48" y="32">审核者</text></g>
+          <g class="ve-n"><rect class="sh" x="150" y="6" width="84" height="52"/><text x="192" y="32">研究者</text></g>
+          <text class="ve-tag" x="120" y="88" text-anchor="middle">同一分钟答完</text>
+          <text class="ve-tag" x="120" y="110" text-anchor="middle">不改代码，不再审</text>
+        </svg>
+      </div>
+      <div class="case" data-st="ok">
+        <span class="chip ok">RV-0071</span>
+        <h3>修复方向先谈定</h3>
+        <svg class="ve-mini" viewBox="0 0 240 128" aria-label="RV-0071：21:00 提问，21:01 研究者给出修复方案，21:03 审核者补约束，21:04 记成发现，21:11 复审 RV-0072 通过，一共 11 分钟；点按时间排开">
+          <path class="rail" d="M14 40H226"/>
+          <circle class="dot" cx="14" cy="40" r="4"/>
+          <circle class="dot" cx="22" cy="40" r="4"/>
+          <circle class="dot" cx="60" cy="40" r="4"/>
+          <circle class="dot" cx="88" cy="40" r="4"/>
+          <circle class="dot" cx="226" cy="40" r="4"/>
+          <text class="ve-tag" x="14" y="26" text-anchor="middle">问</text>
+          <text class="ve-tag" x="22" y="62" text-anchor="middle">方案</text>
+          <text class="ve-tag" x="60" y="26" text-anchor="middle">约束</text>
+          <text class="ve-tag" x="88" y="62" text-anchor="middle">发现</text>
+          <text class="ve-tag" x="232" y="26" text-anchor="end">通过</text>
+          <g class="ve-dim is-key"><path class="ext" d="M14 72V100M226 72V100"/><path class="ln" d="M14 94H226M10 98l8-8M222 98l8-8"/><text x="150" y="88">11 分钟</text></g>
+          <text class="ve-tag" x="120" y="122" text-anchor="middle">复审 RV-0072 通过</text>
+        </svg>
+      </div>
+      <div class="case" data-st="ok">
+        <span class="chip ok">7 个回合</span>
+        <h3>先问再记</h3>
+        <svg class="ve-mini" viewBox="0 0 240 128" aria-label="至少 7 个回合里，审核者先问别处有没有这个检查，作者确认没有，才记成发现">
+          <path class="ve-e is-st" d="M90 22H150"/>
+          <path class="ve-e is-st" d="M150 46H90"/>
+          <text class="ve-el" x="120" y="14">问</text>
+          <text class="ve-el" x="120" y="38">答</text>
+          <g class="ve-n"><rect class="sh" x="6" y="6" width="84" height="52"/><text x="48" y="32">审核者</text></g>
+          <g class="ve-n"><rect class="sh" x="150" y="6" width="84" height="52"/><text x="192" y="32">作者</text></g>
+          <text class="ve-tag" x="120" y="88" text-anchor="middle">别处有这个检查吗</text>
+          <text class="ve-tag" x="120" y="110" text-anchor="middle">没有，才记成发现</text>
+        </svg>
+      </div>
+      <div class="case" data-st="warn">
+        <span class="chip warn">RV-0107</span>
+        <h3>同意只在消息里</h3>
+        <svg class="ve-mini" viewBox="0 0 240 128" aria-label="RV-0107：审核者在 MSG-1048 里同意用执行约束处理两条 low 并附三个条件，但审核记录仍是 2 finding(s), low open">
+          <path class="ve-e is-st" d="M120 48V78"/>
+          <text class="ve-x" x="120" y="67">✕</text>
+          <g class="ve-n"><rect class="sh" x="6" y="8" width="228" height="40"/><text x="120" y="28">MSG-1048：同意，3 个条件</text></g>
+          <g class="ve-n is-off"><rect class="sh" x="6" y="78" width="228" height="40"/><text x="120" y="98">记录：2 finding(s), low open</text></g>
+        </svg>
+      </div>
+      <div class="case" data-st="risk">
+        <span class="chip risk">MSG-0329</span>
+        <h3>通知截断在 600 字符</h3>
+        <svg class="ve-mini" viewBox="0 0 240 128" aria-label="MSG-0329 的初步发现有 830 字符，通知只送出前 600 字符，后 230 字符被截掉">
+          <rect class="bar-off" x="10" y="20" width="220" height="24"/>
+          <rect class="bar-on" x="10" y="20" width="159" height="24"/>
+          <path class="cut" d="M169 12V52"/>
+          <g class="ve-dim is-key"><path class="ext" d="M10 52V80M169 52V80"/><path class="ln" d="M10 74H169M6 78l8-8M165 78l8-8"/><text x="90" y="68">送出 600</text></g>
+          <text class="ve-tag" x="120" y="110" text-anchor="middle">全文 830，后 230 截掉</text>
+        </svg>
+      </div>
+    </div>
+    <figcaption><span class="fig-n">图 13</span>讨论确实改变了结果：省掉了改代码和第二次审核，修复方向在发现前谈定；但讨论的结果没有进记录，长内容还会被通知截断。</figcaption>
+  </figure>
+
+  <figure class="ve-steps">
+    <div class="frame">
+      <svg class="ve-svg" viewBox="0 0 1000 520" aria-label="审核回合 RV-0071 里的讨论：审核者挂草稿发现 F1，CLI 提醒持有者 C；C 在 F1 下回答并附修复方案；审核者接受并加约束，F1 的状态写成修复方向已定；复查通过后 F1 关闭，交接和登记运行的检查读 F1 的状态。方法类发现改提醒科学家 A。">
+        <path class="life" d="M110 66V420"/>
+        <path class="life" d="M890 66V380"/>
+        <rect class="ve-bnd" x="330" y="84" width="340" height="346"/>
+        <text class="ve-bnd-t" x="338" y="100">审核回合 RV-0071</text>
+
+        <path class="ve-e is-async" data-s="1" d="M650 132H930V440"/>
+        <path class="ve-e" pathLength="1" data-s="1" d="M118 188H350"/>
+        <path class="ve-e is-async" data-s="1" d="M650 188H882"/>
+        <path class="ve-e" pathLength="1" data-s="2" d="M882 240H650"/>
+        <path class="ve-e is-async" data-s="2" d="M350 240H118"/>
+        <path class="ve-e" pathLength="1" data-s="3" d="M118 292H350"/>
+        <path class="ve-e is-async" data-s="3" d="M650 292H882"/>
+        <path class="ve-e is-hot" pathLength="1" data-s="4" d="M500 414V452"/>
+
+        <text class="ve-el" data-s="1" x="234" y="179">写草稿</text>
+        <text class="ve-el" data-s="1" x="766" y="179">提醒</text>
+        <text class="ve-el" data-s="2" x="766" y="231">回答</text>
+        <text class="ve-el" data-s="2" x="234" y="231">提醒</text>
+        <text class="ve-el" data-s="3" x="234" y="283">接受</text>
+        <text class="ve-el" data-s="3" x="766" y="283">提醒</text>
+        <text class="ve-el r" data-s="4" x="508" y="438">读 F1 状态</text>
+        <text class="ve-el l" data-s="1" x="922" y="410">方法类找 A</text>
+
+        <text class="ve-tag" data-s="2" x="676" y="262">条目不受 300 字符限制</text>
+        <text class="ve-tag" data-s="3" x="676" y="346">条件留在 F1 上</text>
+        <text class="ve-tag" data-s="4" x="676" y="400">审核结论由 CLI 通知</text>
+        <text class="ve-tag" data-s="4" x="676" y="420">测试作业挂在回合上</text>
+
+        <g class="ve-co" data-s="1" transform="translate(24 188)"><circle r="11"/><text>1</text></g>
+        <g class="ve-co" data-s="2" transform="translate(24 240)"><circle r="11"/><text>2</text></g>
+        <g class="ve-co" data-s="3" transform="translate(24 292)"><circle r="11"/><text>3</text></g>
+        <g class="ve-co" data-s="4" transform="translate(24 472)"><circle r="11"/><text>4</text></g>
+
+        <g class="ve-n"><rect class="sh" x="50" y="14" width="120" height="52"/><text x="110" y="32">审核者</text><text class="sub" x="110" y="52">回合 RV-0071</text></g>
+        <g class="ve-n"><rect class="sh" x="830" y="14" width="120" height="52"/><text x="890" y="32">研究者 C</text><text class="sub" x="890" y="52">持有者 · 工程类</text></g>
+        <g class="ve-n is-key"><rect class="sh" x="350" y="112" width="300" height="40"/><text x="500" y="132">发现 F1 · 工程类 · medium</text></g>
+        <g class="ve-n" data-s="1"><rect class="sh" x="350" y="170" width="300" height="36"/><text x="500" y="188">草稿：比较入口没绑定数据</text></g>
+        <g class="ve-n" data-s="2"><rect class="sh" x="350" y="222" width="300" height="36"/><text x="500" y="240">回答：别处没有检查，附 4 条方案</text></g>
+        <g class="ve-n" data-s="3"><rect class="sh" x="350" y="274" width="300" height="36"/><text x="500" y="292">接受，另加几条约束</text></g>
+        <g class="ve-n is-new" data-s="3"><rect class="sh" x="350" y="326" width="300" height="36"/><text x="500" y="344">F1：修复方向已定</text></g>
+        <g class="ve-n" data-s="4"><rect class="sh" x="350" y="378" width="300" height="36"/><text x="500" y="396">复查通过，F1 关闭</text></g>
+        <g class="ve-n" data-s="4"><rect class="sh" x="380" y="452" width="240" height="40"/><text x="500" y="472">交接、登记运行的检查</text></g>
+        <g class="ve-n" data-s="1"><rect class="sh" x="870" y="440" width="120" height="44"/><text x="930" y="456">科学家 A</text><text class="sub" x="930" y="474">方法类</text></g>
+      </svg>
+    </div>
+    <div class="ve-player">
+      <ol class="ve-cap">
+        <li data-n="1/4">审核者在回合上挂草稿发现 F1，标为工程类。CLI 提醒任务当前的持有者 C；方法类发现改提醒科学家 A。</li>
+        <li data-n="2/4">C 在 F1 下回答：别处没有这个检查，并附 4 条修复方案。条目是记录，不受 300 字符限制。</li>
+        <li data-n="3/4">审核者接受，另加几条约束。F1 的状态写成“修复方向已定”，条件留在 F1 上。</li>
+        <li data-n="4/4">复查通过，F1 关闭。审核结论由 CLI 通知，测试作业挂在回合上；交接和登记运行的检查读 F1 的状态。</li>
+      </ol>
+      <button data-go="-1" aria-label="上一步">←</button>
+      <button data-play aria-label="播放">▶</button>
+      <input type="range" aria-label="步骤">
+      <button data-go="1" aria-label="下一步">→</button>
+    </div>
+    <figcaption><span class="fig-n">图 14</span>讨论挂在发现上：每条回答和提议都是记录，结果写进发现的状态和条件；双方靠一行提醒知道轮到自己。示例按 RV-0071 改写。</figcaption>
+  </figure>
+  <ol>
+    <li>范围：只在开放的审核回合里，审核者和发现的负责人之间。方法类找科学家，工程类找任务当前的持有者。</li>
+    <li>提问、回答和提议都记成回合下的条目。有对应发现的挂在发现上；还没成形的问题挂在回合上。审核者的初步发现先作为草稿挂上去，作者回复后再定稿。</li>
+    <li>讨论改变了发现的处理方式时，写进发现的状态和条件：接受修复方向、按执行约束关闭（写明条件）、确认是有意这样写的（撤回）。照这个规则，RV-0107 那两条会记成“按约束关闭，附三个条件”。</li>
+    <li>另外 138 条不再发：审核结论由 CLI 通知；在被审提交上跑的测试作业由 CLI 挂到回合上，作业结束的记录到了，就进审核者的待办；确认和状态不发。</li>
+  </ol>
+</section>
+
+<section id="examples">
+  <div class="sec-head"><p class="ve-label caps">范例</p><h2>短事实在研究数据库，长文在文件，代码在 git</h2></div>
+  <p>下面按一个假设从头到尾的顺序画九条消息：发件人写的四个字段、主记录上的要素，以及每个要素存在哪。编号和内容是示意，不对应 bypass-lora 的记录。</p>
+  <figure>
+    <div class="store-grid">
+      <div class="store"><span class="st">研究数据库</span><h3>字段和边</h3><p>CLI 要检查、查询或显示的：编号、状态、数字、一两句的命题和结论、记录之间的关系。对话条目也在这里。</p><code>T-0040.priority</code> <code>H-0014.statement</code> <code>T-0042 → T-0040</code></div>
+      <div class="store"><span class="st file">文件</span><h3>登记成文档</h3><p>要整段读的说明和推理：实验说明、授权文件、分析笔记、审核答复、顾问建议、阶段结论的全文。研究数据库只记主人、类型、修订和摘要。</p><code>research/work/T-0042/E-0035.md</code> → DOC-0030</div>
+      <div class="store"><span class="st git">git</span><h3>提交</h3><p>代码、语义测试、判定函数、实验清单，用提交、路径和符号定位。</p><code>c9f78b9:src/e0035/analysis.py::decide</code></div>
+      <div class="store"><span class="st file">文件</span><h3>运行产出</h3><p>指标、判定表、图。小文件在任务的工作目录里，大文件在主项目的 artifacts 下或集群上。Result 记路径和摘要，日志路径在 Attempt 里，交付时登记成产出。</p><code>research/work/T-0042/out/</code></div>
+      <div class="store"><span class="st none">不存</span><h3>读时生成</h3><p>能从记录算出来的：核验行、定位展开、结论审核包、裁决包、启动包、待办、用量合计、研究页和阶段报告。</p></div>
+    </div>
+    <figcaption><span class="fig-n">图 15</span>每个要素只存一处：CLI 要用的放研究数据库的字段，要整段读的放文件，代码放 git，能算出来的不存。范例里标“新”的是整合文档 10.3 新增的字段。</figcaption>
+  </figure>
+  <p>字段里的文字最多一两句；更长的写成文档，字段里放文档编号。现有的 <code>statement_ref</code>、<code>rationale_ref</code>、<code>doc_ref</code>、<code>answer_ref</code> 就是这样。</p>
+
+  <figure>
+    <div class="frame">
+      <svg class="ve-svg seq" viewBox="0 0 1000 730" aria-label="一个假设从头到尾的消息：1 协调者给科学家假设任务 T-0040；2 科学家给审核者审核请求 RV-0036；3 审核者给科学家审核结论；4 科学家给研究者任务卡 T-0042；研究者和审核者之间复查 RV-0037 通过；5 研究者发授权阻塞，科学家答复；6 研究者交任务结论；7 协调者提问，科学家答复，这是对话；8 科学家请求结论审核 RV-0045，通过；9 科学家给协调者假设结论。">
+        <path class="life" d="M120 66V700"/>
+        <path class="life" d="M400 66V700"/>
+        <path class="life" d="M680 66V700"/>
+        <path class="life" d="M900 66V700"/>
+
+        <path class="ve-e" d="M120 112H394"/>
+        <path class="ve-e" d="M400 160H894"/>
+        <path class="ve-e" d="M900 206H406"/>
+        <path class="ve-e" d="M400 252H674"/>
+        <path class="ve-e is-off" d="M680 296H894"/>
+        <path class="ve-e is-off" d="M900 330H686"/>
+        <path class="ve-e" d="M680 376H406"/>
+        <path class="ve-e" d="M400 410H674"/>
+        <path class="ve-e" d="M680 456H406"/>
+        <path class="ve-e" d="M120 502H394"/>
+        <path class="ve-e" d="M400 536H126"/>
+        <path class="ve-e" d="M400 582H894"/>
+        <path class="ve-e is-off" d="M900 616H406"/>
+        <path class="ve-e is-hot" d="M400 662H126"/>
+
+        <a href="#ex-1"><text class="ve-el" x="257" y="103">假设任务 T-0040</text></a>
+        <a href="#ex-2"><text class="ve-el" x="540" y="151">审核请求 RV-0036</text></a>
+        <a href="#ex-3"><text class="ve-el" x="540" y="197">审核结论 RV-0036</text></a>
+        <a href="#ex-4"><text class="ve-el" x="540" y="243">任务卡 T-0042</text></a>
+        <text class="ve-tag" x="790" y="287" text-anchor="middle">复查请求 RV-0037</text>
+        <text class="ve-tag" x="790" y="321" text-anchor="middle">通过</text>
+        <a href="#ex-5"><text class="ve-el" x="540" y="367">授权阻塞</text></a>
+        <a href="#ex-5"><text class="ve-el" x="540" y="401">阻塞的答复</text></a>
+        <a href="#ex-6"><text class="ve-el" x="540" y="447">任务结论 T-0042</text></a>
+        <a href="#ex-7"><text class="ve-el" x="257" y="493">提问 · E-0035</text></a>
+        <a href="#ex-7"><text class="ve-el" x="257" y="527">答复</text></a>
+        <text class="ve-tag" x="128" y="558">对话：存成两条 Message</text>
+        <a href="#ex-8"><text class="ve-el" x="540" y="573">审核请求 RV-0045</text></a>
+        <text class="ve-tag" x="790" y="607" text-anchor="middle">通过</text>
+        <a href="#ex-9"><text class="ve-el" x="257" y="653">假设结论 T-0040</text></a>
+
+        <a href="#ex-1"><g class="ve-co" transform="translate(24 112)"><circle r="11"/><text>1</text></g></a>
+        <a href="#ex-2"><g class="ve-co" transform="translate(24 160)"><circle r="11"/><text>2</text></g></a>
+        <a href="#ex-3"><g class="ve-co" transform="translate(24 206)"><circle r="11"/><text>3</text></g></a>
+        <a href="#ex-4"><g class="ve-co" transform="translate(24 252)"><circle r="11"/><text>4</text></g></a>
+        <a href="#ex-5"><g class="ve-co" transform="translate(24 393)"><circle r="11"/><text>5</text></g></a>
+        <a href="#ex-6"><g class="ve-co" transform="translate(24 456)"><circle r="11"/><text>6</text></g></a>
+        <a href="#ex-7"><g class="ve-co" transform="translate(24 519)"><circle r="11"/><text>7</text></g></a>
+        <a href="#ex-8"><g class="ve-co" transform="translate(24 582)"><circle r="11"/><text>8</text></g></a>
+        <a href="#ex-9"><g class="ve-co" transform="translate(24 662)"><circle r="11"/><text>9</text></g></a>
+
+        <g class="ve-n"><rect class="sh" x="60" y="14" width="120" height="52"/><text x="120" y="32">协调者</text><text class="sub" x="120" y="52">coordinator</text></g>
+        <g class="ve-n"><rect class="sh" x="320" y="14" width="160" height="52"/><text x="400" y="32">科学家</text><text class="sub" x="400" y="52">scientist-H-0014</text></g>
+        <g class="ve-n"><rect class="sh" x="605" y="14" width="150" height="52"/><text x="680" y="32">研究者</text><text class="sub" x="680" y="52">researcher-C</text></g>
+        <g class="ve-n"><rect class="sh" x="840" y="14" width="120" height="52"/><text x="900" y="32">审核者</text><text class="sub" x="900" y="52">B · F</text></g>
+
+        <path class="ve-e" d="M40 718H80"/>
+        <text class="ve-tag" x="90" y="722">有范例的消息，点编号跳过去</text>
+        <path class="ve-e is-off" d="M360 718H400"/>
+        <text class="ve-tag" x="410" y="722">没有单独画范例的消息</text>
+      </svg>
+    </div>
+    <figcaption><span class="fig-n">图 16</span>一个假设走完要九类消息；其中只有第 7 条提问和答复是对话，要存，其余都是状态变化带出的通知。</figcaption>
+  </figure>
+
+  <figure id="ex-1">
+    <div class="ex">
+      <div>
+        <p class="ve-label">1 · 协调者 → 科学家</p>
+        <h3>假设任务</h3>
+        <p class="why">协调者放行排队中的假设任务 T-0040，监视启动科学家会话。</p>
+        <pre>hypothesis-task  coordinator → scientist-H-0014
+subject  T-0040
+ask      test H-0014
+refs     H-0014 D-0099
+note     先看 D-0099：H-0014 是 H-0016、
+         H-0017 的前提。</pre>
+      </div>
+      <div class="ve-table"><table>
+        <thead><tr><th>要素</th><th>内容</th><th>存在哪</th></tr></thead>
+        <tbody>
+          <tr><td>目标假设</td><td>H-0014：W-02 在 dev 上稳定优于 Base</td><td><span class="st">研究数据库</span> <code>T-0040 → H-0014</code>（TARGETS）<span class="new">新</span>；命题在 <code>H-0014.statement</code></td></tr>
+          <tr><td>优先级</td><td>1</td><td><span class="st">研究数据库</span> <code>T-0040.priority</code><span class="new">新</span></td></tr>
+          <tr><td>预算信封</td><td>约 4 MIG·h</td><td><span class="st">研究数据库</span> <code>T-0040.budget_envelope</code><span class="new">新</span></td></tr>
+          <tr><td>并行上限</td><td>同时最多 10 个研究者</td><td><span class="st">研究数据库</span> <code>T-0040.parallel_limit</code><span class="new">新</span></td></tr>
+          <tr><td>状态</td><td>排队，放行后是执行中</td><td><span class="st">研究数据库</span> <code>T-0040.state</code>，加排队状态<span class="new">新</span></td></tr>
+          <tr><td>持有者</td><td>scientist-H-0014</td><td><span class="st">研究数据库</span> <code>T-0040.owner_session</code>；等谁由规则表算出，不存</td></tr>
+          <tr><td>排在这里的理由</td><td>H-0014 是 H-0016、H-0017 的前提，先判定提升是否稳定</td><td><span class="st">研究数据库</span> T-0040 的排期理由<span class="new">新</span>；前提关系是 <code>H-0016 → H-0014</code>（ASSUMES）<span class="new">新</span>；来由在 <code>D-0099.rationale</code></td></tr>
+          <tr><td>启动包</td><td>角色卡、任务卡、假设树每个一行、H-0014 和祖先的决定、可复用的产物</td><td><span class="st none">不存</span> 读时生成</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+    <figcaption><span class="fig-n">图 17</span>假设任务的详情是 T-0040 上的几个字段加上 H-0014 的命题，都在研究数据库里；这一步不需要文件。</figcaption>
+  </figure>
+
+  <figure id="ex-2">
+    <div class="ex">
+      <div>
+        <p class="ve-label">2 · 科学家 → 审核者</p>
+        <h3>审核请求（代码）</h3>
+        <p class="why">科学家在设计提交 c9f78b9 上跑过 CPU 小测试，开审核回合 RV-0036，监视启动审核者 B。</p>
+        <pre>review-request  scientist-H-0014 → reviewer-B
+subject  RV-0036
+ask      review c9f78b9
+refs     E-0035 DOC-0030
+         c9f78b9:src/e0035/analysis.py::decide
+         c9f78b9:tests/test_e0035.py::test_decide_semantics
+         c9f78b9:src/e0035/arms.py
+note     先看 decide：预测和判定都在这个函数里。</pre>
+      </div>
+      <div class="ve-table"><table>
+        <thead><tr><th>要素</th><th>内容</th><th>存在哪</th></tr></thead>
+        <tbody>
+          <tr><td>审核问题</td><td>c9f78b9 是否按 E-0035 实现了两臂、seed 和判定？</td><td><span class="st">研究数据库</span> <code>RV-0036.question</code></td></tr>
+          <tr><td>被审范围</td><td>c9f78b9 上的 3 个文件和它们的摘要</td><td><span class="st">研究数据库</span> <code>RV-0036.code_scope</code></td></tr>
+          <tr><td>所属任务、段、次数</td><td>T-0042 · 科学家段 · 第 1 次</td><td><span class="st">研究数据库</span> <code>RV-0036.target_id</code>、段<span class="new">新</span>、<code>round_index</code></td></tr>
+          <tr><td>实验的问题</td><td>W-02 是否在 seed 0-2 上都优于 Base？</td><td><span class="st">研究数据库</span> <code>E-0035.question</code></td></tr>
+          <tr><td>设计和边界</td><td>设计提交 c9f78b9；实验清单 src/e0035/arms.py；受保护范围 src/train.py::masked_loss、src/e0035/arms.py、src/e0035/analysis.py::decide；语义测试 test_decide_semantics</td><td><span class="st">研究数据库</span> <code>E-0035.design_commit</code>、受保护范围、<code>semantic_tests</code>、实验清单的路径和摘要<span class="new">新</span></td></tr>
+          <tr><td>实验说明</td><td>假设和目标、预测、方法和实验设计、结果对应的下一步、大致花费约 2 MIG·h</td><td><span class="st file">文件</span> <code>research/work/T-0042/E-0035.md</code>，DOC-0030，挂在 E-0035 上</td></tr>
+          <tr><td>代码和测试</td><td>decide()、两臂、语义测试</td><td><span class="st git">git</span> c9f78b9，分支 sr/T-0042</td></tr>
+          <tr><td>小测试记录</td><td>CPU，12 passed；记成试跑，不能当证据</td><td><span class="st">研究数据库</span> <code>ATT-0228-1</code></td></tr>
+          <tr><td>请求文档</td><td>不写：问题和材料都在记录里</td><td><span class="st none">不存</span></td></tr>
+        </tbody>
+      </table></div>
+    </div>
+    <figcaption><span class="fig-n">图 18</span>审核请求不另写材料：问题在审核单上，设计在实验上，代码和实验清单在 git 里；只有实验说明是文件。</figcaption>
+  </figure>
+
+  <figure id="ex-3">
+    <div class="ex">
+      <div>
+        <p class="ve-label">3 · 审核者 → 科学家</p>
+        <h3>审核结论</h3>
+        <p class="why">审核者 B 写下结论。没有方法类发现，CLI 允许交接。</p>
+        <pre>review-verdict  reviewer-B → scientist-H-0014
+subject  RV-0036
+ask      dispatch T-0042, or fix method findings
+refs     RV-0036#F1 RV-0036#F2 DOC-0032
+note     两条都是工程类，可以交接；F1 要在开跑前修。</pre>
+      </div>
+      <div class="ve-table"><table>
+        <thead><tr><th>要素</th><th>内容</th><th>存在哪</th></tr></thead>
+        <tbody>
+          <tr><td>结论</td><td>issues：2 条发现，方法类 0 条</td><td><span class="st">研究数据库</span> <code>RV-0036.verdict</code>、<code>summary</code></td></tr>
+          <tr><td>F1</td><td>工程 · medium · 开放：恢复训练时，检查点路径没区分 seed</td><td><span class="st">研究数据库</span> 发现子项 <code>RV-0036#F1</code><span class="new">新</span></td></tr>
+          <tr><td>F1 的位置</td><td>save_checkpoint</td><td><span class="st git">git</span> <code>c9f78b9:src/train.py::save_checkpoint</code></td></tr>
+          <tr><td>F2</td><td>工程 · low · 开放：日志没记数据顺序的种子</td><td><span class="st">研究数据库</span> <code>RV-0036#F2</code><span class="new">新</span></td></tr>
+          <tr><td>类别的默认值</td><td>F1、F2 的定位都不在受保护范围内，默认是工程类；落在范围内的默认是方法类</td><td><span class="st none">不存</span> CLI 按定位和受保护范围算出</td></tr>
+          <tr><td>推理</td><td>跑过语义测试，核对了两臂和判定函数</td><td><span class="st file">文件</span> <code>research/reviews/RV-0036.md</code>，DOC-0032（<code>RV-0036.answer_ref</code>）</td></tr>
+          <tr><td>能不能交接</td><td>能：B 对 c9f78b9 下过结论，方法类发现 0 条</td><td><span class="st none">不存</span> CLI 交接时检查</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+    <figcaption><span class="fig-n">图 19</span>每条发现是审核单上的子记录，带类别、严重度、状态和代码定位；推理写在答复文件里。</figcaption>
+  </figure>
+
+  <figure id="ex-4">
+    <div class="ex">
+      <div>
+        <p class="ve-label">4 · 科学家 → 研究者</p>
+        <h3>任务卡</h3>
+        <p class="why">科学家运行 <code>rl task dispatch</code>，把 T-0042 交给研究者 C。CLI 检查交接条件，封存设计提交；监视启动 C 的会话。</p>
+        <pre>task-card  scientist-H-0014 → researcher-C
+subject  T-0042
+ask      fix engineering findings, run, deliver
+refs     E-0035 RV-0036#F1 RV-0036#F2 DOC-0033
+note     F1 关系到结果能不能用，开跑前先修。</pre>
+        <p class="ve-label">授权文件 DOC-0033 第 1 版</p>
+        <pre>scope: E-0035@1，两臂，seed 0-2
+budget: 约 2 MIG·h
+retries: 节点故障或排队超时可重提，每个 seed 最多 2 次
+replacements: 无
+start_when: 冒烟通过
+done_when: 3 个 seed 都有结果，decide() 输出判定表
+report_when: 要改语义测试、判定、预测或实验清单；预计超过约 3 MIG·h</pre>
+      </div>
+      <div class="ve-table"><table>
+        <thead><tr><th>要素</th><th>内容</th><th>存在哪</th></tr></thead>
+        <tbody>
+          <tr><td>要回答的问题</td><td>W-02 是否在 seed 0-2 上都优于 Base？</td><td><span class="st">研究数据库</span> <code>E-0035.question</code>，不抄到任务上</td></tr>
+          <tr><td>设计和说明</td><td>c9f78b9、实验清单、3 处受保护范围、DOC-0030</td><td><span class="st">研究数据库</span> E-0035 的字段；<span class="st file">文件</span> DOC-0030</td></tr>
+          <tr><td>授权</td><td>范围、预算、重试、替换、开跑条件、结束条件、何时回报</td><td><span class="st file">文件</span> <code>research/work/T-0042/mandate.yaml</code>，DOC-0033，随任务封存（<code>T-0042.mandate_ref</code>）</td></tr>
+          <tr><td>停止条件</td><td>第一个 seed 的正对照不通过就停</td><td><span class="st git">git</span> 实验清单 <code>c9f78b9:src/e0035/arms.py</code> 里的 <code>stop_when</code>，随设计提交封存；授权文件不写，任务包直接显示</td></tr>
+          <tr><td>工作树、分支</td><td>工作树按任务建，分支 sr/T-0042；工作目录 research/work/T-0042/ 在工作树里</td><td><span class="st">研究数据库</span> <code>T-0042.branch</code>、工作树<span class="new">新</span>；研究者的会话直接在这里启动</td></tr>
+          <tr><td>开放的审核回合</td><td>RV-0036，转入研究者段</td><td><span class="st">研究数据库</span> <code>RV-0036.target_id</code> 指向 T-0042</td></tr>
+          <tr><td>持有者</td><td>scientist-H-0014 → researcher-C</td><td><span class="st">研究数据库</span> <code>T-0042.owner_session</code>、持有者历史<span class="new">新</span></td></tr>
+          <tr><td>所属假设任务</td><td>T-0040</td><td><span class="st">研究数据库</span> <code>T-0042 → T-0040</code>（PART_OF）<span class="new">新</span></td></tr>
+        </tbody>
+      </table></div>
+    </div>
+    <figcaption><span class="fig-n">图 20</span>任务卡不抄实验：问题、设计和说明都在 E-0035 上，停止条件在它的实验清单里；任务自己只有授权文件、分支和工作树、审核回合和持有者。</figcaption>
+  </figure>
+
+  <figure id="ex-5">
+    <div class="ex">
+      <div>
+        <p class="ve-label">5 · 研究者 ⇄ 科学家</p>
+        <h3>授权阻塞和阻塞的答复</h3>
+        <p class="why">C 修好 F1，复查 RV-0037 通过。登记并提交证据运行后，2g 实例排队超过 10 小时。</p>
+        <pre>mandate-block  researcher-C → scientist-H-0014
+subject  T-0042
+ask      change mandate, or cancel T-0042
+refs     ATT-0230-1 DOC-0033
+note     2g 排队已超过 10 小时；换 1g 每个 seed 约多
+         40 分钟，用量仍在约 2 MIG·h 内。</pre>
+        <pre>block-answer  scientist-H-0014 → researcher-C
+subject  T-0042
+ask      continue T-0042
+refs     DOC-0033@2
+note     允许换 1g，条件写在 replacements 里。</pre>
+      </div>
+      <div class="ve-table"><table>
+        <thead><tr><th>要素</th><th>内容</th><th>存在哪</th></tr></thead>
+        <tbody>
+          <tr><td>阻塞</td><td>授权阻塞，等科学家</td><td><span class="st">研究数据库</span> <code>T-0042.state</code> blocked，<code>blocked_reason</code> mandate<span class="new">新</span></td></tr>
+          <tr><td>卡在哪</td><td>ATT-0230-1 排队 10 小时</td><td><span class="st">研究数据库</span> <code>ATT-0230-1</code> 和它的 Observation</td></tr>
+          <tr><td>两条说明</td><td>左边的 note</td><td><span class="st">研究数据库</span> 记在这两次状态变化上</td></tr>
+          <tr><td>新的授权</td><td>replacements：2g 排队超过 6 小时可改用 1g；同一 seed 的两臂用同一种实例</td><td><span class="st file">文件</span> DOC-0033 第 2 版</td></tr>
+          <tr><td>如果是设计阻塞</td><td>要改语义测试、判定、预测或实验清单：实验开新修订版，原因写在一条决定里</td><td><span class="st">研究数据库</span> E-0035@2 和新决定；<span class="st git">git</span> 新的设计提交</td></tr>
+          <tr><td>如果只是疑问</td><td>问清一处用意：科学家答一句，任务回到执行中</td><td><span class="st">研究数据库</span> <code>blocked_reason</code> question<span class="new">新</span>；答复记在任务上</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+    <figcaption><span class="fig-n">图 21</span>阻塞和答复都是 T-0042 的状态变化；改过的授权是授权文件的第 2 版，条件写进文件，不写在说明里。</figcaption>
+  </figure>
+
+  <figure id="ex-6">
+    <div class="ex">
+      <div>
+        <p class="ve-label">6 · 研究者 → 科学家</p>
+        <h3>任务结论</h3>
+        <p class="why">3 个 attempt 都成功。C 写结果和证据，交付 T-0042。</p>
+        <pre>task-conclusion  researcher-C → scientist-H-0014
+subject  T-0042
+ask      accept T-0042
+refs     EV-0101 EV-0102 RV-0036#F2
+         c9f78b9:src/train.py::masked_loss
+         DOC-0031
+note     先看 EV-0102：提升只出现在 seed 0。</pre>
+        <p class="ve-label">科学家读到的核验行，读时生成</p>
+        <pre>T-0042 delivered by researcher-C · branch sr/T-0042,
+       4 commits after design c9f78b9
+attempts   3 ended: 3 success, 0 needs-check
+arms       2 arms × 3 seeds match design, 0 deviations
+results    2 complete; evidence EV-0101, EV-0102
+review     RV-0037 passed · method 0 open · engineering 0 medium+
+protected  unchanged since handover (3 entries);
+           semantic tests passed at head
+mainline   protected scope unchanged on main since design
+usage      about 1.2 MIG·h used, 0 queued (card: about 2);
+           0 attempts unreported
+outputs    research/work/T-0042/: 4 files registered</pre>
+      </div>
+      <div class="ve-table"><table>
+        <thead><tr><th>要素</th><th>内容</th><th>存在哪</th></tr></thead>
+        <tbody>
+          <tr><td>一句结论</td><td>W-02 没有稳定优于 Base：只有 seed 0 为正（EV-0102）</td><td><span class="st">研究数据库</span> <code>T-0042.conclusion</code><span class="new">新</span>；只写方向并引用证据，数字读时从判定表展开</td></tr>
+          <tr><td>证据</td><td>EV-0101：W-02 对 Base，seed 0-2；EV-0102：各 seed 的提升</td><td><span class="st">研究数据库</span> Evidence 记录，指向 RES-0230、RES-0231</td></tr>
+          <tr><td>限制</td><td>只有 3 个 seed；masked_loss 按 batch 内答案 token 数归一，seed 之间的有效学习率可能不同</td><td><span class="st">研究数据库</span> <code>T-0042.limitations</code><span class="new">新</span>；代码在 <span class="st git">git</span> <code>c9f78b9:src/train.py::masked_loss</code></td></tr>
+          <tr><td>分析笔记</td><td>怎么算的，看过哪些图</td><td><span class="st file">文件</span> <code>research/work/T-0042/analysis.md</code>，DOC-0031 第 2 版</td></tr>
+          <tr><td>判定表和图</td><td>decide() 的输出、各 seed 的提升图</td><td><span class="st file">文件</span> <code>research/work/T-0042/out/</code>，登记成任务产出（<code>T-0042.output_refs</code>）；路径和摘要在 Result 的 manifest 里</td></tr>
+          <tr><td>运行</td><td>3 个 attempt，3 个成功</td><td><span class="st">研究数据库</span> Run、Attempt、Result；集群日志的路径在 Attempt 里</td></tr>
+          <tr><td>核验行</td><td>左边下方</td><td><span class="st none">不存</span> 读时生成</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+    <figcaption><span class="fig-n">图 22</span>结论、限制和证据在研究数据库里，推理在分析笔记里，数据在运行产出里；核验行每次读时重新算。</figcaption>
+  </figure>
+
+  <figure id="ex-7">
+    <div class="ex">
+      <div>
+        <p class="ve-label">7 · 协调者 ⇄ 科学家</p>
+        <h3>提问和答复（对话）</h3>
+        <p class="why">协调者在排 H-0016，想知道 E-0035 的 Base 结果能不能复用。</p>
+        <pre>question  coordinator → scientist-H-0014
+MSG-0201
+subject  E-0035
+ask      answer
+refs     H-0016 RES-0230
+text     H-0016 也要 Base 在 seed 0-2 上的结果。
+         E-0035 的 Base 结果能直接给 H-0016 用吗？</pre>
+        <pre>answer  scientist-H-0014 → coordinator
+MSG-0202 · in_reply_to MSG-0201
+subject  E-0035
+refs     RES-0230
+         c9f78b9:src/e0035/config.py::EVAL_LEN
+text     训练结果能用，评估要重跑：H-0016 的评估长度
+         是 512 token，E-0035 是 256。重跑评估约
+         0.1 MIG·h，不用重训。</pre>
+      </div>
+      <div class="ve-table"><table>
+        <thead><tr><th>要素</th><th>内容</th><th>存在哪</th></tr></thead>
+        <tbody>
+          <tr><td>提问</td><td>左边第一条的 text</td><td><span class="st">研究数据库</span> Message MSG-0201，<code>subject</code> 为 E-0035<span class="new">新</span></td></tr>
+          <tr><td>答复</td><td>左边第二条的 text，引用提问</td><td><span class="st">研究数据库</span> MSG-0202，<code>in_reply_to</code> MSG-0201</td></tr>
+          <tr><td>提醒</td><td>每条一行，取第一句</td><td><span class="st none">不存</span> Event 只记送达还是暂存</td></tr>
+          <tr><td>离开待办</td><td>科学家：写下答复；协调者：关闭提问</td><td><span class="st none">不存</span> 由记录状态决定</td></tr>
+          <tr><td>后续</td><td>协调者把 H-0016 的预算信封调成约 2.4 MIG·h</td><td><span class="st">研究数据库</span> H-0016 的假设任务字段</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+    <figcaption><span class="fig-n">图 23</span>对话本身就是内容，存成挂在 E-0035 上的两条 Message；条目不受 300 字符限制，提醒只带第一句。</figcaption>
+  </figure>
+
+  <figure id="ex-8">
+    <div class="ex">
+      <div>
+        <p class="ve-label">8 · 科学家 → 审核者</p>
+        <h3>结论审核请求</h3>
+        <p class="why">结果齐了。科学家写决定草稿 D-0102，开结论审核 RV-0045，监视启动审核者 F。这种请求不带说明。</p>
+        <pre>review-request  scientist-H-0014 → reviewer-F
+subject  RV-0045
+ask      review D-0102
+refs     D-0102 EV-0101 EV-0102 E-0035</pre>
+      </div>
+      <div class="ve-table"><table>
+        <thead><tr><th>要素</th><th>内容</th><th>存在哪</th></tr></thead>
+        <tbody>
+          <tr><td>审核问题</td><td>D-0102 草稿把 H-0014 判为挑战，证据支持吗？</td><td><span class="st">研究数据库</span> <code>RV-0045.question</code>，<code>subject</code> 为 conclusion</td></tr>
+          <tr><td>决定草稿</td><td>H-0014 挑战；理由：预测要求 3 个 seed 都为正，只有 seed 0 为正</td><td><span class="st">研究数据库</span> D-0102，草稿<span class="new">新</span>，<code>rationale</code>；解读的两段也在草稿上<span class="new">新</span>，审核者对照证据查有没有说过头</td></tr>
+          <tr><td>封存的预测和判定</td><td>E-0035@1，交接时封存</td><td><span class="st">研究数据库</span> E-0035 的修订；<span class="st git">git</span> <code>c9f78b9:src/e0035/analysis.py::decide</code></td></tr>
+          <tr><td>审核包</td><td>决定草稿、引用的证据、封存的预测、判定函数的修订版、核验行</td><td><span class="st none">不存</span> CLI 读时生成</td></tr>
+          <tr><td>说明</td><td>不带。审核者的启动包不放作者的说法，一句“重点看该判挑战还是不确定”会把作者的看法带进去</td><td>—</td></tr>
+          <tr><td>另写的材料</td><td>无</td><td>—</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+    <figcaption><span class="fig-n">图 24</span>结论审核的材料全由 CLI 从记录生成；科学家只写决定草稿，请求不带说明。</figcaption>
+  </figure>
+
+  <figure id="ex-9">
+    <div class="ex">
+      <div>
+        <p class="ve-label">9 · 科学家 → 协调者</p>
+        <h3>假设结论</h3>
+        <p class="why">RV-0045 通过。科学家把 D-0102 定稿，交付 T-0040，CLI 检查交付条件，包括解读的两段。</p>
+        <pre>hypothesis-conclusion  scientist-H-0014 → coordinator
+subject  T-0040
+ask      accept T-0040
+refs     D-0102 RV-0045 H-0051 H-0052
+note     先看 D-0102 的建议：H-0051 更便宜，能先排除
+         数据顺序。</pre>
+        <p class="ve-label">协调者读到的核验行，读时生成</p>
+        <pre>H-0014 by scientist-H-0014 · decision D-0102: challenged
+review       conclusion review RV-0045 passed
+experiments  E-0035@1 sealed at handover
+tasks        1 accepted and merged, 0 open
+usage        about 1.2 MIG·h (envelope: about 4);
+             0 attempts unreported
+affects      H-0016 (queued), H-0017 (queued)
+next         proposed children H-0051, H-0052 (D-0102)</pre>
+      </div>
+      <div class="ve-table"><table>
+        <thead><tr><th>要素</th><th>内容</th><th>存在哪</th></tr></thead>
+        <tbody>
+          <tr><td>一句结论</td><td>H-0014 被挑战：W-02 只在 seed 0 优于 Base</td><td><span class="st">研究数据库</span> <code>T-0040.conclusion</code><span class="new">新</span></td></tr>
+          <tr><td>解读</td><td>做了什么：用 E-0035 在 dev 上比较 W-02 和 Base，每个 seed 各跑一遍。意味着什么：W-02 的提升不稳，还不能当作 H-0016、H-0017 的前提</td><td><span class="st">研究数据库</span> D-0102 上的两段<span class="new">新</span>，合计最多三句，不手抄数字；给用户读，研究页的“发现”一节照登</td></tr>
+          <tr><td>决定</td><td>D-0102：挑战，理由一句</td><td><span class="st">研究数据库</span> D-0102 的 <code>evidence_status_set</code>、<code>rationale</code>；理由长时写成<span class="st file">文件</span>，<code>rationale_ref</code></td></tr>
+          <tr><td>证据的方向</td><td>EV-0101、EV-0102 挑战 H-0014</td><td><span class="st">研究数据库</span> CHALLENGES 边，随决定写入</td></tr>
+          <tr><td>建议的下一步</td><td>H-0051：seed 0 的提升来自数据顺序；H-0052：训练到 4,000 步后才稳定</td><td><span class="st">研究数据库</span> 新的 Hypothesis 记录，<code>disposition</code> 为 candidate，主父边指回 H-0014，各带一句目的（<code>purpose</code>）<span class="new">新</span></td></tr>
+          <tr><td>花费</td><td>约 1.2 MIG·h，信封约 4</td><td><span class="st none">不存</span> 从 Usage 记录读时合计</td></tr>
+          <tr><td>受影响的假设</td><td>H-0016、H-0017 以 H-0014 为前提，都还在排队</td><td><span class="st none">不存</span> 沿 ASSUMES 边读时列出；已经在做的假设，它的科学家会收到“上游结论变了”</td></tr>
+          <tr><td>如果是停止</td><td>上游结论变了，或决定请求的答复是停：不判支持、挑战或不确定，把 H-0014 改成暂停或退役</td><td><span class="st">研究数据库</span> 决定改 <code>disposition</code> 为 <code>paused</code> 或 <code>retired</code><span class="new">新</span>，引用上游的决定或决定请求的答复（<code>BASED_ON</code> 指向带着答复的任务），代替证据；核验行第一行写成 <code>stopped</code></td></tr>
+          <tr><td>核验行</td><td>左边下方</td><td><span class="st none">不存</span> 读时生成</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+    <figcaption><span class="fig-n">图 25</span>协调者收到的是一句结论加核验行；判定、证据方向和子假设都是研究数据库里的记录。<code>affects</code> 告诉它排期要不要改。解读是科学家写给用户的，协调者不另写。</figcaption>
+  </figure>
+
+  <figure>
+    <div class="ve-table"><table>
+      <thead><tr><th>消息</th><th>主记录</th><th>要素和存在哪</th></tr></thead>
+      <tbody>
+        <tr><td>决定请求和答复</td><td>假设任务或拆树任务</td><td><span class="st">研究数据库</span> 卡在哪、选项、建议、代价，各一两句<span class="new">新</span>；长时引用一条决定；答复记在请求上，带答复人：协调者或用户。预算是其中一种</td></tr>
+        <tr><td>退回</td><td>任务或假设任务</td><td><span class="st">研究数据库</span> 哪条不够、要补什么，记在这次状态变化上；<span class="st file">文件</span> 新的要求写进授权文件的 <code>done_when</code></td></tr>
+        <tr><td>作业结束、作业超时、测试作业结束</td><td>任务、审核单</td><td><span class="st">研究数据库</span> 作业结束由执行器运行的 rl 命令记在 Attempt 上；成功数和失败数在 Attempt、Observation 里；预计结束时间<span class="new">新</span>和集群日志的路径在 Attempt 里</td></tr>
+        <tr><td>合并冲突</td><td>执行任务</td><td><span class="st">研究数据库</span> 任务的合并状态<span class="new">新</span>；冲突的文件或失败的测试记在这次状态变化上</td></tr>
+        <tr><td>审核升级、裁决意见</td><td>审核单</td><td><span class="st">研究数据库</span> 未关闭的发现子项；裁决用的顾问单指向审核单；<span class="st file">文件</span> 裁决意见写成文档（<code>answer_ref</code>）；<span class="st none">不存</span> 裁决包读时生成</td></tr>
+        <tr><td>阶段结论、阶段结束</td><td>阶段结论任务和它的决定；阶段</td><td><span class="st">研究数据库</span> 判定了哪些假设、依据、建议；挑出的发现：引用这一阶段的决定，每条一句为什么<span class="new">新</span>；决定的类别是 <code>phase</code><span class="new">新</span>，<code>DECIDES</code> 指向阶段，<code>BASED_ON</code> 引用各假设的决定，不改假设状态；阶段包含的任务、预算和科学家上限是阶段记录的字段<span class="new">新</span>；<span class="st file">文件</span> 全文写成文档挂在决定上；<span class="st none">不存</span> 阶段报告是研究页上这一阶段的一节，读时生成</td></tr>
+        <tr><td>子假设已全部判定</td><td>复合假设</td><td><span class="st none">不存</span> 子假设的决定，读时列出</td></tr>
+        <tr><td>上游结论变了</td><td>受影响的假设任务</td><td><span class="st">研究数据库</span> ASSUMES 边<span class="new">新</span>和那条决定；<span class="st none">不存</span> 受影响的假设读时列出</td></tr>
+        <tr><td>用量到线</td><td>假设任务</td><td><span class="st none">不存</span> 用量从 Usage 记录读时合计；越过了哪条线记在 Event 里</td></tr>
+        <tr><td>会话需要决定</td><td>那个会话的任务或审核单</td><td><span class="st">研究数据库</span> 它要什么，记在 Session 上<span class="new">新</span>；协调者的回答记成 Event</td></tr>
+        <tr><td>超时上报</td><td>那一项的主记录</td><td><span class="st">研究数据库</span> 等了多久、已经报到哪一级：Event；失联时哪个会话、最后一条记录：Session、Event</td></tr>
+        <tr><td>审核讨论</td><td>发现或审核单</td><td><span class="st">研究数据库</span> 对话条目；结果写进发现的状态和条件（图 14）</td></tr>
+        <tr><td>咨询和建议</td><td>顾问单</td><td><span class="st">研究数据库</span> 一句问题和定位；<span class="st file">文件</span> 建议写成文档（<code>answer_ref</code>），条目里放第一句</td></tr>
+      </tbody>
+    </table></div>
+    <figcaption><span class="fig-n">图 26</span>其余消息也一样：要素落在主记录的字段和子记录上，长文才写成文件。每种消息的完整列表见整合文档 8.10。</figcaption>
+  </figure>
+</section>
+
+<section id="decide">
+  <div class="sec-head"><p class="ve-label caps">决定</p><h2>三十二件事已定，没有待确认的</h2></div>
+  <div class="ve-table"><table>
+    <thead><tr><th>日期</th><th>已定</th><th>取代了什么</th></tr></thead>
+    <tbody>
+      <tr><td>11-10</td><td>消息只带主记录、ask、定位和一句说明；定位由 CLI 在发送时校验，在读取时展开（图 2、图 4、图 5）</td><td>正文里夹着编号的长消息</td></tr>
+      <tr><td>11-10</td><td>说明最多 2 句、300 字符（图 3；11-24 改成只限 300 字符）</td><td>不限长的 NOTE</td></tr>
+      <tr><td>11-10</td><td>没有无类型的消息；协调者的消息改成“提问”，带主记录和定位（图 9）</td><td>协调者的自由消息（11-09）</td></tr>
+      <tr><td>11-10</td><td>状态变化的通知不写 Message，待办从记录状态查询；Message 只存对话条目（图 6、图 10）</td><td>收件箱、游标和确认</td></tr>
+      <tr><td>11-10</td><td>保留审核讨论，记在审核回合上；讨论的结果写进发现的状态和条件（图 14）</td><td>审核者和研究者之间的自由消息</td></tr>
+      <tr><td>11-24</td><td>说明只限 300 字符，去掉“最多 2 句”；代码定位里的符号只对 Python 文件检查（图 2、图 4）</td><td>说明最多 2 句</td></tr>
+      <tr><td>11-24</td><td>结论审核的请求不带说明；一句结论只写方向并引用证据，不手抄数字（图 22、图 24）</td><td>—</td></tr>
+      <tr><td>11-24</td><td>待办由一张规则表算出，用户也有待办；每条没结束的记录都要有人等；待办超时逐级上报，最后到用户（图 8、图 10、图 11）</td><td>记录上的一个“等谁”字段；只有“失联”一种异常</td></tr>
+      <tr><td>11-24</td><td>作业过了预计结束时间还没有结束的记录，进研究者的待办（图 11）</td><td>固定等 60 分钟后提醒协调者</td></tr>
+      <tr><td>11-24</td><td>预算申请扩成决定请求；科学家段和结论审核的升级交给顾问裁决；研究者可以发“疑问”（图 8）</td><td>预算申请；升级给协调者</td></tr>
+      <tr><td>11-24</td><td>新增通知：合并冲突、上游结论变了、用量到线、阶段结束、会话需要决定（图 8）</td><td>—</td></tr>
+      <tr><td>11-24</td><td>唤醒由监视执行，有无头和 herdr 两种后端；内部交流不改用 A2A（11-25 改成只用 herdr）</td><td>靠 herdr 往会话里打提醒</td></tr>
+      <tr><td>11-24</td><td>待办规则表的每一行写明 ask 对应的 CLI 命令，执行后事项从待办消失（图 8）</td><td>—</td></tr>
+      <tr><td>11-24</td><td>通知记录：Event 里记通知了谁、哪条记录、送达还是暂存，不存正文；通知量靠它统计</td><td>—</td></tr>
+      <tr><td>11-24</td><td>定位的写法：子项用 <code>#</code>；代码用 <code>提交:路径::符号</code>；文件用 DOC 或登记过的产出；每条最多 8 个（图 4）</td><td>—</td></tr>
+      <tr><td>11-24</td><td>任务卡和结论的字段按图 17 至图 25：假设任务的优先级、预算信封、并行上限、排期理由、决定请求，交付时的一句结论和限制放字段；授权沿用封存的授权文件，加 <code>start_when</code>、<code>done_when</code> 和 <code>stop_when</code>（<code>stop_when</code> 同日改为只写在实验清单里）；决定加草稿状态</td><td>—</td></tr>
+      <tr><td>11-24</td><td>提醒用户：<code>rl resume</code>、<code>rl status</code> 和会话启动时的提示显示用户的待办；有 herdr 时再发一条 herdr 通知（11-25 起总有 herdr，研究页也显示）</td><td>—</td></tr>
+      <tr><td>11-24</td><td>待办的期限按通知类型设，默认值在试运行时定；等作业的期限取预计结束时间</td><td>—</td></tr>
+      <tr><td>11-24 复查</td><td>拆树任务和树、给用户的几行（树和排期待批准、转给用户的决定请求、阶段报告）补进规则表；升级条件按回合的种类算，树审核也交顾问裁决；协调者自己的会话停住时报给用户（图 8、图 10）</td><td>各处原来的写法</td></tr>
+      <tr><td>11-24</td><td>作业结束：执行器用 <code>command</code> 方式投递，运行一条 rl 命令在 Attempt 上记下结束，规则表再把“作业结束”放进提交者的待办（图 8、图 11）</td><td>执行器把通知直接发给提交作业的会话</td></tr>
+      <tr><td>11-24</td><td>阶段结论用阶段结论任务，复合假设的结论用一个普通的假设任务，都由协调者建任务并放行（图 8）</td><td>协调者开短会话</td></tr>
+      <tr><td>11-24</td><td>公共准备任务的任务结论由 CLI 验收，不进待办；阻塞和升级先到协调者，由它交给一个短的科学家会话（图 8）</td><td>由第一个依赖它的科学家确认</td></tr>
+      <tr><td>11-24</td><td>用户在协调者的交互会话里答复，协调者用 <code>rl request answer --by user</code> 记下；阶段报告不挡下一阶段（图 8、图 10）（11-25 改：在协调者的面板里答复）</td><td>—</td></tr>
+      <tr><td>11-24</td><td>验收时先在合并提交上跑语义测试，通过了才移主线；不通过记成合并冲突，主线不动（图 1、图 8）</td><td>先合并进主线，再在主线上测</td></tr>
+      <tr><td>11-24</td><td>停止条件只写在实验清单的 <code>stop_when</code> 里，授权文件不写（图 20）</td><td>授权文件里的 <code>stop_when</code></td></tr>
+      <tr><td>11-24</td><td>“停止”的假设结论：不判定，把假设改成 <code>paused</code> 或 <code>retired</code>，引用上游的决定或决定请求的答复；阶段结束改成“假设任务都接收或取消了”（图 8、图 25）</td><td>—</td></tr>
+      <tr><td>11-24</td><td>交接的命令改名 <code>rl task dispatch</code>（图 19、图 20）</td><td><code>rl task hand-over</code></td></tr>
+      <tr><td>11-25</td><td>阶段报告没有人写：它是研究页上这一阶段的一节，由 CLI 从记录生成，科学家交付阶段结论任务时进用户的待办。假设结论加解读两段，阶段结论加挑出的发现，新的子假设带一句目的（图 8、图 15、图 25、图 26）</td><td>协调者写阶段报告</td></tr>
+      <tr><td>11-25</td><td>用户只在协调者的面板里说话；监视只在协调者空闲、用户几分钟没说话时往这个面板里提交提醒，否则先等着，发一条 herdr 通知（图 10、图 11）</td><td>用户在协调者的交互会话里答复；交互会话没有输入时由无头对话接手</td></tr>
+      <tr><td>11-25</td><td>只用 herdr：每个会话开在一个面板里，唤醒是往面板里提交一行提醒；“会话需要决定”由 herdr 报 blocked 触发（图 8、图 11）</td><td>无头和 herdr 两种后端</td></tr>
+      <tr><td>11-25</td><td>空闲超过缓存时间、上下文又大的对话，监视在提醒之前清掉，让它读启动包；不用主动压缩（图 11）</td><td>按启动包新开一段对话</td></tr>
+      <tr><td>11-25</td><td>这次重新设计不兼容之前的项目：为状态变化写 Message 的代码直接删掉，不留读旧格式的代码，schema 5 之前的数据库一律拒绝；只限这一次，升级机制保留，5 以后照常迁移（整合文档 10.4）</td><td>旧的 Message 记录照常能读</td></tr>
+    </tbody>
+  </table></div>
+  <p>第 13 至 18 行是整合文档第 14 章原来的第 11 至 14、16、18 项，11-24 照建议定下。“11-24 复查”一行是同一天复查全文时直接改的；第 20 至 27 行是第 14 章第 31 至 35、37 至 39 项，用户当天照建议定下。第 41、42 项在数据模型上，同日也照建议定下（整合文档 14.2）。最后五行是 11-25 定的第 43、45 至 48 项（整合文档 14.3）；第 44 项删掉论文草稿，和消息无关。角色、流程和其余决定见<a href="smooth-research-minimal-workflow.html">工作流页</a>：<a href="smooth-research-minimal-workflow.html#messages">沟通</a>一节画谁在什么时候发什么，<a href="smooth-research-minimal-workflow.html#open">决定</a>一节列全部已定的事。</p>
+  <p>没有验证过的：300 字符的上限按快照的分布定，没有试过；审核讨论的三类是逐条读后人工分的，边界上的几条可能归到别的类；待办的期限和唤醒的阈值要等试运行的数据；执行器用 <code>command</code> 方式投递作业结束，这条路径没有试过；用户几分钟没说话，监视才往协调者的面板里提交提醒，这个分钟数要等试运行定，herdr 也看不出用户是不是正在打字，靠监视自己记哪一轮是它叫起来的，没有试过。</p>
+</section>
+
+<section class="sources" aria-label="Sources">
+  <p class="ve-label caps">来源</p>
+  <p><code>design/site/content/smooth-research-redesign-2026-11-10.md</code> 7.7、第 8 章（8.4 至 8.12）、第 10 章、11.2、第 13、14 章 · <code>design/analysis/smooth-research-redesign-review-2026-11-24.md</code>（11-24 的评审）· <a href="smooth-research-minimal-workflow.html">工作流页</a></p>
+  <p>bypass-lora 快照 <code>research/snapshots/restart-method-preparation-20261108/snapshot.json</code>：1,324 条消息，共 766,209 字符；审核者和研究者之间 195 条，逐条人工分类；例子 MSG-0329、MSG-0564、MSG-0682、MSG-0690、MSG-1048</p>
+  <p><code>src/smooth_research/messages.py:18</code> <code>NOTICE_CHARS</code> · <code>messages.py:21</code> <code>record</code> · <code>messages.py:137</code> <code>inbox</code> · <code>tasks.py:163-168</code> · <code>context.py:268</code> · <code>watch.py:235</code> · <code>watch.py:702</code> · <code>agents.py:297</code> <code>tell</code> · miyabi-mcp 的 <code>deliver.py</code>（投递方式 <code>command</code>）</p>
+</section>
+</main>
+</body>
+</html>

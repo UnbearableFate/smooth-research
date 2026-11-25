@@ -2,7 +2,7 @@
 
 日期 2026-11-09，2026-11-10 增补 5.11 至 5.13 和第 8 章第 6 至 8 项。插件版本 `a8a70a9`，文中行号都对应这个版本。第 5 章以后是建议，尚未实现，执行时按实际情况调整并更新本文。和 `73d0124` 的对比见[版本对比报告](coordinator-load-version-comparison-2026-11-09.md)。
 
-2026-11-10 更新：整合后的新设计见 [`design/new/smooth-research-redesign-2026-11-10.md`](new/smooth-research-redesign-2026-11-10.md)。它取代本文 5.1、5.2、5.4、5.8、5.11 至 5.13 和第 6 至 9 章；本文其余部分和它冲突时，以新文档为准。
+2026-11-10 更新：整合后的新设计见 [`design/site/content/smooth-research-redesign-2026-11-10.md`](../site/content/smooth-research-redesign-2026-11-10.md)。2026-11-24 起，新设计的源文件都在 `design/site/content/`，三张图解渲染后在站点 `design/site/smooth-research-site.html` 里看。它取代本文 5.1、5.2、5.4、5.8、5.11 至 5.13 和第 6 至 9 章；本文其余部分和它冲突时，以新文档为准。
 
 ## 1. 核心内容总结
 
@@ -124,9 +124,9 @@ watcher 读 Codex 日志时已经经过 `token_count` 和 `token_usage_record`�
 
 ## 5. 新设计建议
 
-2026-11-09 更新：用户否决了原 5.2 的唤醒和静默方案。5.2 已按最精简设计改写，完整定义见 `design/new/smooth-research-minimal-workflow.html`，每种消息和任务包的样例见 `design/new/smooth-research-message-examples.html`。5.3、5.4、5.7 和第 6 至 8 章里凡是提到 `Message.wake`、静默、`--ask` 或空闲 reviewer 自动接单的内容，都以这两页为准。
+2026-11-09 更新：用户否决了原 5.2 的唤醒和静默方案。5.2 已按最精简设计改写，完整定义见 `design/site/content/smooth-research-redesign-2026-11-10.md` 和 `design/site/content/smooth-research-minimal-workflow.src.html`，每种消息的范例见 `design/site/content/smooth-research-message-design.src.html`（原样例页已删除）。5.3、5.4、5.7 和第 6 至 8 章里凡是提到 `Message.wake`、静默、`--ask` 或空闲 reviewer 自动接单的内容，都以这些文档为准。
 
-2026-11-10 更新：新增 5.11 科学家角色、5.12 数据模型和 5.13 文档归属，数据表之间的关系见 `design/new/smooth-research-data-relations.html`。5.1 第 1 条里的路线决策改由科学家做；5.8 的短状态文件由 5.12 的数据库恢复取代。
+2026-11-10 更新：新增 5.11 科学家角色、5.12 数据模型和 5.13 文档归属，数据表之间的关系见 `design/site/content/smooth-research-data-relations.src.html`。5.1 第 1 条里的路线决策改由科学家做；5.8 的短状态文件由 5.12 的数据库恢复取代。
 
 ### 5.1 设计规则
 
@@ -140,20 +140,20 @@ watcher 读 Codex 日志时已经经过 `token_count` 和 `token_usage_record`�
 
 ### 5.2 任务有结论才发消息
 
-用户否决了 `Message.wake`：负载来自角色之间的沟通，所以先删沟通，再谈投递方式。每个角色只回答一个问题，任务有结论、收件人要行动时才发消息，过程写进账本。
+用户否决了 `Message.wake`：负载来自角色之间的沟通，所以先删沟通，再谈投递方式。每个角色只回答一个问题，任务有结论、收件人要行动时才发消息，过程写进研究数据库。
 
 发给协调者的消息只有固定类型，每种有固定字段。研究者发任务结论、阻塞和答复，审核者发结论审核结果和答复，顾问发建议和答复，监视发失联。其他方向可以发自由文本：协调者发给任何角色，研究者和审核者互发。
 
 | 现在进入协调者的内容 | 新设计 |
 |---|---|
-| `task wait` | 删除，账本里的任务状态 |
+| `task wait` | 删除，研究数据库里的任务状态 |
 | 作业结束通知 | 改投提交作业的研究者 |
-| 审核的中间结果、回合结束通知 | 留在研究者和审核者之间，回合状态由账本算出 |
+| 审核的中间结果、回合结束通知 | 留在研究者和审核者之间，回合状态由研究数据库算出 |
 | needs a reviewer | `rl review request` 建审核单并启动会话，谁请求谁启动，一个回合一个会话 |
 | 逐批 GO | 写进任务卡的授权；超出授权发阻塞 |
-| 进度 NOTE | 账本 |
+| 进度 NOTE | 研究数据库 |
 | `agent tell coordinator`、`msg --to coordinator` | CLI 拒绝；只能走固定命令 |
-| `task deliver` | 保留，带 CLI 从账本生成的核验行 |
+| `task deliver` | 保留，带 CLI 从研究数据库生成的核验行 |
 | `task block` | 保留，字段是卡在哪、试过什么、需要的决定 |
 | 轮次用尽仍有 medium 以上 | 阻塞 |
 | watcher：会话断开且恢复不了 | 失联 |
@@ -181,7 +181,7 @@ researcher  rl task deliver                                # 唤醒协调者
 - `watch.waits` 对有 `wait_owner` 的任务先提醒负责人，沿用 1 倍、2 倍、4 倍的退避；负责人不在，或到第二档仍没有新消息时，再写给协调者。
 - `rl agent assign` 拒绝把持有等待任务的会话改派其他任务（`agents.py:255` 现在没有这项检查），除非显式放弃（`--release-wait`）。否则作业通知会送到已经在做别的事的会话。
 
-资源分配失败的重提留在 researcher 内部，失败记录照常写入账本。协调者最后从 RESULT 和核验结果里看到 attempt 总数和失败数，复盘要求的原始失败和唯一 usage 不受影响。
+资源分配失败的重提留在 researcher 内部，失败记录照常写入研究数据库。协调者最后从 RESULT 和核验结果里看到 attempt 总数和失败数，复盘要求的原始失败和唯一 usage 不受影响。
 
 researcher 被唤醒的次数不会增加，节省来自协调者不再为每个作业事件开一个回合。researcher 的上下文并不小（第 2 章），这部分成本由 5.8 处理。
 
@@ -301,7 +301,7 @@ watcher 读取 Codex 日志的 compaction 次数和上下文大小，超过阈�
 
 运行记录（Run、Attempt、Result）由执行任务和准备任务产生，研究者经 CLI 写入。
 
-由定义得出的规则如下。关系图和每条规则的账本数据见 `design/new/smooth-research-data-relations.html`。
+由定义得出的规则如下。关系图和每条规则的研究数据库数据见 `design/site/content/smooth-research-data-relations.src.html`。
 
 1. 准备工作是任务，不建实验。现在运行必须挂实验（`schema.py:104`），实验必须检验假设（`research.py:209`），`SKILL.md:64` 又把 E0 定为结构与实现检查，要跑东西的准备只能建成 E0 实验。bypass-lora 的 14 个 E0 实验全是实现检查、冒烟、审计、工具验证和计时入口，H5 的 10 条检验边都来自它们。新规则下 `Run.experiment_id` 可空，运行一律用新边 `OF_TASK` 挂到任务，新实验不再用 E0。
 2. 写不成命题的方向留在 plan 里，不进假设表。“实现正确”不是假设，归实现任务的验收。
