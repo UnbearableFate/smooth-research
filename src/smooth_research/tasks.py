@@ -812,16 +812,27 @@ def _advance(store: Store, tid: str, commit: str, delivered: str, rnd: int, publ
              needs_job: bool = False) -> str:
     """Move the mainline to the tested merge commit and accept the task, under the write lock and only for the
     acceptance that tested it: a task returned, cancelled or delivered again meanwhile keeps the mainline where it
-    is. A mainline that already holds the commit (a move whose record was interrupted) is accepted as it is."""
+    is. A mainline that already holds the commit (a move whose record was interrupted) is accepted as it is.
+    needs_job: the round's test jobs decide, as the records say under the write lock (a failure, also one recorded
+    after a success, rejects it; an attempt corrected to running meanwhile is waited on)."""
+    if needs_job:  # a round that still waits changes nothing, so it writes nothing (a beat would redraw the page)
+        with store.read() as tx:
+            task = tx.require(tid, "Task")
+            jobs = _round_jobs(tx, task) if _same(task, delivered, rnd) and task.get("merge_commit") == commit \
+                else None
+        if jobs is not None and not _failed(jobs) and not (jobs and all(a["execution_state"] == "ended"
+                                                                         for a in jobs)):
+            return f"{tid} waits on its other merge-test attempts of this round"
     with store.write() as tx:
         task = tx.require(tid, "Task")
         if not _same(task, delivered, rnd) or task.get("merge_commit") != commit:
             raise RLError("CONFLICT", f"{tid} changed during its acceptance (now {task['state']}): the mainline did "
                                       "not move")
         jobs = _round_jobs(tx, task) if needs_job else []
-        failed = [a for a in jobs if a["execution_state"] == "ended" and a["outcome"] != "success"]
+        failed = _failed(jobs)
         if failed:  # any test job of the round that did not pass decides it
-            why = f"the test job {failed[0]['id']} on {commit[:12]} ended {failed[0]['outcome']}"
+            why = (f"the test job {failed[0]['id']} on {commit[:12]} ended {failed[0]['outcome']}: "
+                   f"{failed[0].get('ended_note') or ''}")[:300]
             tx.update(tid, _conflict_changes(task, why, public))
             tx.event("task.merge_conflict", tid, why)
             sync_candidates(tx, store)
@@ -842,6 +853,10 @@ def _advance(store: Store, tid: str, commit: str, delivered: str, rnd: int, publ
         sync_candidates(tx, store)
     gitops.follow(store.project, tid, delivered, commit)
     return f"accepted and merged ({commit[:12]}); the mainline moved"
+
+
+def _failed(jobs: list[dict]) -> list[dict]:
+    return [a for a in jobs if a["execution_state"] == "ended" and a["outcome"] != "success"]
 
 
 def _conflict_changes(task: dict, why: str, public: bool) -> dict:
@@ -880,12 +895,14 @@ def finish_merge(store: Store, attempt: str) -> str | None:
                 "code_commit"):
         return None
     public = task["kind"] == "prep" and task["creator"] == "coordinator"
-    if att["outcome"] != "success":
-        return _conflict(store, task["id"], f"the test job {attempt} on {task['merge_commit'][:12]} ended "
-                                            f"{att['outcome']}: {att.get('ended_note') or ''}"[:300], public,
-                         acc["delivered"], acc["round"])
-    return f"{task['id']}: " + _advance(store, task["id"], task["merge_commit"], acc["delivered"], acc["round"],
-                                        public, f"merged after its test job {attempt}", needs_job=True)
+    # a failure and a success alike go to one decision under the write lock, on the attempts as they stand then
+    try:
+        return f"{task['id']}: " + _advance(store, task["id"], task["merge_commit"], acc["delivered"], acc["round"],
+                                            public, f"merged after its test job {attempt}", needs_job=True)
+    except RLError as exc:  # the acceptance ended meanwhile: this job no longer decides anything
+        if exc.code != "CONFLICT":
+            raise
+        return f"{task['id']}: {exc.message}"
 
 
 def reconcile_merges(store: Store) -> list[str]:

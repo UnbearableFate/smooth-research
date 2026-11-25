@@ -529,6 +529,57 @@ def test_compute_sync_publishes_the_candidates_the_records_wait_on_and_retires_t
     assert tasks.repair_candidates(project) is False
 
 
+def test_candidates_go_to_the_push_destination_and_a_changed_branch_there_is_left_alone(project, rl, tmp_path):
+    from smooth_research import compute
+    flow.delivered(project, rl)
+    path = project.project.root / "smooth-research.yaml"
+    config = yaml.safe_load(path.read_text())
+    config["compute"] = {"default": "box", "tests": "job", "resources": {"box": {
+        "kind": "remote", "connect": "ssh", "host": "box", "jobs": "shell", "workspace": "/w", "code": "git",
+        "git_remote": "origin"}}}
+    path.write_text(yaml.safe_dump(config, sort_keys=False))
+    from smooth_research.project import find_project
+    from smooth_research.store import Store
+    project = Store(find_project(), "test")
+    top = gitops.top(project.project)
+    fetch, push = tmp_path / "fetch.git", tmp_path / "push.git"
+    for bare in (fetch, push):
+        git(tmp_path, "init", "-q", "--bare", str(bare))
+    git(top, "remote", "add", "origin", str(fetch))
+    git(top, "remote", "set-url", "--push", "origin", str(push))
+    (top / "other.txt").write_text("main moved\n")
+    git(top, "add", "-A")
+    git(top, "commit", "-qm", "main moves on")
+    ok(rl("task", "accept", "T-0003", who="scientist-T-0002"))
+    with project.read() as tx:
+        cand = tx.require("T-0003")["merge_commit"]
+    ok(rl("compute", "sync", who="scientist-T-0002"))
+    refs = lambda bare: git(tmp_path, "--git-dir", str(bare), "for-each-ref", "--format=%(refname) %(objectname)")
+    assert f"/T-0003 {cand}" in refs(push) and "sr-accept/" not in refs(fetch)
+    branch = "refs/heads/" + gitops.candidate_branch(project.project, "T-0003")
+    # another writer moved the branch at the destination after this sync listed it: the lease refuses the removal
+    ok(rl("task", "cancel", "T-0003", "--reason", "no longer needed", who="scientist-T-0002"))
+    real = compute._listed
+
+    def moved_after_listing(checkout, url, prefix):
+        found = real(checkout, url, prefix)
+        git(tmp_path, "--git-dir", str(push), "update-ref", branch, git(top, "rev-parse", "HEAD"))
+        return found
+    lines, problems = [], []
+    compute._listed = moved_after_listing
+    try:
+        compute._push_candidates(project, project.project.checkout, "origin", lines, problems)
+    finally:
+        compute._listed = real
+    assert any("could not remove" in p for p in problems) and branch in refs(push)
+    ok(rl("compute", "sync", who="scientist-T-0002"))  # the next sync retires it at the push destination
+    assert "sr-accept/" not in refs(push)
+    git(top, "remote", "set-url", "--push", "origin", str(tmp_path / "missing.git"))
+    lines, problems = [], []
+    compute._push_candidates(project, project.project.checkout, "origin", lines, problems)
+    assert any("could not be listed" in p for p in problems)
+
+
 def test_a_draft_edited_and_restored_while_its_test_runs_is_not_credited(project, rl, monkeypatch):
     from smooth_research import tasks
     flow.designed(project, rl)
@@ -544,6 +595,47 @@ def test_a_draft_edited_and_restored_while_its_test_runs_is_not_credited(project
     monkeypatch.setattr(tasks, "run_check", edit_meanwhile)
     code, _, err = rl("task", "test", "T-0003", who="scientist-T-0002")
     assert code == 3 and "changed while the test ran" in err
+
+
+def test_an_attempt_corrected_to_running_during_the_failure_decision_does_not_reject_its_round(project, rl,
+                                                                                              monkeypatch):
+    from smooth_research import tasks
+    flow.delivered(project, rl)
+    s = "scientist-T-0002"
+    _job_tests(project)
+    from smooth_research.project import find_project
+    from smooth_research.store import Store
+    project = Store(find_project(), "test")
+    top = gitops.top(project.project)
+    (top / "other.txt").write_text("main moved\n")
+    git(top, "add", "-A")
+    git(top, "commit", "-qm", "main moves on")
+    main = git(top, "rev-parse", "HEAD")
+    ok(rl("task", "accept", "T-0003", who=s))
+    run = json.loads(ok(rl("--json", "run", "register", "--task", "T-0003", "--request-id", "m1", "--purpose",
+                           "merge-test", "--minutes", "5", who=s)))
+    real = tasks._advance
+
+    def corrected_meanwhile(*args, **kw):  # the failure was read; a correction lands before the decision
+        with project.write() as tx:
+            tx.update(run["attempt"], {"execution_state": "running", "outcome": "unknown", "closed_at": None})
+        monkeypatch.setattr(tasks, "_advance", real)
+        return real(*args, **kw)
+    monkeypatch.setattr(tasks, "_advance", corrected_meanwhile)
+    ok(rl("run", "record", "--attempt", run["attempt"], "--state", "ended", "--outcome", "failed", who=s))
+    with project.read() as tx:
+        task = tx.require("T-0003")
+        version = tx.meta()["data_version"]
+    assert task["state"] == "merging" and task["merge_state"] == "merging"
+    assert tasks.reconcile_merges(project) == [] and tasks.reconcile_merges(project) == []
+    with project.read() as tx:
+        assert tx.meta()["data_version"] == version  # beats with nothing to decide write nothing
+    with project.write() as tx:  # it ends well after all
+        tx.update(run["attempt"], {"execution_state": "ended", "outcome": "success"})
+    tasks.finish_merge(project, run["attempt"])
+    with project.read() as tx:
+        assert tx.require("T-0003")["state"] == "accepted"
+    assert git(top, "rev-parse", "HEAD") != main
 
 
 def test_one_passed_attempt_waits_for_the_rest_of_its_round(project, rl):

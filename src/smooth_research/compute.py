@@ -16,12 +16,15 @@ locations.
 
 from __future__ import annotations
 
+import fcntl
 import os
 import re
 import shlex
 import shutil
 import subprocess
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Iterator
 
 from .project import (Project, Resource, compute_default, compute_repository, compute_resources,
                       coordinator_is_login, repo_top)
@@ -385,38 +388,85 @@ def _create_repository(store: Store, top: Path, remote: str) -> tuple[str | None
     return url, f"created the private GitHub repository {url} as git remote {remote} (compute.repository)"
 
 
+def _push_urls(checkout: Path, remote: str) -> list[str]:
+    """Where a push to the remote goes: its push URLs (git remote get-url --push --all), which may differ from the
+    URL it fetches from."""
+    ok, said = _call(checkout, "git", "remote", "get-url", "--push", "--all", remote, timeout=30)
+    return [u for u in said.splitlines() if u.strip()] if ok else []
+
+
+def _listed(checkout: Path, url: str, prefix: str) -> dict[str, str] | str:
+    """The candidate branches at one push destination (ref -> commit), or why they could not be listed."""
+    try:
+        done = subprocess.run(["git", "ls-remote", url, f"{prefix}*"], cwd=checkout, capture_output=True, text=True,
+                              timeout=120, env={**os.environ, **QUIET})
+    except (OSError, subprocess.SubprocessError) as exc:
+        return str(exc)
+    if done.returncode != 0:
+        return done.stderr.strip()[-300:] or f"git ls-remote exited {done.returncode}"
+    found = {}
+    for line in done.stdout.splitlines():
+        parts = line.split()
+        if len(parts) == 2 and parts[1].startswith(prefix):
+            found[parts[1]] = parts[0]
+    return found
+
+
+@contextmanager
+def _candidates_lock(store: Store) -> Iterator[None]:
+    """One candidate reconciliation at a time per project: an older sync must not apply its view of the records
+    after a newer one published the next round."""
+    path = store.project.state_dir / "candidates.lock"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(fd)
+
+
 def _push_candidates(store: Store, checkout: Path, remote: str, lines: list[str], problems: list[str]) -> None:
     """Publish the merge candidates the records wait on (one read of committed records: the exact commits, whatever
-    local branches a stopped process left), and retire this project's candidate branches on the remote that no
-    acceptance waits on any more (only while they still name the commit seen)."""
+    local branches a stopped process left), and retire this project's candidate branches that no acceptance waits
+    on any more, at each push destination of the remote. One reconciliation runs at a time; every update is leased
+    on the commit listed there just before, so a branch that changed meanwhile is left alone and reported."""
     from .gitops import candidate_branch, candidate_prefix
     from .tasks import _wanted, repair_candidates
-    try:
-        repair_candidates(store)
-    except RLError as exc:
-        problems.append(f"the local merge candidate branches could not be brought to the records ({exc.message}); "
-                        "fix it, then rl compute sync")
-    with store.read() as tx:
-        wanted = _wanted(tx)
-    for tid, commit in wanted.items():
-        ref = f"refs/heads/{candidate_branch(store.project, tid)}"
-        ok, said = _call(checkout, "git", "push", "--force", remote, f"{commit}:{ref}")
-        (lines if ok else problems).append(f"pushed the merge candidate of {tid} ({commit[:12]}) to {remote}" if ok
-                                           else f"git push {remote} {commit[:12]}:{ref} failed: {said}")
-    prefix = f"refs/heads/{candidate_prefix(store.project)}"
-    try:
-        listed = subprocess.run(["git", "ls-remote", remote, f"{prefix}*"], cwd=checkout, capture_output=True,
-                                text=True, timeout=120, env={**os.environ, **QUIET}).stdout
-    except (OSError, subprocess.SubprocessError):
-        listed = ""
-    for line in listed.splitlines():
-        parts = line.split()
-        if len(parts) != 2 or not parts[1].startswith(prefix) or parts[1][len(prefix):] in wanted:
-            continue
-        sha, ref = parts
-        done, said = _call(checkout, "git", "push", f"--force-with-lease={ref}:{sha}", remote, f":{ref}")
-        (lines if done else problems).append(f"removed the finished merge candidate {ref} from {remote}" if done
-                                             else f"could not remove {ref} from {remote}: {said}")
+    with _candidates_lock(store):
+        try:
+            repair_candidates(store)
+        except RLError as exc:
+            problems.append(f"the local merge candidate branches could not be brought to the records "
+                            f"({exc.message}); fix it, then rl compute sync")
+        urls = _push_urls(checkout, remote)
+        if not urls:
+            problems.append(f"the push URL of {remote} could not be read; merge candidates were not published")
+            return
+        prefix = f"refs/heads/{candidate_prefix(store.project)}"
+        for url in urls:
+            there = _listed(checkout, url, prefix)
+            if isinstance(there, str):
+                problems.append(f"the merge candidates at {url} could not be listed ({there}); nothing was "
+                                "published or retired there: rl compute sync again")
+                continue
+            with store.read() as tx:  # the records as they stand now, under the lock
+                wanted = {f"refs/heads/{candidate_branch(store.project, tid)}": (tid, commit)
+                          for tid, commit in _wanted(tx).items()}
+            for ref, (tid, commit) in wanted.items():
+                if there.get(ref) == commit:
+                    continue
+                done, said = _call(checkout, "git", "push", f"--force-with-lease={ref}:{there.get(ref, '')}", url,
+                                   f"{commit}:{ref}")
+                (lines if done else problems).append(
+                    f"pushed the merge candidate of {tid} ({commit[:12]}) to {url}" if done
+                    else f"could not push the merge candidate of {tid} ({commit[:12]}) to {url}: {said}")
+            for ref, sha in there.items():
+                if ref in wanted:
+                    continue
+                done, said = _call(checkout, "git", "push", f"--force-with-lease={ref}:{sha}", url, f":{ref}")
+                (lines if done else problems).append(f"removed the finished merge candidate {ref} from {url}" if done
+                                                     else f"could not remove {ref} from {url}: {said}")
 
 
 def sync(store: Store, name: str | None = None) -> dict:
