@@ -355,3 +355,18 @@ def test_an_old_race_that_left_two_records_binds_the_open_one(project, rl, fake)
     assert sessions(project)["coordinator"]["id"] == first
     with project.read() as tx:
         assert [s["status"] for s in tx.all("Session", name="coordinator")] == ["open", "ended"]
+
+
+def test_a_close_herdr_cannot_answer_keeps_the_session_open(project, rl, fake, monkeypatch):
+    flow.approved(project, rl)
+    watch.beat(project)
+    s = sessions(project)["scientist-T-0002"]
+    real = fake.call
+
+    def timeout(*args, timeout=90):
+        if args[:2] == ("tab", "close"):
+            raise RLError("HERDR", "timed out", herdr_code="timeout")
+        return real(*args, timeout=timeout)
+    monkeypatch.setattr(herdr, "call", timeout)
+    assert "not closed yet" in watch.close_session(project, s, "its work is finished")
+    assert "scientist-T-0002" in sessions(project)

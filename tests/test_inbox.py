@@ -194,3 +194,17 @@ def test_a_settlement_after_a_trial_still_says_go_on(project, rl):
     with project.write() as tx:  # the settlement that made the round pass came after the trial
         tx.event("review.settled", "RV-0003", "F1 withdrawn by scientist-T-0002")
     assert "review-verdict" in flow.types(project, r)
+
+
+def test_a_task_returned_and_delivered_again_is_news_to_both_sides(project, rl):
+    flow.delivered(project, rl)
+    s, r = "scientist-T-0002", "researcher-T-0003"
+    first = next(i for i in flow.items(project, s) if i.type == "task-conclusion")
+    flow.ok(rl("task", "return", "T-0003", "--reason", "add a seed", who=s))
+    returned = next(i for i in flow.items(project, r) if i.type == "returned")
+    flow.ok(rl("task", "deliver", "T-0003", "--conclusion", "mean3 lowers the error (EV-0001), revised",
+               "--limitations", "one seed", "--outputs", "research/work/T-0003/mean3-0.json", who=r))
+    again = next(i for i in flow.items(project, s) if i.type == "task-conclusion")
+    assert again.key() != first.key()
+    flow.ok(rl("task", "return", "T-0003", "--reason", "still one seed", who=s))
+    assert next(i for i in flow.items(project, r) if i.type == "returned").key() != returned.key()

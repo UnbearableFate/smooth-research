@@ -274,12 +274,14 @@ def _rebind_row(rows: list[dict]) -> dict | None:
 
 
 def close_session(store: Store, s: dict, why: str) -> str:
+    """End a session with its tab. When herdr cannot answer (a timeout), the record stays open and the next beat
+    tries again: an ended record over a live agent would leave that agent running unwatched."""
     try:
         tab = launch.own_tab(store, s)
         if tab:
             herdr.call("tab", "close", tab, timeout=30)
-    except RLError:
-        pass
+    except RLError as exc:
+        return f"{s['name']}: not closed yet ({exc.message}); the next beat tries again"
     with store.write() as tx:
         tx.update(s["id"], {"status": "ended", "ended_at": now_utc()})
         tx.event("session.closed", s["name"], why)

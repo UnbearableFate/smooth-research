@@ -19,7 +19,7 @@ from pathlib import Path
 
 from . import compute, gitops, manifest
 from .project import Project, coordinator_is_login, limit
-from .research import brief, design_keys, recheck_dependents, task_design, task_experiment
+from .research import brief, recheck_dependents, task_design, task_experiment
 from .reviews import covers, open_blockers
 from .roles import Actor, need
 from .schema import ENUMS
@@ -159,10 +159,6 @@ def register(store: Store, actor: Actor, task_id: str, request_id: str, arm: str
             run = tx.require(run_id, "Run")
             if run["task_id"] != task_id:
                 raise RLError("INVALID", f"{run_id} belongs to {run['task_id']}, not {task_id}")
-            was, now_test = (run["spec"].get("test") or {}), (spec.get("test") or {})
-            if was.get("design") != now_test.get("design") and {was.get("design"), now_test.get("design")} <= \
-                    design_keys(task_design(tx, task_id)):  # the same never-edited design under its older key
-                spec = {**spec, "test": {**now_test, "design": was["design"]}}  # the run keeps its spec
             if _comparable(run["spec"], spec) != _comparable(spec, run["spec"]):
                 raise RLError("CONFLICT", f"the spec differs from {run_id}'s: a changed run is a new run (omit --run)")
             index = run["attempt_count"] + 1
@@ -517,7 +513,10 @@ def _artifact_places(project: Project, path: str, task_id: str | None) -> list[t
         return [("absolute", p)] if p.is_file() else []
     places = [("project", project.root / p), ("checkout", project.checkout / p)]
     if task_id:
-        places.append(("task", checkout_in(project, task_id) / p))
+        try:  # a project restored without its repository has no task worktrees
+            places.append(("task", checkout_in(project, task_id) / p))
+        except RLError:
+            pass
     found, seen = [], set()
     for which, f in places:
         if f.is_file() and f.resolve() not in seen:
@@ -527,8 +526,9 @@ def _artifact_places(project: Project, path: str, task_id: str | None) -> list[t
 
 
 def _verify_artifacts(project: Project, artifacts: list, task_id: str | None = None) -> tuple[list[dict], str]:
-    """Each artifact checked against the file it names. The file read is kept on the entry (local_file), so later
-    checks (rl doctor) read the same one; copies that differ make the entry ambiguous rather than picking one."""
+    """Each artifact checked against the file it names. Where the file read was is kept on the entry (read_at:
+    project, checkout or task, relative to the project), so later checks (rl doctor) read the same one in the
+    project they audit; copies that differ make the entry ambiguous rather than picking one."""
     out, counts = [], {}
     for art in artifacts:
         if not isinstance(art, dict) or not (art.get("path") or art.get("uri")):
@@ -545,7 +545,7 @@ def _verify_artifacts(project: Project, artifacts: list, task_id: str | None = N
                 entry["copies"] = [{"at": which, "local_digest": d} for which, _, d in found]
             else:
                 which, f, actual = (matching or found)[0]
-                entry.update(local_digest=actual, local_file=str(f.resolve()), read_at=which)
+                entry.update(local_digest=actual, read_at=which)
                 if not reported or not reported.startswith("blake2b:"):
                     entry["check"] = "read_locally" + ("" if not reported else "; reported digest uses another algorithm, not compared")
                 else:

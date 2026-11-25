@@ -90,7 +90,8 @@ design: the protected scope, the manifest, the semantic tests. A design problem 
 Execute task:
 1. Read the card in `rl pack`. Runs follow the manifest's arms and seeds.
 2. Per run: `rl run register --task T-x --request-id <unique> --arm <arm> --seed <n> --minutes <expected>` (the
-   arm's config and split are recorded; give --config/--split only for a run that deviates, with --deviation).
+   arm's config and split are recorded; give --config with the whole configuration to change a parameter the
+   manifest lists under allowed, and --config/--split with --deviation for a run that deviates).
    On a remote resource add `--resource <name>` and follow `rl compute steps --attempt ATT-x`. Start it yourself
    (locally: run the command; a cluster: the job tools), record what you see: `rl run record --attempt ATT-x
    --state running|ended [--outcome success|failed] --source <tool> [--exec-kind hpc_job --exec-namespace <ns>

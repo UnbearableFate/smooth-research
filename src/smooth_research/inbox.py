@@ -43,12 +43,12 @@ class Item:
 
     def key(self) -> str:
         """The item's identity for the watcher's told record; a review item carries its pass, so a recheck on the
-        same ticket is news to the reviewer and its verdict to the author; a delivered task its delivery, so a
-        revision delivered after a return is news to the coordinator."""
+        same ticket is news to the reviewer and its verdict to the author; an item about a task its revision, so a
+        task delivered again or returned again is news to the one it goes to."""
         base = f"{self.type}:{self.subject}:{self.to}"
         if "pass" in self.extra:
             return f"{base}#{self.extra['pass']}"
-        return f"{base}@{self.extra['delivered']}" if self.extra.get("delivered") is not None else base
+        return f"{base}@{self.extra['rev']}" if self.extra.get("rev") is not None else base
 
 
 TEST_PURPOSES = ("merge-test", "design-test", "review-test")  # runs that are not the task's evidence
@@ -203,6 +203,7 @@ class Rules:
                            "tree": "build the hypothesis tree", "phase": "write the phase conclusion"}[t["kind"]]
                     self.add(type=f"{t['kind']}-task" if not t.get("return_note") else "returned", to=who,
                              subject=t["id"], ask=ask, cmd=f"rl task deliver {t['id']}",
+                             extra={"rev": t["revision"]} if t.get("return_note") else {},  # each return is news
                              since=self.since([t["id"]] + [k["id"] for k in self.children(t["id"])]),
                              frm="coordinator", note=t.get("return_note"))
             elif t["kind"] == "prep" and t["creator"] == "coordinator" and t.get("scientist_session") \
@@ -228,7 +229,9 @@ class Rules:
                 kind = "returned" if t.get("return_note") else "merge-conflict" if t.get("merge_state") == "conflict" \
                     else "task-card"
                 note = t.get("return_note") or t.get("merge_note") or t.get("answer_note") or t.get("dispatch_note")
-                self.add(type=kind, to=who, subject=t["id"], ask="fix engineering findings, run, deliver"
+                self.add(type=kind, to=who, subject=t["id"],
+                         extra={"rev": t["revision"]} if kind == "returned" else {},
+                         ask="fix engineering findings, run, deliver"
                          if t["kind"] == "execute" else "write the code, pass the done check, deliver",
                          cmd=f"rl task deliver {t['id']}", since=self.since([t["id"]]), frm=t["creator"], note=note)
 
@@ -242,6 +245,7 @@ class Rules:
             if t["state"] == "delivered" and t["creator"] != "coordinator":
                 conflict = t.get("merge_state") == "conflict"
                 self.add(type="merge-conflict" if conflict else "task-conclusion", to=sci, subject=t["id"],
+                         extra={"rev": t["revision"]},
                          ask=f"accept {t['id']} (it merges) or return it" if not conflict else
                          "open a small task to resolve it, or fix and accept again",
                          cmd=f"rl task accept {t['id']} | rl task return {t['id']} --reason ..",
@@ -421,7 +425,7 @@ class Rules:
             report = next((a["id"] for a in self.asks if a["kind"] == "report" and a["task_id"] == t["id"]
                            and a["state"] == "open"), None)
             self.add(type=kind, to="coordinator", subject=t["id"], ask=f"receive {t['id']} or return it",
-                     extra={"delivered": t["revision"]},  # each delivery (or a changed acceptance) is news
+                     extra={"rev": t["revision"]},  # each delivery (or a changed acceptance) is news
                      cmd=f"rl task accept {t['id']} | rl task return {t['id']} --reason ..",
                      since=t.get("delivered_at") or now_utc(), frm=t.get("holder"), note=(t.get("state_note")
                      or t.get("conclusion") or "") + (f" · the user reads its report ({report}); record what they "

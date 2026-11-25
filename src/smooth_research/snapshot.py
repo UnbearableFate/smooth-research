@@ -9,7 +9,7 @@ from pathlib import Path
 
 from latticedb import Database
 
-from . import documents
+from . import documents, gitops
 from .project import CONFIG_NAME, Project, load_config
 from .schema import ENTITIES, SCHEMA_VERSION
 from .store import Store, Tx
@@ -119,9 +119,15 @@ def doctor(store: Store) -> dict:
             for v in res.get("verification") or []:
                 if not (v.get("path") and v.get("local_digest")):
                     continue
-                # the file the import read (a task worktree's, until it is merged and the worktree removed)
-                read = Path(v["local_file"]) if v.get("local_file") else None
-                f = read if read and read.is_file() else store.project.abs(v["path"])
+                # the file the import read, in this project: a task worktree's until it is merged and removed
+                f = store.project.abs(v["path"])
+                if v.get("read_at") == "task" and not Path(v["path"]).is_absolute():
+                    try:
+                        task = tx.require(tx.require(res["attempt_id"], "Attempt")["run_id"], "Run")["task_id"]
+                        here = gitops.checkout_in(store.project, task) / v["path"]
+                        f = here if here.is_file() else f
+                    except RLError:
+                        pass
                 if f.is_file() and digest_file(f) != v["local_digest"]:
                     dangling.append(f"{res['id']}: {v['path']} changed since import ({f})")
     from .inbox import unwatched

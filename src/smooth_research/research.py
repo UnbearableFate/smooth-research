@@ -383,19 +383,6 @@ def design_key(exp: dict | None) -> str | None:
     return f"{exp['id']}@{exp['revision']}#{digest_json(fields)}"
 
 
-def design_keys(exp: dict | None) -> set[str]:
-    """The keys a clearance of this experiment may carry: its key, and for one never edited also the key the version
-    of 298955e wrote (it digested an explicit null edit_seq), so a clearance made under either stays valid. Once
-    edited, only the exact key."""
-    if not exp:
-        return set()
-    from .util import digest_json
-    keys = {design_key(exp)}
-    if exp.get("edit_seq") is None:
-        keys.add(f"{exp['id']}@{exp['revision']}#{digest_json({k: exp.get(k) for k in KEY_FIELDS})}")
-    return keys
-
-
 def design_id(tx: Tx, task_id: str) -> str | None:
     """The key of the experiment as it stands now for a task (design_key)."""
     return design_key(task_experiment(tx, task_id))

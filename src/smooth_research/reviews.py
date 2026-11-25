@@ -71,9 +71,9 @@ def covers(tx: Tx, task_id: str, commit: str, for_evidence: bool) -> tuple[bool,
     if not lp or lp.get("commit") != commit:
         return False, (f"{t['id']} last reviewed {lp['commit'][:12] if lp else 'nothing yet'}, not {commit[:12]}: "
                        f"request a {'recheck' if lp else 'review'}")
-    from .research import design_id, design_keys, task_experiment
+    from .research import design_id
     now = design_id(tx, task_id)
-    if now and lp.get("design") not in design_keys(task_experiment(tx, task_id)):
+    if now and lp.get("design") != now:
         return False, (f"{t['id']} reviewed {lp.get('design') or 'another design'}, and the experiment is {now} now "
                        "(another revision, or the draft changed since): request a review of it")
     seg = "researcher" if for_evidence else "scientist"

@@ -160,11 +160,12 @@ def load_json_records(value: str) -> list[dict]:
     return data
 
 
-CREDENTIALS = re.compile(r"(?<=://)[^/@\s]+@")
+CREDENTIALS = re.compile(r"(https?://)[^/@\s]+@")
 
 
 def redact(text: str) -> str:
-    """Text with the user and password of any URL in it left out (https://user:token@host -> https://host): what
-    rl prints or records never carries a credential a remote URL holds. A host fetching code authenticates by its
-    own means (a deploy key, gh auth login)."""
-    return CREDENTIALS.sub("", text or "")
+    """Text with the user and token of any http(s) URL in it left out (https://user:token@host -> https://host):
+    what rl prints or records never carries a credential a remote URL holds. A host fetching code authenticates by
+    its own means (a deploy key, gh auth login). An ssh login (ssh://git@host) is no secret and stays: the clone
+    needs it."""
+    return CREDENTIALS.sub(r"\1", text or "")
