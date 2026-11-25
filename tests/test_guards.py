@@ -884,3 +884,18 @@ def test_a_higher_envelope_line_is_news_to_whoever_was_told_of_a_lower(project, 
     assert keys() == ["usage-line:T-0002:scientist-T-0002@0.8"]
     charge("pbs:2", 0.2)
     assert keys() == ["usage-line:T-0002:scientist-T-0002@1"]
+
+
+def test_the_scientist_is_told_again_for_the_verdict_when_its_last_task_ends(project, rl):
+    """Codex trial, 11-25: the scientist accepted the execute task, ended its turn as told, and nothing woke it
+    for the verdict (its hypothesis-task item had been told at the start)."""
+    flow.delivered(project, rl)
+    s = "scientist-T-0002"
+
+    def item():
+        return next(i for i in flow.items(project, s) if i.subject == "T-0002")
+
+    before = item().key()
+    ok(rl("task", "accept", "T-0003", who=s))
+    after = item()
+    assert after.key() != before and "write the verdict on H-0001" in after.ask

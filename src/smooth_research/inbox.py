@@ -199,11 +199,20 @@ class Rules:
                     waits = self.scientist_waits(t)
                     if waits:
                         continue
-                    ask = {"hypothesis": f"test {', '.join(e['id'] for e in self.tx.out(t['id'], 'targets'))}",
+                    targets = ', '.join(e['id'] for e in self.tx.out(t['id'], 'targets'))
+                    ask = {"hypothesis": f"test {targets}",
                            "tree": "build the hypothesis tree", "phase": "write the phase conclusion"}[t["kind"]]
+                    kids = self.children(t["id"])
+                    ended = [k for k in kids if k["state"] in TASK_DONE]
+                    if kids and len(ended) == len(kids) and t["kind"] == "hypothesis":
+                        ask = (f"its tasks have ended: design the next one, or write the verdict on {targets} "
+                               "(rl decide --kind verdict ..), have it reviewed, deliver")
+                    # each return is news, and so is each of its tasks ending: a scientist that ended its turn
+                    # after accepting the last one is woken for the verdict (Codex trial, 11-25)
+                    rev = t["revision"] if t.get("return_note") else f"done{len(ended)}" if ended else None
                     self.add(type=f"{t['kind']}-task" if not t.get("return_note") else "returned", to=who,
                              subject=t["id"], ask=ask, cmd=f"rl task deliver {t['id']}",
-                             extra={"rev": t["revision"]} if t.get("return_note") else {},  # each return is news
+                             extra={"rev": rev} if rev is not None else {},
                              since=self.since([t["id"]] + [k["id"] for k in self.children(t["id"])]),
                              frm="coordinator", note=t.get("return_note"))
             elif t["kind"] == "prep" and t["creator"] == "coordinator" and t.get("scientist_session") \
