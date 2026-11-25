@@ -109,7 +109,7 @@ def show(store: Store, commit: str | None = None) -> dict:
             checks.append(f"{res.jobs}: checked by the agent")
         facts = _git_facts(project, res, commit) if res.remote else {}
         if facts.get("url"):
-            checks.append(f"git remote {res.git_remote}: {facts['url']}")
+            checks.append(f"git remote {res.git_remote}: {redact(facts['url'])}")
         if facts.get("problem"):
             checks.append(facts["problem"])
         if commit and "pushed" in facts:
@@ -360,14 +360,23 @@ def _fetch_steps(project: Project, res: Resource, att: str, where: dict) -> list
 QUIET = {"GIT_TERMINAL_PROMPT": "0", "GH_PROMPT_DISABLED": "1"}  # fail instead of asking for a password
 
 
+CREDENTIALS = re.compile(r"(?<=://)[^/@\s]+@")
+
+
+def redact(text: str) -> str:
+    """Text with the user and password of any URL in it left out (https://user:token@host -> https://host): what
+    rl prints or records never carries a credential a remote URL holds."""
+    return CREDENTIALS.sub("", text or "")
+
+
 def _call(cwd: Path, *args: str, timeout: int = 300) -> tuple[bool, str]:
-    """Run git or gh without prompts: (succeeded, the last of its output)."""
+    """Run git or gh without prompts: (succeeded, the last of its output, credentials left out)."""
     try:
         done = subprocess.run(list(args), cwd=cwd, capture_output=True, text=True, timeout=timeout,
                               env={**os.environ, **QUIET})
     except (OSError, subprocess.SubprocessError) as exc:
-        return False, str(exc)
-    return done.returncode == 0, (done.stderr.strip() + "\n" + done.stdout.strip()).strip()[-400:]
+        return False, redact(str(exc))
+    return done.returncode == 0, redact((done.stderr.strip() + "\n" + done.stdout.strip()).strip())[-400:]
 
 
 def _create_repository(store: Store, top: Path, remote: str) -> tuple[str | None, str]:
@@ -391,8 +400,12 @@ def _create_repository(store: Store, top: Path, remote: str) -> tuple[str | None
 def _push_urls(checkout: Path, remote: str) -> list[str]:
     """Where a push to the remote goes: its push URLs (git remote get-url --push --all), which may differ from the
     URL it fetches from."""
-    ok, said = _call(checkout, "git", "remote", "get-url", "--push", "--all", remote, timeout=30)
-    return [u for u in said.splitlines() if u.strip()] if ok else []
+    try:  # the whole list: a remote may push to many places
+        done = subprocess.run(["git", "remote", "get-url", "--push", "--all", remote], cwd=checkout,
+                              capture_output=True, text=True, timeout=30, env={**os.environ, **QUIET})
+    except (OSError, subprocess.SubprocessError):
+        return []
+    return [u.strip() for u in done.stdout.splitlines() if u.strip()] if done.returncode == 0 else []
 
 
 def _listed(checkout: Path, url: str, prefix: str) -> dict[str, str] | str:
@@ -401,9 +414,9 @@ def _listed(checkout: Path, url: str, prefix: str) -> dict[str, str] | str:
         done = subprocess.run(["git", "ls-remote", url, f"{prefix}*"], cwd=checkout, capture_output=True, text=True,
                               timeout=120, env={**os.environ, **QUIET})
     except (OSError, subprocess.SubprocessError) as exc:
-        return str(exc)
+        return redact(str(exc))
     if done.returncode != 0:
-        return done.stderr.strip()[-300:] or f"git ls-remote exited {done.returncode}"
+        return redact(done.stderr.strip())[-300:] or f"git ls-remote exited {done.returncode}"
     found = {}
     for line in done.stdout.splitlines():
         parts = line.split()
@@ -445,9 +458,9 @@ def _push_candidates(store: Store, checkout: Path, remote: str, lines: list[str]
             return
         prefix = f"refs/heads/{candidate_prefix(store.project)}"
         for url in urls:
-            there = _listed(checkout, url, prefix)
+            there, at = _listed(checkout, url, prefix), redact(url)  # at: where, as printed
             if isinstance(there, str):
-                problems.append(f"the merge candidates at {url} could not be listed ({there}); nothing was "
+                problems.append(f"the merge candidates at {at} could not be listed ({there}); nothing was "
                                 "published or retired there: rl compute sync again")
                 continue
             with store.read() as tx:  # the records as they stand now, under the lock
@@ -459,14 +472,14 @@ def _push_candidates(store: Store, checkout: Path, remote: str, lines: list[str]
                 done, said = _call(checkout, "git", "push", f"--force-with-lease={ref}:{there.get(ref, '')}", url,
                                    f"{commit}:{ref}")
                 (lines if done else problems).append(
-                    f"pushed the merge candidate of {tid} ({commit[:12]}) to {url}" if done
-                    else f"could not push the merge candidate of {tid} ({commit[:12]}) to {url}: {said}")
+                    f"pushed the merge candidate of {tid} ({commit[:12]}) to {at}" if done
+                    else f"could not push the merge candidate of {tid} ({commit[:12]}) to {at}: {said}")
             for ref, sha in there.items():
                 if ref in wanted:
                     continue
                 done, said = _call(checkout, "git", "push", f"--force-with-lease={ref}:{sha}", url, f":{ref}")
-                (lines if done else problems).append(f"removed the finished merge candidate {ref} from {url}" if done
-                                                     else f"could not remove {ref} from {url}: {said}")
+                (lines if done else problems).append(f"removed the finished merge candidate {ref} from {at}" if done
+                                                     else f"could not remove {ref} from {at}: {said}")
 
 
 def sync(store: Store, name: str | None = None) -> dict:
@@ -524,13 +537,13 @@ def sync(store: Store, name: str | None = None) -> dict:
             upstream = _git(checkout, "rev-parse", "--abbrev-ref", f"{branch}@{{upstream}}", check=False)
             ok, said = _call(checkout, "git", "push", *([] if upstream else ["-u"]), remote, branch)
             if ok:
-                pushed.append({"remote": remote, "branch": branch, "commit": head, "url": url})
+                pushed.append({"remote": remote, "branch": branch, "commit": head, "url": redact(url)})
                 if "up-to-date" in said:  # nothing new went out: no event
-                    lines.append(f"{branch} ({head[:12]}) is already on {remote} ({url})")
+                    lines.append(f"{branch} ({head[:12]}) is already on {remote} ({redact(url)})")
                 else:
-                    lines.append(f"pushed {branch} ({head[:12]}) to {remote} ({url})")
+                    lines.append(f"pushed {branch} ({head[:12]}) to {remote} ({redact(url)})")
                     with store.write() as tx:
-                        tx.event("compute.push", None, f"{branch} {head[:12]} -> {remote} {url}")
+                        tx.event("compute.push", None, f"{branch} {head[:12]} -> {remote} {redact(url)}")
             else:
                 problems.append(f"git push {remote} {branch} failed: {said}. Fix it (never force a shared branch), "
                                 "then rl compute sync")

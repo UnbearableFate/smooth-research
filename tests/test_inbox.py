@@ -108,8 +108,11 @@ def test_a_recheck_on_the_same_ticket_is_news_to_the_reviewer_and_its_verdict_to
     assert passed.key() != failed.key()
 
 
-def test_only_the_latest_tree_round_clears_the_delivery(project, rl):
+@pytest.mark.parametrize("first", [1, 9999])  # 9999: the next round is RV-10000, after it by number, not as text
+def test_only_the_latest_tree_round_clears_the_delivery(project, rl, first):
     """A tree whose newer round failed is not delivered on an older pass, nor told to be."""
+    with project.write() as tx:
+        tx.txn.set_property(tx._meta_node(), "seq_RV", first - 1)
     flow.ok(rl("task", "create", "--kind", "tree", "--title", "Tree", who="coordinator"))
     flow.ok(rl("task", "release", "T-0001", who="coordinator"))
     s = "scientist-T-0001"
@@ -118,12 +121,13 @@ def test_only_the_latest_tree_round_clears_the_delivery(project, rl):
                "whether averaging is worth it", "--scope", "N(5,1)", "--source", "Averaging", who=s))
     flow.ok(rl("decide", "--kind", "route", "--targets", "H-0001", "--rationale", "one", who=s))
     flow.ok(rl("review", "request", "T-0001", "--kind", "tree", who=s))
-    flow.ok(rl("review", "answer", "RV-0001", "--verdict", "pass", who="reviewer-RV-0001"))
+    one, two = (f"RV-{n:04d}" for n in (first, first + 1))
+    flow.ok(rl("review", "answer", one, "--verdict", "pass", who=f"reviewer-{one}"))
     flow.ok(rl("review", "request", "T-0001", "--kind", "tree", who=s))  # the tree changed: a new round
-    flow.ok(rl("review", "answer", "RV-0002", "--verdict", "fail", "--findings", json.dumps(
+    flow.ok(rl("review", "answer", two, "--verdict", "fail", "--findings", json.dumps(
         [{"category": "method", "severity": "medium", "text": "scope too wide", "loc": None}]),
-        who="reviewer-RV-0002"))
-    assert not any(i.type == "review-verdict" and i.subject == "RV-0001" for i in flow.items(project, s))
+        who=f"reviewer-{two}"))
+    assert not any(i.type == "review-verdict" and i.subject == one for i in flow.items(project, s))
     code, _, err = rl("task", "deliver", "T-0001", "--conclusion", "x", who=s)
     assert code == 1 and "tree review has not passed" in err
 
@@ -147,3 +151,23 @@ def test_a_design_key_from_before_edit_seq_stays_the_same():
     old = {k: exp.get(k) for k in KEY_FIELDS if k != "edit_seq"}
     assert design_key(exp) == f"E-0001@1#{digest_json(old)}"
     assert design_key({**exp, "edit_seq": 1}) != design_key(exp)
+
+
+def test_a_delivered_tree_is_not_reviewed_again(project, rl):
+    flow.tree(project, rl)
+    code, _, err = rl("review", "request", "T-0001", "--kind", "tree", who="scientist-T-0001")
+    assert code == 1 and "delivered" in err
+
+
+def test_the_go_on_item_follows_the_latest_round_and_the_event_order(project, rl):
+    flow.dispatched(project, rl)
+    r = "researcher-T-0003"
+    flow.run_arm(project, rl, "single")  # registered before the pass (in the same second, possibly)
+    flow.ok(rl("review", "request", "T-0003", who=r))
+    flow.ok(rl("review", "answer", "RV-0003", "--verdict", "pass", who="reviewer-RV-0003"))
+    assert "review-verdict" in flow.types(project, r)  # a run before the pass does not clear it
+    flow.ok(rl("review", "request", "T-0003", who=r))  # a newer round that fails says fix, not go on
+    flow.ok(rl("review", "answer", "RV-0004", "--verdict", "fail", "--findings", json.dumps(
+        [{"category": "method", "severity": "high", "text": "wrong baseline", "loc": None}]), who="reviewer-RV-0004"))
+    verdicts = [i for i in flow.items(project, r) if i.type == "review-verdict"]
+    assert [i.subject for i in verdicts] == ["RV-0004"] and "fix" in verdicts[0].ask

@@ -71,9 +71,9 @@ def covers(tx: Tx, task_id: str, commit: str, for_evidence: bool) -> tuple[bool,
     if not lp or lp.get("commit") != commit:
         return False, (f"{t['id']} last reviewed {lp['commit'][:12] if lp else 'nothing yet'}, not {commit[:12]}: "
                        f"request a {'recheck' if lp else 'review'}")
-    from .research import design_id
+    from .research import design_id, design_keys, task_experiment
     now = design_id(tx, task_id)
-    if now and lp.get("design") != now:
+    if now and lp.get("design") not in design_keys(task_experiment(tx, task_id)):
         return False, (f"{t['id']} reviewed {lp.get('design') or 'another design'}, and the experiment is {now} now "
                        "(another revision, or the draft changed since): request a review of it")
     seg = "researcher" if for_evidence else "scientist"
@@ -114,9 +114,15 @@ def conclusion_passed(tx: Tx, decision_id: str) -> dict | None:
     return None
 
 
+def latest_round(tx: Tx, task_id: str, kind: str) -> dict | None:
+    """The task's newest review round of a kind (rounds in id order: RV-9999 before RV-10000). The inbox and the
+    command guards both decide by it."""
+    rounds = [t for t in task_rounds(tx, task_id) if t.get("review_kind") == kind]
+    return rounds[-1] if rounds else None
+
+
 def latest_tree_round(tx: Tx, task_id: str) -> dict | None:
-    rounds = [t for t in task_rounds(tx, task_id) if t.get("review_kind") == "tree"]
-    return max(rounds, key=lambda t: t["id"]) if rounds else None
+    return latest_round(tx, task_id, "tree")
 
 
 def tree_passed(tx: Tx, task_id: str) -> dict | None:
@@ -155,6 +161,9 @@ def request(store: Store, actor: Actor, target: str, kind: str = "design", quest
             task = tx.require(target, "Task")
             if task["kind"] != "tree" or task.get("holder") != actor.name:
                 raise RLError("INVALID", f"a tree review is of the tree task you hold; {target} is not")
+            if task["state"] != "active":  # a delivered tree is the coordinator's: it returns it for more work
+                raise RLError("INVALID", f"{target} is {task['state']}: a tree is reviewed while you work on it; a "
+                                         "delivered tree that needs more work is returned by the coordinator first")
             out = _round(tx, actor, "tree", target, target, None, recheck_of, question)
         else:
             raise RLError("INVALID", "--kind is design, conclusion or tree (a recheck: --recheck-of RV-x)")

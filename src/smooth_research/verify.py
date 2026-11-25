@@ -68,11 +68,11 @@ def task_lines(tx: Tx, project: Project, task: dict) -> list[str]:
                          + (f", rechecked in {', '.join(rechecked)}" if rechecked else ", NOT rechecked"))
         else:
             lines.append("protected  unchanged since design")
-        from .research import design_key
+        from .research import design_keys
         from .tasks import passed_at, test_runs
         command = exp.get("semantic_tests")
-        runs = test_runs(task, tip, command, design_key(exp))
-        state = "not recorded" if not runs else "passed" if passed_at(task, tip, command, design_key(exp)) \
+        runs = test_runs(task, tip, command, design_keys(exp))
+        state = "not recorded" if not runs else "passed" if passed_at(task, tip, command, design_keys(exp)) \
             else "FAILED (latest run, or a failure as late as the pass)"
         lines.append(f"tests      semantic tests {state} at the delivered commit ({command})")
         def on_main() -> str:

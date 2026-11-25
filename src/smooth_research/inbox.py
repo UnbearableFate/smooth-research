@@ -20,10 +20,10 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from .project import deadline_minutes, limit
-from .reviews import blocking, last_pass, open_findings
+from .reviews import blocking, last_pass, latest_round, open_findings
 from .roles import session_name
 from .schema import TASK_DONE
-from .store import Tx
+from .store import Tx, id_order
 from .util import now_utc, parse_time
 
 
@@ -287,6 +287,8 @@ class Rules:
                              since=r.get("answered_at") or now_utc(), frm=reviewer)
             elif r["status"] == "passed" and r.get("review_kind") == "design":
                 t = self.by_id.get(r.get("task_id"))
+                if t and (latest_round(self.tx, t["id"], "design") or {}).get("id") != r["id"]:
+                    continue  # a newer round of the task decides (one that failed says fix, not go on)
                 if t and t["state"] == "active" and t.get("holder", "").startswith("scientist-") \
                         and last_pass(r) and last_pass(r).get("segment") == "scientist":
                     self.add(type="review-verdict", extra=pass_of(r), to=t["holder"], subject=r["id"],
@@ -294,21 +296,18 @@ class Rules:
                              since=r.get("answered_at") or now_utc(), frm=reviewer)
                 elif t and t["state"] == "active" and t.get("holder", "").startswith("researcher-") \
                         and last_pass(r) and last_pass(r).get("segment") == "researcher":
-                    # the researcher waits on this pass to run; its task card stays the item that times. A run
-                    # registered after the pass shows it went on.
-                    went_on = any(x["task_id"] == t["id"] and x.get("purpose") not in TEST_PURPOSES
-                                  and x["created_at"] >= (last_pass(r).get("answered_at") or "")
-                                  for x in self.runs.values())
-                    if went_on:
+                    # the researcher waits on this pass to run; its task card stays the item that times. An
+                    # attempt of a run of the task registered after the pass (by the event order) shows it went on.
+                    if self.went_on(t["id"], r["id"]):
                         continue
                     self.add(type="review-verdict", extra=pass_of(r), to=t["holder"], subject=r["id"],
                              ask=f"the review passed: go on with {t['id']} (run, then deliver)",
                              cmd="rl pack", since=r.get("answered_at") or now_utc(), frm=reviewer, timed=False)
             elif r["status"] == "passed" and r.get("review_kind") == "tree":
                 t = self.by_id.get(r.get("task_id"))
-                if t and t["state"] == "active" and t.get("holder") and r["id"] == max(
-                        x["id"] for x in self.tickets if x["kind"] == "review" and x.get("review_kind") == "tree"
-                        and x.get("task_id") == t["id"]):  # only the latest tree round says deliver
+                # only the task's latest tree round says deliver
+                if t and t["state"] == "active" and t.get("holder") and \
+                        (latest_round(self.tx, t["id"], "tree") or {}).get("id") == r["id"]:
                     self.add(type="review-verdict", extra=pass_of(r), to=t["holder"], subject=r["id"],
                              ask=f"deliver {t['id']}", cmd=f"rl task deliver {t['id']} ..",
                              since=r.get("answered_at") or now_utc(), frm=reviewer)
@@ -321,12 +320,23 @@ class Rules:
                              frm="cli")
             elif r["status"] == "closed" and r.get("ruled"):
                 newer = [x for x in self.tickets if x["kind"] == "review" and x.get("task_id") == r.get("task_id")
-                         and x.get("review_kind") == r.get("review_kind") and x["id"] > r["id"]]
+                         and x.get("review_kind") == r.get("review_kind") and id_order(x["id"]) > id_order(r["id"])]
                 if not newer:
                     self.add(type="ruling", to=author, subject=r["id"],
                              ask="the ruling upheld findings: change the work and open a new round, or make a "
                                  "decision request", cmd=f"rl show {r['ruled'].get('by')}",
                              since=r["ruled"].get("at") or now_utc(), frm=r["ruled"].get("by"))
+
+    def went_on(self, task_id: str, rv: str) -> bool:
+        """An attempt of a non-test run of the task was registered after the round's last answer, by event seq
+        (two in the same second keep their order)."""
+        answered = [e["seq"] for e in self.tx.all("Event", entity_id=rv, type="review.answered")]
+        if not answered:
+            return False
+        mine = [a["id"] for a in self.attempts if (self.runs.get(a["run_id"]) or {}).get("task_id") == task_id
+                and (self.runs.get(a["run_id"]) or {}).get("purpose") not in TEST_PURPOSES]
+        return any(e["seq"] > max(answered) for att in mine
+                   for e in self.tx.all("Event", entity_id=att, type="run.register"))
 
     def round_author(self, r: dict) -> str:
         if r.get("review_kind") == "design":

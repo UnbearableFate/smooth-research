@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 
 from . import documents, gitops, manifest
 from .project import limit, tests_mode
-from .research import design_key, sealed_copy, task_design, task_experiment
+from .research import design_key, design_keys, sealed_copy, task_design, task_experiment
 from .reviews import covers, last_passed_design, open_blockers
 from .roles import Actor, need, session_name
 from .schema import TASK_DONE
@@ -354,11 +354,12 @@ def _manifest_note(store: Store, tid: str, commit: str) -> str:
     return f"\nWARNING: {why}" if why else ""
 
 
-def test_runs(task: dict, commit: str, command: str | None, design: str | None = None) -> list[dict]:
-    """The recorded runs of this test command at this commit (for this experiment revision, when given), in the
-    order they ended."""
+def test_runs(task: dict, commit: str, command: str | None, design: str | set | None = None) -> list[dict]:
+    """The recorded runs of this test command at this commit (for this experiment revision, when given: a key or
+    the keys of research.design_keys), in the order they ended."""
+    keys = {design} if isinstance(design, str) else design
     runs = [t for t in task.get("tests") or [] if t["commit"] == commit and t.get("command") == command
-            and (design is None or t.get("design") == design)]
+            and (keys is None or t.get("design") in keys)]
     return sorted(runs, key=_instant)
 
 
@@ -370,7 +371,7 @@ def _instant(t: dict) -> float:
         return 0.0
 
 
-def passed_at(task: dict, commit: str, command: str | None, design: str | None = None) -> bool:
+def passed_at(task: dict, commit: str, command: str | None, design: str | set | None = None) -> bool:
     """The latest recorded run of this test command at this commit (for this experiment revision) passed: a later
     failure, a changed command or a new revision needs a new pass."""
     runs = test_runs(task, commit, command, design)
@@ -443,7 +444,7 @@ def dispatch(store: Store, actor: Actor, tid: str, note: str | None = None) -> d
             if missing:
                 raise RLError("INVALID", f"{exp['id']} needs {', '.join(missing)} before its code is handed over "
                                          "(rl experiment set ..)")
-            if not passed_at(task, commit, exp["semantic_tests"], design_key(exp)):
+            if not passed_at(task, commit, exp["semantic_tests"], design_keys(exp)):
                 raise RLError("INVALID", f"the latest test of `{exp['semantic_tests']}` at {commit[:12]} did not pass "
                                          f"(or none is recorded): rl task test {tid}")
             ok, why = covers(tx, tid, commit, for_evidence=False)

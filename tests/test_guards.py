@@ -692,3 +692,62 @@ def test_an_artifact_in_the_task_worktree_is_read_and_digested(project, rl):
                            json.dumps(res), who=r)))
     with project.read() as tx:
         assert tx.require(out["result"])["verification"][0]["check"].startswith("read_locally")
+
+
+def test_a_clearance_written_by_the_version_with_a_null_edit_seq_still_counts(project, rl):
+    """298955e digested an explicit null edit_seq; a never-edited experiment cleared then dispatches now."""
+    from smooth_research.research import KEY_FIELDS
+    from smooth_research.util import digest_json
+    flow.designed(project, rl)
+    s = "scientist-T-0002"
+    ok(rl("review", "request", "T-0003", who=s))
+    ok(rl("review", "answer", "RV-0002", "--verdict", "pass", who="reviewer-RV-0002"))
+    with project.write() as tx:  # the records as that version left them
+        tx.update("E-0001", {"edit_seq": None})
+        exp = tx.require("E-0001")
+        old = f"E-0001@{exp['revision']}#{digest_json({k: exp.get(k) for k in KEY_FIELDS})}"
+        rv = tx.require("RV-0002")
+        tx.update("RV-0002", {"passes": [*rv["passes"][:-1], {**rv["passes"][-1], "design": old}]})
+        task = tx.require("T-0003")
+        tx.update("T-0003", {"tests": [{**t, "design": old} for t in task["tests"]]})
+    ok(rl("task", "dispatch", "T-0003", who=s))
+
+
+def test_candidates_reach_every_push_destination_and_no_credential_is_printed(project, rl, tmp_path):
+    from smooth_research import compute
+    flow.delivered(project, rl)
+    path = project.project.root / "smooth-research.yaml"
+    config = yaml.safe_load(path.read_text())
+    config["compute"] = {"default": "box", "tests": "job", "resources": {"box": {
+        "kind": "remote", "connect": "ssh", "host": "box", "jobs": "shell", "workspace": "/w", "code": "git",
+        "git_remote": "origin"}}}
+    path.write_text(yaml.safe_dump(config, sort_keys=False))
+    from smooth_research.project import find_project
+    from smooth_research.store import Store
+    project = Store(find_project(), "test")
+    top = gitops.top(project.project)
+    # long paths: the list of push URLs is longer than a shortened diagnostic
+    bares = [tmp_path / ("d" * 120 + str(n)) / "repo.git" for n in range(3)]
+    for bare in bares:
+        bare.parent.mkdir()
+        git(tmp_path, "init", "-q", "--bare", str(bare))
+    git(top, "remote", "add", "origin", str(bares[0]))
+    for bare in bares:
+        git(top, "remote", "set-url", "--add", "--push", "origin", str(bare))
+    (top / "other.txt").write_text("main moved\n")
+    git(top, "add", "-A")
+    git(top, "commit", "-qm", "main moves on")
+    ok(rl("task", "accept", "T-0003", who="scientist-T-0002"))
+    with project.read() as tx:
+        cand = tx.require("T-0003")["merge_commit"]
+    lines, problems = [], []
+    compute._push_candidates(project, project.project.checkout, "origin", lines, problems)
+    assert problems == []
+    for bare in bares:
+        assert cand in git(tmp_path, "--git-dir", str(bare), "for-each-ref", "--format=%(objectname)")
+    secret = "https://someone:s3cr3t-token@127.0.0.1:9/repo.git"  # nothing listens: the listing fails
+    git(top, "remote", "set-url", "--push", "origin", secret, str(bares[0]))
+    lines, problems = [], []
+    compute._push_candidates(project, project.project.checkout, "origin", lines, problems)
+    assert problems and not any("s3cr3t" in x or "someone" in x for x in lines + problems)
+    assert compute.redact(f"push to {secret} failed") == "push to https://127.0.0.1:9/repo.git failed"

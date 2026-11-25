@@ -279,6 +279,11 @@ class Tx:
                                 "result": result})
 
 
+def id_order(ref: str) -> tuple:
+    """The order of record ids by their numbers (RV-9999 before RV-10000); compare ids with this, never as text."""
+    return _sort_key(ref)
+
+
 def _sort_key(ref: str) -> tuple:
     """Record ids by their numbers (H-0002 before H-0010, DOC-0003@2 after DOC-0003); labels by the number at each
     level: H2.9 before H2.10, a hypothesis before the ones under it, and the experiments anchored at a hypothesis

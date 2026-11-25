@@ -291,3 +291,35 @@ def test_a_stale_heartbeat_makes_every_command_say_the_watcher_stopped(project, 
     watch.heartbeat_path(project).write_text(json.dumps({"at": "2026-01-01T00:00:00+00:00", "pid": 1}))
     code, out, _ = rl("status")
     assert code == 0 and "warning: the watcher is not running: run `rl resume`" in out
+
+
+def _coordinator_row(project, status, pane=None):
+    with project.write() as tx:
+        sid = tx.next_id("Session")
+        tx.create("Session", {"id": sid, "name": "coordinator", "role": "coordinator", "subject": "project",
+                              "host": "claude", "entry": "claude:m", "status": status,
+                              "cwd": str(project.project.root), **({"herdr_pane": pane, "herdr_tab":
+                                                                    pane.replace(":p", ":t")} if pane else {})})
+    return sid
+
+
+def test_an_open_session_whose_pane_id_went_stale_is_bound_to_its_live_agent(project, rl, fake):
+    flow.tree(project, rl)
+    name = launch.herdr_name(project, "coordinator")
+    sid = _coordinator_row(project, "open", pane="w1:p3")  # herdr renumbered: its agent now lives in w1:p7
+    fake.tabs["w1:t7"] = name
+    fake.agents["w1:p7"] = {"name": name, "agent_status": "idle", "state_change_seq": 1}
+    assert watch.ensure_coordinator(project) == "the coordinator runs in pane w1:p7 (its session bound again)"
+    assert sessions(project)["coordinator"]["id"] == sid and "w1:t7" in fake.tabs
+    assert not any(c[:2] in (("tab", "close"), ("agent", "start")) for c in fake.calls)
+
+
+def test_a_session_bound_meanwhile_is_returned_and_not_started_again(project, rl, fake):
+    flow.tree(project, rl)
+    name = launch.herdr_name(project, "coordinator")
+    _coordinator_row(project, "open", pane="w1:p7")
+    fake.tabs["w1:t7"] = name
+    fake.agents["w1:p7"] = {"name": name, "agent_status": "idle", "state_change_seq": 1}
+    assert watch.rebind(project, "coordinator")["herdr_pane"] == "w1:p7"  # the watcher bound it a moment ago
+    out = watch.open_session(project, "coordinator", [], {})  # rl resume, on its older reading
+    assert out.startswith("coordinator: runs already") and not any(c[:2] == ("agent", "start") for c in fake.calls)
