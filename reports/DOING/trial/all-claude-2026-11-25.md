@@ -35,4 +35,4 @@ Result: H-0001 is **supported** in the simulated model. The mean of three draws 
 
 - The spend shows "—": local runs record no usage, because usage comes only from accounting records. Decided 11-25 by the user: local runs do not count usage time. They are no longer reported as missing usage, and the check line lists them as not counted.
 - Clearing a session's context never triggers: there is still no source for its context size.
-- The next trial should use Codex roles; this one was Claude only.
+- The Codex-roles trial ran the same day: [codex-2026-11-25.md](codex-2026-11-25.md).
