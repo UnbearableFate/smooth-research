@@ -53,8 +53,14 @@ def minutes_since(at: str | None, now: datetime | None = None) -> float:
     return ((now or datetime.now(timezone.utc)) - _ts(at)).total_seconds() / 60
 
 
+# Events that do not change what is waited on: the watcher's own notices and reminders, and session bookkeeping.
+# An item's age counts from the last change of its records, so a reminder never restarts its deadline.
+QUIET_EVENTS = ("notice", "session.opened", "session.closed", "session.cleared", "session.failed",
+                "session.trusted", "session.answered")
+
+
 def _last_event(tx: Tx, ids: list[str]) -> str | None:
-    times = [e["created_at"] for i in ids for e in tx.all("Event", entity_id=i)]
+    times = [e["created_at"] for i in ids for e in tx.all("Event", entity_id=i) if e["type"] not in QUIET_EVENTS]
     return max(times) if times else None
 
 
@@ -77,6 +83,11 @@ class Rules:
         self.items: list[Item] = []
 
     # -- shared facts -------------------------------------------------------------------------------------------
+
+    def ready(self, task: dict) -> bool:
+        """Every task it depends on is accepted: the rule claim checks (tasks.claim)."""
+        deps = [self.by_id.get(e["id"]) for e in self.tx.out(task["id"], "depends_on")]
+        return all(d and d["state"] == "accepted" for d in deps)
 
     def children(self, tid: str) -> list[dict]:
         return [self.by_id[e["id"]] for e in self.tx.inc(tid, "part_of") if e["id"] in self.by_id]
@@ -162,7 +173,7 @@ class Rules:
         for t in self.tasks:
             if t["kind"] in ("hypothesis", "tree", "phase"):
                 who = session_name("scientist", t["id"])
-                if t["state"] == "open":
+                if t["state"] == "open" and self.ready(t):
                     self.add(type=f"{t['kind']}-task", to=who, subject=t["id"], ask=f"work on {t['id']}",
                              cmd="rl pack", since=t.get("released_at") or now_utc(), frm="coordinator", timed=False,
                              note=t.get("reason"))
@@ -191,8 +202,7 @@ class Rules:
                 continue
             who = session_name("researcher", t["id"])
             if t["state"] == "open" and t["creator"] == "coordinator" and t.get("released_at"):
-                deps = [self.by_id.get(e["id"]) for e in self.tx.out(t["id"], "depends_on")]
-                if all(d and d["state"] == "accepted" for d in deps):
+                if self.ready(t):
                     self.add(type="prep-task", to=who, subject=t["id"], ask="write the code, run it until the done "
                              "check passes, deliver", cmd=f"rl task deliver {t['id']}", since=t["released_at"],
                              frm="coordinator", timed=False, note=t.get("requirement"))
@@ -229,7 +239,7 @@ class Rules:
                          since=self.since([t["id"]]), frm=t.get("holder"), note=t.get("block_note"))
             elif t["state"] == "open" and t["creator"] != "coordinator" and not t.get("holder"):
                 deps = [self.by_id.get(e["id"]) for e in self.tx.out(t["id"], "depends_on")]
-                if all(d and d["state"] == "accepted" for d in deps):
+                if self.ready(t):
                     self.add(type="prerequisites-accepted", to=t["creator"], subject=t["id"],
                              ask=f"claim {t['id']}, write its code or dispatch it", cmd=f"rl task claim {t['id']}",
                              since=self.since([d["id"] for d in deps], t.get("created_at")), frm="cli")

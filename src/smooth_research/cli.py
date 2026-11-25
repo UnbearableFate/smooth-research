@@ -475,20 +475,21 @@ def cmd_agent(args):
     store = _store(args)
     with store.read() as tx:
         s = next((x for x in tx.all("Session", name=args.name) if x["status"] == "open"), None)
-    if s is None or not s.get("herdr_pane"):
-        raise RLError("NOT_FOUND", f"no open session {args.name}")
+    pane = launch.bound(store, s)[0] if s else None
+    if pane is None:
+        raise RLError("NOT_FOUND", f"no open session {args.name} with its agent in herdr")
     if args.action == "dialog":
-        return {"summary": launch.excerpt(herdr.read(s["herdr_pane"]), 1500)}
+        return {"summary": launch.excerpt(herdr.read(pane), 1500)}
     actor = _actor(args)
     if args.name == "coordinator":
         pass  # the user answers the coordinator's own dialog in its pane; recorded here when asked to
     else:
         need(actor, "coordinator", what="answering a session's dialog")
-    screen = herdr.read(s["herdr_pane"])
-    why = launch.select(s["herdr_pane"], args.option, screen, lambda now: True)
+    screen = herdr.read(pane)
+    why = launch.select(pane, args.option, screen, lambda now: True)
     if why:
         raise RLError("INVALID", why)
-    herdr.keys(s["herdr_pane"], "enter")
+    herdr.keys(pane, "enter")
     with store.write() as tx:
         tx.update(s["id"], {"needs_decision": None})
         tx.event("session.answered", args.name, f"{args.option}: {args.reason}")

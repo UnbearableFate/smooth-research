@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from . import documents, gitops, inbox, refs
 from .cards import card
-from .research import brief, task_experiment, tree_lines
+from .research import brief, task_design, task_experiment, tree_lines
 from .reviews import blocking, open_findings, task_rounds
 from .roles import Actor, parse
 from .schema import TASK_DONE
@@ -225,9 +225,10 @@ def _scientist(store: Store, tx: Tx, actor: Actor) -> list[tuple[str, list[str],
 def _researcher(store: Store, tx: Tx, actor: Actor) -> list[tuple[str, list[str], bool]]:
     t = tx.require(actor.subject, "Task")
     cardl = _task_card(tx, t)
-    exp = task_experiment(tx, t["id"]) if t["kind"] == "execute" else None
+    exp = task_design(tx, t["id"]) if t["kind"] == "execute" else None
     if exp:
-        cardl += [f"experiment {exp['id']}@{exp['revision']}: {exp['question']}",
+        cardl += [f"experiment {exp['id']}@{exp['revision']}{' (as sealed for this task)' if t.get('sealed_design') else ''}"
+                  f": {exp['question']}",
                   f"design commit: {exp.get('design_commit') or 'not sealed'}",
                   f"manifest: {exp.get('manifest_path')}  · stop_when: {(exp.get('manifest') or {}).get('stop_when')}",
                   "arms: " + "; ".join(f"{a.get('name')} seeds {a.get('seeds')} split {a.get('split')} config "
@@ -278,7 +279,7 @@ def _reviewer(store: Store, tx: Tx, actor: Actor) -> list[tuple[str, list[str], 
     kind = r.get("review_kind")
     if kind == "design":
         t = tx.require(r["task_id"], "Task")
-        exp = task_experiment(tx, t["id"])
+        exp = task_design(tx, t["id"])
         commit = lp.get("commit")
         material += [f"commit under review: {commit}", f"worktree: {t.get('worktree')} (read with git show "
                      f"{(commit or '')[:12]}:<path>)"]
@@ -304,7 +305,7 @@ def _reviewer(store: Store, tx: Tx, actor: Actor) -> list[tuple[str, list[str], 
         if task:
             material += hypothesis_lines(tx, task)
             for e in tx.inc(task["id"], "part_of"):
-                exp = task_experiment(tx, e["id"])
+                exp = task_design(tx, e["id"])
                 if exp:
                     material.append(f"sealed design {exp['id']}@{exp['revision']} at "
                                     f"{(exp.get('design_commit') or '-')[:12]}: {exp['question']}")

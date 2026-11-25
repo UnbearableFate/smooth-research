@@ -169,7 +169,10 @@ def open_session(store: Store, name: str, items: list[inbox.Item], low: dict) ->
         mine = (actor.role == "scientist" and rec["kind"] in ("hypothesis", "tree", "phase")) or \
             (actor.role == "researcher" and rec["kind"] == "prep" and rec["creator"] == "coordinator")
         if mine:
-            claim(store, rec["id"], name)
+            try:
+                claim(store, rec["id"], name)
+            except RLError as exc:  # taken meanwhile, or a prerequisite changed: the next beat looks again
+                return f"{name}: not opened ({exc.message})"
     with store.write() as tx:
         cwd = folder(store, tx, name)
         old = tx.all("Session", name=name)
@@ -215,8 +218,9 @@ def tell(store: Store, sid: str, pane: str, items: list[inbox.Item], text: str |
 
 def close_session(store: Store, s: dict, why: str) -> str:
     try:
-        if s.get("herdr_tab") and herdr.get("tab", s["herdr_tab"]):
-            herdr.call("tab", "close", s["herdr_tab"], timeout=30)
+        tab = launch.own_tab(store, s)
+        if tab:
+            herdr.call("tab", "close", tab, timeout=30)
     except RLError:
         pass
     with store.write() as tx:
@@ -242,9 +246,8 @@ def _due(s: dict, items: list[inbox.Item], config: dict) -> list[inbox.Item]:
 def look(store: Store, s: dict, items: list[inbox.Item], low: dict) -> str | None:
     """One open session: gone, at a dialog, working, or idle with something to tell."""
     config = store.project.config
-    pane = s.get("herdr_pane")
     try:
-        info = herdr.agent(pane) if pane else None
+        pane, info = launch.bound(store, s)
     except RLError as exc:
         return f"{s['name']}: herdr failed ({exc.message})"
     if info is None:
@@ -290,7 +293,9 @@ def look(store: Store, s: dict, items: list[inbox.Item], low: dict) -> str | Non
 
 def beat(store: Store) -> dict:
     """One pass of the rules."""
+    from .tasks import reconcile_merges
     config = store.project.config
+    reconcile_merges(store)
     with store.read() as tx:
         items = inbox.all_items(tx, config)
         sessions = {s["name"]: s for s in tx.all("Session") if s["status"] == "open"}
@@ -306,43 +311,56 @@ def beat(store: Store) -> dict:
         done.append(close_session(store, s, "its work is finished"))
         sessions.pop(s["name"], None)
     for name, its in sorted(by_to.items(), key=lambda kv: kv[0] != "coordinator"):
-        s = sessions.get(name)
-        if s is None:
-            if name == "coordinator":
-                continue  # the coordinator's pane is opened by rl resume
-            with store.read() as tx:
-                why = may_open(tx, config, name, set(sessions))
-            if why:
+        try:
+            s = sessions.get(name)
+            if s is None:
+                if name == "coordinator":
+                    continue  # the coordinator's pane is opened by rl resume
+                with store.read() as tx:
+                    why = may_open(tx, config, name, set(sessions))
+                if why:
+                    continue
+                done.append(open_session(store, name, its, low))
+                with store.read() as tx:
+                    sessions = {x["name"]: x for x in tx.all("Session") if x["status"] == "open"}
                 continue
-            done.append(open_session(store, name, its, low))
-            with store.read() as tx:
-                sessions = {x["name"]: x for x in tx.all("Session") if x["status"] == "open"}
-            continue
-        out = look(store, s, its, low)
-        if out:
-            done.append(out)
+            out = look(store, s, its, low)
+            if out:
+                done.append(out)
+        except RLError as exc:  # one session's trouble does not stop the beat for the others
+            done.append(f"{name}: {exc.message}")
     for name, s in sessions.items():
-        if name not in by_to and s.get("needs_decision") is not None:
-            look(store, s, [], low)
+        if name not in by_to:  # nothing to tell, but a dialog it shows still needs someone
+            try:
+                look(store, s, [], low)
+            except RLError as exc:
+                done.append(f"{name}: {exc.message}")
     _redraw(store)
-    atomic_write(heartbeat_path(store), json.dumps({"at": now_utc(), "pid": os.getpid()}).encode())
     return {"actions": done, "items": len(items), "summary": "\n".join(done) or "nothing to do"}
 
 
+def write_heartbeat(store: Store, **values) -> None:
+    """The one writer of the heartbeat file: what it held, updated with values and the time of this beat."""
+    beat_info = {**(heartbeat(store) or {}), **values, "at": now_utc(), "pid": os.getpid()}
+    atomic_write(heartbeat_path(store), json.dumps(beat_info).encode())
+
+
 def _redraw(store: Store) -> None:
+    """The page again when the records changed since it was drawn, or every agents.page_minutes; then the
+    heartbeat."""
     from . import page
     beat_info = heartbeat(store) or {}
     with store.read() as tx:
         seq = tx.meta().get("data_version")
     every = agents_value(store.project.config, "page_minutes")
+    drawn = {}
     if seq != beat_info.get("page_seq") or _minutes(beat_info.get("page_at")) >= every:
         try:
             page.write(store)
+            drawn = {"page_seq": seq, "page_at": now_utc()}
         except RLError:
-            return
-        beat_info.update(page_seq=seq, page_at=now_utc())
-    beat_info.update(at=now_utc(), pid=os.getpid())
-    atomic_write(heartbeat_path(store), json.dumps(beat_info).encode())
+            pass
+    write_heartbeat(store, **drawn)
 
 
 # -- running it -----------------------------------------------------------------------------------------------
@@ -381,8 +399,7 @@ def start(store: Store) -> str:
                          "--env", f"SMOOTH_RESEARCH_RL={launch.rl_command()}")
     pane = made["root_pane"]["pane_id"]
     herdr.call("pane", "run", pane, f"{shlex.quote(launch.rl_command())} watch run")
-    atomic_write(heartbeat_path(store), json.dumps({"at": now_utc(), "pid": None, "tab": made["tab"]["tab_id"]}
-                                                   ).encode())
+    write_heartbeat(store, tab=made["tab"]["tab_id"])
     return f"the watcher started in tab {made['tab']['tab_id']}"
 
 
@@ -390,8 +407,13 @@ def ensure_coordinator(store: Store) -> str:
     """The coordinator's pane (11.2): one session on the project, opened from its pack."""
     with store.read() as tx:
         s = next((x for x in tx.all("Session", name="coordinator") if x["status"] == "open"), None)
-    if s and s.get("herdr_pane") and herdr.status(s["herdr_pane"]) not in ("gone", "not checked"):
-        return f"the coordinator runs in pane {s['herdr_pane']}"
+    if s:
+        try:
+            pane, _ = launch.bound(store, s)
+        except RLError as exc:
+            return f"the coordinator's pane could not be checked ({exc.message})"
+        if pane:
+            return f"the coordinator runs in pane {pane}"
     if s:
         close_session(store, s, "its pane is gone")
     with store.read() as tx:

@@ -15,8 +15,6 @@ ruling (an AD ticket the CLI opens).
 
 from __future__ import annotations
 
-import json
-
 from . import documents, gitops
 from .roles import Actor, need
 from .schema import FINDING_CLOSED
@@ -62,12 +60,6 @@ def task_rounds(tx: Tx, task_id: str) -> list[dict]:
     return [t for t in tx.all("Ticket", task_id=task_id) if t["kind"] == "review"]
 
 
-def current_round(tx: Tx, task_id: str, kind: str = "design") -> dict | None:
-    """The task's latest round of this kind that is not closed."""
-    found = [t for t in task_rounds(tx, task_id) if t.get("review_kind") == kind and t["status"] != "closed"]
-    return found[-1] if found else None
-
-
 def covers(tx: Tx, task_id: str, commit: str, for_evidence: bool) -> tuple[bool, str]:
     """Whether a review of the task covers commit: a reviewer gave a verdict on exactly this commit, and nothing that
     blocks is open (method findings; for evidence runs also medium or higher, 5.5)."""
@@ -84,6 +76,15 @@ def covers(tx: Tx, task_id: str, commit: str, for_evidence: bool) -> tuple[bool,
     if open_:
         return False, f"{t['id']} has open {_names(t, open_)}"
     return True, f"{t['id']} covers {commit[:12]}"
+
+
+def open_blockers(tx: Tx, task_id: str, for_evidence: bool) -> str | None:
+    """Open findings that block, on any design round of the task: the fast lane stands in for a review of the
+    commit, never for the resolution of a known finding (6.6)."""
+    seg = "researcher" if for_evidence else "scientist"
+    named = [_names(t, blocking(t, seg)) for t in task_rounds(tx, task_id)
+             if t.get("review_kind") == "design" and blocking(t, seg)]
+    return f"open {'; '.join(named)}" if named else None
 
 
 def _names(t: dict, findings: list[dict]) -> str:
@@ -389,14 +390,3 @@ def advise(store: Store, actor: Actor, ad: str, answer_doc: str, rulings: list[d
         tx.event("advice.answered", ad, ref)
     return {"id": ad, "summary": f"{ad} answered ({ref})"}
 
-
-def parse_findings(text: str | None) -> list[dict]:
-    if not text:
-        return []
-    try:
-        data = json.loads(text)
-    except ValueError as exc:
-        raise RLError("INVALID", f"findings are a JSON list of {{category, severity, text, loc}}: {exc}") from None
-    if not isinstance(data, list):
-        raise RLError("INVALID", "findings are a JSON list")
-    return data

@@ -295,8 +295,10 @@ def add_evidence(store: Store, actor: Actor, task_id: str, summary: str, level: 
         for res_id in results:
             res = tx.require(res_id, "Result")
             if not res.get("usable", True):
-                raise RLError("INVALID", f"{res_id} differs from its run's registration ({res.get('mismatches')}); "
-                                         "it cannot be evidence")
+                why = (f"differs from its run's registration ({res['mismatches']})" if res.get("mismatches") else
+                       f"is {res['status']}" if res["status"] == "rejected" else
+                       f"cannot be checked against its run ({res.get('verification_scope')})")
+                raise RLError("INVALID", f"{res_id} {why}: it cannot be evidence")
             runs.append(tx.require(tx.require(res["attempt_id"])["run_id"]))
         runs += [tx.require(tx.require(a, "Attempt")["run_id"]) for a in attempts]
         for run in runs:
@@ -349,6 +351,22 @@ def recheck_dependents(tx: Tx, source: str, reason: str) -> list[str]:
 def task_experiment(tx: Tx, task_id: str) -> dict | None:
     found = [e for e in tx.out(task_id, "targets") if e["label"] == "Experiment"]
     return tx.require(found[0]["id"]) if found else None
+
+
+DESIGN_FIELDS = ("id", "revision", "question", "manifest_path", "manifest", "manifest_digest", "design_commit",
+                 "semantic_tests", "protected", "brief_ref", "label")
+
+
+def task_design(tx: Tx, task_id: str) -> dict | None:
+    """The experiment as a dispatched task was given it: the revision sealed at its dispatch, kept on the task, so
+    a later revision of the experiment does not change what its runs, results and packs are checked against.
+    Before dispatch, the experiment as it stands (a draft)."""
+    task = tx.require(task_id, "Task")
+    return task.get("sealed_design") or task_experiment(tx, task_id)
+
+
+def sealed_copy(exp: dict) -> dict:
+    return {k: exp.get(k) for k in DESIGN_FIELDS}
 
 
 # -- decisions ------------------------------------------------------------------------------------------------
@@ -429,7 +447,13 @@ def finalize(store: Store, actor: Actor, dec: str) -> dict:
         if not review:
             raise RLError("INVALID", f"{dec} has no passing conclusion review: rl review request {dec} --kind "
                                      "conclusion; it becomes final once that review passes")
-        hyps = [tx.require(e["id"]) for e in tx.out(dec, "decides") if e["label"] == "Hypothesis"]
+        edges = [e for e in tx.out(dec, "decides") if e["label"] == "Hypothesis"]
+        hyps = [tx.require(e["id"]) for e in edges]
+        moved = [f"{e['id']} is at revision {h['revision']}, the reviewed draft decides revision {e.get('revision')}"
+                 for e, h in zip(edges, hyps) if e.get("revision") is not None and e["revision"] != h["revision"]]
+        if moved:
+            raise RLError("INVALID", f"{dec} was reviewed for another statement: {'; '.join(moved)}. Write a new "
+                                     "draft for the revised hypothesis (rl decide ..) and have it reviewed")
         cited = [tx.require(e["id"]) for e in tx.out(dec, "based_on")]
         supports, challenges = d.get("supports") or [], d.get("challenges") or []
         if d["kind"] == "verdict":

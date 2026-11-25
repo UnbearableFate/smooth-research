@@ -28,6 +28,7 @@ def task_ids(tx: Tx, task: dict) -> list[str]:
 
 def task_usage(tx: Tx, task: dict) -> dict:
     used: dict[str, float] = {}
+    counted: set[str] = set()  # one accounting record covers several attempts: counted once
     pending_hours, pending, unreported = 0.0, 0, 0
     for tid in task_ids(tx, task):
         for run in tx.all("Run", task_id=tid):
@@ -35,7 +36,9 @@ def task_usage(tx: Tx, task: dict) -> dict:
                 records = [tx.require(e["id"]) for e in tx.inc(att["id"], "covers")]
                 records = [u for u in records if not u.get("superseded")]
                 for u in records:
-                    used[u["unit"]] = used.get(u["unit"], 0.0) + u["quantity"]
+                    if u["id"] not in counted:
+                        counted.add(u["id"])
+                        used[u["unit"]] = used.get(u["unit"], 0.0) + u["quantity"]
                 if att["execution_state"] in ("prepared", "queued", "running", "unknown"):
                     pending += 1
                     pending_hours += (run.get("minutes") or 0) / 60

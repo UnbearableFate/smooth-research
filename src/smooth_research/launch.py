@@ -8,6 +8,7 @@ coordinator answers (rl agent answer), or the user for the coordinator's own ses
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -111,11 +112,47 @@ def launch_args(store: Store, entry: adapters.Entry, kind: str, name: str, host_
     return args + agent_args(store.project.config, entry.entry)
 
 
+def herdr_name(store: Store, name: str) -> str:
+    """The herdr agent name (and tab label) of a session: herdr takes [a-z][a-z0-9_-]{0,31}, unique on its server,
+    so the session name is lowercased behind a tag of the project (a few letters of its folder and a short digest
+    of its path), and two projects with the same record ids keep apart."""
+    root = str(store.project.root.resolve())
+    slug = re.sub(r"[^a-z0-9]", "", store.project.root.name.lower())[:6]
+    slug = slug if slug[:1].isalpha() else "p" + slug[:5]
+    tag = hashlib.blake2b(root.encode(), digest_size=2).hexdigest()
+    return f"{slug}{tag}-{name.lower()}"[:32]
+
+
+def bound(store: Store, s: dict) -> tuple[str | None, dict | None]:
+    """The session's pane and its live agent, when the agent there is still the session's own: herdr reuses pane
+    and tab ids after a restart, so an id alone may name another project's agent. (None, None) when the pane holds
+    no agent or another one; such a binding is stale, and nothing is done to whatever lives there."""
+    pane = s.get("herdr_pane")
+    if not pane:
+        return None, None
+    info = herdr.agent(pane)
+    if info is None or (info.get("name") or "") != herdr_name(store, s["name"]):
+        return None, None
+    return pane, info
+
+
+def own_tab(store: Store, s: dict) -> str | None:
+    """The session's tab when it is still the one rl made for it (by its label), else None."""
+    tab = s.get("herdr_tab")
+    if not tab:
+        return None
+    try:
+        found = herdr.get("tab", tab)
+    except RLError:
+        return None
+    return tab if found and found.get("label") == herdr_name(store, s["name"]) else None
+
+
 def new_tab(store: Store, s: dict) -> dict:
     """A herdr tab for a session, in its folder, with the environment that names its project, session and checkout."""
     env = {ENV_PROJECT: str(store.project.root), "SMOOTH_RESEARCH_RL": rl_command(), ENV_SESSION: s["name"],
            **({ENV_CHECKOUT: s["cwd"]} if s.get("cwd") and Path(s["cwd"]) != store.project.root else {})}
-    return herdr.new_tab("--cwd", s["cwd"], "--label", s["name"], "--no-focus",
+    return herdr.new_tab("--cwd", s["cwd"], "--label", herdr_name(store, s["name"]), "--no-focus",
                          *[a for k, v in env.items() for a in ("--env", f"{k}={v}")])
 
 
@@ -125,6 +162,7 @@ def start_agent(store: Store, s: dict, timeout: int = 90, tab: str | None = None
     id, and why the agent still waits when it is not ready (a dialog someone decides). When the agent does not
     start, a tab made here is closed and the error raised."""
     name, entry = s["name"], adapters.Entry.parse(s["entry"])
+    agent_name = herdr_name(store, name)
     made = not pane
     if made:
         created = new_tab(store, s)
@@ -132,7 +170,7 @@ def start_agent(store: Store, s: dict, timeout: int = 90, tab: str | None = None
     host_session = str(uuid.uuid4()) if entry.entry in ("claude", "pi") else None
     waiting = None
     try:
-        herdr.call("agent", "start", name, "--kind", entry.entry, "--pane", pane, "--timeout", str(timeout * 1000),
+        herdr.call("agent", "start", agent_name, "--kind", entry.entry, "--pane", pane, "--timeout", str(timeout * 1000),
                    "--", *launch_args(store, entry, s["role"], name, host_session), timeout=timeout + 30)
     except RLError as exc:
         if exc.details.get("herdr_code") != "agent_not_ready":

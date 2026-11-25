@@ -3,11 +3,12 @@ agent each item once, records a dialog for the coordinator, reopens a session wh
 ones whose work is finished."""
 
 import json
+import re
 
 import flow
 import pytest
 
-from smooth_research import adapters, herdr, usage, watch
+from smooth_research import adapters, herdr, launch, page, usage, watch
 from smooth_research.util import RLError
 
 
@@ -39,6 +40,10 @@ class FakeHerdr:
             return {"tab": {"tab_id": rest[0], "label": self.tabs[rest[0]]}}
         if (group, command) == ("agent", "start"):
             name, pane = rest[0], rest[rest.index("--pane") + 1]
+            if not re.fullmatch(r"[a-z][a-z0-9_-]{0,31}", name):  # herdr's grammar
+                raise RLError("HERDR", "invalid name", herdr_code="invalid_agent_name")
+            if any(a["name"] == name for a in self.agents.values()):
+                raise RLError("HERDR", "name taken", herdr_code="agent_name_taken")
             self.agents[pane] = {"name": name, "agent_status": "idle", "state_change_seq": 1,
                                  "args": rest[rest.index("--") + 1:]}
             return {"agent": {"pane_id": pane}}
@@ -145,12 +150,73 @@ def test_a_finished_session_is_closed_with_its_tab(project, rl, fake):
         tx.create("Session", {"id": tx.next_id("Session"), "name": "scientist-T-0001", "role": "scientist",
                               "subject": "T-0001", "host": "claude", "entry": "claude:m", "status": "open",
                               "cwd": str(project.project.root), "herdr_tab": "w1:t9", "herdr_pane": "w1:p9"})
-    fake.tabs["w1:t9"] = "scientist-T-0001"
-    fake.agents["w1:p9"] = {"name": "scientist-T-0001", "agent_status": "idle", "state_change_seq": 1}
+    fake.tabs["w1:t9"] = launch.herdr_name(project, "scientist-T-0001")
+    fake.agents["w1:p9"] = {"name": launch.herdr_name(project, "scientist-T-0001"), "agent_status": "idle",
+                            "state_change_seq": 1}
     flow.ok(rl("task", "accept", "T-0001", who="coordinator"))
     out = watch.beat(project)
     assert "scientist-T-0001: closed (its work is finished)" in out["actions"]
     assert "w1:t9" not in fake.tabs and "scientist-T-0001" not in sessions(project)
+
+
+def test_herdr_names_are_lowercase_short_and_differ_between_projects(project, tmp_path):
+    name = launch.herdr_name(project, "researcher-T-10003")
+    assert re.fullmatch(r"[a-z][a-z0-9_-]{0,31}", name) and name.endswith("-researcher-t-10003")
+    other = type(project.project)(tmp_path / "elsewhere" / "proj", {})
+    assert launch.herdr_name(type(project)(other, "t"), "coordinator") != launch.herdr_name(project, "coordinator")
+
+
+def test_a_pane_id_that_now_holds_another_agent_is_left_alone(project, rl, fake):
+    """After a herdr restart ids start again: the saved pane and tab may hold another project's agent."""
+    flow.approved(project, rl)
+    watch.beat(project)
+    s = sessions(project)["scientist-T-0002"]
+    fake.agents[s["herdr_pane"]]["name"] = "other1234-scientist-t-0002"
+    fake.tabs[s["herdr_tab"]] = "other1234-scientist-t-0002"
+    prompts = len(fake.prompts)
+    out = watch.beat(project)
+    assert any("its agent is gone" in a for a in out["actions"])
+    assert s["herdr_tab"] in fake.tabs  # not closed: not ours
+    assert not any(p == s["herdr_pane"] for p, _ in fake.prompts[prompts:])
+    assert not any(c[:2] == ("tab", "close") for c in fake.calls)
+
+
+def test_a_session_with_nothing_to_do_is_still_watched_for_dialogs(project, rl, fake):
+    flow.dispatched(project, rl)
+    with project.write() as tx:  # the scientist waits on its researcher: no items, an open session
+        tx.create("Session", {"id": tx.next_id("Session"), "name": "scientist-T-0002", "role": "scientist",
+                              "subject": "T-0002", "host": "claude", "entry": "claude:m", "status": "open",
+                              "cwd": str(project.project.root), "herdr_tab": "w1:t9", "herdr_pane": "w1:p9"})
+    fake.agents["w1:p9"] = {"name": launch.herdr_name(project, "scientist-T-0002"), "agent_status": "blocked",
+                            "state_change_seq": 2}
+    assert flow.types(project, "scientist-T-0002") == []
+    watch.beat(project)
+    assert "session-needs-decision" in flow.types(project, "coordinator")
+
+
+def test_a_claim_that_fails_does_not_stop_the_beat(project, rl, fake, monkeypatch):
+    flow.approved(project, rl)
+    from smooth_research import tasks
+
+    def taken(store, tid, holder):
+        raise tasks.RLError("CONFLICT", f"{tid} is active, held by someone")
+    monkeypatch.setattr(tasks, "claim", taken)
+    out = watch.beat(project)
+    assert any("not opened" in a for a in out["actions"]) and watch.alive(project)
+    assert "scientist-T-0002" not in sessions(project)
+
+
+def test_the_page_is_drawn_again_only_when_the_records_changed(project, rl, fake, monkeypatch):
+    flow.approved(project, rl)
+    watch.beat(project)
+    drawn = []
+    monkeypatch.setattr(page, "write", lambda store: drawn.append(1))
+    pane = sessions(project)["scientist-T-0002"]["herdr_pane"]
+    fake.set(pane, "working")
+    watch.beat(project)  # the session's seq moved: a record changed
+    watch.beat(project)
+    watch.beat(project)
+    assert len(drawn) == 1
 
 
 def test_the_watcher_needs_herdr(project):

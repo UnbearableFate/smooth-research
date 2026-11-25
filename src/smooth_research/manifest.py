@@ -64,23 +64,33 @@ def config_digest(name: str, seed, split, config: dict, allowed: list[str]) -> s
                         "config": kept})
 
 
+def effective(manifest: dict, name: str, config: dict | None, split) -> tuple[dict | None, object]:
+    """The configuration and split a run registers with: what it gives, else its arm's (a run that names only its
+    arm runs the arm as written, and is recorded so)."""
+    a = arm(manifest, name) or {}
+    return (dict(a.get("config") or {}) if config is None else config), (a.get("split") if split is None else split)
+
+
 def check_run(manifest: dict, name: str, seed, config: dict | None, split=None) -> list[str]:
-    """Why a run with this arm, seed and configuration does not match the manifest; [] when it does."""
+    """Why a run with this arm, seed, configuration and split does not match the manifest; [] when it does. A
+    configuration or split not given is the arm's (effective)."""
     a = arm(manifest, name)
     if a is None:
         return [f"arm {name!r} is not in the manifest (arms: {', '.join(str(x['name']) for x in manifest['arms'])})"]
+    config, split = effective(manifest, name, config, split)
     out = []
     seeds = a.get("seeds", [None])
     if seeds != [None] and (seed is None or str(seed) not in {str(s) for s in seeds}):
         out.append(f"seed {seed!r} is not one of arm {name}'s seeds ({', '.join(map(str, seeds))})")
     allowed = [str(k) for k in manifest.get("allowed") or []]
     expected = config_digest(name, seed, a.get("split"), a.get("config") or {}, allowed)
-    actual = config_digest(name, seed, a.get("split") if split is None else split, config or {}, allowed)
-    if config is not None and expected != actual:
+    actual = config_digest(name, seed, split, config or {}, allowed)
+    if expected != actual:
         want, got = a.get("config") or {}, config or {}
         keys = sorted(k for k in set(want) | set(got) if k not in allowed and want.get(k) != got.get(k))
         out.append("configuration differs from the manifest in " + ", ".join(
-            f"{k} ({want.get(k)!r} → {got.get(k)!r})" for k in keys[:6]) if keys else "the split differs")
+            f"{k} ({want.get(k)!r} → {got.get(k)!r})" for k in keys[:6]) if keys else
+            f"the split differs ({a.get('split')!r} → {split!r})")
     return out
 
 

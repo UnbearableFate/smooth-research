@@ -11,7 +11,7 @@ from conftest import git
 from smooth_research import inbox
 from smooth_research.store import Store
 
-SIM = '''import argparse, json, random, statistics
+SIM = '''import argparse, json, random, statistics, subprocess
 
 def error(arm, seed, n=300):
     rng = random.Random(seed)
@@ -22,7 +22,9 @@ if __name__ == "__main__":
     p = argparse.ArgumentParser()
     p.add_argument("--arm"); p.add_argument("--seed", type=int); p.add_argument("--out")
     a = p.parse_args()
-    json.dump({"status": "complete", "arm": a.arm, "seed": a.seed, "config": {"k": 3 if a.arm == "mean3" else 1},
+    commit = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+    json.dump({"status": "complete", "arm": a.arm, "seed": a.seed, "commit": commit,
+               "config": {"k": 3 if a.arm == "mean3" else 1},
                "metrics": {"abs_error": error(a.arm, a.seed)}}, open(a.out, "w"))
 '''
 TEST = 'from sim import error\nassert error("single", 0, 50) > 0\nprint("ok")\n'

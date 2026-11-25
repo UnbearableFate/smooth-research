@@ -132,21 +132,48 @@ def test_a_running_job_hides_the_task_until_it_ends(project, rl):
     assert types(project, r) == ["task-card"]
 
 
-def test_the_executor_command_delivery_finds_the_job_by_its_id(project, rl, monkeypatch):
+def miyabi(head: str, rows: list[str], final: bool = True) -> str:
+    """A message as miyabi-mcp renders it (notify.render): a head line, one row per job, its footer."""
+    lines = [f"[miyabi-mcp] {head} N-1 (arms): all ended (12:00 JST)", *rows,
+             "PBS exit status is not application success: check the outputs before continuing.",
+             "Details: job_get(job_ids=[...], tail_lines=50)."]
+    if final:
+        lines.append('Acknowledge: notify_ack(id="N-1", ack_token="t")  (success is not claimed here)')
+    return "\n".join(lines)
+
+
+def test_the_executor_command_delivery_ends_each_job_by_its_own_row(project, rl, monkeypatch):
+    import io
     flow.dispatched(project, rl)
     r = "researcher-T-0003"
-    ok(rl("run", "register", "--task", "T-0003", "--request-id", "a", "--arm", "single", "--seed", "0", "--config",
-          '{"k": 1}', "--minutes", "60", who=r))
-    ok(rl("run", "record", "--attempt", "ATT-0001-1", "--state", "queued", "--exec-kind", "hpc_job",
-          "--exec-namespace", "miyabi-pbs", "--exec-id", "123456.opbs", who=r))
-    import io
-    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(
-        {"notification": "job", "msg_id": "m1", "message": "job 123456.opbs finished (exit status 0)"})))
-    out = ok(rl("run", "ended"))
-    assert "ATT-0001-1" in out
-    with project.read() as tx:
-        att = tx.require("ATT-0001-1")
-    assert (att["execution_state"], att["outcome"]) == ("ended", "success")
+    for n, (arm, job) in enumerate((("single", "123456.opbs"), ("mean3", "123457.opbs")), 1):
+        k = 3 if arm == "mean3" else 1
+        ok(rl("run", "register", "--task", "T-0003", "--request-id", f"a{n}", "--arm", arm, "--seed", "0",
+              "--config", json.dumps({"k": k}), "--minutes", "60", who=r))
+        ok(rl("run", "record", "--attempt", f"ATT-000{n}-1", "--state", "queued", "--exec-kind", "hpc_job",
+              "--exec-namespace", "miyabi-pbs", "--exec-id", job, who=r))
+
+    def deliver(message: str) -> str:
+        monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"notification": "N-1", "msg_id": "m",
+                                                                 "message": message})))
+        return ok(rl("run", "ended"))
+
+    def state(att: str) -> tuple:
+        with project.read() as tx:
+            a = tx.require(att)
+        return a["execution_state"], a["outcome"]
+
+    # a state-unknown notice names the job and its footer says "success": nothing ends
+    deliver(miyabi("job state unknown in", ["- 123456.opbs single  - (unknown)  walltime -/1:00:00  log o"],
+                   final=False))
+    assert state("ATT-0001-1") == ("queued", "unknown")
+    # a batch: each job by its own row; one still running stays pending
+    out = deliver(miyabi("notification", ["- 123456.opbs single  F (success)  walltime 0:10/1:00:00  log o",
+                                          "- 123457.opbs mean3  R (unknown)  walltime 0:10/1:00:00  log o"]))
+    assert "ATT-0001-1" in out and "still running or unknown: ATT-0002-1" in out
+    assert state("ATT-0001-1") == ("ended", "success") and state("ATT-0002-1") == ("queued", "unknown")
+    deliver(miyabi("notification", ["- 123457.opbs mean3  F (failed)  walltime 0:20/1:00:00  log o"]))
+    assert state("ATT-0002-1") == ("ended", "failed")
 
 
 def test_acceptance_merges_into_the_mainline_after_tests(project, rl):

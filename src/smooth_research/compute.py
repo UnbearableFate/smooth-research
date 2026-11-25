@@ -141,8 +141,7 @@ def _attempt_facts(store: Store, attempt: str) -> tuple[str | None, str | None, 
     with store.read() as tx:
         att = tx.require(attempt, "Attempt")
         run = tx.require(att["run_id"])
-    code = run["spec"].get("code_ref")
-    commit = code.get("commit") if isinstance(code, dict) else None
+    commit = run.get("code_commit") or run["spec"].get("commit")  # the one representation runs.register writes
     return (att.get("resource") or {}).get("name"), commit, run["spec_digest"]
 
 

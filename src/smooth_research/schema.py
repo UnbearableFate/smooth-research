@@ -117,7 +117,7 @@ ENTITIES: dict[str, Entity] = {e.label: e for e in [
        answer_note=F(), return_note=F(), branch=F(), worktree=F(), design_commit=F(), delivered_commit=F(),
        merge_state=F(enum="merge_state"), merge_note=F(), merge_commit=F(), requirement=F(), done_check=F(),
        mandate_ref=F(), estimate=F(), released_at=F(), delivered_at=F(), outputs=F("json"), tests=F("json"),
-       fast_lane=F("bool"), scientist_session=F(), dispatch_note=F(), state_note=F()),
+       fast_lane=F("bool"), scientist_session=F(), dispatch_note=F(), state_note=F(), sealed_design=F("json")),
     _e("Phase", "PH", graph=True, title=F(required=True), budget=F(), scientist_limit=F("int", True)),
     _e("Ask", "RQ", kind=F(required=True, enum="ask_kind"), task_id=F(required=True),
        state=F(required=True, enum="ask_state"), by=F(required=True), stuck=F(required=True), options=F(),
