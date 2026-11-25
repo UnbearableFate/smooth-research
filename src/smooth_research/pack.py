@@ -143,6 +143,12 @@ def _task_card(tx: Tx, t: dict) -> list[str]:
     return lines
 
 
+def _compute(store: Store) -> list[str]:
+    """The resources, and the login-node policy when it applies."""
+    from .compute import pack_text
+    return pack_text(store.project).splitlines()
+
+
 def _scientist(store: Store, tx: Tx, actor: Actor) -> list[tuple[str, list[str], bool]]:
     t = tx.require(actor.subject, "Task")
     fetch = ("Fetch by id", ["rl show EV-x|RV-x|AD-x|D-x · rl task check T-x · rl paper search ..",
@@ -219,7 +225,8 @@ def _scientist(store: Store, tx: Tx, actor: Actor) -> list[tuple[str, list[str],
             ("Hypothesis tree (one line each)", tree_lines(tx, mark), True),
             ("Decisions on this hypothesis and its ancestors", decs, True),
             ("Experiments and tasks under it", exps + work, True),
-            ("Reusable outputs", reusable, True), fetch]
+            ("Reusable outputs", reusable, True),
+            ("Compute (your test and merge-test jobs)", _compute(store), False), fetch]
 
 
 # -- researcher -----------------------------------------------------------------------------------------------
@@ -256,8 +263,7 @@ def _researcher(store: Store, tx: Tx, actor: Actor) -> list[tuple[str, list[str]
     deps = [f"{d['id']} {tx.require(d['id'])['title']}: " + ", ".join(
         o["path"] if isinstance(o, dict) else o for o in tx.require(d["id"]).get("outputs") or [])
         for d in tx.out(t["id"], "depends_on")]
-    from .compute import pack_text
-    compute = pack_text(store.project).splitlines()  # the resources, and the login-node policy when it applies
+    compute = _compute(store)
     return [("Task card", cardl, False),
             ("Jobs still running (check them first)", running, False),
             ("Ended attempts", ended, True),

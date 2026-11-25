@@ -117,8 +117,9 @@ def register(store: Store, actor: Actor, task_id: str, request_id: str, arm: str
     tested = None
     if purpose in ("merge-test", "design-test", "review-test"):
         from .tasks import test_command
+        from .research import design_id
         with store.read() as tx:
-            tested = {"command": test_command(tx, task)}
+            tested = {"command": test_command(tx, task), "design": design_id(tx, task_id)}
     spec = {"arm": arm, "seed": seed, "config": config, "split": split, "commit": commit, "params": params,
             **({"design": design} if design else {}), **({"acceptance": acceptance} if acceptance else {}),
             **({"test": tested} if tested else {})}
@@ -141,13 +142,19 @@ def register(store: Store, actor: Actor, task_id: str, request_id: str, arm: str
         if previous:
             return {**previous, "duplicate": True,
                     "summary": f"duplicate request {request_id}: {previous['run']} {previous['attempt']}"}
-        if category == "evidence":  # again under the write lock: a finding recorded meanwhile blocks it
-            _evidence_allowed(tx, tx.require(task_id, "Task"), commit, changed)
+        if category == "evidence":  # again under the write lock: a finding or a revision recorded meanwhile
+            now = tx.require(task_id, "Task")
+            sealed, live_now = task_design(tx, task_id), task_experiment(tx, task_id)
+            if now.get("holder") != task.get("holder") or (sealed or {}).get("revision") != exp["revision"] \
+                    or (live_now or {}).get("revision") != exp["revision"]:
+                raise RLError("CONFLICT", f"{task_id} changed meanwhile (its holder or its experiment's revision): "
+                                          "nothing was registered; look at it again")
+            _evidence_allowed(tx, now, commit, changed)
         if run_id:
             run = tx.require(run_id, "Run")
             if run["task_id"] != task_id:
                 raise RLError("INVALID", f"{run_id} belongs to {run['task_id']}, not {task_id}")
-            if _comparable(run["spec"]) != _comparable(spec):
+            if _comparable(run["spec"], spec) != _comparable(spec, run["spec"]):
                 raise RLError("CONFLICT", f"the spec differs from {run_id}'s: a changed run is a new run (omit --run)")
             index = run["attempt_count"] + 1
             tx.update(run_id, {"attempt_count": index})
@@ -264,17 +271,26 @@ ROW = re.compile(r"^- (\S+) .*?\((success|failed|cancelled|unknown|None)\)", re.
 
 
 def job_rows(text: str) -> dict[str, str]:
-    """job id -> outcome, from the status rows of a notification; none for a job-state-unknown notice."""
-    header = text.lstrip().split("\n", 1)[0]
-    if re.match(r"\[[\w.-]+\] job state unknown in", header):
+    """job id -> outcome, from the job table of a notification: the status rows right under its header line, up to
+    the first other line (a note the user attached below cannot add or change a row). None for a job-state-unknown
+    notice; a job listed twice with different outcomes stays unknown."""
+    lines = text.strip().splitlines()
+    if not lines or re.match(r"\[[\w.-]+\] job state unknown in", lines[0]):
         return {}
-    return {m[1]: m[2] for m in ROW.finditer(text)}
+    rows: dict[str, str] = {}
+    for line in lines[1:] if lines[0].startswith("[") else lines:
+        m = ROW.match(line)
+        if not m:
+            break
+        rows[m[1]] = m[2] if rows.get(m[1], m[2]) == m[2] else "unknown"
+    return rows
 
 
-def _comparable(spec: dict) -> str:
-    """A retry repeats its run's spec; the design the run was sealed against is the run's own, not compared (a run
-    registered before the design was kept has none)."""
-    return digest_json({k: v for k, v in spec.items() if k != "design"})
+def _comparable(spec: dict, other: dict) -> str:
+    """A retry repeats its run's spec, including the design it was sealed against: a run of another revision is a
+    new run. Only a run registered before runs kept their design (it has none) is compared without it."""
+    keep_design = "design" in spec and "design" in other
+    return digest_json({k: v for k, v in spec.items() if keep_design or k != "design"})
 
 
 def _finish_merge_tests(store: Store, attempts: list[str]) -> None:

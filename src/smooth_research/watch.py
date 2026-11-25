@@ -279,7 +279,8 @@ def look(store: Store, s: dict, items: list[inbox.Item], low: dict) -> str | Non
         s = {**s, **changes}
     if status in ("blocked", "working", "unknown"):
         return None
-    if s["host"] in low and s["role"] in SWITCHING:
+    if s["host"] in low and s["role"] in SWITCHING and (other := choose_entry(store, s["role"], low)) \
+            and other.entry not in low:  # only when another host can take it
         return close_session(store, s, low[s["host"]]["reason"] + "; reopened on another model")
     due = _due(s, items, config)
     if not due:

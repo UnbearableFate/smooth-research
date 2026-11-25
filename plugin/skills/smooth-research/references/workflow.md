@@ -191,11 +191,13 @@ source builds and application imports belong in an allocation. `rl` bookkeeping 
 sandbox and cannot stop arbitrary shell commands; agents must follow this policy. If the MCP is unavailable,
 report the missing executor and continue independent control work; do not silently run the workload locally.
 
-With `compute.tests: job` a task's tests are jobs too. Register one with `{{rl}} run register --task T-x --purpose
-design-test --minutes N` (its run keeps the test command and commit of that moment), run the command at that
-commit, then `{{rl}} task test T-x --record pass|fail --attempt <ATT>`. A command changed afterwards needs a new
-job. An acceptance waits on its merge test the same way (`--purpose merge-test`); the watcher finishes it when
-the job's end is recorded.
+With `compute.tests: job` a task's tests are jobs too. Register one with `{{rl}} run register --task T-x
+--request-id <new id> --purpose design-test --minutes N` (and `--resource <name>` where the project runs through an
+executor); its run keeps the test command, commit and experiment revision of that moment. Run the command at that
+commit, then `{{rl}} task test T-x --record pass|fail --attempt <ATT>` (once per job). A command or revision changed
+afterwards needs a new job. An acceptance waits on its merge test the same way (`--purpose merge-test`): the
+candidate is the branch `sr-accept/T-x`, which `{{rl}} compute sync` pushes for a git resource; the watcher
+finishes the acceptance when the job's end is recorded.
 
 ### Jobs through an external executor
 

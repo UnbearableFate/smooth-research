@@ -71,6 +71,11 @@ def covers(tx: Tx, task_id: str, commit: str, for_evidence: bool) -> tuple[bool,
     if not lp or lp.get("commit") != commit:
         return False, (f"{t['id']} last reviewed {lp['commit'][:12] if lp else 'nothing yet'}, not {commit[:12]}: "
                        f"request a {'recheck' if lp else 'review'}")
+    from .research import design_id
+    now = design_id(tx, task_id)
+    if now and lp.get("design") != now:
+        return False, (f"{t['id']} reviewed {lp.get('design') or 'another design'}, and the experiment is {now} now: "
+                       "request a review of this revision")
     seg = "researcher" if for_evidence else "scientist"
     open_ = blocking(t, seg)
     if open_:
@@ -163,11 +168,14 @@ def _design_request(store: Store, tx: Tx, actor: Actor, target: str, question: s
         raise RLError("INVALID", f"{target}'s worktree has uncommitted changes: commit them; a review is of a commit")
     commit = gitops.head(store.project, target)
     segment = "scientist" if actor.role == "scientist" else "researcher"
-    return _round(tx, actor, "design", target, target, commit, recheck_of, question, segment)
+    from .research import design_id
+    return _round(tx, actor, "design", target, target, commit, recheck_of, question, segment,
+                  design_id(tx, target))
 
 
 def _round(tx: Tx, actor: Actor, kind: str, task_id: str | None, target: str, commit: str | None,
-           recheck_of: str | None, question: str | None, segment: str | None = None) -> dict:
+           recheck_of: str | None, question: str | None, segment: str | None = None,
+           design: str | None = None) -> dict:
     current = None
     if recheck_of:
         current = tx.require(recheck_of, "Ticket")
@@ -194,7 +202,7 @@ def _round(tx: Tx, actor: Actor, kind: str, task_id: str | None, target: str, co
         raise RLError("INVALID", f"{current['id']} has used its {MAX_PASSES} reviews"
                                  + (f" in the {segment}'s segment" if segment else ""))
     entry = {"n": len(passes) + 1, "segment": segment, "commit": commit, "target": target, "requested_by": actor.name,
-             "requested_at": now_utc(), "question": question}
+             "requested_at": now_utc(), "question": question, **({"design": design} if design else {})}
     if current:
         tx.update(current["id"], {"passes": passes + [entry], "status": "waiting", "segment": segment,
                                   "target_id": target, "verdict": None})

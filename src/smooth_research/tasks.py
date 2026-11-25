@@ -14,15 +14,16 @@ from __future__ import annotations
 import re
 import shlex
 import subprocess
+from datetime import datetime, timezone
 
 from . import documents, gitops, manifest
 from .project import limit, tests_mode
-from .research import sealed_copy, task_design, task_experiment
+from .research import design_id, sealed_copy, task_design, task_experiment
 from .reviews import covers, last_passed_design, open_blockers
 from .roles import Actor, need, session_name
 from .schema import TASK_DONE
 from .store import Store, Tx
-from .util import RLError, now_utc
+from .util import RLError, now_utc, parse_time
 
 NOTE_CHARS = 300
 PARALLEL_MAX = 10
@@ -279,38 +280,59 @@ def test(store: Store, actor: Actor, tid: str, record: str | None = None, commit
         if record not in ("pass", "fail") or not attempt:
             raise RLError("INVALID", "--record pass|fail with --attempt <the attempt of the test job>")
         with store.read() as tx:
-            run = tx.require(tx.require(attempt, "Attempt")["run_id"], "Run")
+            att = tx.require(attempt, "Attempt")
+            run = tx.require(att["run_id"], "Run")
         ran = (run.get("spec") or {}).get("test") or {}
         if run["task_id"] != tid or run.get("purpose") not in ("design-test", "review-test") or not ran.get("command"):
             raise RLError("INVALID", f"{attempt} is not a test job of {tid}: register it with rl run register --task "
                                      f"{tid} --purpose design-test --minutes N")
         if commit and gitops.rev(store.project, commit) != run["code_commit"]:
             raise RLError("INVALID", f"{attempt} tested {run['code_commit'][:12]}, not {commit[:12]}")
-        command, at = ran["command"], run["code_commit"]
+        command, at, design = ran["command"], run["code_commit"], ran.get("design")
         ok, detail = record == "pass", f"job {attempt}, log {log or 'not given'}"
+        when = att.get("closed_at") or now_utc()  # results are ordered by when the job ended
     else:
         if tests_mode(store.project.config) == "job":
             raise RLError("INVALID", f"compute.tests is job: run the tests as a short job (rl run register --task "
-                                     f"{tid} --purpose design-test --minutes N), then record its outcome: rl task "
-                                     f"test {tid} --record pass|fail --attempt <ATT>")
+                                     f"{tid} --request-id <new id> --purpose design-test --minutes N [--resource R]), "
+                                     f"then record its outcome: rl task test {tid} --record pass|fail --attempt <ATT>")
         if gitops.dirty(store.project, tid):
             raise RLError("INVALID", f"{tid}'s worktree has uncommitted changes: tests are recorded for a commit")
         at = gitops.head(store.project, tid)
+        with store.read() as tx:
+            design = design_id(tx, tid)
         ok, detail = run_check(store, tid, command)
+        when = now_utc()
     with store.write() as tx:
         task = tx.require(tid, "Task")
-        tests = list(task.get("tests") or []) + [{"commit": at, "command": command, "outcome": "pass" if ok else "fail",
-                                                  "at": now_utc(), "by": actor.name, "detail": detail}]
+        outcome = "pass" if ok else "fail"
+        same = [t for t in task.get("tests") or [] if attempt and t.get("attempt") == attempt]
+        if same:  # one job, one result: a repeated report changes nothing
+            if same[0]["outcome"] != outcome:
+                raise RLError("CONFLICT", f"{attempt}'s result is recorded as {same[0]['outcome']} already")
+            return {"id": tid, "passed": ok, "duplicate": True,
+                    "summary": f"{tid}: {attempt}'s result ({outcome}) is recorded already"}
+        tests = list(task.get("tests") or []) + [{"commit": at, "command": command, "outcome": outcome, "at": when,
+                                                  "by": actor.name, "detail": detail, "design": design,
+                                                  **({"attempt": attempt} if attempt else {})}]
         tx.update(tid, {"tests": tests})
         tx.event("task.tested", tid, f"{'pass' if ok else 'fail'} at {at[:12]}: {command}")
     return {"id": tid, "passed": ok, "summary": f"{tid} tests {'pass' if ok else 'FAIL'} at {at[:12]} ({command})"
                                                 + ("" if ok else f": {detail}")}
 
 
-def passed_at(task: dict, commit: str, command: str | None) -> bool:
-    """The latest recorded run of this test command at this commit passed: a later failure, or a changed command,
-    needs a new pass."""
-    runs = [t for t in task.get("tests") or [] if t["commit"] == commit and t.get("command") == command]
+def test_runs(task: dict, commit: str, command: str | None, design: str | None = None) -> list[dict]:
+    """The recorded runs of this test command at this commit (for this experiment revision, when given), in the
+    order they ended."""
+    runs = [t for t in task.get("tests") or [] if t["commit"] == commit and t.get("command") == command
+            and (design is None or t.get("design") == design)]
+    return sorted(runs, key=lambda t: t.get("at") or "")
+
+
+def passed_at(task: dict, commit: str, command: str | None, design: str | None = None) -> bool:
+    """The latest recorded run of this test command at this commit (for this experiment revision) passed: a later
+    failure, a changed command or a new revision needs a new pass."""
+    runs = test_runs(task, commit, command, design)
     return bool(runs) and runs[-1]["outcome"] == "pass"
 
 
@@ -377,7 +399,7 @@ def dispatch(store: Store, actor: Actor, tid: str, note: str | None = None) -> d
             if missing:
                 raise RLError("INVALID", f"{exp['id']} needs {', '.join(missing)} before its code is handed over "
                                          "(rl experiment set ..)")
-            if not passed_at(task, commit, exp["semantic_tests"]):
+            if not passed_at(task, commit, exp["semantic_tests"], f"{exp['id']}@{exp['revision']}"):
                 raise RLError("INVALID", f"the latest test of `{exp['semantic_tests']}` at {commit[:12]} did not pass "
                                          f"(or none is recorded): rl task test {tid}")
             ok, why = covers(tx, tid, commit, for_evidence=False)
@@ -641,34 +663,44 @@ def accept(store: Store, actor: Actor, tid: str) -> dict:
         raise RLError("CONFLICT", f"{tid} is {task['state']}, not delivered")
     if task["kind"] in ("tree", "hypothesis", "phase"):
         need(actor, "coordinator", what=f"receiving a {task['kind']} task")
-        return {"id": tid, "summary": f"{tid}: " + _merge(store, tid, run_tests=False)}
+        return {"id": tid, "summary": f"{tid}: " + _merge(store, tid, run_tests=False, seen=task["revision"])}
     need(actor, "scientist", what="accepting a task")
     if task["creator"] != actor.name and task.get("scientist_session") != actor.name:
         raise RLError("INVALID", f"{tid} was made by {task['creator']}, who accepts it")
-    return {"id": tid, "summary": f"{tid}: " + _merge(store, tid, run_tests=True)}
+    return {"id": tid, "summary": f"{tid}: " + _merge(store, tid, run_tests=True, seen=task["revision"])}
 
 
-def _merge(store: Store, tid: str, run_tests: bool) -> str:
+def _merge(store: Store, tid: str, run_tests: bool, seen: int | None = None) -> str:
     """Accept a delivery (6.5): a merge commit of the delivered commit and the mainline, the task's tests on it in a
     temporary checkout, then the mainline moves to it. What merges is the delivered commit, whatever the branch
     holds now. The acceptance is recorded first (its candidate and round), so a finish, a failure, a test job and
-    a restart all act on this acceptance only. A conflict or a failing test leaves the mainline where it was."""
+    a restart all act on this acceptance only. A conflict or a failing test leaves the mainline where it was.
+    seen: the task's revision when the one accepting read it; a task returned and delivered again since (even at the
+    same commit, with another conclusion) is not accepted on that reading."""
     with store.read() as tx:
         task = tx.require(tid, "Task")
         command = test_command(tx, task) if run_tests or task["kind"] == "prep" else None
+    seen = task["revision"] if seen is None else seen
+    if task["revision"] != seen:
+        raise RLError("CONFLICT", f"{tid} changed since you read it (now {task['state']}): read it again")
     delivered = task.get("delivered_commit")
     if not delivered:
         raise RLError("INVALID", f"{tid} has no delivered commit: deliver it first")
+    public = task["kind"] == "prep" and task["creator"] == "coordinator"
+    recovered = _recover(store, task, public)
+    if recovered:
+        return recovered
     head = gitops.head(store.project, tid)
     if head != delivered:
         raise RLError("CONFLICT", f"{tid}'s branch is at {head[:12]}, not at its delivery {delivered[:12]}: what is "
                                   "accepted is what was delivered, so deliver it again (or reset the extra commits)")
-    public = task["kind"] == "prep" and task["creator"] == "coordinator"
     commit, conflicts = gitops.merge_candidate(store.project, tid, delivered)
     job = bool(command) and tests_mode(store.project.config) == "job"
     with store.write() as tx:
         task = tx.require(tid, "Task")
-        if task["state"] != "delivered" or task.get("delivered_commit") != delivered:
+        if task["state"] != "delivered" or task.get("delivered_commit") != delivered or task["revision"] != seen:
+            if not conflicts:
+                gitops.retire_candidate(store.project, tid)
             raise RLError("CONFLICT", f"{tid} changed meanwhile (now {task['state']}): nothing was merged")
         rnd = task["revision"] + 1
         if conflicts:
@@ -681,8 +713,9 @@ def _merge(store: Store, tid: str, run_tests: bool) -> str:
         tx.event("task.merging", tid, f"candidate {commit[:12]} of delivery {delivered[:12]}"
                                       + (": its tests run as a job" if job else ""))
     if job:
-        return (f"merge commit {commit[:12]} made; run its tests as a short job: rl run register --task {tid} "
-                f"--purpose merge-test --minutes N ..; the mainline moves when it passes")
+        return (f"merge commit {commit[:12]} made (branch {gitops.candidate_branch(tid)}); run its tests as a short "
+                f"job: rl run register --task {tid} --request-id <new id> --purpose merge-test --minutes N "
+                f"[--resource R]; the mainline moves when it passes")
     if command:
         with gitops.temp_checkout(store.project, commit) as where:
             ok, detail = run_check(store, tid, command, cwd=where)
@@ -690,6 +723,18 @@ def _merge(store: Store, tid: str, run_tests: bool) -> str:
             return _conflict(store, tid, f"tests fail on the merge commit {commit[:12]}: {detail}", public,
                              delivered, rnd)
     return _advance(store, tid, commit, delivered, rnd, public, "merged")
+
+
+def _recover(store: Store, task: dict, public: bool) -> str | None:
+    """An acceptance whose record was interrupted after the mainline moved: its recorded candidate is on the
+    mainline, so it is finished as it was tested, whatever the mainline holds since."""
+    commit = task.get("merge_commit")
+    if task.get("merge_state") != "merging" or not commit or task["state"] not in ("delivered", "merging") \
+            or not gitops.exists(store.project, commit) \
+            or not gitops.is_ancestor(store.project, commit, gitops.mainline(store.project)):
+        return None
+    return _advance(store, task["id"], commit, task["delivered_commit"], task["revision"], public,
+                    "merged (finished after an interruption)")
 
 
 def _same(task: dict, delivered: str, rnd: int) -> bool:
@@ -717,6 +762,7 @@ def _advance(store: Store, tid: str, commit: str, delivered: str, rnd: int, publ
         tx.update(tid, {"state": "accepted", "merge_state": "merged", "merge_commit": commit, "merge_note": None,
                         "revision": task["revision"] + 1})
         tx.event("task.accepted", tid, f"{how} at {commit[:12]}")
+    gitops.retire_candidate(store.project, tid)
     gitops.follow(store.project, tid, delivered, commit)
     return f"accepted and merged ({commit[:12]}); the mainline moved"
 
@@ -740,6 +786,7 @@ def _conflict(store: Store, tid: str, why: str, public: bool, delivered: str, rn
             return f"{why}; {tid} changed meanwhile (now {task['state']}), so nothing was recorded"
         tx.update(tid, _conflict_changes(task, why, public))
         tx.event("task.merge_conflict", tid, why)
+    gitops.retire_candidate(store.project, tid)
     return _conflict_text(why, public)
 
 
@@ -766,13 +813,42 @@ def finish_merge(store: Store, attempt: str) -> str | None:
 
 def reconcile_merges(store: Store) -> list[str]:
     """Acceptances waiting on a test job whose end is already recorded (a crash between the two, or an end that came
-    through rl run record): finish them now. The watcher runs this every beat."""
+    through rl run record): finish them now; and acceptances interrupted after their candidate reached the mainline
+    (a public preparation task's too, which nobody accepts by hand). The watcher runs this every beat."""
     with store.read() as tx:
         merging = [t for t in tx.all("Task") if t["state"] == "merging"]
         ended = [a["id"] for t in merging for r in tx.all("Run", task_id=t["id"])
                  if r.get("purpose") == "merge-test" and r.get("code_commit") == t.get("merge_commit")
                  for a in tx.all("Attempt", run_id=r["id"]) if a["execution_state"] == "ended"]
-    return [x for x in (finish_merge(store, a) for a in ended) if x]
+        stuck = [t for t in tx.all("Task") if t.get("merge_state") == "merging" and t["state"] in ("delivered",
+                                                                                                    "merging")]
+    done = [x for x in (finish_merge(store, a) for a in ended) if x]
+    for t in stuck:
+        try:
+            got = _recover(store, t, t["kind"] == "prep" and t["creator"] == "coordinator")
+        except RLError:
+            continue
+        if got:
+            done.append(f"{t['id']}: {got}")
+        elif t["kind"] == "prep" and t["creator"] == "coordinator" and t["state"] == "delivered" \
+                and _minutes_since_event(store, t["id"], "task.merging") > STALE_MERGE_MINUTES:
+            try:  # its automatic acceptance stopped before the mainline moved: start it again
+                done.append(f"{t['id']}: " + _merge(store, t["id"], run_tests=False))
+            except RLError as exc:
+                done.append(f"{t['id']}: {exc.message}")
+    return done
+
+
+STALE_MERGE_MINUTES = 30  # an acceptance in progress longer than this was interrupted (its tests time out at 30)
+
+
+def _minutes_since_event(store: Store, tid: str, kind: str) -> float:
+    with store.read() as tx:
+        found = [e for e in tx.all("Event", entity_id=tid) if e["type"] == kind]
+    try:
+        return (datetime.now(timezone.utc) - parse_time(found[-1]["created_at"])).total_seconds() / 60
+    except (IndexError, KeyError, RLError, TypeError):
+        return float("inf")
 
 
 def return_task(store: Store, actor: Actor, tid: str, reason: str) -> dict:

@@ -82,7 +82,7 @@ compute:
 - 入口 `manual` 仍能解析，但监视程序开会话时跳过它。
 - `@effort` 传给 Claude 的 `--effort`、Codex 的 `model_reasoning_effort` 或 pi 的 `--thinking`。
 
-监视程序给一个会话选模型时，按顺序取第一个可用的条目：不是 `manual`，命令（`claude`、`codex`、`pi`）在 PATH 上，所在宿主的订阅额度不低（见“订阅额度”）。所有条目都在额度低的宿主上时，仍用第一个命令可用的条目。一个都没有时不开会话，这一拍的输出说明原因。会话打开时用的条目记在会话记录上，之后改配置只影响新开的会话。rl 自己不调用任何模型。
+监视程序给一个会话选模型时，按顺序取第一个可用的条目：不是 `manual`，命令（`claude`、`codex`、`pi`）在 PATH 上，研究者和审核者还要求所在宿主的订阅额度不低（见“订阅额度”；协调者、科学家和顾问不看额度）。所有条目都在额度低的宿主上时，仍用第一个命令可用的条目。一个都没有时不开会话，这一拍的输出说明原因。会话打开时用的条目记在会话记录上，之后改配置只影响新开的会话。rl 自己不调用任何模型。
 
 ### 会话怎样启动
 
@@ -141,7 +141,7 @@ compute:
    - 有会话、但 herdr 里已经没有它的 agent（退出了，或者 tab 被关掉了）：会话记录结束；下一拍还有事项时再开一个新会话。
    - agent 在对话框（`blocked`）：记下需要决定，不输入。
    - agent 在工作，或者状态未知：不输入。
-   - agent 空闲：所在宿主额度低、又不是协调者时，关掉会话，下一拍在别的条目上重开。否则把还没告诉过它的事项，以及告诉过它、但已经超过期限的事项，每条一行输入进去（一次最多 4 条，多的写 “+N more: rl inbox”），结尾是 “handle these, then end your turn.”。协调者的 pane 在用户最近 `user_quiet_minutes` 分钟里说过话时不输入（协调者的 pane 有动静、而 rl 最近两拍没给它发过提示，就算用户在说话）。空闲超过 `clear_idle_minutes`、上下文又大的会话先输入 `/clear`，再告诉它重新读 pack。
+   - agent 空闲：研究者或审核者所在宿主额度低、角色列表里又有额度不低的别的宿主时，关掉会话，下一拍在那个条目上重开。否则把还没告诉过它的事项，以及告诉过它、但已经超过期限的事项，每条一行输入进去（一次最多 4 条，多的写 “+N more: rl inbox”），结尾是 “handle these, then end your turn.”。协调者的 pane 在用户最近 `user_quiet_minutes` 分钟里说过话时不输入（协调者的 pane 有动静、而 rl 最近两拍没给它发过提示，就算用户在说话）。空闲超过 `clear_idle_minutes`、上下文又大的会话先输入 `/clear`，再告诉它重新读 pack。
 5. 没有事项的会话也看一次，记下它是否停在对话框。
 6. 记录变了（`data_version` 变了）或者距上次超过 `page_minutes` 时重画 `docs/research.html`，然后写心跳 `research/state/watch.json`。
 
@@ -179,7 +179,7 @@ Claude Code 和 Codex 一般用订阅，有 5 小时和每周两个窗口。
 
 - 读数从哪里来。Codex 自己把窗口写进会话日志（`$CODEX_HOME/sessions/*/*/*/rollout-*.jsonl` 里的 `token_count` 事件）。CLI 比较最后写入的 5 个日志各自的最后一条读数，取事件时间最新的那条。Claude Code 只把额度交给状态栏命令：CLI 启动的 Claude 会话的状态栏运行 `rl usage statusline`，它把读数存进 `$SMOOTH_RESEARCH_HOME/usage/claude.json`（读数没变时一分钟最多写一次），并显示模型和各窗口还剩多少。pi 不报告窗口。
 - 超过 15 分钟的读数算过期，不让宿主算作额度低；没有读数也一样。重置时间已经过了的窗口按没用过计算。
-- 宿主额度低时：新会话跳过这个宿主上的条目，用角色列表里的下一个；这个宿主上已经开着的会话（协调者除外）在空闲时被关掉，下一拍在别的条目上重开，新会话从 pack 读回工作，没有交接文档。协调者不换模型。
+- 宿主额度低时：新的研究者和审核者会话跳过这个宿主上的条目，用角色列表里的下一个；这个宿主上已经开着的研究者和审核者会话在空闲时被关掉，下一拍在别的条目上重开，新会话从 pack 读回工作，没有交接文档。角色列表里没有额度不低的别的宿主时不关。协调者、科学家和顾问不换模型。
 
 ### 计算资源
 
@@ -221,7 +221,7 @@ compute:
 | `compute.coordinator` | `local` | `local`：普通本机工作流。`login`：协调者在登录节点，所有工作负载（包括测试、smoke、构建和分析）通过配置的作业 MCP 或 skill；不让 checkout 和 `jobs: shell` 的资源用于执行，登记必须带 `--resource`。不认识的值警告并按 `login` 处理 |
 | `compute.default` | `local` | `rl compute steps` 不写资源时用的资源，也是 pack 里显示的默认资源。`rl run register` 不自动采用它：`local` 模式下可以不写 `--resource`（不记录资源），`login` 模式拒绝 |
 | `compute.repository` | `none` | `code: git` 的资源缺 git remote 时，`rl compute sync` 怎么办：`github-private` 用 `gh repo create --private` 建一个仓库再推送；`none` 不建，提示问用户代码放到哪里 |
-| `compute.tests` | `local` | `local`：`rl task test` 在任务的 worktree 里直接运行实验的语义测试或 prep 任务的完成检查，交付 prep 任务和接受时的合并测试也在本地跑。`job`：这些测试作为短作业运行（`rl run register --task T-x --purpose design-test --minutes N`，run 记下当时的测试命令和提交），结果用 `rl task test T-x --record pass|fail --attempt <ATT>` 记下（记的是那个作业跑的命令，之后改了命令要重跑）；接受时任务停在 merging，等合并测试的作业（`--purpose merge-test`）结束，由监视程序完成接受 |
+| `compute.tests` | `local` | `local`：`rl task test` 在任务的 worktree 里直接运行实验的语义测试或 prep 任务的完成检查，交付 prep 任务和接受时的合并测试也在本地跑。`job`：这些测试作为短作业运行（`rl run register --task T-x --request-id <新 id> --purpose design-test --minutes N`，走执行器的项目再加 `--resource <资源>`；run 记下当时的测试命令、提交和实验版本），结果用 `rl task test T-x --record pass|fail --attempt <ATT>` 记下，每个作业记一次（记的是那个作业跑的命令，之后改了命令或实验版本要重跑）；接受时任务停在 merging，等合并测试的作业（`--purpose merge-test`）结束，由监视程序完成接受 |
 | `compute.resources` | `{local: {kind: local}}` | 资源名到设置的映射，整体替换默认值。名字以字母或数字开头，只能用字母、数字、`.`、`_`、`-`。`login` 模式下没有能用的资源时，不提供执行步骤，也不回退到本机 |
 | `<资源>.kind` | 有 `host` 或 `connect: local` 时为 `remote`，否则 `local` | `local` 使用调用者的 checkout，输出到 `research/artifacts/<attempt>/`；`remote` 在别的执行环境运行一个提交的快照，包括共享目录上的集群作业 |
 | `<资源>.host` | 无 | ssh 或 pi-env-mcp 的连接目标；`connect: local` 不需要 |

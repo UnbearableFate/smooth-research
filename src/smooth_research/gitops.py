@@ -191,7 +191,26 @@ def merge_candidate(project: Project, task_id: str, delivered: str) -> tuple[str
     tree = lines[0].strip()
     commit = git(root, "commit-tree", tree, "-p", delivered, "-p", main, "-m",
                  f"Merge {mainline(project)} into {branch_name(task_id)} for acceptance of {task_id}")
+    # a branch names the candidate while its acceptance waits, so a remote test job can fetch it (compute sync
+    # pushes these branches); it is removed when the acceptance ends
+    git(root, "branch", "-f", candidate_branch(task_id), commit)
     return commit, []
+
+
+CANDIDATES = "sr-accept/"
+
+
+def candidate_branch(task_id: str) -> str:
+    return CANDIDATES + task_id
+
+
+def retire_candidate(project: Project, task_id: str) -> None:
+    git(top(project), "branch", "-D", candidate_branch(task_id), check=False)
+
+
+def candidate_branches(checkout: Path) -> list[str]:
+    return git(checkout, "for-each-ref", "--format=%(refname:short)", f"refs/heads/{CANDIDATES}",
+               check=False).split()
 
 
 @contextmanager

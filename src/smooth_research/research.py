@@ -365,6 +365,13 @@ def task_design(tx: Tx, task_id: str) -> dict | None:
     return task.get("sealed_design") or task_experiment(tx, task_id)
 
 
+def design_id(tx: Tx, task_id: str) -> str | None:
+    """The experiment revision a task's code is designed for now (E-x@n), or None: what a review pass and a test
+    record clear, so a new revision needs its own (9.1)."""
+    exp = task_experiment(tx, task_id)
+    return f"{exp['id']}@{exp['revision']}" if exp else None
+
+
 def sealed_copy(exp: dict) -> dict:
     return {k: exp.get(k) for k in DESIGN_FIELDS}
 

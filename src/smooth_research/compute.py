@@ -445,6 +445,11 @@ def sync(store: Store, name: str | None = None) -> dict:
             else:
                 problems.append(f"git push {remote} {branch} failed: {said}. Fix it (never force a shared branch), "
                                 "then rl compute sync")
+        from .gitops import candidate_branches
+        for cand in candidate_branches(checkout) if url else []:  # merge candidates waiting on a test job
+            ok, said = _call(checkout, "git", "push", "--force", remote, cand)
+            (lines if ok else problems).append(f"pushed the merge candidate {cand} to {remote}" if ok else
+                                               f"git push {remote} {cand} failed: {said}")
     if head and branch and _git(checkout, "status", "--porcelain", "--untracked-files=no", check=False):
         lines.append("uncommitted changes to tracked files are not pushed: a run uses only committed code")
     for res in targets:

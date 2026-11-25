@@ -267,3 +267,97 @@ def test_a_null_config_is_not_a_reported_config(project, rl):
     out = ok(rl("--json", "run", "import-result", "--attempt", "ATT-0001-1", "--request-id", "i", "--manifest",
                 json.dumps(reported), who=r))
     assert "unverified" in json.loads(out)["summary"]
+
+
+def test_a_pending_candidate_has_a_branch_until_its_acceptance_ends(project, rl):
+    flow.delivered(project, rl)
+    s = "scientist-T-0002"
+    _job_tests(project)
+    from smooth_research.project import find_project
+    from smooth_research.store import Store
+    project = Store(find_project(), "test")
+    top = gitops.top(project.project)
+    (top / "other.txt").write_text("main moved\n")  # so the candidate is a new merge commit
+    git(top, "add", "-A")
+    git(top, "commit", "-qm", "main moves on")
+    ok(rl("task", "accept", "T-0003", who=s))
+    with project.read() as tx:
+        cand = tx.require("T-0003")["merge_commit"]
+    assert git(top, "rev-parse", "sr-accept/T-0003") == cand
+    att = json.loads(ok(rl("--json", "run", "register", "--task", "T-0003", "--request-id", "m", "--purpose",
+                           "merge-test", "--minutes", "5", who=s)))["attempt"]
+    ok(rl("run", "record", "--attempt", att, "--state", "ended", "--outcome", "success", who=s))
+    assert gitops.candidate_branches(top) == []
+
+
+def test_an_acceptance_interrupted_after_the_mainline_moved_is_finished_as_tested(project, rl):
+    from smooth_research import tasks
+    flow.delivered(project, rl)
+    top = gitops.top(project.project)
+    with project.read() as tx:
+        task = tx.require("T-0003")
+    commit, _ = gitops.merge_candidate(project.project, "T-0003", task["delivered_commit"])
+    with project.write() as tx:  # the acceptance was recorded and main moved, then the process died
+        tx.update("T-0003", {"merge_commit": commit, "merge_state": "merging", "revision": task["revision"] + 1})
+    git(top, "merge", "-q", "--ff-only", commit)
+    (top / "later.txt").write_text("another task merged since\n")
+    git(top, "add", "-A")
+    git(top, "commit", "-qm", "later work on main")
+    assert any("T-0003" in x for x in tasks.reconcile_merges(project))
+    with project.read() as tx:
+        task = tx.require("T-0003")
+    assert task["state"] == "accepted" and task["merge_commit"] == commit
+
+
+def test_an_acceptance_on_an_old_reading_of_the_task_is_refused(project, rl):
+    from smooth_research import tasks
+    flow.delivered(project, rl)
+    with project.read() as tx:
+        seen = tx.require("T-0003")["revision"]
+    ok(rl("task", "return", "T-0003", "--reason", "say more", who="scientist-T-0002"))
+    ok(rl("task", "deliver", "T-0003", "--conclusion", "another claim", "--limitations", "none",
+          who="researcher-T-0003"))
+    import pytest
+    from smooth_research.util import RLError
+    with pytest.raises(RLError, match="changed since you read it"):
+        tasks._merge(project, "T-0003", run_tests=True, seen=seen)
+
+
+def test_one_test_job_gives_one_result(project, rl):
+    flow.designed(project, rl)
+    s = "scientist-T-0002"
+    _job_tests(project)
+    ok(rl("review", "request", "T-0003", who=s))
+    ok(rl("review", "answer", "RV-0002", "--verdict", "pass", who="reviewer-RV-0002"))
+    atts = [json.loads(ok(rl("--json", "run", "register", "--task", "T-0003", "--request-id", f"t{n}", "--purpose",
+                             "design-test", "--minutes", "5", who=s)))["attempt"] for n in (1, 2)]
+    ok(rl("task", "test", "T-0003", "--record", "pass", "--attempt", atts[0], who=s))
+    ok(rl("task", "test", "T-0003", "--record", "fail", "--attempt", atts[1], who=s))
+    assert "recorded already" in ok(rl("task", "test", "T-0003", "--record", "pass", "--attempt", atts[0], who=s))
+    code, _, err = rl("task", "dispatch", "T-0003", who=s)
+    assert code == 1 and "did not pass" in err
+
+
+def test_a_review_and_a_test_clear_one_revision_of_the_design(project, rl):
+    flow.designed(project, rl)
+    s = "scientist-T-0002"
+    ok(rl("review", "request", "T-0003", who=s))
+    ok(rl("review", "answer", "RV-0002", "--verdict", "pass", who="reviewer-RV-0002"))
+    ok(rl("task", "test", "T-0003", who=s))
+    ok(rl("task", "dispatch", "T-0003", who=s))
+    r = "researcher-T-0003"
+    ok(rl("task", "block", "T-0003", "--reason", "design", "--note", "another manifest", who=r))
+    ok(rl("experiment", "set", "E-0001", "--question", "revision 2", "--reason", "new arms", who=s))
+    ok(rl("task", "answer", "T-0003", "--text", "use revision 2", who=s))
+    code, _, err = rl("task", "dispatch", "T-0003", who=s)  # the old test and review were of revision 1
+    assert code == 1
+    ok(rl("task", "test", "T-0003", who=s))
+    code, _, err = rl("task", "dispatch", "T-0003", who=s)
+    assert code == 1 and "E-0001@2" in err
+
+
+def test_a_retry_of_another_design_revision_is_a_new_run():
+    a = {"arm": "x", "design": {"revision": 1}}
+    assert runs._comparable(a, {"arm": "x", "design": {"revision": 2}}) != runs._comparable(
+        {"arm": "x", "design": {"revision": 2}}, a)
+    assert runs._comparable({"arm": "x"}, a) == runs._comparable(a, {"arm": "x"})  # a run from before designs

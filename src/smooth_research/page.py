@@ -290,7 +290,7 @@ def render(store: Store) -> str:
 <main class="wrap">
 <section class="panel" aria-label="现在"><h2>现在</h2>
 <table><thead><tr><th>任务</th><th>目标</th><th>走到哪一步</th><th>在等谁</th><th>等了多久</th><th>花费/信封</th></tr></thead>
-<tbody>{''.join(now_rows) or '<tr><td colspan="6">没有在做的假设任务。</td></tr>'}</tbody></table>
+<tbody>{''.join(now_rows) or '<tr><td colspan="6">没有在做的假设任务。</td></tr>'}</tbody></table>{'<p class="muted">花费后面带 * 的：其中有的用量记录同时覆盖别的任务的运行，在每个任务里都按全额算，几个任务的花费不能相加。</p>' if any(str(v).split('/')[0].endswith('*') for v in c['usage'].values()) else ''}
 <h3>最近 24 小时</h3><ul>{recent_html}</ul></section>
 <section class="panel" aria-label="等你决定"><h2>等你决定</h2>
 <ul>{''.join(you) or '<li>没有等你决定的事。</li>'}</ul>

@@ -27,10 +27,14 @@ def task_ids(tx: Tx, task: dict) -> list[str]:
 
 
 def task_usage(tx: Tx, task: dict) -> dict:
+    """used, per unit; shared: the part of it from accounting records that also cover attempts of other tasks,
+    counted in full in each of them (no attribution rule yet, 7.2), so the tasks' amounts do not add up."""
     used: dict[str, float] = {}
+    shared: dict[str, float] = {}
     counted: set[str] = set()  # one accounting record covers several attempts: counted once
     pending_hours, pending, unreported = 0.0, 0, 0
-    for tid in task_ids(tx, task):
+    mine = set(task_ids(tx, task))
+    for tid in mine:
         for run in tx.all("Run", task_id=tid):
             for att in tx.all("Attempt", run_id=run["id"]):
                 records = [tx.require(e["id"]) for e in tx.inc(att["id"], "covers")]
@@ -39,13 +43,22 @@ def task_usage(tx: Tx, task: dict) -> dict:
                     if u["id"] not in counted:
                         counted.add(u["id"])
                         used[u["unit"]] = used.get(u["unit"], 0.0) + u["quantity"]
+                        if any(_task_of(tx, e["id"]) not in mine for e in tx.out(u["id"], "covers")):
+                            shared[u["unit"]] = shared.get(u["unit"], 0.0) + u["quantity"]
                 if att["execution_state"] in ("prepared", "queued", "running", "unknown"):
                     pending += 1
                     pending_hours += (run.get("minutes") or 0) / 60
                 elif not records:
                     unreported += 1
-    return {"used": used, "pending": pending, "pending_hours": pending_hours, "unreported": unreported,
+    return {"used": used, "shared": shared, "pending": pending, "pending_hours": pending_hours,
+            "unreported": unreported,
             "envelope": envelope(task.get("envelope") or task.get("estimate"))}
+
+
+def _task_of(tx: Tx, attempt: str) -> str | None:
+    att = tx.get(attempt)
+    run = tx.get(att["run_id"]) if att else None
+    return run["task_id"] if run else None
 
 
 def fmt(amounts: dict[str, float]) -> str:
@@ -55,7 +68,7 @@ def fmt(amounts: dict[str, float]) -> str:
 def task_usage_short(tx: Tx, task: dict) -> str:
     u = task_usage(tx, task)
     env = fmt(u["envelope"]) if u["envelope"] else "—"
-    return f"{fmt(u['used']) if u['used'] else '—'}/{env}"
+    return f"{fmt(u['used']) if u['used'] else '—'}{'*' if u['shared'] else ''}/{env}"
 
 
 def usage_line(tx: Tx, task: dict) -> str:
@@ -65,6 +78,8 @@ def usage_line(tx: Tx, task: dict) -> str:
     return (f"about {fmt(u['used'])} used, {u['pending']} attempt(s) queued or running"
             + (f" (about {u['pending_hours']:.3g} h asked)" if u["pending_hours"] else "")
             + (f" ({card}: about {fmt(u['envelope'])})" if u["envelope"] else "")
+            + (f"; of it {fmt(u['shared'])} is shared with other tasks and counted in each (not additive)"
+               if u["shared"] else "")
             + f"; {u['unreported']} attempt(s) unreported")
 
 

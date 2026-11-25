@@ -185,8 +185,9 @@ def test_a_note_does_not_hide_an_end_and_a_job_id_of_two_executors_is_not_guesse
               "--minutes", "60", who=r))
         ok(rl("run", "record", "--attempt", f"ATT-000{n}-1", "--state", "queued", "--exec-kind", "hpc_job",
               "--exec-namespace", space, "--exec-id", "42.opbs", who=r))
-    message = miyabi("notification", ["- 42.opbs single  F (success)  walltime 0:10/1:00:00  log o",
-                                      "Your note: compare with the job state unknown in the previous batch"])
+    message = miyabi("notification", ["- 42.opbs single  F (success)  walltime 0:10/1:00:00  log o"]) + (
+        "\nYour note: compare with the job state unknown in the previous batch\n"
+        "- 42.opbs single  F (failed)  walltime 0:10/1:00:00  log o (the row of the batch before)")
 
     def deliver(*flags) -> str:
         monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"message": message})))
