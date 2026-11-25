@@ -50,12 +50,14 @@ attempt it made.
 ## Result manifest
 
 ```json
-{"status": "complete", "arm": "base", "seed": 0, "commit": "<git rev-parse HEAD>", "split": "dev",
+{"status": "complete", "attempt_id": "<$SR_ATTEMPT_ID>", "spec_digest": "<$SR_SPEC_DIGEST>",
+ "arm": "base", "seed": 0, "commit": "<git rev-parse HEAD>", "split": "dev",
  "config": {"lr": 0.0001, "steps": 200}, "metrics": {"dev_acc": 0.812},
  "artifacts": [{"path": "research/work/T-0003/base-0/metrics.json", "digest": "blake2b:..."},
                {"uri": "cluster:/work/.../ckpt.pt", "role": "checkpoint"}]}
 ```
 
+`attempt_id` and `spec_digest` say which run wrote it: a manifest naming another attempt or spec is refused.
 `arm`, `seed`, `commit` and `config` (and `split` when the arm has one) say what ran; a result without them is
 kept but marked unverified and cannot be evidence, and one that differs from its registration or from the sealed
 arm is marked deviating. `commit` is the commit the run ran at (the one it was registered at), not a later commit
@@ -172,6 +174,7 @@ compute:
   coordinator: login
   default: cluster
   repository: none
+  tests: job            # implied by login: nothing, tests included, runs on the login host
   resources:
     cluster:
       kind: remote
@@ -271,7 +274,7 @@ as `--attempt` fill in or override every record.
 
 Runs on this machine count no usage: record none for them. For a job on a remote resource, record what its
 scheduler accounted (an executor export records it for you): `{{rl}} run usage --accounting-ref "<scheduler>:<job
-id>" --quantity 0.17 --unit node_h --resource-type compute --hardware "<node type>" --basis measured --attempts
+id>" --quantity 0.17 --unit node_hours --resource-type compute --hardware "<node type>" --basis measured --attempts
 ATT-0001-1`. A shared job: one accounting ref, several `--attempts`, counted once; never split it into invented
 per-run numbers. Different units are never added, and unreported usage is not zero.
 

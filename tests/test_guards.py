@@ -178,8 +178,8 @@ def test_one_accounting_record_over_two_attempts_counts_once(project, rl):
         runs._usage(tx, {"accounting_ref": "scheduler:1", "quantity": 3, "unit": "GPU·h", "resource_type": "gpu"},
                     ["ATT-0001-1", "ATT-0002-1"])
     with project.read() as tx:
-        assert usage_view.task_usage(tx, tx.require("T-0002"))["used"] == {"GPU·h": 3.0}
-        assert usage_view.task_usage(tx, tx.require("T-0003"))["used"] == {"GPU·h": 3.0}
+        assert usage_view.task_usage(tx, tx.require("T-0002"))["used"] == {"gpu_hours": 3.0}
+        assert usage_view.task_usage(tx, tx.require("T-0003"))["used"] == {"gpu_hours": 3.0}
 
 
 def test_a_new_acceptance_is_not_decided_by_the_test_job_of_an_earlier_one(project, rl):
@@ -834,3 +834,53 @@ def test_usage_recorded_for_a_run_on_this_machine_is_not_counted_and_every_charg
         out = runs._usage(tx, {"accounting_ref": "pbs:9", "quantity": 1, "unit": "node_h",
                                "resource_type": "compute"}, [att])  # as an executor's export writes it
         assert [e for e in tx.all("Event", type="run.usage") if e["entity_id"] == out["usage"]]
+
+
+def test_a_manifest_naming_another_attempt_or_spec_is_refused(project, rl):
+    flow.dispatched(project, rl)
+    r = "researcher-T-0003"
+    ok(rl("run", "register", "--task", "T-0003", "--request-id", "a", "--arm", "single", "--seed", "0", who=r))
+    with project.read() as tx:
+        run = tx.require("RUN-0001")
+    good = {"status": "complete", "arm": "single", "seed": 0, "commit": run["code_commit"], "config": {"k": 1},
+            "attempt_id": "ATT-0001-1", "spec_digest": run["spec_digest"]}
+    for n, wrong in enumerate(({"attempt_id": "ATT-0009-1"}, {"spec_digest": "blake2b:00"})):
+        code, _, err = rl("run", "import-result", "--attempt", "ATT-0001-1", "--request-id", f"w{n}", "--manifest",
+                          json.dumps({**good, **wrong}), who=r)
+        assert code != 0 and ("another run" in err or "not ATT-0001-1's" in err)
+    out = json.loads(ok(rl("--json", "run", "import-result", "--attempt", "ATT-0001-1", "--request-id", "i",
+                           "--manifest", json.dumps(good), who=r)))
+    assert out["spec_match"] if "spec_match" in out else not out.get("mismatches")
+
+
+def test_a_login_coordinator_runs_tests_as_jobs_and_units_compare_by_executor_name():
+    from smooth_research.project import tests_mode
+    assert tests_mode({"compute": {"coordinator": "login", "tests": "local"}}) == "job"
+    assert tests_mode({"compute": {"coordinator": "local", "tests": "local"}}) == "local"
+    assert usage_view.envelope("about 4 MIG·h, 0.2 node·h, 1 cpu·h") == {
+        "mig_instance_hours": 4.0, "node_hours": 0.2, "cpu·h": 1.0}
+    assert usage_view.unit_key("node_h") == usage_view.unit_key("node_hours") == "node_hours"
+
+
+def test_a_higher_envelope_line_is_news_to_whoever_was_told_of_a_lower(project, rl):
+    flow.dispatched(project, rl)
+    r = "researcher-T-0003"
+    ok(rl("run", "register", "--task", "T-0003", "--request-id", "a", "--arm", "single", "--seed", "0", who=r))
+
+    with project.write() as tx:  # the route decision came earlier, not in the same second as the charges
+        for d in tx.all("Decision", task_id="T-0002"):
+            tx.update(d["id"], {"created_at": "2026-01-01T00:00:00Z"})
+
+    def charge(ref, quantity):
+        with project.write() as tx:
+            tx.update("ATT-0001-1", {"resource": {"kind": "remote", "name": "box"}})
+            runs._usage(tx, {"accounting_ref": ref, "quantity": quantity, "unit": "cpu·h", "resource_type": "cpu"},
+                        ["ATT-0001-1"])
+
+    def keys():
+        return [i.key() for i in flow.items(project, "scientist-T-0002") if i.type == "usage-line"]
+
+    charge("pbs:1", 0.85)
+    assert keys() == ["usage-line:T-0002:scientist-T-0002@0.8"]
+    charge("pbs:2", 0.2)
+    assert keys() == ["usage-line:T-0002:scientist-T-0002@1"]

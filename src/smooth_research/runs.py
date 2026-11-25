@@ -591,6 +591,19 @@ def _mismatches(tx: Tx, run: dict, reported: dict) -> tuple[list[dict], list[str
     return found, unreported
 
 
+def _same_run(attempt: str, run: dict, reported: dict) -> None:
+    """A manifest that names its attempt or spec digest (SR_ATTEMPT_ID, SR_SPEC_DIGEST) must name this one: the
+    file of another run (an earlier repeat with the same arm, seed and commit) is refused, not attached."""
+    named = reported.get("attempt_id")
+    if named not in (None, "") and str(named) != attempt:
+        raise RLError("CONFLICT", f"this manifest is {named}'s, not {attempt}'s: import the file its run wrote "
+                                  f"(runs/{attempt}/manifest.json)")
+    digest = reported.get("spec_digest")
+    if digest not in (None, "") and str(digest) != run["spec_digest"]:
+        raise RLError("CONFLICT", f"this manifest's spec_digest {digest} is not {run['id']}'s ({run['spec_digest']}): "
+                                  "it was written by another run; import the file this attempt's run wrote")
+
+
 def _best(results: list[dict]) -> str:
     statuses = {r["status"] for r in results if r["status"] != "rejected"}
     return "complete" if "complete" in statuses else "partial" if "partial" in statuses else (
@@ -621,6 +634,7 @@ def import_result(store: Store, actor: Actor, attempt: str, reported: dict, requ
             return {**previous, "duplicate": True, "summary": f"duplicate request {request_id}: {previous['result']}"}
         att = tx.require(attempt, "Attempt")
         run = tx.require(att["run_id"], "Run")
+        _same_run(attempt, run, reported)
         prior = tx.all("Result", attempt_id=attempt)
         same = [r for r in prior if r["manifest_digest"] == manifest_digest]
         if same:

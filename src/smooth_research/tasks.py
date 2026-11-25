@@ -17,6 +17,7 @@ import subprocess
 from datetime import datetime, timezone
 
 from . import documents, gitops, manifest
+from .usage_view import unit_key
 from .project import limit, tests_mode
 from .research import design_key, sealed_copy, task_design, task_experiment
 from .reviews import covers, last_passed_design, open_blockers
@@ -406,10 +407,10 @@ def fast_lane(store: Store, tx: Tx, task: dict, exp: dict, commit: str) -> tuple
         if text is None or manifest.parse(text, exp["manifest_path"]) != exp.get("manifest"):
             why.append("the manifest differs from the sealed one")
     m = re.match(r"^\s*(?:about\s+)?([0-9.]+)\s*(\S.*)$", task.get("estimate") or "")
-    caps = limit(store.project.config, "fast_lane")
+    caps = {unit_key(k): v for k, v in limit(store.project.config, "fast_lane").items()}
     if not m:
         why.append("the task has no estimate (--estimate \"0.2 MIG·h\")")
-    elif m[2].strip() not in caps or float(m[1]) > caps[m[2].strip()]:
+    elif unit_key(m[2]) not in caps or float(m[1]) > caps[unit_key(m[2])]:
         why.append(f"estimate {task['estimate']} is not under limits.fast_lane ({caps or 'none set'})")
     return not why, why
 

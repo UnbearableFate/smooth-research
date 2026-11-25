@@ -334,6 +334,10 @@ def limit(config: dict, key: str):
 
 
 def tests_mode(config: dict) -> str:
+    """local or job. With the coordinator on a login node, always job: nothing runs on the login host, whatever
+    compute.tests says (its default is local)."""
+    if coordinator_is_login(config):
+        return "job"
     compute = config.get("compute")
     value = compute.get("tests") if isinstance(compute, dict) else None
     return value if value in ("local", "job") else "local"

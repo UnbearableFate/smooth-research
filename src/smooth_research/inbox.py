@@ -534,8 +534,10 @@ class Rules:
                                      frm="cli", note=f"{h['id']} assumes {e['id']}")
 
     def usage(self) -> None:
-        from .usage_view import lines_crossed
+        from .usage_view import _task_of, lines_crossed, task_ids
         shares = limit(self.config, "envelope_lines")
+        charges = [(e["created_at"], {_task_of(self.tx, c["id"]) for c in self.tx.out(e["entity_id"], "covers")})
+                   for e in self.tx.all("Event", type="run.usage")]
         for t in self.tasks:
             if t["kind"] != "hypothesis" or t["state"] not in ("active", "delivered") or not t.get("envelope"):
                 continue
@@ -543,19 +545,21 @@ class Rules:
             if not crossed:
                 continue
             top = max(s for s, _ in crossed)
-            usage_times = [e["created_at"] for e in self.tx.all("Event", type="run.usage")]
+            mine = set(task_ids(self.tx, t))  # charges of this hypothesis's work only: another task's charge
+            usage_times = [at for at, tasks in charges if tasks & mine]  # does not reopen a handled warning
             last_usage = max(usage_times) if usage_times else t["created_at"]
+            line = {"rev": f"{top:g}"}  # the line crossed: a higher one is news to whoever was told of a lower
             later = [d for d in self.decisions if d.get("task_id") == t["id"] and d["created_at"] >= last_usage]
             env_changed = [e for e in self.tx.all("Event", entity_id=t["id"]) if e["type"] == "task.envelope"
                            and e["created_at"] >= last_usage]
             if not later and not env_changed and t["state"] == "active":
                 self.add(type="usage-line", to=t["holder"], subject=t["id"], ask="adjust the plan, or make a "
                          "decision request", cmd="rl decide --kind route .. | rl request ..", since=last_usage,
-                         frm="cli", note=f"past {top:.0%} of the envelope")
+                         frm="cli", note=f"past {top:.0%} of the envelope", extra=line)
             if top >= shares[-1] and not env_changed:
                 self.add(type="usage-line", to="coordinator", subject=t["id"], ask="look at the envelope",
                          cmd=f"rl task set {t['id']} --envelope ..", since=last_usage, frm="cli",
-                         note=f"past {top:.0%} of the envelope")
+                         note=f"past {top:.0%} of the envelope", extra=line)
 
     def dialogue(self) -> None:
         """Questions, review discussion and consultations: an entry waits for its addressee's reply (8.7)."""

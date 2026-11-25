@@ -132,15 +132,23 @@ def _coordinator(store: Store, tx: Tx) -> list[tuple[str, list[str], bool]]:
 # -- scientist ------------------------------------------------------------------------------------------------
 
 
-def _task_card(tx: Tx, t: dict) -> list[str]:
+def _task_card(store: Store, tx: Tx, t: dict) -> list[str]:
     lines = [f"{t['id']} {t['kind']} · {t['state']}" + (f" · held by {t['holder']}" if t.get("holder") else "")
              + f" · {t['title']}"]
     for key in ("reason", "priority", "envelope", "parallel_limit", "requirement", "done_check", "estimate",
                 "block_reason", "block_note", "answer_note", "return_note", "dispatch_note", "merge_state",
                 "merge_note", "worktree", "branch"):
         if t.get(key) not in (None, ""):
-            lines.append(f"{key}: {t[key]}")
+            lines.append(f"{key}: {_worktree(store, t) if key == 'worktree' else t[key]}")
     return lines
+
+
+def _worktree(store: Store, t: dict) -> str:
+    """The task's worktree in this project (a project restored elsewhere has its own), as the watcher opens it."""
+    try:
+        return str(gitops.checkout_in(store.project, t["id"]))
+    except RLError:
+        return t.get("worktree") or "-"
 
 
 def _compute(store: Store) -> list[str]:
@@ -157,7 +165,7 @@ def _scientist(store: Store, tx: Tx, actor: Actor) -> list[tuple[str, list[str],
         plan = store.project.plan_path
         text = plan.read_text(encoding="utf-8").splitlines() if plan.is_file() else ["(no plan file)"]
         current = tree_lines(tx) or ["(no hypotheses yet)"]
-        return [("Tree task card", _task_card(tx, t) + [
+        return [("Tree task card", _task_card(store, tx, t) + [
                     "Deliver: hypotheses (statement, scope, source, purpose; one primary parent each), a route "
                     "decision on why the tree is split this way, every plan heading covered (or in left-out.md), "
                     "flagged hypotheses with basis and options, a passed tree review."], False),
@@ -171,18 +179,18 @@ def _scientist(store: Store, tx: Tx, actor: Actor) -> list[tuple[str, list[str],
             for d in tx.all("Decision", task_id=ht["id"]):
                 if d["kind"] in ("verdict", "stop"):
                     rows.append("  " + brief(d))
-        return [("Phase task card", _task_card(tx, t) + ([f"phase {ph['id']}: {ph['title']}"] if ph else []), False),
+        return [("Phase task card", _task_card(store, tx, t) + ([f"phase {ph['id']}: {ph['title']}"] if ph else []), False),
                 ("The phase's tasks, conclusions and decisions", rows, True),
                 ("Hypothesis tree", tree_lines(tx), True), fetch]
     if t["kind"] == "prep":
         atts = [f"{a['id']} {a['execution_state']}/{a['outcome']}" for r in tx.all("Run", task_id=t["id"])
                 for a in tx.all("Attempt", run_id=r["id"])]
         rounds = [f"{r['id']} {r['status']} · {len(open_findings(r))} open" for r in task_rounds(tx, t["id"])]
-        return [("Preparation task card (handed to you)", _task_card(tx, t), False),
+        return [("Preparation task card (handed to you)", _task_card(store, tx, t), False),
                 ("Attempts", atts, True), ("Review rounds", rounds, True), fetch]
     # hypothesis task
     hyps = [tx.require(e["id"]) for e in tx.out(t["id"], "targets") if e["label"] == "Hypothesis"]
-    cardl = _task_card(tx, t)
+    cardl = _task_card(store, tx, t)
     for h in hyps:
         cardl += [f"{h['id']} {h.get('label')}: {h['statement']}", f"  scope: {h.get('scope') or '-'} · purpose: "
                   f"{h.get('purpose') or '-'}" + (" · composite" if h.get("composite") else "")]
@@ -234,7 +242,7 @@ def _scientist(store: Store, tx: Tx, actor: Actor) -> list[tuple[str, list[str],
 
 def _researcher(store: Store, tx: Tx, actor: Actor) -> list[tuple[str, list[str], bool]]:
     t = tx.require(actor.subject, "Task")
-    cardl = _task_card(tx, t)
+    cardl = _task_card(store, tx, t)
     exp = task_design(tx, t["id"]) if t["kind"] == "execute" else None
     if exp:
         cardl += [f"experiment {exp['id']}@{exp['revision']}{' (as sealed for this task)' if t.get('sealed_design') else ''}"
@@ -290,7 +298,7 @@ def _reviewer(store: Store, tx: Tx, actor: Actor) -> list[tuple[str, list[str], 
         t = tx.require(r["task_id"], "Task")
         exp = lp.get("design_snapshot") or task_design(tx, t["id"])  # the design this pass was requested for
         commit = lp.get("commit")
-        material += [f"commit under review: {commit}", f"worktree: {t.get('worktree')} (read with git show "
+        material += [f"commit under review: {commit}", f"worktree: {_worktree(store, t)} (read with git show "
                      f"{(commit or '')[:12]}:<path>)"]
         if exp:
             material += [f"experiment {exp['id']}@{exp['revision']}: {exp['question']}",

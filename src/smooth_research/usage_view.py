@@ -14,9 +14,22 @@ from .store import Tx
 ENVELOPE = re.compile(r"(?:about\s+)?([0-9]+(?:\.[0-9]+)?)\s*([^\s,;]+)")
 
 
+# The spellings people write for the units executors report (Miyabi's jobs MCP: node_hours, mig_instance_hours):
+# compared as one unit. Other units stay distinct.
+UNIT_NAMES = {"node_hours": ("node·h", "node_h", "node-h", "node-hours", "node_hour", "nodeh"),
+              "mig_instance_hours": ("mig·h", "mig_h", "mig-h", "mig_hours", "mig-hours"),
+              "gpu_hours": ("gpu·h", "gpu_h", "gpu-h", "gpu-hours")}
+_ALIAS = {alias: name for name, aliases in UNIT_NAMES.items() for alias in aliases + (name,)}
+
+
+def unit_key(unit: str) -> str:
+    """The unit as compared: 'MIG·h' and 'mig_instance_hours' are one unit."""
+    return _ALIAS.get(str(unit).strip().lower(), str(unit).strip())
+
+
 def envelope(text: str | None) -> dict[str, float]:
-    """'about 4 MIG·h, 0.5 node·h' -> {'MIG·h': 4.0, 'node·h': 0.5}."""
-    return {m[2]: float(m[1]) for m in ENVELOPE.finditer(text or "")}
+    """'about 4 MIG·h, 0.5 node·h' -> {'mig_instance_hours': 4.0, 'node_hours': 0.5}."""
+    return {unit_key(m[2]): float(m[1]) for m in ENVELOPE.finditer(text or "")}
 
 
 def task_ids(tx: Tx, task: dict) -> list[str]:
@@ -43,9 +56,10 @@ def task_usage(tx: Tx, task: dict) -> dict:
                 for u in records:
                     if u["id"] not in counted:
                         counted.add(u["id"])
-                        used[u["unit"]] = used.get(u["unit"], 0.0) + u["quantity"]
+                        unit = unit_key(u["unit"])
+                        used[unit] = used.get(unit, 0.0) + u["quantity"]
                         if any(_task_of(tx, e["id"]) not in mine for e in tx.out(u["id"], "covers")):
-                            shared[u["unit"]] = shared.get(u["unit"], 0.0) + u["quantity"]
+                            shared[unit] = shared.get(unit, 0.0) + u["quantity"]
                 if att["execution_state"] in ("prepared", "queued", "running", "unknown"):
                     pending += 1
                     pending_hours += 0 if here else (run.get("minutes") or 0) / 60
