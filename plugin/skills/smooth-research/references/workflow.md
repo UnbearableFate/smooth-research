@@ -196,7 +196,7 @@ With `compute.tests: job` a task's tests are jobs too. Register one with `{{rl}}
 executor); its run keeps the test command, commit and experiment revision of that moment. Run the command at that
 commit, then `{{rl}} task test T-x --record pass|fail --attempt <ATT>` (once per job). A command or revision changed
 afterwards needs a new job. An acceptance waits on its merge test the same way (`--purpose merge-test`): the
-candidate is the branch `sr-accept/T-x`, which `{{rl}} compute sync` pushes for a git resource; the watcher
+candidate is the branch `sr-accept/<project tag>/T-x`, which `{{rl}} compute sync` pushes for a git resource; the watcher
 finishes the acceptance when the job's end is recorded.
 
 ### Jobs through an external executor

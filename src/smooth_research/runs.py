@@ -142,6 +142,11 @@ def register(store: Store, actor: Actor, task_id: str, request_id: str, arm: str
         if previous:
             return {**previous, "duplicate": True,
                     "summary": f"duplicate request {request_id}: {previous['run']} {previous['attempt']}"}
+        if purpose == "merge-test":  # again under the write lock: the acceptance it tests still waits
+            now = tx.require(task_id, "Task")
+            if now["state"] != "merging" or now.get("merge_commit") != commit or now["revision"] != acceptance["round"]:
+                raise RLError("CONFLICT", f"{task_id}'s acceptance changed meanwhile (now {now['state']}): nothing was "
+                                          "registered")
         if category == "evidence":  # again under the write lock: a finding or a revision recorded meanwhile
             now = tx.require(task_id, "Task")
             sealed, live_now = task_design(tx, task_id), task_experiment(tx, task_id)

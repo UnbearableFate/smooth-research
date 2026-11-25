@@ -336,15 +336,17 @@ class Rules:
                     self.add(type="merge-test", to=who, subject=t["id"], ask="run the merge test of its acceptance "
                              "as a short job", cmd=f"rl run register --task {t['id']} --request-id <new id> --purpose "
                              "merge-test --minutes N [--resource R]", since=self.since([t["id"]]), frm="cli",
-                             note=f"candidate {t['merge_commit'][:12]} (branch sr-accept/{t['id']})")
+                             note=f"candidate {t['merge_commit'][:12]} (rl compute sync pushes its branch)")
         for a in self.attempts:
             run = self.runs.get(a["run_id"]) or {}
             who = a.get("submitted_by")
-            if not who or run.get("purpose") == "merge-test":
+            if not who:
                 continue
             if run.get("ticket_id"):
                 who = session_name("reviewer", run["ticket_id"])
             if a["execution_state"] == "ended":
+                if run.get("purpose") == "merge-test":  # its end decides the acceptance (tasks.finish_merge)
+                    continue
                 newer = run.get("attempt_count", 1) > a["index"]
                 if not a.get("handled_at") and a["result_status"] == "absent" and not newer:
                     self.add(type="test-job-ended" if run.get("ticket_id") else "job-ended", to=who,

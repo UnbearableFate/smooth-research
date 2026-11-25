@@ -197,26 +197,39 @@ def merge_candidate(project: Project, task_id: str, delivered: str) -> tuple[str
 CANDIDATES = "sr-accept/"
 
 
-def candidate_branch(task_id: str) -> str:
-    return CANDIDATES + task_id
+def _tag(project: Project) -> str:
+    """This project's part of the candidate branch names: another project in the same repository keeps its own."""
+    import hashlib
+    return hashlib.blake2b(str(project.root.resolve()).encode(), digest_size=4).hexdigest()
+
+
+def candidate_prefix(project: Project) -> str:
+    return f"{CANDIDATES}{_tag(project)}/"
+
+
+def candidate_branch(project: Project, task_id: str) -> str:
+    return candidate_prefix(project) + task_id
+
+
+def candidate_refs(project: Project) -> dict[str, str]:
+    """task id -> commit of this project's candidate branches."""
+    out = git(top(project), "for-each-ref", "--format=%(refname:short) %(objectname)",
+              f"refs/heads/{candidate_prefix(project)}", check=False)
+    return {name[len(candidate_prefix(project)):]: sha for name, sha in (line.split() for line in out.splitlines())}
 
 
 def set_candidates(project: Project, wanted: dict[str, str]) -> None:
-    """Make the candidate branches exactly wanted (task id -> the candidate its acceptance waits on with a test
-    job): a remote job fetches its candidate through it (compute sync pushes these branches). The caller holds the
-    records' write lock and derives wanted from them, so the branches follow the records, never a stale process."""
+    """Make this project's candidate branches exactly wanted (task id -> the candidate its acceptance waits on with
+    a test job): a remote job fetches its candidate through it (compute sync pushes these branches). The caller
+    holds the records' write lock and derives wanted from them, so the branches follow the records, never a stale
+    process. A branch that cannot be set or removed raises (nothing is pushed then)."""
     root = top(project)
-    have = {b[len(CANDIDATES):]: rev(project, b) for b in candidate_branches(root)}
+    have = candidate_refs(project)
     for tid, commit in wanted.items():
         if have.get(tid) != commit:
-            git(root, "update-ref", f"refs/heads/{candidate_branch(tid)}", commit)
+            git(root, "update-ref", f"refs/heads/{candidate_branch(project, tid)}", commit)
     for tid in set(have) - set(wanted):
-        git(root, "update-ref", "-d", f"refs/heads/{candidate_branch(tid)}", check=False)
-
-
-def candidate_branches(checkout: Path) -> list[str]:
-    return git(checkout, "for-each-ref", "--format=%(refname:short)", f"refs/heads/{CANDIDATES}",
-               check=False).split()
+        git(root, "update-ref", "-d", f"refs/heads/{candidate_branch(project, tid)}", have[tid])
 
 
 @contextmanager

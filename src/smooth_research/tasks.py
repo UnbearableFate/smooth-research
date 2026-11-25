@@ -317,6 +317,9 @@ def test(store: Store, actor: Actor, tid: str, record: str | None = None, commit
     with store.write() as tx:
         task = tx.require(tid, "Task")
         outcome = "pass" if ok else "fail"
+        if not attempt and test_target(tx, task) != (command, design):  # the design changed while the test ran
+            raise RLError("CONFLICT", f"{tid}'s design or test command changed while the test ran: nothing was "
+                                      "recorded; test again")
         same = [t for t in task.get("tests") or [] if attempt and t.get("attempt") == attempt]
         if same:  # one job, one result: a repeated report changes nothing
             if same[0]["outcome"] != outcome:
@@ -337,7 +340,15 @@ def test_runs(task: dict, commit: str, command: str | None, design: str | None =
     order they ended."""
     runs = [t for t in task.get("tests") or [] if t["commit"] == commit and t.get("command") == command
             and (design is None or t.get("design") == design)]
-    return sorted(runs, key=lambda t: t.get("at") or "")
+    return sorted(runs, key=_instant)
+
+
+def _instant(t: dict) -> float:
+    """A test result's time as an instant (results come with any UTC offset)."""
+    try:
+        return parse_time(t.get("at")).timestamp()
+    except (RLError, TypeError, ValueError):
+        return 0.0
 
 
 def passed_at(task: dict, commit: str, command: str | None, design: str | None = None) -> bool:
@@ -347,7 +358,7 @@ def passed_at(task: dict, commit: str, command: str | None, design: str | None =
     if not runs or runs[-1]["outcome"] != "pass":
         return False
     # a failure that cannot be put before the latest pass (ended in the same second) needs another pass
-    return not any(t["outcome"] != "pass" and t.get("at") == runs[-1].get("at") for t in runs)
+    return not any(t["outcome"] != "pass" and _instant(t) >= _instant(runs[-1]) for t in runs)
 
 
 # -- dispatch -------------------------------------------------------------------------------------------------
@@ -728,7 +739,8 @@ def _merge(store: Store, tid: str, run_tests: bool, seen: int | None = None) -> 
         if job:
             sync_candidates(tx, store)
     if job:
-        return (f"merge commit {commit[:12]} made (branch {gitops.candidate_branch(tid)}); run its tests as a short "
+        return (f"merge commit {commit[:12]} made (branch {gitops.candidate_branch(store.project, tid)}); run its "
+                f"tests as a short "
                 f"job: rl run register --task {tid} --request-id <new id> --purpose merge-test --minutes N "
                 f"[--resource R]; the mainline moves when it passes")
     if command:
@@ -787,9 +799,7 @@ def repair_candidates(store: Store) -> bool:
     differ, so a beat with nothing to repair writes nothing. True when something was repaired."""
     with store.read() as tx:
         wanted = _wanted(tx)
-    root = gitops.top(store.project)
-    have = {b[len(gitops.CANDIDATES):]: gitops.rev(store.project, b) for b in gitops.candidate_branches(root)}
-    if have == wanted:
+    if gitops.candidate_refs(store.project) == wanted:
         return False
     with store.write() as tx:
         sync_candidates(tx, store)
@@ -867,7 +877,7 @@ def finish_merge(store: Store, attempt: str) -> str | None:
                                             f"{att['outcome']}: {att.get('ended_note') or ''}"[:300], public,
                          acc["delivered"], acc["round"])
     return f"{task['id']}: " + _advance(store, task["id"], task["merge_commit"], acc["delivered"], acc["round"],
-                                        public, f"merged after its test job {attempt}")
+                                        public, f"merged after its test job {attempt}", needs_job=True)
 
 
 def reconcile_merges(store: Store) -> list[str]:

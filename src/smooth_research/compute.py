@@ -447,11 +447,17 @@ def sync(store: Store, name: str | None = None) -> dict:
             else:
                 problems.append(f"git push {remote} {branch} failed: {said}. Fix it (never force a shared branch), "
                                 "then rl compute sync")
-        from .gitops import candidate_branches
+        from .gitops import candidate_branch, candidate_refs
         from .tasks import repair_candidates
+        cands: list[str] = []
         if url:
-            repair_candidates(store)  # the branches as the records say, before they go out
-        for cand in candidate_branches(checkout) if url else []:  # merge candidates waiting on a test job
+            try:  # the branches as the records say, before they go out
+                repair_candidates(store)
+                cands = [candidate_branch(project, t) for t in candidate_refs(project)]
+            except RLError as exc:
+                problems.append(f"the merge candidate branches could not be brought to the records ({exc.message}): "
+                                "none was pushed; fix it, then rl compute sync")
+        for cand in cands:  # merge candidates waiting on a test job
             ok, said = _call(checkout, "git", "push", "--force", remote, cand)
             (lines if ok else problems).append(f"pushed the merge candidate {cand} to {remote}" if ok else
                                                f"git push {remote} {cand} failed: {said}")

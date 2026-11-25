@@ -283,11 +283,11 @@ def test_a_pending_candidate_has_a_branch_until_its_acceptance_ends(project, rl)
     ok(rl("task", "accept", "T-0003", who=s))
     with project.read() as tx:
         cand = tx.require("T-0003")["merge_commit"]
-    assert git(top, "rev-parse", "sr-accept/T-0003") == cand
+    assert gitops.candidate_refs(project.project) == {"T-0003": cand}
     att = json.loads(ok(rl("--json", "run", "register", "--task", "T-0003", "--request-id", "m", "--purpose",
                            "merge-test", "--minutes", "5", who=s)))["attempt"]
     ok(rl("run", "record", "--attempt", att, "--state", "ended", "--outcome", "success", who=s))
-    assert gitops.candidate_branches(top) == []
+    assert gitops.candidate_refs(project.project) == {}
 
 
 def test_an_acceptance_interrupted_after_the_mainline_moved_is_finished_as_tested(project, rl):
@@ -415,11 +415,13 @@ def test_candidate_branches_follow_the_records(project, rl):
     flow.delivered(project, rl)
     top = gitops.top(project.project)
     head = git(top, "rev-parse", "HEAD")
-    git(top, "branch", "sr-accept/T-0099", head)  # left by a stopped process: no acceptance waits on it
+    git(top, "branch", gitops.candidate_branch(project.project, "T-0099"), head)  # left by a stopped process
+    git(top, "branch", "sr-accept/otherproj/T-0003", head)  # another project's: never touched
     with project.write() as tx:  # an acceptance recorded, its branch never made
         tx.update("T-0003", {"state": "merging", "merge_state": "merging", "merge_commit": head})
     assert tasks.repair_candidates(project)
-    assert gitops.candidate_branches(top) == ["sr-accept/T-0003"]
+    assert gitops.candidate_refs(project.project) == {"T-0003": head}
+    assert git(top, "rev-parse", "sr-accept/otherproj/T-0003") == head
     assert not tasks.repair_candidates(project)  # nothing to repair: nothing written
 
 
@@ -449,3 +451,30 @@ def test_a_test_credits_the_design_it_read(project, rl):
     with project.read() as tx:
         task = tx.require("T-0003")
     assert task["tests"][-1]["design"].startswith("E-0001@1#")
+
+
+def test_results_are_ordered_as_instants_whatever_their_offset():
+    from smooth_research.tasks import passed_at
+    t = {"tests": [{"commit": "c", "command": "x", "outcome": "fail", "at": "2026-11-25T10:01:00+00:00"},
+                   {"commit": "c", "command": "x", "outcome": "pass", "at": "2026-11-25T19:00:00+09:00"}]}
+    assert not passed_at(t, "c", "x")  # the pass was at 10:00 UTC, before the failure
+
+
+def test_a_running_merge_test_can_be_overdue(project, rl):
+    flow.delivered(project, rl)
+    s = "scientist-T-0002"
+    _job_tests(project)
+    from smooth_research.project import find_project
+    from smooth_research.store import Store
+    project = Store(find_project(), "test")
+    top = gitops.top(project.project)
+    (top / "other.txt").write_text("main moved\n")
+    git(top, "add", "-A")
+    git(top, "commit", "-qm", "main moves on")
+    ok(rl("task", "accept", "T-0003", who=s))
+    att = json.loads(ok(rl("--json", "run", "register", "--task", "T-0003", "--request-id", "m", "--purpose",
+                           "merge-test", "--minutes", "5", who=s)))["attempt"]
+    ok(rl("run", "record", "--attempt", att, "--state", "running", who=s))
+    with project.write() as tx:
+        tx.update(att, {"expected_end": "2026-01-01T00:00:00+00:00"})
+    assert "job-overdue" in flow.types(project, s)
