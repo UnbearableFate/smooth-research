@@ -29,7 +29,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Iterator
 
-from . import adapters, herdr, inbox, launch, usage
+from . import adapters, gitops, herdr, inbox, launch, usage
 from .project import ENV_PROJECT, agents_value, limit, usable_entries
 from .roles import parse, session_name
 from .schema import TASK_DONE
@@ -146,11 +146,18 @@ def choose_entry(store: Store, role: str, low: dict) -> adapters.Entry | None:
 
 
 def folder(store: Store, tx: Tx, name: str) -> str:
-    """Where a session works: a task's worktree for its scientist or researcher, else the project root."""
+    """Where a session works: a task's worktree for its scientist or researcher, else the project root. The
+    worktree is the one of this project (a project restored elsewhere has its own), not the path recorded when the
+    task was claimed; one that is missing is refused with the way to make it again."""
     rec = subject_of(tx, name)
     if rec and rec["_label"] == "Task" and parse(name).role in ("scientist", "researcher"):
         if rec.get("worktree"):
-            return rec["worktree"]
+            here = gitops.checkout_in(store.project, rec["id"])
+            if not here.is_dir():
+                raise RLError("NOT_FOUND", f"{rec['id']}'s worktree {here} is missing (a project moved or restored?):"
+                                           f" make it again on its branch: git worktree add "
+                                           f"{gitops.worktree_path(store.project, rec['id'])} {rec.get('branch')}")
+            return str(here)
     return str(store.project.root)
 
 

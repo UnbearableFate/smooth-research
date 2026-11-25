@@ -269,10 +269,11 @@ as `--attempt` fill in or override every record.
 
 ## Usage
 
-`{{rl}} run usage --accounting-ref "local:$(hostname):ATT-0001-1" --quantity 42 --unit cpu_s --resource-type
-compute --hardware "<cpu model>" --basis measured --attempts ATT-0001-1`. A shared job: one accounting ref,
-several `--attempts`, counted once; never split it into invented per-run numbers. Different units are never
-added, and unreported usage is not zero.
+Runs on this machine count no usage: record none for them. For a job on a remote resource, record what its
+scheduler accounted (an executor export records it for you): `{{rl}} run usage --accounting-ref "<scheduler>:<job
+id>" --quantity 0.17 --unit node_h --resource-type compute --hardware "<node type>" --basis measured --attempts
+ATT-0001-1`. A shared job: one accounting ref, several `--attempts`, counted once; never split it into invented
+per-run numbers. Different units are never added, and unreported usage is not zero.
 
 ## After a plugin update
 

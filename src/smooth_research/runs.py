@@ -511,12 +511,13 @@ def _artifact_places(project: Project, path: str, task_id: str | None) -> list[t
     p = Path(path)
     if p.is_absolute():
         return [("absolute", p)] if p.is_file() else []
-    places = [("project", project.root / p), ("checkout", project.checkout / p)]
+    places = [("project", project.root / p)]
     if task_id:
         try:  # a project restored without its repository has no task worktrees
-            places.append(("task", checkout_in(project, task_id) / p))
-        except RLError:
-            pass
+            places.append(("task", checkout_in(project, task_id) / p))  # before the caller's checkout: usually
+        except RLError:                                                   # the same file, and rl doctor finds it
+            pass                                                          # again by the task
+    places.append(("checkout", project.checkout / p))
     found, seen = [], set()
     for which, f in places:
         if f.is_file() and f.resolve() not in seen:
@@ -687,7 +688,7 @@ def _usage(tx: Tx, usage: dict, attempts: list[str], revise: bool = False) -> di
         if usage.get(key) in (None, ""):
             raise RLError("INVALID", f"usage needs {key} (unreported usage is simply not recorded, never zero)")
     if ":" not in usage["accounting_ref"]:
-        raise RLError("INVALID", "accounting_ref needs a namespace, e.g. scheduler:12345 or local:<host>:<run>")
+        raise RLError("INVALID", "accounting_ref needs a namespace, e.g. scheduler:12345")
     body = {k: usage.get(k) for k in ("quantity", "unit", "resource_type", "hardware", "basis", "source_ref")}
     body["basis"] = body["basis"] or "reported"
     digest = digest_json({**body, "attempts": sorted(attempts)})
@@ -712,29 +713,33 @@ def _usage(tx: Tx, usage: dict, attempts: list[str], revise: bool = False) -> di
     for a in attempts:
         tx.require(a, "Attempt")
         tx.link("covers", uid, a)
+    # one event for every new charge, however it came (rl run usage or an executor's export): the envelope
+    # notices date spending from it (inbox.usage)
+    tx.event("run.usage", uid, f"{usage['quantity']} {usage['unit']} {usage['accounting_ref']}")
     return {"usage": uid, "duplicate": False}
 
 
 def add_usage(store: Store, usage: dict, attempts: list[str], revise: bool = False) -> dict:
     with store.write() as tx:
         out = _usage(tx, usage, attempts, revise)
-        if not out["duplicate"]:
-            tx.event("run.usage", out["usage"], f"{usage['quantity']} {usage['unit']} {usage['accounting_ref']}")
     return {**out, "summary": f"{out['usage']} {'already recorded' if out['duplicate'] else 'recorded'} "
                               f"({usage['quantity']} {usage['unit']}, {usage['accounting_ref']})"}
 
 
 def usage_summary(tx: Tx) -> dict:
+    from .usage_view import on_this_machine
     totals: dict[tuple, float] = {}
     covered = set()
     for u in tx.all("Usage"):
         if u.get("superseded"):
             continue
+        atts = [tx.get(e["id"]) for e in tx.out(u["id"], "covers")]
+        if atts and all(a and on_this_machine(tx, a) for a in atts):
+            continue  # usage of runs on this machine is not counted (11-25, the user's decision)
         key = (u["resource_type"], u["unit"], u.get("hardware") or "-", u["basis"])
         totals[key] = totals.get(key, 0.0) + u["quantity"]
         covered |= {e["id"] for e in tx.out(u["id"], "covers")}
     # an attempt on this machine counts no usage (11-25, the user's decision): never "unreported"
-    from .usage_view import on_this_machine
     attempts = [a["id"] for a in tx.all("Attempt") if a["execution_state"] != "prepared"
                 and not on_this_machine(tx, a)]
     return {"totals": [{"resource_type": k[0], "unit": k[1], "hardware": k[2], "basis": k[3], "quantity": v}

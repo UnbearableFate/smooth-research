@@ -37,15 +37,15 @@ def task_usage(tx: Tx, task: dict) -> dict:
     for tid in mine:
         for run in tx.all("Run", task_id=tid):
             for att in tx.all("Attempt", run_id=run["id"]):
+                here = on_this_machine(tx, att)
                 records = [tx.require(e["id"]) for e in tx.inc(att["id"], "covers")]
-                records = [u for u in records if not u.get("superseded")]
+                records = [u for u in records if not u.get("superseded") and not here]  # (11-25, the user)
                 for u in records:
                     if u["id"] not in counted:
                         counted.add(u["id"])
                         used[u["unit"]] = used.get(u["unit"], 0.0) + u["quantity"]
                         if any(_task_of(tx, e["id"]) not in mine for e in tx.out(u["id"], "covers")):
                             shared[u["unit"]] = shared.get(u["unit"], 0.0) + u["quantity"]
-                here = on_this_machine(tx, att)
                 if att["execution_state"] in ("prepared", "queued", "running", "unknown"):
                     pending += 1
                     pending_hours += 0 if here else (run.get("minutes") or 0) / 60

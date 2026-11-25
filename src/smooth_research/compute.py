@@ -232,11 +232,11 @@ def _local_steps(project: Project, res: Resource, commit: str | None, facts: dic
 def _remote(res: Resource, script: str) -> str:
     """How to run a shell script on the resource's host."""
     if res.connect == "local":
-        return f"   sh -s <<'SR_EOF'\n{_indent(script)}\n   SR_EOF"
+        return f"   sh -s <<'SR_EOF'\n{_indent(script)}\nSR_EOF"  # the delimiter at column one, or the shell misses it
     if res.connect == "pi-env-mcp":
         return (f"   pi-env-mcp bash (server {res.server or 'pi-env-mcp'}, host {res.host}), command:\n"
                 + _indent(script))
-    return f"   ssh -T -o BatchMode=yes {_sh(res.host)} sh -s <<'SR_EOF'\n{_indent(script)}\n   SR_EOF"
+    return f"   ssh -T -o BatchMode=yes {_sh(res.host)} sh -s <<'SR_EOF'\n{_indent(script)}\nSR_EOF"
 
 
 def _indent(text: str) -> str:
@@ -246,8 +246,12 @@ def _indent(text: str) -> str:
 def _sync_steps(project: Project, res: Resource, commit: str | None, facts: dict, where: dict) -> list[str]:
     sha = commit or "<commit>"
     ws, snap = res.workspace, where["snapshot"]
+    sub = where["project"][len(snap):].lstrip("/")  # the project's directory in the repository ('' at its top)
+    proj = "$snap" + (f"/{sub}" if sub else "")
     head = (f"ws={_sh(ws)}; sha={sha}; snap=\"$ws/snapshots/$sha\"\n"
-            "if [ -d \"$snap\" ]; then echo \"already staged: $snap\"; exit 0; fi\n"
+            f"if [ -d \"{proj}\" ]; then echo \"already staged: {proj}\"; exit 0; fi\n"
+            "if [ -e \"$snap\" ]; then echo \"$snap is incomplete (no project directory in it): remove it "
+            "(chmod -R u+w, rm -rf) and stage again\" >&2; exit 1; fi\n"
             "mkdir -p \"$ws/snapshots\" \"$ws/runs\"; tmp=\"$ws/snapshots/.$sha.partial\"; rm -rf \"$tmp\"; "
             "mkdir \"$tmp\"\n")
     tail = "mv \"$tmp\" \"$snap\" && chmod -R a-w \"$snap\" && echo \"staged: $snap\""
@@ -255,7 +259,8 @@ def _sync_steps(project: Project, res: Resource, commit: str | None, facts: dict
              "start, so a snapshot is never edited; the same commit is staged once):"]
     if res.connect == "local":
         script = ("set -eu\n" + head
-                  + f"git -C {_sh(facts['checkout'])} archive --format=tar {sha} -o \"$tmp/.source.tar\"\n"
+                  + f"git -C {_sh(_top_of(facts['checkout']))} archive --format=tar {sha} "
+                  + "-o \"$tmp/.source.tar\"\n"
                   + 'tar -xf "$tmp/.source.tar" -C "$tmp"\nrm "$tmp/.source.tar"\n' + tail)
         lines += ["   Shared filesystem: stage from the caller's commit, with no SSH, upload or git push. "
                   "Keep this to small source-only archives; stage large trees in a compute allocation.",
@@ -282,7 +287,7 @@ def _sync_steps(project: Project, res: Resource, commit: str | None, facts: dict
         lines.append(_remote(res, script))
         return lines
     tar = project.research_root / "artifacts" / "snapshots" / f"{sha}.tar"
-    archive = f"git -C {_sh(facts['checkout'])} archive --format=tar {sha}"
+    archive = f"git -C {_sh(_top_of(facts['checkout']))} archive --format=tar {sha}"
     if res.connect == "ssh":
         script = ("set -eu\n" + head.replace("exit 0", "cat >/dev/null; exit 0") + "tar -x -C \"$tmp\"\n" + tail)
         script = "; ".join(script.splitlines())  # one line to copy
@@ -296,6 +301,12 @@ def _sync_steps(project: Project, res: Resource, commit: str | None, facts: dict
               f"{ws}/snapshots/{sha}.tar",
               "   c. Extract it:", _remote(res, script)]
     return lines
+
+
+def _top_of(checkout: str) -> str:
+    """The repository top of a checkout: git archive run in a subdirectory archives only that subdirectory, at the
+    archive's root, so a nested project would lose its path and the files it shares with the repository."""
+    return str(repo_top(Path(checkout)) or checkout)
 
 
 def _clone(url: str) -> str:

@@ -173,6 +173,8 @@ def test_one_accounting_record_over_two_attempts_counts_once(project, rl):
     for n, arm in enumerate(("single", "mean3"), 1):
         ok(rl("run", "register", "--task", "T-0003", "--request-id", f"a{n}", "--arm", arm, "--seed", "0", who=r))
     with project.write() as tx:
+        for a in ("ATT-0001-1", "ATT-0002-1"):  # remote work: usage on this machine is not counted
+            tx.update(a, {"resource": {"kind": "remote", "name": "box"}})
         runs._usage(tx, {"accounting_ref": "scheduler:1", "quantity": 3, "unit": "GPU·h", "resource_type": "gpu"},
                     ["ATT-0001-1", "ATT-0002-1"])
     with project.read() as tx:
@@ -797,3 +799,38 @@ def test_a_run_on_this_machine_counts_no_usage_and_is_not_unreported(project, rl
         assert u["used"] == {} and u["unreported"] == 0 and u["local"] == 2
         assert "2 attempt(s) on this machine, not counted" in usage_line(tx, task)
         assert runs.usage_summary(tx)["unreported_attempts"] == []
+
+
+def test_a_session_works_in_the_worktree_of_the_project_it_runs_in(project, rl):
+    """A project restored elsewhere: the worktree recorded at the claim names the original."""
+    from smooth_research import watch
+    flow.approved(project, rl)
+    ok(rl("task", "claim", "T-0002", who="scientist-T-0002"))
+    with project.write() as tx:
+        tx.update("T-0002", {"worktree": "/elsewhere/original/.worktrees/T-0002"})
+        assert watch.folder(project, tx, "scientist-T-0002") == str(gitops.checkout_in(project.project, "T-0002"))
+
+
+def test_staging_archives_from_the_repository_top_and_ends_its_heredoc_at_column_one(tmp_path):
+    from smooth_research import compute
+    from smooth_research.project import Resource
+    git(tmp_path, "init", "-q")
+    (tmp_path / "examples" / "project").mkdir(parents=True)
+    assert compute._top_of(str(tmp_path / "examples" / "project")) == str(tmp_path)
+    res = Resource(name="c", kind="remote", host="h", connect="local", jobs="pbs", workspace="/w", code="archive")
+    assert compute._remote(res, "echo hi").endswith("\nSR_EOF")
+
+
+def test_usage_recorded_for_a_run_on_this_machine_is_not_counted_and_every_charge_is_an_event(project, rl):
+    from smooth_research import runs
+    from smooth_research.usage_view import task_usage
+    flow.delivered(project, rl)
+    with project.read() as tx:
+        att = tx.all("Attempt")[0]["id"]
+    ok(rl("run", "usage", "--accounting-ref", "local:box:1", "--quantity", "42", "--unit", "cpu_s",
+          "--resource-type", "compute", "--basis", "measured", "--attempts", att, who="researcher-T-0003"))
+    with project.write() as tx:
+        assert task_usage(tx, tx.require("T-0003"))["used"] == {} and runs.usage_summary(tx)["totals"] == []
+        out = runs._usage(tx, {"accounting_ref": "pbs:9", "quantity": 1, "unit": "node_h",
+                               "resource_type": "compute"}, [att])  # as an executor's export writes it
+        assert [e for e in tx.all("Event", type="run.usage") if e["entity_id"] == out["usage"]]
