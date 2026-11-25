@@ -92,7 +92,7 @@ def register(store: Store, actor: Actor, task_id: str, request_id: str, arm: str
         if problems:
             if not deviation:
                 raise RLError("INVALID", "the run does not match the sealed manifest: " + "; ".join(problems)
-                              + ". Fix the run's configuration, or register it as deviating (--deviation "<why>"), "
+                              + ". Fix the run's configuration, or register it as deviating (--deviation '<why>'), "
                                 "which is not evidence")
             deviates = True
     spec = {"arm": arm, "seed": seed, "config": config, "split": split, "commit": commit, "params": params}

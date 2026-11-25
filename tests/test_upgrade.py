@@ -1,23 +1,22 @@
-"""Plugin updates never stop a project: older records are upgraded in place (with a copy of the old database), a
-project written by a newer plugin stays readable, older snapshots restore, and the frozen projects of earlier record
-formats keep working with every command."""
+"""Plugin updates never stop a project: the frozen projects of earlier record formats restore and keep working
+with every command, an older store is upgraded in place with a copy of its database, a project written by a
+newer plugin stays readable, and a project from before the 2026-11 redesign is refused with what to do."""
 
 import json
-import shutil
 from pathlib import Path
 
 import pytest
-import yaml
 
-from smooth_research import hooks, research, reviews, runs, snapshot
+from smooth_research import schema, snapshot, store as store_mod, upgrade
 from smooth_research.project import find_project
-from smooth_research.schema import SCHEMA_VERSION
 from smooth_research.store import Store
-from smooth_research.util import RLError
-
-from conftest import SPEC
+from smooth_research.upgrade import Migration
 
 FROZEN = Path(__file__).parent / "fixtures" / "projects"
+
+READS = [("status",), ("tree",), ("history",), ("doctor",), ("upgrade",), ("task", "list"), ("hypothesis", "list"),
+         ("run", "show"), ("inbox", "--for", "coordinator"), ("inbox", "--for", "user"), ("pack", "--for", "coordinator"),
+         ("pack", "--for", "scientist-T-0002"), ("view",)]
 
 
 @pytest.fixture(autouse=True)
@@ -25,309 +24,70 @@ def no_plugin_build(monkeypatch):
     monkeypatch.delenv("SMOOTH_RESEARCH_BUILD", raising=False)
 
 
-def _manual_advisor(root: Path) -> None:
-    path = root / "smooth-research.yaml"
-    config = yaml.safe_load(path.read_text())
-    config["models"]["advisor"] = ["manual:advisor-a", "manual:advisor-b"]
-    path.write_text(yaml.safe_dump(config, sort_keys=False))
-
-
-# the fields each record format added: an older store lacks those of the later formats
-ADDED = {2: (("Attempt", "code_review"), ("Ticket", "advice_round")), 3: (("Hypothesis", "label"), ("Experiment", "label"))}
-
-
-def _make_old(store: Store, version: int = 1) -> None:
-    """Make the store look written by an older plugin: drop the fields that version did not write."""
-    with store.write() as tx:
-        for label, field in (pair for added, pairs in ADDED.items() if added > version for pair in pairs):
-            for rec in tx.all(label):
-                tx.txn.set_property(tx._node(label, rec["id"]), field, None)
-        tx.set_meta(schema_version=version)
-
-
-def _older_project(project, tmp_path) -> Store:
-    _manual_advisor(tmp_path)
-    store = Store(find_project(), "test")
-    runs.register(store, "E-0001", SPEC, "r1", no_review="smoke")
-    reviews.prepare_advice(store, "which explanation?", "H-0001")
-    _make_old(store)
-    return Store(find_project(), "test")
-
-
-def test_an_older_project_is_upgraded_in_place_with_a_copy_of_its_database(project, tmp_path, rl):
-    _older_project(project, tmp_path)
-    code, out, _ = rl("run", "show")  # reads code_review on every attempt
-    assert code == 0 and "code review: unchecked: registered before code review checks were recorded" in out
-    assert f"the records were upgraded from format 1 to {SCHEMA_VERSION}" in out and "run `rl upgrade`" in out
-    backups = list((tmp_path / "research/state/backups").glob("schema-1-*"))
-    assert len(backups) == 1 and (backups[0] / "research.lattice").is_file()
-    store = Store(find_project(), "test")
-    with store.read() as tx:
-        assert tx.meta()["schema_version"] == SCHEMA_VERSION
-        assert [t["advice_round"] for t in tx.all("Ticket", kind="advice")] == [1, 1]
-        event = [e for e in tx.all("Event") if e["type"] == "project.upgrade"]
-        assert len(event) == 1 and f"schema 1 -> {SCHEMA_VERSION}" in event[0]["summary"]
-        assert "1 attempt(s)" in event[0]["summary"]
-        assert [(r["id"], r["label"]) for r in tx.all("Hypothesis") + tx.all("Experiment")] == \
-            [("H-0001", "H1"), ("E-0001", "EH1/1")]
-    assert store.upgraded is None
-    code, out, _ = rl("models")  # counts advice rounds
-    assert code == 0 and "advice rounds used: 1 of 3" in out and "upgraded" not in out
-
-
-def test_the_old_database_copy_opens_as_it_was(project, tmp_path):
-    store = _older_project(project, tmp_path)
-    with store.read():
-        pass
-    backup = next((tmp_path / "research/state/backups").glob("schema-1-*"))
-    copy = tmp_path.parent / f"{tmp_path.name}-copy"
-    shutil.copytree(tmp_path, copy, ignore=shutil.ignore_patterns("backups"))
-    for f in (copy / "research/state").glob("research.lattice*"):
-        f.unlink()
-    for f in backup.iterdir():
-        shutil.copy2(f, copy / "research/state" / f.name)
-    from latticedb import Database
-    from smooth_research.store import Tx
-    with Database(copy / "research/state/research.lattice", read_only=True) as db, db.read() as txn:
-        assert Tx(txn, False, "t").meta()["schema_version"] == 1
-
-
-def test_a_project_from_a_newer_plugin_is_read_but_not_written(project, tmp_path, rl):
-    with project.write() as tx:
-        tx.set_meta(schema_version=SCHEMA_VERSION + 1)
-    code, out, _ = rl("status")
-    assert code == 0 and "H1@1" in out
-    code, _, err = rl("hypothesis", "add", "--title", "t", "--statement", "s")
-    assert code != 0 and "written by a newer smooth-research" in err and "nothing was written" in err
-    text = hooks.session_start("claude", "{}")["hookSpecificOutput"]["additionalContext"]
-    assert "written by a newer smooth-research" in text and "Tell the user" in text
-
-
-def test_an_older_snapshot_restores_and_is_upgraded(project, tmp_path):
-    store = _older_project(project, tmp_path)
-    snap = tmp_path / "snap"
-    # export reads through the store, which upgrades it first: write the old format back into the snapshot
-    snapshot.export(store, str(snap))
-    data = json.loads((snap / "snapshot.json").read_text())
-    data["schema_version"] = data["meta"]["schema_version"] = 1
-    for label, field in (pair for pairs in ADDED.values() for pair in pairs):
-        for rec in data["nodes"][label]:
-            rec.pop(field, None)
-    (snap / "snapshot.json").write_text(json.dumps(data))
-    out = snapshot.restore(str(snap), str(tmp_path.parent / f"{tmp_path.name}-restored"))
-    assert out["problems"] == [] and f"records upgraded from format 1 to {SCHEMA_VERSION}" in out["summary"]
-    data["schema_version"] = SCHEMA_VERSION + 1
-    (snap / "snapshot.json").write_text(json.dumps(data))
-    with pytest.raises(RLError) as exc:
-        snapshot.restore(str(snap), str(tmp_path.parent / f"{tmp_path.name}-restored-2"))
-    assert exc.value.code == "UNSUPPORTED" and "newer smooth-research" in exc.value.message
-
-
-def test_a_plugin_update_is_flagged_until_rl_upgrade_records_it(project, tmp_path, rl, monkeypatch):
-    monkeypatch.setenv("SMOOTH_RESEARCH_BUILD", "b2")
-    code, out, _ = rl("status")
-    assert "the plugin changed since this project was last used (build dev -> b2): run rl upgrade" in out
-    text = hooks.session_start("claude", "{}")["hookSpecificOutput"]["additionalContext"]
-    assert "attention: the plugin changed since this project was last used" in text
-    shutil.rmtree(tmp_path / "research/reports")
-    code, out, _ = rl("upgrade")
-    assert code == 0 and f"schema {SCHEMA_VERSION} (this CLI: {SCHEMA_VERSION})" in out
-    assert "plugin build b2 (last used with dev)" in out and "layout: created research/reports/" in out
-    assert "adjust the old research assets to this version yourself" in out and "Never rewrite recorded facts" in out
-    code, out, _ = rl("status")
-    assert "plugin changed" not in out
-    code, out, _ = rl("upgrade", "--note", "moved old notes into research/notes/")
-    assert "recorded: project.adjusted: moved old notes into research/notes/" in out
-    with project.read() as tx:
-        assert [e["summary"] for e in tx.all("Event") if e["type"] == "project.adjusted"] == \
-            ["by build b2: moved old notes into research/notes/"]
-
-
-def test_the_claude_and_codex_builds_of_one_source_share_a_project_without_a_plugin_change(project, rl, monkeypatch):
-    with project.write() as tx:  # a Codex coordinator made the project; its Claude researchers use the Claude build
-        tx.set_meta(last_build="0123456789abcdef-c0dec0de")
-    monkeypatch.setenv("SMOOTH_RESEARCH_BUILD", "0123456789abcdef-c1a0de00")
-    code, out, _ = rl("status")
-    assert code == 0 and "plugin changed" not in out
-    monkeypatch.setenv("SMOOTH_RESEARCH_BUILD", "fedcba9876543210-c1a0de00")  # a new source: an update
-    code, out, _ = rl("status")
-    assert "plugin changed since this project was last used (build 0123456789abcdef-c0dec0de -> fedcba98" in out
-    with project.write() as tx:  # the id of a build from before ids had a source part is compared whole
-        tx.set_meta(last_build="599ea6164eab10d1")
-    code, out, _ = rl("status")
-    assert "(build 599ea6164eab10d1 -> fedcba9876543210-c1a0de00)" in out
-
-
-def test_the_upgrade_binds_older_conclusion_reviews_to_the_revision_they_reviewed(project, tmp_path):
-    before = reviews.request_conclusion_review(project, ["H-0001"], "H1 holds", ["claude-opus-5-5"])["id"]
-    research.revise_hypothesis(project, "H-0001", "sharper", statement="weight decay raises test accuracy a lot")
-    after = reviews.request_conclusion_review(project, ["H-0001"], "H1 holds", ["claude-opus-5-5"])["id"]
-    with project.write() as tx:  # as a plugin before reviews were bound to revisions wrote them
-        for rv in (before, after):
-            tx.txn.delete_edge(tx._node("Ticket", rv), tx._node("Hypothesis", "H-0001"), "TARGETS")
-            tx.link("targets", rv, "H-0001")
-        tx.set_meta(schema_version=3)
-    store = Store(find_project(), "test")
-    with store.read() as tx:
-        edges = [tx.out(rv, "targets")[0] for rv in (before, after)]
-    assert [e.get("revision") for e in edges] == [1, 2] and "evidence" not in edges[0]
-    assert store.upgraded["changes"] == ["schema 4: conclusion reviews bound to the revision of each hypothesis "
-                                         "they reviewed", "  2 hypothesis target(s) of conclusion reviews bound to "
-                                         "the revision reviewed"]
-
-
-def test_the_hook_says_the_records_were_upgraded(project, tmp_path):
-    _older_project(project, tmp_path)
-    text = hooks.session_start("claude", "{}")["hookSpecificOutput"]["additionalContext"]
-    assert f"Its records were upgraded from format 1 to {SCHEMA_VERSION}" in text
-
-
-def test_layout_repair_creates_only_what_is_missing(project, tmp_path):
-    (tmp_path / "docs/constraints.md").write_text("mine\n")
-    shutil.rmtree(tmp_path / "research/notes")
-    assert research.ensure_layout(project.project) == ["research/notes/"]
-    assert (tmp_path / "docs/constraints.md").read_text() == "mine\n"
-
-
-FROZEN_COMMANDS = [
-    ("status",), ("resume", "--role", "coordinator"), ("history",), ("graph",), ("view",), ("report",),
-    ("manuscript",), ("run", "show"), ("run", "show", "ATT-0001-1"), ("inbox", "--role", "researcher-1"),
-    ("models",), ("compute",), ("doctor",), ("upgrade",), ("context", "--purpose", "work", "--task", "T-0001"),
-    ("context", "--purpose", "advice", "--question", "next?"), ("task", "list"), ("paper", "list"),
-    ("review", "show", "RV-0001"), ("review", "show", "RV-0002"), ("advise", "show", "AD-0001"),
-]
-
-
-@pytest.mark.parametrize("frozen", sorted(p.name for p in FROZEN.iterdir() if p.is_dir()))
-def test_frozen_projects_of_earlier_formats_keep_working(frozen, tmp_path, rl, monkeypatch):
+def restored(frozen: str, tmp_path, monkeypatch) -> tuple[Path, dict]:
     target = tmp_path / "project"
     out = snapshot.restore(str(FROZEN / frozen), str(target))
     assert out["problems"] == [], out["problems"]
     monkeypatch.chdir(target)
-    data = json.loads((FROZEN / frozen / "snapshot.json").read_text())
+    return target, json.loads((FROZEN / frozen / "snapshot.json").read_text())
+
+
+@pytest.mark.parametrize("frozen", sorted(p.name for p in FROZEN.iterdir() if p.is_dir()))
+def test_frozen_projects_of_earlier_formats_keep_working(frozen, tmp_path, rl, monkeypatch):
+    _, data = restored(frozen, tmp_path, monkeypatch)
     ids = [rec["id"] for label, rows in data["nodes"].items() if label not in ("Event", "Request", "Meta")
            for rec in rows]
-    for args in [*FROZEN_COMMANDS, *[("show", i) for i in ids]]:
+    for args in [*READS, *[("show", i) for i in ids]]:
         code, _, err = rl(*args)
         assert code == 0, (args, err)
-    spec = data["nodes"]["Run"][0]["spec"]
-    spec = {k: v for k, v in (json.loads(spec) if isinstance(spec, str) else spec).items()
-            if k not in ("experiment_ref", "protocol_ref")}
-    writes = [("hypothesis", "add", "--title", "new", "--statement", "a new claim", "--derived-from", "H-0001"),
-              ("run", "register", "--experiment", "E-0001", "--run", "RUN-0001", "--request-id", "again",
-               "--spec", json.dumps(spec), "--no-review", "re-execution"),
-              ("run", "record", "--attempt", "ATT-0001-2", "--source", "test", "--state", "ended", "--outcome",
-               "failed"),
-              ("decide", "--targets", "H-0002", "--action", "pause", "--rationale", "later",
-               "--reopen-condition", "a clean-label control"),
-              ("task", "create", "--title", "next", "--kind", "analysis", "--targets", "H-0001")]
-    for args in writes:
-        code, _, err = rl(*args)
+    writes = [(("task", "create", "--kind", "tree", "--title", "Second tree"), "coordinator"),
+              (("phase", "create", "--title", "Phase 2"), "coordinator"),
+              (("question", "--close", "MSG-0001"), "coordinator")]
+    for args, who in writes:
+        code, _, err = rl(*args, who=who)
         assert code == 0, (args, err)
 
 
-def _older_layout(project, tmp_path):
-    """Files where an earlier layout kept them, with the records pointing there."""
-    old = tmp_path / "docs/experiments"
-    old.mkdir(parents=True)
-    contract = tmp_path / "research/experiments/E-0001.md"
-    contract.rename(old / "E-0001.md")
-    with project.write() as tx:
-        tx.update("E-0001", {"contract_path": "docs/experiments/E-0001.md"})
-    for name in ("reviews/RV-0009.md", "report-1.md"):
-        (tmp_path / "reports" / name).parent.mkdir(parents=True, exist_ok=True)
-        (tmp_path / "reports" / name).write_text("old\n")
-    (tmp_path / "docs/plan").mkdir()
-    (tmp_path / "docs/constraints.md").rename(tmp_path / "docs/plan/constraints.md")
+def _set_version(root: Path, version: int) -> None:
+    with Store(find_project(str(root)), "test").write() as tx:
+        tx.set_meta(schema_version=version)
 
 
-def test_older_layout_is_listed_and_moved_with_its_records(project, tmp_path, rl):
-    _older_layout(project, tmp_path)
-    code, out, _ = rl("upgrade")
-    for old, new in (("docs/plan/constraints.md", "docs/constraints.md"), ("docs/experiments", "research/experiments"),
-                     ("reports/reviews", "research/reviews"), ("reports", "research/reports")):
-        assert f"older layout: {old} " in out and f"rl upgrade --move {old} {new}" in out
-    assert not (tmp_path / "docs/constraints.md").exists()  # no empty template over the user's constraints
-    code, _, err = rl("upgrade", "--move", "reports", "research/reports")
-    assert code != 0 and "move that first (rl upgrade --move reports/reviews research/reviews)" in err
-    code, out, _ = rl("upgrade", "--move", "docs/experiments", "research/experiments")
-    assert code == 0 and "E-0001 contract" in out
-    with project.read() as tx:
-        assert tx.require("E-0001")["contract_path"] == "research/experiments/E-0001.md"
-        assert [e for e in tx.all("Event") if e["type"] == "project.moved"]
-    assert (tmp_path / "research/experiments/E-0001.md").is_file() and not (tmp_path / "docs/experiments").exists()
-    runs.register(project, "E-0001", SPEC, "r1", no_review="smoke")  # seals the contract from its new place
-    with project.read() as tx:
-        assert tx.require("E-0001")["contract_ref"]
-    for old, new in (("reports/reviews", "research/reviews"), ("reports", "research/reports"),
-                     ("docs/plan/constraints.md", "docs/constraints.md")):
-        assert rl("upgrade", "--move", old, new)[0] == 0
-    code, out, _ = rl("upgrade")
-    assert "older layout: " not in out and "is missing" not in out
+def test_a_project_from_before_the_redesign_is_refused_with_what_to_do(tmp_path, rl, monkeypatch):
+    root, _ = restored("schema-5", tmp_path, monkeypatch)
+    _set_version(root, 4)
+    code, _, err = rl("status")
+    assert code == 1 and "before the 2026-11 redesign" in err and "rl init --plan" in err
 
 
-def test_a_move_refuses_clashes_and_protected_paths_and_rolls_back(project, tmp_path, rl, monkeypatch):
-    _older_layout(project, tmp_path)
-    (tmp_path / "research/experiments/E-0001.md").write_text("new\n")
-    code, _, err = rl("upgrade", "--move", "docs/experiments", "research/experiments")
-    assert code != 0 and "already there: research/experiments/E-0001.md" in err
-    (tmp_path / "research/experiments/E-0001.md").unlink()
-    for protected in ("research/state", "research", "research/documents/objects"):  # in it, or holding it
-        code, _, err = rl("upgrade", "--move", protected, "elsewhere")
-        assert code != 0 and "not a movable path" in err, protected
-    assert (tmp_path / "research/state/research.lattice").is_file() and not (tmp_path / "elsewhere").exists()
-    (tmp_path / "stray/state").mkdir(parents=True)
-    (tmp_path / "stray/state/notes.txt").write_text("x\n")
-    code, _, err = rl("upgrade", "--move", "stray", "research")  # its files would land in research/state
-    assert code != 0 and "research/state/notes.txt would land among the database" in err
-    assert (tmp_path / "stray/state/notes.txt").is_file()
-    (tmp_path / "incoming/alias").mkdir(parents=True)
-    (tmp_path / "incoming/alias/probe.txt").write_text("x\n")
-    (tmp_path / "research/alias").symlink_to(tmp_path / "research/state")  # a link inside the destination
-    code, _, err = rl("upgrade", "--move", "incoming", "research")
-    assert code != 0 and "research/alias/probe.txt would land among the database" in err
-    assert (tmp_path / "incoming/alias/probe.txt").is_file() and not (tmp_path / "research/state/probe.txt").exists()
-    (tmp_path / "research/alias").unlink()
-    from smooth_research.store import Tx
-
-    def broken(self, *args, **kwargs):
-        raise RLError("CORRUPT", "simulated failure")
-    monkeypatch.setattr(Tx, "event", broken)
-    code, _, err = rl("upgrade", "--move", "docs/experiments", "research/experiments")
-    assert code != 0 and "simulated failure" in err
-    assert (tmp_path / "docs/experiments/E-0001.md").is_file()
-    assert not (tmp_path / "research/experiments/E-0001.md").exists()
-    monkeypatch.undo()
-    with project.read() as tx:
-        assert tx.require("E-0001")["contract_path"] == "docs/experiments/E-0001.md"
+def test_a_project_written_by_a_newer_plugin_is_read_but_not_written(tmp_path, rl, monkeypatch):
+    root, _ = restored("schema-5", tmp_path, monkeypatch)
+    _set_version(root, schema.SCHEMA_VERSION + 1)
+    assert rl("status")[0] == 0 and rl("tree")[0] == 0
+    code, _, err = rl("task", "create", "--kind", "tree", "--title", "x", who="coordinator")
+    assert code == 1 and "newer smooth-research" in err and "nothing was written" in err
 
 
-def test_read_only_reads_without_upgrading_writing_or_creating_anything(project, tmp_path, rl):
-    research.decide(project, ["H-0001"], "continue", "go on")
-    (tmp_path / "research/state/write.lock").unlink()  # a project no writer has locked yet (a copy, say)
-    with open(tmp_path / "smooth-research.yaml", "a") as config:  # changed since a command last read it
-        config.write("\nadvice:\n  max_rounds: 5\n")
+def test_a_later_format_upgrades_the_frozen_project_in_place_with_a_copy(tmp_path, rl, monkeypatch):
+    """A stand-in for the next record format: its migration runs once, under the lock, with a backup."""
+    root, _ = restored("schema-5", tmp_path, monkeypatch)
+    nxt = schema.SCHEMA_VERSION + 1
+    for module in (schema, store_mod, upgrade, snapshot):
+        monkeypatch.setattr(module, "SCHEMA_VERSION", nxt, raising=False)
 
-    def files():
-        return {p.relative_to(tmp_path): p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
-
-    before = files()
-    for args in (("status",), ("show", "H1"), ("hypothesis", "list"), ("evidence", "list"), ("history",),
-                 ("inbox", "--role", "coordinator"), ("view", "--todo"), ("export", "--records-only"), ("run", "show")):
-        code, _, err = rl("--read-only", *args)
-        assert code == 0, (args, err)
-    code, out, _ = rl("show", "H1", "--read-only", "--json")  # also after the command, as --json is
-    assert code == 0 and json.loads(out)["record"]["id"] == "H-0001"
-    for args in (("hypothesis", "add", "--title", "t", "--statement", "s"), ("view",), ("view", "--stamp", "H1"),
-                 ("export",), ("inbox", "--role", "coordinator", "--ack"), ("upgrade",), ("report",)):
-        code, _, err = rl("--read-only", *args)
-        assert code == 1 and "error[READ_ONLY]" in err and "--read-only writes nothing" in err, (args, err)
-    assert files() == before
-    with pytest.raises(RLError, match="--read-only writes nothing: nothing was written"):  # the store refuses too
-        research.add_hypothesis(Store(find_project(), "test", read_only=True), "t", "s")
-    _make_old(project, 3)
-    before = files()
-    code, _, err = rl("--read-only", "status")
-    assert code == 1 and "error[READ_ONLY]: the records are in format 3 and this CLI reads format " \
-        f"{SCHEMA_VERSION}, after upgrading them in place, which --read-only does not do" in err
-    assert files() == before and not list((tmp_path / "research/state").glob("*backup*"))
+    def fill(tx) -> list[str]:
+        hyps = tx.all("Hypothesis")
+        return [f"{len(hyps)} hypothesis(es) looked at"]
+    monkeypatch.setattr(upgrade, "MIGRATIONS", [Migration(nxt, "a test migration", fill)])
+    code, out, err = rl("upgrade")
+    assert code == 0, err
+    assert f"schema {nxt}" in out and "project.upgrade" in out
+    backups = list((root / "research/state/backups").iterdir())
+    assert [b.name.split("-")[1] for b in backups] == ["5"]
+    with Store(find_project(), "test").read() as tx:
+        assert tx.meta()["schema_version"] == nxt
+        events = [e["summary"] for e in tx.all("Event") if e["type"] == "project.upgrade"]
+    assert len(events) == 1 and "1 hypothesis(es) looked at" in events[0]
+    assert rl("upgrade")[0] == 0  # nothing more to do the second time
+    with Store(find_project(), "test").read() as tx:
+        assert len([e for e in tx.all("Event") if e["type"] == "project.upgrade"]) == 1

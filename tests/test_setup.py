@@ -2,11 +2,9 @@
 <version> --no-workspace, then uv add of rl's dependencies, which creates .venv) and only then creates the records
 on it; later commands run there too. These tests drive the real launcher with uv."""
 
-import json
 import os
 import shutil
 import subprocess
-import time
 import tomllib
 from pathlib import Path
 
@@ -58,7 +56,7 @@ def test_init_makes_the_project_environment_before_the_records(tmp_path):
     assert (root / ".git").is_dir() and ".venv" in (root / ".gitignore").read_text().split()
     assert "made " in done.stderr and "commit pyproject.toml and uv.lock" in done.stderr
     assert "environment: Python 3.13" in done.stdout and "on the project's .venv" in done.stdout
-    assert "commit the new project in its root" in done.stdout
+    assert "commit the new project" in done.stdout
 
     for cwd in (root, root / "src"):  # later commands, also from below the root, run on the same environment
         later = rl(cwd, "upgrade")
@@ -67,17 +65,9 @@ def test_init_makes_the_project_environment_before_the_records(tmp_path):
     again = rl(root, "init", "--plan", "plan.md")
     assert again.returncode == 0 and "already initialized" in again.stdout and again.stderr == ""
 
-    # a background worker (review, advice, delegation) runs rl on the same environment, which does not install the
-    # package: a manual entry calls no model, so the worker only records that it waits for a pasted answer
-    assert rl(root, "advise", "prepare", "--question", "which route?").returncode == 0
-    started = rl(root, "advise", "run", "AD-0001", "--background", "--entry", "manual:chosen-model", "--json")
-    assert started.returncode == 0, started.stderr
-    log = root / json.loads(started.stdout)["log"]
-    for _ in range(300):
-        if "to chosen-model yourself" in log.read_text() or "Error" in log.read_text():
-            break
-        time.sleep(0.1)
-    assert "to chosen-model yourself" in log.read_text(), log.read_text()
+    # a role writes records on the same environment
+    made = rl(root, "--as", "coordinator", "task", "create", "--kind", "tree", "--title", "Tree")
+    assert made.returncode == 0 and "T-0001" in made.stdout, made.stderr
 
 
 def test_a_project_inside_another_uv_project_gets_its_own_environment(tmp_path):

@@ -119,7 +119,8 @@ plugin_ready() { [ -f "$env_dir/.ready" ] && [ -x "$env_dir/bin/rl" ]; }
 build_plugin() {
   say "building the CLI environment of plugin build $build (once per plugin version)"
   rm -f "$env_dir/.ready"
-  UV_PROJECT_ENVIRONMENT="$env_dir" uv sync --project "$package" --frozen --no-dev --no-editable --quiet
+  # --reinstall-package: uv keys a built local package on pyproject.toml alone, so a changed source would reuse the old wheel
+  UV_PROJECT_ENVIRONMENT="$env_dir" uv sync --project "$package" --frozen --no-dev --no-editable --reinstall-package smooth-research --quiet
   "$env_dir/bin/rl" --help >/dev/null
   : > "$env_dir/.ready"
 }

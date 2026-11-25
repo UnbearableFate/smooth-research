@@ -1,4 +1,5 @@
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -11,56 +12,54 @@ from smooth_research.store import Store
 
 @pytest.fixture(autouse=True)
 def outside_herdr(monkeypatch):
-    """Tests never reach a real herdr session: the ones that need herdr use a fake one (tests/test_agents.py)."""
-    for key in ("HERDR_ENV", "HERDR_PANE_ID", "HERDR_TAB_ID", "HERDR_WORKSPACE_ID", "SMOOTH_RESEARCH_ROLE",
-                "SMOOTH_RESEARCH_SESSION", "SMOOTH_RESEARCH_CHECKOUT", "SMOOTH_RESEARCH_BUILD",
-                "SMOOTH_RESEARCH_HEADLESS"):
+    """Tests never reach a real herdr session: the ones that need herdr use a fake one (test_watch.py)."""
+    for key in ("HERDR_ENV", "HERDR_PANE_ID", "HERDR_TAB_ID", "HERDR_WORKSPACE_ID", "SMOOTH_RESEARCH_SESSION",
+                "SMOOTH_RESEARCH_CHECKOUT", "SMOOTH_RESEARCH_BUILD", "SMOOTH_RESEARCH_PROJECT"):
         monkeypatch.delenv(key, raising=False)
+    for key, value in (("GIT_AUTHOR_NAME", "t"), ("GIT_AUTHOR_EMAIL", "t@example.org"),
+                       ("GIT_COMMITTER_NAME", "t"), ("GIT_COMMITTER_EMAIL", "t@example.org")):
+        monkeypatch.setenv(key, value)
 
 
 @pytest.fixture(autouse=True)
 def own_homes(tmp_path_factory, monkeypatch):
-    """Tests read no real subscription usage and no real Claude settings: rl's data directory, Codex's home and
-    Claude's configuration directory are empty ones of their own."""
+    """Tests read no real subscription usage and no real Claude settings."""
     base = tmp_path_factory.mktemp("homes")
     for key in ("SMOOTH_RESEARCH_HOME", "CODEX_HOME", "CLAUDE_CONFIG_DIR"):
         monkeypatch.setenv(key, str(base / key.lower()))
     return base
 
 
+def git(cwd, *args) -> str:
+    return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
+
+
+PLAN = "# Toy plan\n\n## Averaging\nThe mean of three noisy estimates has a smaller error than one estimate.\n"
+
+
 @pytest.fixture
-def project(tmp_path, monkeypatch):
-    """An initialized project with one hypothesis and one experiment; cwd is the project root."""
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.delenv("SMOOTH_RESEARCH_PROJECT", raising=False)
-    (tmp_path / "plan.md").write_text("# Plan\nDoes weight decay help under label noise?\n", encoding="utf-8")
-    research.init_project(tmp_path, "plan.md", "test")
-    store = Store(find_project(), "test")
-    research.add_hypothesis(store, "WD helps", "weight decay raises test accuracy under 20% noise", "toy")
-    research.add_experiment(store, "WD smoke", "does wd beat no wd?", ["H-0001"], "E1", intervention="wd",
-                            comparator="no wd", metric="acc", scope="toy", outcome_actions="a", budget="b", stop="c")
-    return store
+def project(tmp_path, monkeypatch) -> Store:
+    """An initialized project in its own git repository, committed; cwd is the project root."""
+    root = tmp_path / "proj"
+    root.mkdir()
+    monkeypatch.chdir(root)
+    git(root, "init", "-q", "-b", "main")
+    (root / "plan.md").write_text(PLAN, encoding="utf-8")
+    research.init_project(root, "plan.md", "toy")
+    git(root, "add", "-A")
+    git(root, "commit", "-qm", "init")
+    return Store(find_project(), "test")
 
 
 @pytest.fixture
 def rl(capsys):
-    """Run the CLI in-process: returns (exit code, stdout, stderr)."""
-    def run(*args):
-        code = main([str(a) for a in args])
+    """Run the CLI in-process: rl(*args, who=None) -> (exit code, stdout, stderr); who is the session (--as)."""
+    def run(*args, who=None):
+        argv = (["--as", who] if who else []) + [str(a) for a in args]
+        code = main(argv)
         out = capsys.readouterr()
         return code, out.out, out.err
     return run
-
-
-SPEC = {"arm": "wd", "seed": 0, "code_ref": {"content_digest": "blake2b:" + "0" * 64}, "config_digest": "unknown",
-        "data_revision": "synthetic-v1", "metric": "acc", "output_spec": "metrics.json"}
-
-
-def obs(attempt="ATT-0001-1", state="running", outcome=None, at="2026-10-30T00:00:00+00:00", **extra):
-    o = {"attempt_id": attempt, "source": "test", "observed_at": at, "execution_state": state, **extra}
-    if outcome:
-        o["outcome"] = outcome
-    return o
 
 
 def write_json(path: Path, value) -> Path:

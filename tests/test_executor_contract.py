@@ -6,10 +6,25 @@ would have seen it; the observer host and observation times are synthetic."""
 import json
 from pathlib import Path
 
-from conftest import SPEC
+import flow
+import pytest
+
 from smooth_research import runs
+from smooth_research.roles import parse
 
 EXPORT = Path(__file__).parent / "fixtures" / "miyabi_mcp_export.jsonl"
+
+
+@pytest.fixture
+def project(project, rl):
+    """A dispatched execute task (T-0003) whose researcher registers trial runs for the jobs."""
+    flow.dispatched(project, rl)
+    return project
+
+
+def register(store, n=0) -> str:
+    return runs.register(store, parse("researcher-T-0003"), "T-0003", f"r{n}", seed=n, trial=True,
+                         minutes=5)["attempt"]
 
 
 def lines():
@@ -23,7 +38,7 @@ def write(path, records):
 
 
 def test_an_export_is_recorded_once_in_source_order_whatever_the_delivery_order(project, rl, tmp_path):
-    runs.register(project, "E-0001", dict(SPEC), "r1")
+    register(project)
     queued, running, ended = lines()
     code, out, _ = rl("run", "record", "--observation", write(tmp_path / "end.jsonl", [ended]))
     assert code == 0 and "applied" in out
@@ -42,7 +57,7 @@ def test_an_export_is_recorded_once_in_source_order_whatever_the_delivery_order(
 
 
 def test_usage_from_the_export_and_from_the_cli_count_once_and_tokens_stay_separate(project, rl, tmp_path):
-    runs.register(project, "E-0001", dict(SPEC), "r1")
+    register(project)
     rl("run", "record", "--observation", write(tmp_path / "all.jsonl", lines()))
     same = lines()[2]["usage"]
     code, out, _ = rl("run", "usage", "--accounting-ref", same["accounting_ref"], "--quantity", same["quantity"],
@@ -59,7 +74,7 @@ def test_usage_from_the_export_and_from_the_cli_count_once_and_tokens_stay_separ
 
 
 def test_a_submission_whose_confirming_lookup_failed_is_still_a_queued_binding(project, rl, tmp_path):
-    runs.register(project, "E-0001", dict(SPEC), "r1")
+    register(project)
     unconfirmed = {k: v for k, v in lines()[0].items() if k != "occurred_at"}
     unconfirmed["raw_state"] = "submitted"
     code, out, _ = rl("run", "record", "--observation", write(tmp_path / "submitted.jsonl", [unconfirmed]))
@@ -71,7 +86,7 @@ def test_a_submission_whose_confirming_lookup_failed_is_still_a_queued_binding(p
 
 
 def test_a_lookup_after_the_end_and_a_reconciled_correction(project, rl, tmp_path):
-    runs.register(project, "E-0001", dict(SPEC), "r1")
+    register(project)
     rl("run", "record", "--observation", write(tmp_path / "all.jsonl", lines()))
     base = {k: v for k, v in lines()[2].items() if k not in ("usage", "occurred_at")}
     # miyabi-mcp stops looking at ended jobs; this lookup comes from another tool and only adds an issue
@@ -98,7 +113,7 @@ def test_the_real_mig_drills_in_one_project_export(project, rl, tmp_path):
     stored events; only the project path is replaced by <project_dir>. Their usage has no hardware (mig_hardware
     was configured afterwards). Only one drill had a client_ref; here every job gets its attempt as client_ref."""
     jobs = ["3737441.opbs", "3737442.opbs", "3737546.opbs", "3737547.opbs", "3737549.opbs"]
-    attempt = {job: runs.register(project, "E-0001", {**SPEC, "seed": n}, f"r{n}")["attempt"]
+    attempt = {job: register(project, n)
                for n, job in enumerate(jobs)}
     records = [{**r, "attempt_id": attempt[r["execution_ref"]["opaque_id"]]}
                for r in map(json.loads, DRILLS.read_text().splitlines())]

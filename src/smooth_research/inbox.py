@@ -349,8 +349,7 @@ class Rules:
         if tree and tree["state"] == "accepted":
             asks = [a for a in self.asks if a["task_id"] == tree["id"] and a["kind"] == "approval"]
             if approval(self.tx, tree):
-                queued = [t for t in self.tasks if t["state"] == "queued" and t["kind"] in ("hypothesis", "prep")
-                          and self.tx.out(t["id"], "in_phase")]
+                queued = [t for t in self.tasks if t["state"] == "queued" and t["kind"] in ("hypothesis", "prep")]
                 if queued and not any(t.get("released_at") for t in self.tasks if t["kind"] == "hypothesis"):
                     self.add(type="tree-approved", to="coordinator", subject=tree["id"],
                              ask="release the first phase", cmd="rl task release T-x ...",

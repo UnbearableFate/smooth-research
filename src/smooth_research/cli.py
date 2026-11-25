@@ -26,10 +26,29 @@ ID_ARGS = ("id", "targets", "hypotheses", "parent", "assumes", "based_on", "supp
            "motivated_by", "target", "source", "on")
 
 
+# what rl --read-only runs: the commands that read the records and write no file (None: every action)
+READ_ONLY = {"status": None, "show": None, "history": None, "tree": None, "doctor": None, "inbox": None,
+             "pack": None, "refs": None, "usage": None, "hypothesis": ("list",), "task": ("list",),
+             "run": ("show",)}
+
+
+def _check_read_only(args) -> None:
+    """rl --read-only refuses up front a command that would write records, files or caches; the ones it runs open
+    the records without upgrading them or creating anything (Store.read_only)."""
+    actions = READ_ONLY.get(args.command, ())
+    action = getattr(args, "action", None)
+    if actions is not None and action not in actions:
+        what = " ".join(x for x in (args.command, action) if x)
+        raise RLError("READ_ONLY", f"rl {what} writes (records, files or caches), and --read-only writes nothing. "
+                                   "It reads with status, show, history, tree, doctor, inbox, pack, refs and the "
+                                   "list and show subcommands")
+
+
 def _store(args) -> Store:
-    project = find_project(args.project)
+    read_only = getattr(args, "read_only", False)
+    project = find_project(args.project, read_only=read_only)
     args.config_warnings = project.warnings
-    args.store = Store(project, getattr(args, "as_", None) or "user")
+    args.store = Store(project, getattr(args, "as_", None) or "user", read_only=read_only)
     _resolve_labels(args, args.store)
     return args.store
 
@@ -135,7 +154,11 @@ def cmd_show(args):
     with store.read() as tx:
         rec = out.get("record") or {}
         if rec.get("_label") == "Task" and rec["kind"] in ("execute", "prep"):
-            out["summary"] += "\n\ncheck lines:\n" + "\n".join(verify.task_lines(tx, store.project, rec))
+            try:
+                lines = verify.task_lines(tx, store.project, rec)
+            except RLError as exc:  # the records are readable without the repository (a restored snapshot)
+                lines = [f"not available: {exc.message}"]
+            out["summary"] += "\n\ncheck lines:\n" + "\n".join(lines)
         if rec.get("_label") == "Ticket":
             out["summary"] += "\n" + "\n".join(messages.thread_lines(tx, rec["id"]))
     return out
@@ -196,7 +219,7 @@ def cmd_usage(args):
         raw = "" if sys.stdin.isatty() else sys.stdin.read()
     except (OSError, ValueError):
         raw = ""
-    return {"summary": usage.statusline(raw)}
+    return {"summary": usage.statusline(raw, keep=not args.read_only)}
 
 
 def cmd_compute(args):
@@ -481,6 +504,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--project", help="project directory (default: the nearest smooth-research.yaml above cwd)")
     p.add_argument("--json", action="store_true", help="print the full JSON result")
     p.add_argument("--as", dest="as_", help="the session this command runs as (default: SMOOTH_RESEARCH_SESSION)")
+    p.add_argument("--read-only", action="store_true", help="read without writing anything (no upgrade, no caches)")
     sub = p.add_subparsers(dest="command", required=True, metavar="command")
 
     def add(name, fn, help_):
@@ -869,6 +893,8 @@ def _accept_global_options_everywhere(parser: argparse.ArgumentParser) -> None:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
+        if args.read_only:
+            _check_read_only(args)
         result = args.fn(args)
     except RLError as exc:
         if args.command == "hook":
@@ -890,4 +916,6 @@ def main(argv: list[str] | None = None) -> int:
         print(result.get("summary", ""))
         for w in [*(result.get("warnings") or []), *warnings]:
             print(f"warning: {w}")
+        for step in result.get("next") or []:
+            print(f"next: {step}")
     return 0
