@@ -334,7 +334,15 @@ def look(store: Store, s: dict, items: list[inbox.Item], low: dict) -> str | Non
         if s["role"] == "coordinator" and _minutes(s.get("last_prompt_at")) * 60 > 2 * agents_value(
                 config, "beat_seconds"):
             changes["last_user_at"] = now_utc()  # it moved without a prompt of ours: the user talks to it
-    if status == "blocked":
+    screen = herdr.read(pane) if status in ("idle", "done") and s["host"] in launch.UNSEEN else ""
+    if status != "blocked" and launch.unseen(s["host"], screen):
+        # a dialog herdr reports as idle (Codex's hook review): a prompt now would be lost in it while the item
+        # counts as told (Codex trial, 11-25); it waits for a decision as a blocked one does
+        status = "blocked"
+        seen = f"waits at a dialog herdr does not see ({launch.excerpt(screen, 300)})"
+        if seen != s.get("needs_decision"):
+            changes["needs_decision"] = seen
+    elif status == "blocked":
         seen = launch.excerpt(herdr.read(pane), 300)
         if seen != s.get("needs_decision"):  # an unchanged dialog changes no record (nor the page)
             changes["needs_decision"] = seen

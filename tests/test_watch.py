@@ -370,3 +370,26 @@ def test_a_close_herdr_cannot_answer_keeps_the_session_open(project, rl, fake, m
     monkeypatch.setattr(herdr, "call", timeout)
     assert "not closed yet" in watch.close_session(project, s, "its work is finished")
     assert "scientist-T-0002" in sessions(project)
+
+
+def test_nothing_is_typed_into_a_dialog_herdr_reports_as_idle(project, rl, fake, monkeypatch):
+    """Codex trial, 11-25: a Codex session at its hook review is idle to herdr; the review request typed into it was
+    lost while it counted as told."""
+    flow.approved(project, rl)
+    watch.beat(project)
+    s = sessions(project)["scientist-T-0002"]
+    with project.write() as tx:
+        tx.update(s["id"], {"host": "codex"})
+    screen = {"text": "Hooks need review\n1 hook is new or changed.\n› 1. Review hooks"}
+    monkeypatch.setattr(herdr, "read", lambda target: screen["text"])
+    flow.ok(rl("question", "--to", "scientist-T-0002", "--on", "T-0002", "--text", "which arm first?",
+               who="coordinator"))
+    fake.set(s["herdr_pane"], "idle")
+    watch.beat(project)
+    assert len(fake.prompts) == 1  # held: only the first item, before the dialog
+    assert "Hooks need review" in sessions(project)["scientist-T-0002"]["needs_decision"]
+    assert "session-needs-decision" in flow.types(project, "coordinator")
+    screen["text"] = "› Ask Codex to do anything"
+    watch.beat(project)
+    assert sessions(project)["scientist-T-0002"].get("needs_decision") is None
+    assert len(fake.prompts) == 2 and "which arm first?" in fake.prompts[-1][1]
