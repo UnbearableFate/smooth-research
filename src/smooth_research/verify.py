@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from . import gitops
 from .project import Project
-from .research import task_experiment
+from .research import task_design, task_experiment
 from .reviews import blocking, open_findings, task_rounds
 from .store import Tx
 from .usage_view import usage_line
@@ -57,7 +57,7 @@ def task_lines(tx: Tx, project: Project, task: dict) -> list[str]:
         lines.append("review     fast lane (6.6): the last passed review of this experiment covers it")
     else:
         lines.append("review     none")
-    exp = task_experiment(tx, tid) if task["kind"] == "execute" else None
+    exp = task_design(tx, tid) if task["kind"] == "execute" else None  # as handed over to this task
     if exp and base and tip:
         units = list(exp.get("protected") or [])
         changed = _safe(lambda: ", ".join(gitops.protected_changes(project, base, tip, units)) or "")
@@ -68,8 +68,11 @@ def task_lines(tx: Tx, project: Project, task: dict) -> list[str]:
                          + (f", rechecked in {', '.join(rechecked)}" if rechecked else ", NOT rechecked"))
         else:
             lines.append("protected  unchanged since design")
-        tested = any(t["commit"] == tip and t["outcome"] == "pass" for t in task.get("tests") or [])
-        lines.append(f"tests      semantic tests {'passed' if tested else 'not recorded'} at the delivered commit")
+        from .tasks import passed_at
+        command = exp.get("semantic_tests")
+        runs = [t for t in task.get("tests") or [] if t["commit"] == tip and t.get("command") == command]
+        state = "not recorded" if not runs else "passed" if passed_at(task, tip, command) else "FAILED (latest run)"
+        lines.append(f"tests      semantic tests {state} at the delivered commit ({command})")
         def on_main() -> str:
             main = gitops.mainline(project)
             fork = gitops.git(gitops.top(project), "merge-base", base, main, check=False)

@@ -216,8 +216,8 @@ def _round(tx: Tx, actor: Actor, kind: str, task_id: str | None, target: str, co
 def _protected(tx: Tx, t: dict) -> list[str]:
     if t.get("review_kind") != "design" or not t.get("task_id"):
         return []
-    from .research import task_experiment
-    exp = task_experiment(tx, t["task_id"])
+    from .research import task_design
+    exp = task_design(tx, t["task_id"])  # the revision the task was handed, not a later draft
     return list((exp or {}).get("protected") or [])
 
 

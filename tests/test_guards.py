@@ -215,3 +215,55 @@ def test_a_delivery_already_on_the_mainline_is_accepted_without_a_merge(project,
     with project.read() as tx:
         task = tx.require("T-0003")
     assert task["state"] == "accepted" and git(top, "rev-parse", "HEAD") == delivered
+
+
+def test_a_changed_design_is_handed_over_again_before_evidence(project, rl):
+    flow.dispatched(project, rl)
+    r, s = "researcher-T-0003", "scientist-T-0002"
+    ok(rl("task", "block", "T-0003", "--reason", "design", "--note", "the arms need a third seed", who=r))
+    ok(rl("experiment", "set", "E-0001", "--question", "with three seeds", "--reason", "revision 2", who=s))
+    out = ok(rl("task", "answer", "T-0003", "--text", "use revision 2", who=s))
+    assert "back with you" in out
+    with project.read() as tx:
+        task = tx.require("T-0003")
+    assert task["holder"] == s and task["state"] == "active" and not task.get("sealed_design")
+    code, _, err = rl("run", "register", "--task", "T-0003", "--request-id", "a", "--arm", "single", "--seed", "0",
+                      who=r)
+    assert code == 1
+    with project.write() as tx:  # a revision changed without a blocker: evidence still waits for the handoff
+        tx.update("T-0003", {"holder": r, "sealed_design": {**_sealed_r1(), "revision": 1}})
+    code, _, err = rl("run", "register", "--task", "T-0003", "--request-id", "b", "--arm", "single", "--seed", "0",
+                      who=r)
+    assert code == 1 and "evidence waits until the new revision is handed over" in err
+
+
+def _sealed_r1() -> dict:
+    return {"id": "E-0001", "manifest": {"arms": [{"name": "single", "seeds": [0], "config": {"k": 1}}]},
+            "manifest_digest": "x", "design_commit": "0" * 40, "protected": []}
+
+
+def test_a_test_job_records_the_command_it_ran_not_the_one_set_since(project, rl):
+    flow.designed(project, rl)
+    s = "scientist-T-0002"
+    _job_tests(project)
+    ok(rl("review", "request", "T-0003", who=s))
+    ok(rl("review", "answer", "RV-0002", "--verdict", "pass", who="reviewer-RV-0002"))
+    att = json.loads(ok(rl("--json", "run", "register", "--task", "T-0003", "--request-id", "t1", "--purpose",
+                           "design-test", "--minutes", "5", who=s)))["attempt"]
+    ok(rl("experiment", "set", "E-0001", "--semantic-tests", "false", who=s))
+    ok(rl("task", "test", "T-0003", "--record", "pass", "--attempt", att, who=s))
+    code, _, err = rl("task", "dispatch", "T-0003", who=s)  # the pass is of the old command
+    assert code == 1 and "`false`" in err
+
+
+def test_a_null_config_is_not_a_reported_config(project, rl):
+    flow.dispatched(project, rl)
+    r = "researcher-T-0003"
+    ok(rl("run", "register", "--task", "T-0003", "--request-id", "a", "--arm", "single", "--seed", "0", who=r))
+    with project.read() as tx:
+        commit = tx.require("RUN-0001")["code_commit"]
+    ok(rl("run", "record", "--attempt", "ATT-0001-1", "--state", "ended", "--outcome", "success", who=r))
+    reported = {"status": "complete", "arm": "single", "seed": 0, "commit": commit, "config": None}
+    out = ok(rl("--json", "run", "import-result", "--attempt", "ATT-0001-1", "--request-id", "i", "--manifest",
+                json.dumps(reported), who=r))
+    assert "unverified" in json.loads(out)["summary"]

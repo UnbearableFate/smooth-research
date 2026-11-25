@@ -176,6 +176,31 @@ def test_the_executor_command_delivery_ends_each_job_by_its_own_row(project, rl,
     assert state("ATT-0002-1") == ("ended", "failed")
 
 
+def test_a_note_does_not_hide_an_end_and_a_job_id_of_two_executors_is_not_guessed(project, rl, monkeypatch):
+    import io
+    flow.dispatched(project, rl)
+    r = "researcher-T-0003"
+    for n, (arm, space) in enumerate((("single", "miyabi-pbs"), ("mean3", "other-pbs")), 1):
+        ok(rl("run", "register", "--task", "T-0003", "--request-id", f"a{n}", "--arm", arm, "--seed", "0",
+              "--minutes", "60", who=r))
+        ok(rl("run", "record", "--attempt", f"ATT-000{n}-1", "--state", "queued", "--exec-kind", "hpc_job",
+              "--exec-namespace", space, "--exec-id", "42.opbs", who=r))
+    message = miyabi("notification", ["- 42.opbs single  F (success)  walltime 0:10/1:00:00  log o",
+                                      "Your note: compare with the job state unknown in the previous batch"])
+
+    def deliver(*flags) -> str:
+        monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"message": message})))
+        return ok(rl("run", "ended", *flags))
+
+    assert "more than one executor namespace" in deliver()
+    with project.read() as tx:
+        assert tx.require("ATT-0001-1")["execution_state"] == "queued"
+    assert "ATT-0001-1" in deliver("--namespace", "miyabi-pbs")
+    with project.read() as tx:
+        assert tx.require("ATT-0001-1")["outcome"] == "success"
+        assert tx.require("ATT-0002-1")["execution_state"] == "queued"
+
+
 def test_acceptance_merges_into_the_mainline_after_tests(project, rl):
     flow.delivered(project, rl)
     s = "scientist-T-0002"

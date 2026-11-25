@@ -191,6 +191,12 @@ source builds and application imports belong in an allocation. `rl` bookkeeping 
 sandbox and cannot stop arbitrary shell commands; agents must follow this policy. If the MCP is unavailable,
 report the missing executor and continue independent control work; do not silently run the workload locally.
 
+With `compute.tests: job` a task's tests are jobs too. Register one with `{{rl}} run register --task T-x --purpose
+design-test --minutes N` (its run keeps the test command and commit of that moment), run the command at that
+commit, then `{{rl}} task test T-x --record pass|fail --attempt <ATT>`. A command changed afterwards needs a new
+job. An acceptance waits on its merge test the same way (`--purpose merge-test`); the watcher finishes it when
+the job's end is recorded.
+
 ### Jobs through an external executor
 
 With `jobs: mcp:<server>` or `skill:<name>`, the external integration owns scheduler semantics, site policy,
@@ -221,8 +227,8 @@ one.
    id from the executor's output, never from memory (`{{rl}} run record --exec-id` reminds you on such a resource).
    Queued is not running. Import measured usage once; unknown usage is not zero.
 6. Nobody waits in a pane. Configure the executor's completion notification with its `command` delivery
-   running `rl run ended` in the project (the notification JSON on stdin): rl finds the attempts by the job ids
-   bound to them and ends each job by its own status row; a job whose row says it is still running or unknown
+   running `rl run ended --namespace <executor namespace>` in the project (the notification JSON on stdin): rl
+   finds the attempts by the job ids bound to them in that namespace and ends each job by its own status row; a job whose row says it is still running or unknown
    stays pending, and a state-unknown notice ends nothing. The submitter then sees a `job-ended` item and the
    watcher wakes it. While a task's runs are queued or running, its session has nothing to do and ends its turn.
 7. Verify application outputs after completion: scheduler success alone is insufficient. With a shared

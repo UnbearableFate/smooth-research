@@ -305,7 +305,7 @@ def cmd_task(args):
     if a == "cancel":
         return tasks.cancel(store, actor, args.id, args.reason)
     if a == "test":
-        return tasks.test(store, actor, args.id, args.record, args.commit, args.log)
+        return tasks.test(store, actor, args.id, args.record, args.commit, args.log, args.attempt)
     if a == "dispatch":
         return tasks.dispatch(store, actor, args.id, args.note)
     if a == "block":
@@ -424,7 +424,7 @@ def cmd_run(args):
                              args.run, args.resource, params or None)
     if a == "ended":
         raw = None if sys.stdin.isatty() or args.attempt else sys.stdin.read()
-        return runs.ended(store, raw, args.attempt, args.outcome, args.note)
+        return runs.ended(store, raw, args.attempt, args.outcome, args.note, args.namespace)
     if a == "record":
         items = load_json_records(args.observation) if args.observation else [{}]
         flags = {"attempt_id": args.attempt, "source": args.source, "observed_at": args.observed_at,
@@ -682,8 +682,9 @@ def build_parser() -> argparse.ArgumentParser:
         s.add_argument("--reason", required=True)
     s = ss.add_parser("test")
     s.add_argument("id")
-    s.add_argument("--record", choices=["pass", "fail"])
-    s.add_argument("--commit")
+    s.add_argument("--record", choices=["pass", "fail"], help="the outcome of a test job (compute.tests: job)")
+    s.add_argument("--attempt", help="the test job's attempt (registered with --purpose design-test)")
+    s.add_argument("--commit", help="the commit the job tested (checked against its run)")
     s.add_argument("--log")
     s = ss.add_parser("dispatch")
     s.add_argument("id")
@@ -799,6 +800,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--attempt")
     s.add_argument("--outcome", choices=ENUMS["outcome"])
     s.add_argument("--note")
+    s.add_argument("--namespace", help="the executor namespace the notification's job ids belong to")
     s = ss.add_parser("record", help="record an observation of an attempt (queries nothing)")
     s.add_argument("--observation")
     s.add_argument("--attempt")

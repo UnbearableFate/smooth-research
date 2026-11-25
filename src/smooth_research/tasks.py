@@ -261,9 +261,11 @@ def _check_env(store: Store) -> dict:
 
 
 def test(store: Store, actor: Actor, tid: str, record: str | None = None, commit: str | None = None,
-         log: str | None = None) -> dict:
+         log: str | None = None, attempt: str | None = None) -> dict:
     """Run the task's tests (an execute task's semantic tests, a prep task's done check) at its committed head and
-    record the outcome; with record (pass|fail), record the outcome of a test job instead (compute.tests: job)."""
+    record the outcome; with record (pass|fail), record the outcome of a test job instead (compute.tests: job): the
+    job's run says which command it ran at which commit (registered with --purpose design-test), so a command
+    changed since is not marked as tested."""
     need(actor, "scientist", "researcher", what="testing a task")
     with store.read() as tx:
         task = tx.require(tid, "Task")
@@ -274,13 +276,23 @@ def test(store: Store, actor: Actor, tid: str, record: str | None = None, commit
         raise RLError("INVALID", f"{tid} has no test command: set the experiment's --semantic-tests (execute) or the "
                                  "task's done check (prep)")
     if record:
-        if record not in ("pass", "fail") or not commit:
-            raise RLError("INVALID", "--record pass|fail with --commit <the commit the job tested>")
-        ok, detail, at = record == "pass", f"job result, log {log or 'not given'}", commit
+        if record not in ("pass", "fail") or not attempt:
+            raise RLError("INVALID", "--record pass|fail with --attempt <the attempt of the test job>")
+        with store.read() as tx:
+            run = tx.require(tx.require(attempt, "Attempt")["run_id"], "Run")
+        ran = (run.get("spec") or {}).get("test") or {}
+        if run["task_id"] != tid or run.get("purpose") not in ("design-test", "review-test") or not ran.get("command"):
+            raise RLError("INVALID", f"{attempt} is not a test job of {tid}: register it with rl run register --task "
+                                     f"{tid} --purpose design-test --minutes N")
+        if commit and gitops.rev(store.project, commit) != run["code_commit"]:
+            raise RLError("INVALID", f"{attempt} tested {run['code_commit'][:12]}, not {commit[:12]}")
+        command, at = ran["command"], run["code_commit"]
+        ok, detail = record == "pass", f"job {attempt}, log {log or 'not given'}"
     else:
         if tests_mode(store.project.config) == "job":
-            raise RLError("INVALID", "compute.tests is job: run the tests as a short job (rl run register --trial ..), "
-                                     "then record its outcome: rl task test T-x --record pass|fail --commit <c>")
+            raise RLError("INVALID", f"compute.tests is job: run the tests as a short job (rl run register --task "
+                                     f"{tid} --purpose design-test --minutes N), then record its outcome: rl task "
+                                     f"test {tid} --record pass|fail --attempt <ATT>")
         if gitops.dirty(store.project, tid):
             raise RLError("INVALID", f"{tid}'s worktree has uncommitted changes: tests are recorded for a commit")
         at = gitops.head(store.project, tid)
@@ -430,6 +442,17 @@ def answer(store: Store, actor: Actor, tid: str, text: str) -> dict:
         if actor.name not in (task["creator"], task.get("scientist_session")) and \
                 (hypothesis_task_of(tx, task) or {}).get("holder") != actor.name:
             raise RLError("INVALID", f"{tid}'s blockers go to {task['creator']}")
+        live = task_experiment(tx, tid) if task["kind"] == "execute" else None
+        sealed = task.get("sealed_design") or {}
+        if live and sealed and live["revision"] != sealed.get("revision"):
+            # a changed design is handed over like the first one: its tests, its review, a dispatch
+            tx.update(tid, {"state": "active", "answer_note": text, "revision": task["revision"] + 1,
+                            "sealed_design": None, **_hold(tx, task, actor.name)})
+            tx.event("task.answered", tid, f"design changed to {live['id']}@{live['revision']}: {text[:250]}")
+            return {"id": tid, "summary": f"{tid} is back with you: {live['id']} is now at revision "
+                                          f"{live['revision']}, so commit the design, rl task test {tid}, get its "
+                                          f"review and rl task dispatch {tid} again; runs already registered stay "
+                                          f"on revision {sealed.get('revision')}"}
         tx.update(tid, {"state": "active", "answer_note": text, "revision": task["revision"] + 1})
         tx.event("task.answered", tid, text[:300])
     return {"id": tid, "summary": f"{tid} back with its researcher"}
@@ -490,7 +513,8 @@ def _deliver_work(store: Store, actor: Actor, tid: str, conclusion, limitations,
             if not ok:
                 raise RLError("INVALID", f"the done check fails at {head[:12]}: {detail}")
         elif not passed_at(task, head, command):
-            raise RLError("INVALID", f"no passing done check is recorded at {head[:12]} (rl task test {tid} --record)")
+            raise RLError("INVALID", f"no passing done check is recorded at {head[:12]}: run it as a job, then rl task "
+                                     f"test {tid} --record pass --attempt <ATT>")
     with store.write() as tx:
         task = tx.require(tid, "Task")
         changes = {"state": "delivered", "conclusion": conclusion, "limitations": limitations,

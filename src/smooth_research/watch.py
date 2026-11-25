@@ -268,8 +268,9 @@ def look(store: Store, s: dict, items: list[inbox.Item], low: dict) -> str | Non
                 config, "beat_seconds"):
             changes["last_user_at"] = now_utc()  # it moved without a prompt of ours: the user talks to it
     if status == "blocked":
-        screen = herdr.read(pane)
-        changes["needs_decision"] = launch.excerpt(screen, 300)
+        seen = launch.excerpt(herdr.read(pane), 300)
+        if seen != s.get("needs_decision"):  # an unchanged dialog changes no record (nor the page)
+            changes["needs_decision"] = seen
     elif s.get("needs_decision"):
         changes["needs_decision"] = None
     if changes:
