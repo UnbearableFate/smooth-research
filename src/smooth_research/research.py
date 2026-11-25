@@ -1,49 +1,48 @@
-"""Project setup and the scientific graph: hypotheses, experiments, evidence, decisions and relations."""
+"""Project setup and the scientific graph: hypotheses, experiments, evidence, decisions and relations (design ch. 10).
+
+Decisions are the only way a hypothesis changes state. A verdict (supported, challenged, inconclusive) or a stop
+(paused, retired) starts as a draft and becomes final only after a passing conclusion review of that draft
+(reviews.py); a route decision (why a new experiment, how an answer is followed) and a phase conclusion are final
+at once and change no hypothesis.
+"""
 
 from __future__ import annotations
 
-import json
 import shutil
 from pathlib import Path
 
-import yaml
-
-from . import documents, labels
-from .project import CONFIG_NAME, DOCS_DIRS, RESEARCH_DIRS, Project, load_config, write_default_config
-from .schema import ENUMS, LINKABLE, RELATIONS
+from . import documents, gitops, labels
+from .project import CONFIG_NAME, RESEARCH_DIRS, Project, load_config, write_default_config
+from .roles import Actor, need
+from .schema import LINKABLE, RELATIONS
 from .store import Store, Tx, _sort_key, label_of
-from .upgrade import build, environment, same_source
-from .util import RLError, digest_file, digest_json, now_utc, short
+from .upgrade import environment
+from .util import RLError, digest_file, now_utc
 
 CONSTRAINTS_TEMPLATE = """# Constraints
 
-Who decided each item and when. The coordinator and executors follow this; the plugin does not enforce it.
-Model choices and compute resources are not kept here: they live in smooth-research.yaml (models, compute),
-where the CLI reads them.
+What only the user may change. The coordinator fills this from the plan once, with the user; every role follows
+it, and what it does not allow goes to the user as a decision request.
 
-- Research goal and claims in scope:
-- Allowed data, and which compute resources may be used for what (the resources themselves, how they are
-  reached and how code gets there, are in smooth-research.yaml, compute):
-- Resource ceiling (per experiment / per batch / total; units such as CPU-h, GPU-h, node-h; queues):
+- Goal and claims in scope:
+- Allowed data, and which compute resources may be used for what (the resources themselves are in
+  smooth-research.yaml, compute):
+- Resource ceiling (total; units such as GPU·h, MIG·h, node·h):
 - Actions that need the user's decision first:
 """
 
 DEFAULT_PYTHON = "3.13"  # of the project's environment; bin/rl makes it before init (rl init --python)
-
-ACTION_DISPOSITION = {"pause": "paused", "stop": "retired", "reopen": "active"}
-STAGE_ACTIONS = ("recommend_formal", "continue_probe", "pause", "stop")
-# Key conclusions get an independent, read-only check before anyone relies on them (rl review conclusion):
-# a hypothesis set supported or challenged, a retired route, a recommended formal experiment.
-KEY_STATUSES = ("supported", "challenged")
+VERDICTS = ("supported", "challenged", "inconclusive")
+STOPS = ("paused", "retired")
+GITIGNORE = ("# the database and raw run artifacts stay out of git; sealed documents are kept\nstate/\n"
+             "artifacts/\n")
 
 
 # -- project --------------------------------------------------------------------------------------------------
 
 
 def ensure_layout(project: Project, skip: list[Path] = ()) -> list[str]:
-    """The fixed directories and starter files, created where missing (nothing existing is changed). Run by init and
-    by rl upgrade, so a project made by an older plugin gets what a newer layout adds; skip names files not to
-    create because an older layout still holds them elsewhere. Returns what it created."""
+    """The fixed directories and starter files, created where missing (nothing existing is changed)."""
     made = []
 
     def write(path: Path, text: str) -> None:
@@ -52,24 +51,20 @@ def ensure_layout(project: Project, skip: list[Path] = ()) -> list[str]:
             path.write_text(text, encoding="utf-8")
             made.append(project.rel(path))
 
-    for path in [project.code_root] + [(project.docs_root if area == "docs" else project.research_root) / name
-                                       for area, names in (("research", RESEARCH_DIRS), ("docs", DOCS_DIRS))
-                                       for name in names]:
+    for path in [project.code_root, project.docs_root / "explanations"] + \
+            [project.research_root / name for name in RESEARCH_DIRS]:
         if not path.is_dir():
             path.mkdir(parents=True, exist_ok=True)
             made.append(project.rel(path) + "/")
-    write(project.research_root / ".gitignore", "# the active database, call logs and raw run artifacts stay out of "
-          "git;\n# sealed documents are kept, and `rl export` writes consistent snapshots\nstate/\ncalls/\nartifacts/\n")
-    # a commit is staged as the code snapshot of remote runs: sources only
+    write(project.research_root / ".gitignore", GITIGNORE)
+    write(project.docs_root / ".gitignore", "# drawn by the watcher (rl view), not tracked\nresearch.html\n")
     write(project.code_root / ".gitignore", "__pycache__/\n*.py[cod]\n")
     write(project.constraints_path, CONSTRAINTS_TEMPLATE)
     return made
 
 
 def init_project(root: Path, plan: str | None = None, title: str | None = None) -> dict:
-    """Create the project (or check an existing one) and import the plan. The plugin's bin/rl makes the project's
-    own Python environment first (uv init, uv add of rl's dependencies) and runs this on it, so the records are
-    created by the library versions the project pins; the init event names that environment."""
+    """Create the project (or check an existing one) and import the plan."""
     root = root.resolve()
     root.mkdir(parents=True, exist_ok=True)
     write_default_config(root)
@@ -91,331 +86,255 @@ def init_project(root: Path, plan: str | None = None, title: str | None = None) 
             sealed_digest = tx.require(sealed, "DocRevision")["digest"] if sealed else None
         held = sealed_digest or (digest_file(snapshot) if snapshot.exists() and snapshot.resolve() != source else None)
         if held and held != digest_file(source):
-            constraints = project.rel(project.constraints_path)
-            raise RLError("CONFLICT", f"the project already holds a different imported plan ({sealed or 'not sealed'}"
-                                      f", {project.rel(snapshot)}); the original snapshot is immutable and only the "
-                                      "starting point. Record a new direction as hypotheses and decisions, and a new "
-                                      f"goal, scope or budget in {constraints} with the user.")
+            raise RLError("CONFLICT", f"the project already holds a different plan ({sealed or 'not sealed'}); a new "
+                                      "direction is a new tree task (rl task create --kind tree --reason ..)")
         if snapshot.resolve() != source:
             snapshot.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(source, snapshot)
         prep = documents.prepare(project, snapshot, "plan")
     with store.write() as tx:
-        plan_ref = documents.register(tx, prep) if prep else tx.meta().get("plan_ref")
+        plan_ref = documents.register(tx, prep, documents.PROJECT) if prep else tx.meta().get("plan_ref")
         if prep:
             tx.set_meta(plan_ref=plan_ref, plan_source=str(Path(plan).expanduser().resolve()))
         tx.event("project.init" if created else "project.reinit", None, f"plan {plan_ref}; {env_line}")
     return {"project": str(root), "created": created, "plan_ref": plan_ref, "config": str(root / CONFIG_NAME),
             "warnings": project.warnings,
             "summary": (f"{'initialized' if created else 'already initialized'} {root}"
-                        + (f"; plan snapshot {plan_ref} ({project.rel(project.plan_path)})" if plan_ref
-                           else "; no plan imported yet")
-                        + "\nlayout: experiment code src/ · for people docs/ (the plan, the constraints, the "
-                          "research page research.html, the manuscript, explanations/) · records and working documents "
-                          f"research/\n{env_line}"),
-            "next": (["commit the new project in its root (git add . && git commit; git init first if it is in no "
-                      "repository): runs use committed code, and rl session start pushes it to remote resources"]
-                     if created else [])
-                    + [f"fill {project.rel(project.constraints_path)} with what only the user may change: goal and "
-                     "claims in scope, data and environments, resource ceiling, actions that need their decision",
-                     f"put the user's model choices in {CONFIG_NAME} (models) and check them: rl models",
-                     "register yourself: rl session start --role coordinator ...",
-                     "extract near-term hypotheses once (the plan is not read again afterwards): rl hypothesis "
-                     "add ... --origin 'plan §x'"]}
+                        + (f"; plan {plan_ref} ({project.rel(project.plan_path)})" if plan_ref else "; no plan yet")
+                        + f"\n{env_line}"),
+            "next": (["commit the new project (git init; git add -A; git commit): task branches start from the "
+                      "mainline"] if created else [])
+                    + ["rl resume: opens the coordinator's pane in herdr and starts the watcher"]}
 
 
 # -- hypotheses -----------------------------------------------------------------------------------------------
 
 
-def add_hypothesis(store: Store, title: str, statement: str, scope: str | None = None,
-                   disposition: str = "active", derived_from: list[str] = (), combines: list[str] = (),
-                   motivated_by: list[str] = (), origin: str | None = None, statement_file: str | None = None,
-                   parent: str | None = None, root: bool = False) -> dict:
-    """A new hypothesis; its label goes under its primary parent among the hypotheses it is derived from (the
-    latest created, or parent), or starts a new top-level line (none of them, or root): see labels."""
-    prep = documents.prepare(store.project, statement_file, "hypothesis") if statement_file else None
+def add_hypothesis(store: Store, actor: Actor, title: str, statement: str, purpose: str, scope: str | None = None,
+                   source: str | None = None, parent: str | None = None, assumes: list[str] = (),
+                   cost: str | None = None, composite: bool = False, candidate: bool = False,
+                   motivated_by: list[str] = ()) -> dict:
+    """A hypothesis written by a scientist: on a tree task (the initial tree) or as a proposed child in a
+    hypothesis task. The primary parent edge places it in the tree; ASSUMES edges name its premises (4.7)."""
+    need(actor, "scientist", what="adding a hypothesis")
+    if not (purpose or "").strip():
+        raise RLError("INVALID", "a hypothesis needs --purpose: one sentence on what testing it answers (the "
+                                 "research page shows it)")
     with store.write() as tx:
-        sources = [t for t in dict.fromkeys(derived_from) if tx.require(t)["_label"] == "Hypothesis"]
-        label = labels.for_hypothesis(tx, sources, parent, root)
+        task = tx.require(actor.subject, "Task")
+        if task["kind"] not in ("tree", "hypothesis"):
+            raise RLError("INVALID", f"hypotheses are added on a tree or hypothesis task, not on {task['kind']} "
+                                     f"{task['id']}")
+        if parent:
+            tx.require(parent, "Hypothesis")
+        label = labels.for_hypothesis(tx, [parent] if parent else [], parent)
         hid = tx.next_id("Hypothesis")
         tx.create("Hypothesis", {"id": hid, "label": label, "title": title, "statement": statement, "scope": scope,
-                                 "statement_ref": documents.register(tx, prep) if prep else None,
-                                 "evidence_status": "untested", "disposition": disposition, "revision": 1,
-                                 "origin": origin})
-        for rel, targets in (("derived_from", derived_from), ("combines", combines), ("motivated_by", motivated_by)):
-            for target in targets:
-                tx.link(rel, hid, target)
+                                 "source": source, "purpose": purpose.strip(), "evidence_status": "untested",
+                                 "disposition": "candidate" if candidate or task["kind"] == "hypothesis" else "active",
+                                 "revision": 1, "cost": cost, "composite": composite or None, "origin": task["id"]})
+        if parent:
+            tx.link("derived_from", hid, parent, primary=True)
+        for premise in assumes:
+            tx.link("assumes", hid, premise)
+        for m in motivated_by:
+            tx.link("motivated_by", hid, m)
         tx.event("hypothesis.added", hid, f"{label}: {title}")
-    return {"id": hid, "label": label, "revision": 1, "summary": f"{label}@1 {disposition}: {title} (id {hid})"}
+    return {"id": hid, "label": label, "summary": f"{label} ({hid}): {title}"}
 
 
-def revise_hypothesis(store: Store, hid: str, reason: str, statement: str | None = None, scope: str | None = None,
-                      title: str | None = None, base_revision: int | None = None,
-                      statement_file: str | None = None) -> dict:
-    prep = documents.prepare(store.project, statement_file, "hypothesis") if statement_file else None
+def revise_hypothesis(store: Store, actor: Actor, hid: str, reason: str, statement: str | None = None,
+                      scope: str | None = None, title: str | None = None, purpose: str | None = None,
+                      source: str | None = None, cost: str | None = None) -> dict:
+    need(actor, "scientist", what="revising a hypothesis")
     with store.write() as tx:
         h = tx.require(hid, "Hypothesis")
-        if base_revision is not None and base_revision != h["revision"]:
-            raise RLError("STALE_REVISION", f"{hid} is at revision {h['revision']}, not {base_revision}",
-                          current=_brief(h))
-        changes: dict = {}
-        if title:
-            changes["title"] = title
+        changes = {k: v for k, v in (("title", title), ("purpose", purpose), ("source", source), ("cost", cost))
+                   if v is not None}
         scientific = {k: v for k, v in (("statement", statement), ("scope", scope)) if v is not None and v != h.get(k)}
-        if prep:
-            scientific["statement_ref"] = documents.register(tx, prep)
         if scientific:
-            changes.update(scientific, revision=h["revision"] + 1, evidence_status="untested",
-                           needs_recheck=False, recheck_reason=None)
+            if h["evidence_status"] != "untested":
+                raise RLError("INVALID", f"{hid} is {h['evidence_status']}: a decided hypothesis keeps its statement; "
+                                         "propose a child hypothesis instead")
+            changes.update(scientific, revision=h["revision"] + 1)
         if not changes:
-            return {"id": hid, "revision": h["revision"], "summary": f"{hid}@{h['revision']} unchanged"}
-        h2 = tx.update(hid, changes)
-        old = [e for e in tx.inc(hid) if e["rel"] in ("supports", "challenges") and e.get("revision") != h2["revision"]]
-        tx.event("hypothesis.revised", hid, f"rev {h2['revision']}: {reason}")
-    note = (f"; {len(old)} evidence link(s) stay bound to earlier revisions — re-link after checking scope"
-            if scientific and old else "")
-    return {"id": hid, "revision": h2["revision"], "summary": f"{hid}@{h2['revision']} revised{note}"}
+            return {"id": hid, "summary": f"{hid} unchanged"}
+        tx.update(hid, changes)
+        tx.event("hypothesis.revised", hid, reason)
+    return {"id": hid, "summary": f"{hid} revised: {reason}"}
 
 
-def set_hypothesis(store: Store, hid: str, reason: str, evidence_status: str | None = None,
-                   disposition: str | None = None, rechecked: bool = False) -> dict:
-    """Status bookkeeping. A key conclusion (supported, challenged) is a decision, which the conclusion review check
-    follows; it is not set here."""
-    if evidence_status in KEY_STATUSES:
-        raise RLError("INVALID", f"{evidence_status} is a key conclusion: record it as a decision, after a conclusion "
-                                 f"review (rl review conclusion --target {hid} ...): rl decide --targets {hid} --action "
-                                 f"continue --set-evidence-status {evidence_status} --rationale .. --based-on EV-x,RV-x")
+def flag_hypothesis(store: Store, actor: Actor, hid: str, lack: str, basis: str, options: str) -> dict:
+    """A scientist marks a hypothesis whose novelty or feasibility falls short; it stays a candidate until the user
+    decides (4.8)."""
+    need(actor, "scientist", what="flagging a hypothesis")
+    if lack not in ("novelty", "feasibility"):
+        raise RLError("INVALID", "--lack is novelty or feasibility")
     with store.write() as tx:
-        tx.require(hid, "Hypothesis")
-        changes = {k: v for k, v in (("evidence_status", evidence_status), ("disposition", disposition)) if v}
-        if rechecked:
-            changes.update(needs_recheck=False, recheck_reason=None)
-        h = tx.update(hid, changes)
-        tx.event("hypothesis.status", hid, f"{h['evidence_status']}/{h['disposition']}: {reason}")
-    return {"id": hid, "summary": f"{hid}: evidence {h['evidence_status']}, disposition {h['disposition']}"}
+        h = tx.require(hid, "Hypothesis")
+        tx.update(hid, {"flag": {"lack": lack, "basis": basis, "options": options, "by": actor.name},
+                        "disposition": "candidate" if h["disposition"] == "active" else h["disposition"]})
+        tx.event("hypothesis.flagged", hid, f"{lack}: {basis}")
+    return {"id": hid, "summary": f"{hid} flagged ({lack}); it stays a candidate until the user decides"}
+
+
+def settle_flag(store: Store, actor: Actor, hid: str, outcome: str) -> dict:
+    """The coordinator records the user's decision on a flagged hypothesis (keep it active, or leave it out)."""
+    need(actor, "coordinator", what="settling a flagged hypothesis")
+    with store.write() as tx:
+        h = tx.require(hid, "Hypothesis")
+        if not h.get("flag"):
+            raise RLError("INVALID", f"{hid} is not flagged")
+        flag = {**h["flag"], "settled": outcome, "settled_at": now_utc()}
+        changes = {"flag": flag}
+        if outcome == "keep":
+            changes["disposition"] = "active"
+        elif outcome == "drop":
+            changes["disposition"] = "retired"
+        else:
+            raise RLError("INVALID", "--outcome is keep or drop; narrowing or another test is the scientist's "
+                                     "change, returned to the tree task")
+        tx.update(hid, changes)
+        tx.event("hypothesis.flag_settled", hid, outcome)
+    return {"id": hid, "summary": f"{hid}: flag settled ({outcome})"}
+
+
+def defer_hypothesis(store: Store, actor: Actor, hid: str, reason: str | None) -> dict:
+    """The coordinator marks a candidate 'not now' (or clears it with reason None); scheduling only (7.1)."""
+    need(actor, "coordinator", what="deferring a hypothesis")
+    with store.write() as tx:
+        h = tx.require(hid, "Hypothesis")
+        if h["evidence_status"] != "untested":
+            raise RLError("INVALID", f"{hid} is already {h['evidence_status']}")
+        tx.update(hid, {"defer_reason": reason})
+        tx.event("hypothesis.deferred" if reason else "hypothesis.undeferred", hid, reason or "")
+    return {"id": hid, "summary": f"{hid} {'not now: ' + reason if reason else 'back among the candidates'}"}
 
 
 # -- experiments ----------------------------------------------------------------------------------------------
 
-CONTRACT_FIELDS = ("question", "intervention", "comparator", "metric", "scope", "outcome_actions", "budget", "stop")
 
-
-def add_experiment(store: Store, title: str, question: str, hypotheses: list[str], stage: str | None = None,
-                   compared_with: list[str] = (), code_from: str | None = None, depends_on: list[str] = (),
-                   anchor: str | None = None, **contract: str | None) -> dict:
-    """A new experiment with a draft contract; its label goes under the deepest common ancestor of the hypotheses
-    it tests, else under the first of them, or under anchor: see labels."""
+def add_experiment(store: Store, actor: Actor, title: str, question: str, hypotheses: list[str],
+                   motivated_by: str, manifest_path: str | None = None, protected: list[str] = (),
+                   semantic_tests: str | None = None, brief: str | None = None, estimate: str | None = None) -> dict:
+    """A new experiment, a draft until a task carrying it is dispatched (the design commit is sealed then). It points
+    back to the short decision that motivates it (4.5)."""
+    need(actor, "scientist", what="adding an experiment")
     if not hypotheses:
-        raise RLError("INVALID", "an experiment tests at least one hypothesis (--hypotheses H-0001)")
+        raise RLError("INVALID", "an experiment tests at least one hypothesis (--tests H-0001)")
+    prep = documents.prepare(store.project, brief, "brief") if brief else None
     with store.write() as tx:
-        refs = []
+        d = tx.require(motivated_by, "Decision")
+        if d["kind"] != "route" or d["state"] != "final":
+            raise RLError("INVALID", f"--motivated-by is the short route decision on why this experiment now "
+                                     f"(rl decide --kind route ..); {motivated_by} is a {d['state']} {d['kind']}")
         for hid in hypotheses:
-            h = tx.require(hid, "Hypothesis")
-            refs.append(f"{hid}@{h['revision']}")
-        label = labels.for_experiment(tx, list(hypotheses), anchor)
+            tx.require(hid, "Hypothesis")
+        label = labels.for_experiment(tx, list(hypotheses))
         eid = tx.next_id("Experiment")
-        path = store.project.dir("experiments") / f"{eid}.md"
-        tx.create("Experiment", {"id": eid, "label": label, "title": title, "question": question, "stage": stage,
-                                 "contract_path": store.project.rel(path), "revision": 0})
+        tx.create("Experiment", {"id": eid, "label": label, "title": title, "question": question, "revision": 1,
+                                 "manifest_path": manifest_path, "protected": list(protected) or None,
+                                 "semantic_tests": semantic_tests, "estimate": estimate})
+        if prep:
+            tx.update(eid, {"brief_ref": documents.register(tx, prep, eid)})
         for hid in hypotheses:
             tx.link("tests", eid, hid, revision=tx.require(hid)["revision"])
-        for other in compared_with:
-            tx.link("compared_with", eid, other)
-        if code_from:
-            tx.link("code_from", eid, code_from)
-        for dep in depends_on:
-            tx.link("depends_on", eid, dep)
-        front = {"experiment": eid, "label": label, "title": title, "stage": stage, "hypotheses": refs,
-                 **{k: (question if k == "question" else contract.get(k)) or "TODO" for k in CONTRACT_FIELDS}}
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("---\n" + yaml.safe_dump(front, sort_keys=False, allow_unicode=True) + "---\n\n"
-                        "## Design\n\nArms, seeds, data split, positive/negative controls and what each outcome "
-                        "changes. Edit freely until the first run, review or task references this contract; "
-                        "later edits become a new sealed revision. Optional lists in the front matter: `arms:` "
-                        "(run register then takes only these arm names) and `metrics:` (the metrics the tables "
-                        "show).\n", encoding="utf-8")
+        tx.link("motivated_by", eid, motivated_by)
         tx.event("experiment.added", eid, f"{label}: {title}")
-    todo = [k for k in CONTRACT_FIELDS if not (question if k == "question" else contract.get(k))]
-    return {"id": eid, "label": label, "contract": store.project.rel(path),
-            "summary": f"{label} (id {eid}) draft contract {store.project.rel(path)}"
-                       + (f"; fill in: {', '.join(todo)}" if todo else "")}
+    return {"id": eid, "label": label, "summary": f"{label} ({eid}) draft: {title}"}
 
 
-def prepare_contract(store: Store, eid: str, arm: str | None = None) -> documents.Prepared:
-    """The experiment's contract, prepared for sealing. With arm (a new run's), a contract that lists its arms
-    (`arms:` in its front matter) refuses any other first, so a refused registration leaves no object behind."""
-    with store.read() as tx:
+def update_experiment(store: Store, actor: Actor, eid: str, reason: str | None = None, **fields) -> dict:
+    """Change an experiment's design fields. A draft (not sealed) changes freely; a sealed one becomes a new
+    revision with a reason, and the next dispatch seals it again (4.6)."""
+    need(actor, "scientist", what="changing an experiment")
+    brief = fields.pop("brief", None)
+    prep = documents.prepare(store.project, brief, "brief") if brief else None
+    with store.write() as tx:
         exp = tx.require(eid, "Experiment")
-    path = store.project.abs(exp["contract_path"])
-    if arm is not None and path.is_file():
-        arms = contract_arms(_front_matter(path), exp["contract_path"])
-        if arms is not None and str(arm) not in arms:
-            raise RLError("INVALID", f"arm {arm!r} is not one of the arms of {labels.name(exp)}'s contract "
-                                     f"({', '.join(arms)}): register the run under one of them, or add it to arms: "
-                                     f"in {exp['contract_path']} (a new contract revision)")
-    return documents.prepare(store.project, path, "experiment_contract")
+        changes = {k: v for k, v in fields.items() if v is not None}
+        if prep:
+            changes["brief_ref"] = documents.register(tx, prep, eid)
+        if exp.get("design_commit"):
+            if not reason:
+                raise RLError("INVALID", f"{eid}@{exp['revision']} is sealed (design {exp['design_commit'][:12]}): a "
+                                         "change is a new revision; give --reason")
+            first = first_evidence_run(tx, eid)
+            changes.update(revision=exp["revision"] + 1, revision_reason=reason, design_commit=None, sealed_at=None,
+                           manifest=None, manifest_digest=None)
+            tx.event("experiment.revised", eid, f"@{exp['revision'] + 1} "
+                                                f"{'after' if first else 'before'} the first evidence run: {reason}")
+        tx.update(eid, changes)
+    return {"id": eid, "summary": f"{eid} updated" + (f" (new revision: {reason})" if reason else "")}
 
 
-def seal_contract(tx: Tx, eid: str, prep: documents.Prepared, project: Project) -> str:
-    """Seal the current contract; a changed draft becomes a new revision, flagged if results were already seen."""
-    exp = tx.require(eid, "Experiment")
-    current = exp.get("contract_ref")
-    if current and tx.require(current, "DocRevision")["digest"] == prep.digest:
-        return f"{eid}@{exp['revision']}"
-    ref = documents.register(tx, prep)
-    changes: dict = {"contract_ref": ref, "revision": exp["revision"] + 1}
-    front = _front_matter(project.abs(prep.object_path))
-    for key in ("title", "question"):
-        if isinstance(front.get(key), str) and front[key].strip() and front[key] != "TODO":
-            changes[key] = front[key].strip()
-    if front.get("stage") in ENUMS["stage"]:
-        changes["stage"] = front["stage"]
-    seen = any(tx.all("Result", attempt_id=a["id"]) for run in tx.all("Run", experiment_id=eid)
-               for a in tx.all("Attempt", run_id=run["id"]))
-    if current and seen:
-        changes["revised_after_results"] = True
-        tx.event("experiment.revised_after_results", eid,
-                 f"contract {ref} written after results were imported; not a pre-specified design")
-    tx.update(eid, changes)
-    tx.event("experiment.sealed", eid, ref)
-    return f"{eid}@{changes['revision']}"
+def first_evidence_run(tx: Tx, eid: str) -> str | None:
+    runs = [r for r in tx.all("Run", experiment_id=eid) if r["category"] == "evidence"]
+    return runs[0]["id"] if runs else None
 
 
-def contract_arms(front: dict, where: str) -> list[str] | None:
-    """The arm names a contract declares (`arms:` in its front matter), or None when it declares none."""
-    arms = front.get("arms")
-    if arms in (None, "", []):
-        return None
-    if not isinstance(arms, list) or not all(isinstance(a, (str, int, float)) for a in arms):
-        raise RLError("INVALID", f"arms: in {where} is a list of arm names")
-    return [str(a) for a in arms]
+# -- evidence -------------------------------------------------------------------------------------------------
 
 
-def contract_gaps(front: dict) -> list[str]:
-    """The contract fields still to fill in: absent, empty or TODO."""
-    return [k for k in CONTRACT_FIELDS if front.get(k) in (None, [], {})
-            or (isinstance(front.get(k), str) and front[k].strip() in ("", "TODO"))]
-
-
-def prepare_contracts(store: Store, refs: list[str]) -> dict[str, documents.Prepared]:
-    """The contracts of the experiments among refs, read and checked before the write lock (seal_referenced): a task
-    or a code review that names an experiment seals its contract, and only a complete one."""
-    eids = [r for r in dict.fromkeys(refs) if label_of(r) == "Experiment"]
-    if not eids:
-        return {}
-    with store.read() as tx:
-        exps = [tx.require(eid, "Experiment") for eid in eids]
-    for exp in exps:  # all checked before any is sealed: a refused command leaves no sealed object behind
-        path = store.project.abs(exp["contract_path"])
-        missing = contract_gaps(_front_matter(path)) if path.is_file() else []  # a missing one: prepare says so
-        if missing:
-            raise RLError("INVALID", f"the contract of {labels.name(exp)} ({exp['contract_path']}) is not complete: "
-                                     f"fill in {', '.join(missing)}. A task or a code review that names an experiment "
-                                     "seals its contract, and the work follows that revision")
-    return {exp["id"]: documents.prepare(store.project, store.project.abs(exp["contract_path"]), "experiment_contract")
-            for exp in exps}
-
-
-def seal_referenced(tx: Tx, preps: dict[str, documents.Prepared], project: Project) -> tuple[dict[str, dict], list[str]]:
-    """Seal the contracts prepare_contracts read: for each experiment, the properties of the targets edge that bind
-    the task or review to the revision (and the sealed document), and a note."""
-    bound, notes = {}, []
-    for eid, prep in preps.items():
-        before = tx.require(eid, "Experiment")["revision"]
-        seal_contract(tx, eid, prep, project)
-        exp = tx.require(eid)
-        bound[eid] = {"revision": exp["revision"], "contract_ref": exp["contract_ref"]}
-        notes.append(f"contract {eid}@{exp['revision']} ({exp['contract_ref']})"
-                     + (" sealed now" if exp["revision"] != before else ""))
-    return bound, notes
-
-
-def seal_experiment(store: Store, eid: str) -> dict:
-    prep = prepare_contract(store, eid)
-    with store.write() as tx:
-        ref = seal_contract(tx, eid, prep, store.project)
-        exp = tx.require(eid)
-    flag = " (revised after results: exploratory, not pre-specified)" if exp.get("revised_after_results") else ""
-    return {"id": eid, "ref": ref, "contract_ref": exp["contract_ref"], "summary": f"{ref} sealed as {exp['contract_ref']}{flag}"}
-
-
-def _front_matter(path: Path) -> dict:
-    text = path.read_text(encoding="utf-8", errors="replace")
-    if not text.startswith("---"):
-        return {}
-    try:
-        data = yaml.safe_load(text.split("---", 2)[1])
-    except yaml.YAMLError:
-        return {}
-    return data if isinstance(data, dict) else {}  # a draft is edited by hand: its callers read fields with .get
-
-
-def contract_front(tx: Tx, store: Store, exp: dict) -> dict:
-    """The front matter of an experiment's contract: of its sealed revision, else of the draft."""
-    if exp.get("contract_ref"):
-        path = store.project.abs(documents.resolve(tx, exp["contract_ref"])["object_path"])
-    elif exp.get("contract_path"):
-        path = store.project.abs(exp["contract_path"])
-    else:
-        return {}
-    return _front_matter(path) if path.exists() else {}
-
-
-# -- evidence and decisions -----------------------------------------------------------------------------------
-
-
-def add_evidence(store: Store, summary: str, level: str, validity: str = "pending", scope: str | None = None,
-                 supports: list[str] = (), challenges: list[str] = (), attempts: list[str] = (),
-                 results: list[str] = (), experiment: str | None = None, artifacts: list[str] = (),
+def add_evidence(store: Store, actor: Actor, task_id: str, summary: str, level: str, results: list[str] = (),
+                 attempts: list[str] = (), scope: str | None = None, artifacts: list[str] = (),
                  doc: str | None = None) -> dict:
-    prep = documents.prepare(store.project, doc, "evidence") if doc else None
-    warnings = []
+    """A fact drawn from results, without direction (10.2 rule 4). Only evidence runs that do not deviate from the
+    design count (9.1)."""
+    need(actor, "researcher", what="writing evidence")
+    if not results and not attempts:
+        raise RLError("INVALID", "evidence is drawn from results or attempts: --results RES-x or --attempts ATT-x")
+    prep = documents.prepare(store.project, doc, "analysis") if doc else None
     with store.write() as tx:
+        task = tx.require(task_id, "Task")
+        if task["kind"] != "execute":
+            raise RLError("INVALID", f"evidence comes from an execute task; {task_id} is {task['kind']} (a "
+                                     "preparation task's outputs are not evidence)")
+        exp = task_experiment(tx, task_id)
+        runs = []
         for res_id in results:
             res = tx.require(res_id, "Result")
-            if not res.get("usable_for_planned_comparison", True):
-                warnings.append(f"{res_id} does not match its run spec; it cannot serve the pre-specified comparison")
-                if level == "confirmatory":
-                    raise RLError("INVALID", f"{res_id} differs from its RunSpec; it cannot be confirmatory evidence")
-        for att_id in attempts:
-            att = tx.require(att_id, "Attempt")
-            if att["outcome"] != "success":
-                warnings.append(f"{att_id} outcome is {att['outcome']}: diagnose before treating this as a test of the mechanism")
+            if not res.get("usable", True):
+                raise RLError("INVALID", f"{res_id} differs from its run's registration ({res.get('mismatches')}); "
+                                         "it cannot be evidence")
+            runs.append(tx.require(tx.require(res["attempt_id"])["run_id"]))
+        runs += [tx.require(tx.require(a, "Attempt")["run_id"]) for a in attempts]
+        for run in runs:
+            if run["category"] != "evidence":
+                raise RLError("INVALID", f"{run['id']} is a {run['category']} run: only evidence runs can be cited")
+            if run.get("deviates"):
+                raise RLError("INVALID", f"{run['id']} deviates from the design ({run.get('deviation')}): not evidence")
+            if run["task_id"] != task_id:
+                raise RLError("INVALID", f"{run['id']} belongs to {run['task_id']}, not {task_id}")
         evid = tx.next_id("Evidence")
-        tx.create("Evidence", {"id": evid, "summary": summary, "validity": validity, "evidence_level": level,
-                               "scope": scope, "artifact_refs": list(artifacts) or None,
-                               "doc_ref": documents.register(tx, prep) if prep else None})
-        for rel, hids in (("supports", supports), ("challenges", challenges)):
-            for hid in hids:
-                tx.link(rel, evid, hid, revision=tx.require(hid, "Hypothesis")["revision"], scope=scope)
+        tx.create("Evidence", {"id": evid, "summary": summary, "validity": "valid", "evidence_level": level,
+                               "scope": scope, "artifact_refs": list(artifacts) or None, "task_id": task_id})
+        if prep:
+            tx.update(evid, {"doc_ref": documents.register(tx, prep, evid)})
         for att_id in attempts:
             tx.link("from_attempt", evid, att_id)
         for res_id in results:
             tx.link("from_result", evid, res_id)
-        if experiment:
-            tx.link("about", evid, experiment)
-        tx.event("evidence.added", evid, f"{level}/{validity}: {summary}")
-    return {"id": evid, "warnings": warnings,
-            "summary": f"{evid} {level}/{validity}" + (f" (supports {', '.join(supports)})" if supports else "")
-                       + (f" (challenges {', '.join(challenges)})" if challenges else "")}
+        if exp:
+            tx.link("about", evid, exp["id"])
+        tx.event("evidence.added", evid, f"{level}: {summary}")
+    return {"id": evid, "summary": f"{evid} {level}: {summary}"}
 
 
-def set_evidence(store: Store, evid: str, validity: str, reason: str) -> dict:
-    """Retraction marks only what actually depends on this evidence for re-checking."""
+def set_evidence(store: Store, actor: Actor, evid: str, validity: str, reason: str) -> dict:
+    """Retraction marks what rests on the evidence for re-checking."""
+    need(actor, "researcher", "scientist", what="changing evidence validity")
     with store.write() as tx:
         ev = tx.require(evid, "Evidence")
         tx.update(evid, {"validity": validity, "validity_reason": reason})
-        flagged = []
-        if validity != ev["validity"] and (validity == "invalid" or ev["validity"] == "valid"):
-            flagged = recheck_dependents(tx, evid, f"{evid} now {validity}: {reason}")
+        flagged = recheck_dependents(tx, evid, f"{evid} now {validity}: {reason}") if validity != ev["validity"] else []
         tx.event("evidence.validity", evid, f"{validity}: {reason}")
-    return {"id": evid, "flagged": flagged,
-            "summary": f"{evid} -> {validity}" + (f"; re-check {', '.join(flagged)}" if flagged else "")}
+    return {"id": evid, "summary": f"{evid} -> {validity}" + (f"; re-check {', '.join(flagged)}" if flagged else "")}
 
 
 def recheck_dependents(tx: Tx, source: str, reason: str) -> list[str]:
-    """Mark for re-checking what rests on a record that no longer holds: the hypotheses an evidence supports or
-    challenges and the decisions based on it; for a result, also what rests on the evidence drawn from it."""
+    """Mark what rests on a record that no longer holds: hypotheses an evidence supports or challenges, decisions
+    based on it; for a result, also what rests on the evidence drawn from it."""
     sources = [source] + ([e["id"] for e in tx.inc(source, "from_result")] if label_of(source) == "Result" else [])
     flagged = []
     for sid in sources:
@@ -427,190 +346,139 @@ def recheck_dependents(tx: Tx, source: str, reason: str) -> list[str]:
     return flagged
 
 
-def _is_key(kind: str, action: str, evidence_status: str | None) -> bool:
-    return evidence_status in KEY_STATUSES or action == "stop" or (kind == "stage" and action == "recommend_formal")
+def task_experiment(tx: Tx, task_id: str) -> dict | None:
+    found = [e for e in tx.out(task_id, "targets") if e["label"] == "Experiment"]
+    return tx.require(found[0]["id"]) if found else None
 
 
-def key_hypotheses(tx: Tx, d: dict) -> dict[str, int | None]:
-    """The hypotheses on which decision d states a key conclusion, each with the revision it decided on; empty when
-    it states none."""
-    if not _is_key(d["kind"], d["action"], d.get("evidence_status_set")):
-        return {}
-    return {e["id"]: e.get("revision") for e in tx.out(d["id"], "decides") if e["label"] == "Hypothesis"}
+# -- decisions ------------------------------------------------------------------------------------------------
 
 
-def conclusion_reviews(tx: Tx, refs: list[str]) -> list[dict]:
-    tickets = [tx.require(r) for r in refs if label_of(r) == "Ticket"]
-    return [t for t in tickets if t.get("subject") == "conclusion"]
-
-
-def review_passes(t: dict) -> bool:
-    """An answered review passes when no finding of medium or higher severity remains, or when the coordinator
-    approved it. A code review whose files changed after the request may describe another version: it never
-    passes."""
-    if t.get("kind") != "review" or t.get("status") != "answered" or t.get("changed_during_review"):
-        return False
-    return bool(t.get("approved")) or (t.get("verdict") in ("pass", "issues")
-                                       and t.get("open_severity") in ("none", "low"))
-
-
-def review_mark(t: dict) -> str:
-    """A review's outcome in a few words: verdict, open severity, approval or resolution."""
-    out = t.get("verdict") or t["status"]
-    if t.get("open_severity") not in (None, "none", "low"):
-        out += f", {t['open_severity']} open"
-    if t.get("changed_during_review"):
-        out += ", not counted: the files changed during the review"
-    if t.get("resolved_by"):
-        out += f", resolved by {t['resolved_by']}"
-    return out + (", approved by the coordinator" if t.get("approved") else "")
-
-
-def passing_rechecks(reviews: list[dict]) -> dict[str, list[str]]:
-    """For each review among reviews, the passing reviews that re-check it (--recheck-of), directly or further down
-    a chain of re-checks, in id order."""
-    by_id = {t["id"]: t for t in reviews}
-    out: dict[str, list[str]] = {}
-    for t in sorted(reviews, key=lambda t: _sort_key(t["id"])):
-        if not review_passes(t):
-            continue
-        prev, walked = t.get("recheck_of"), set()
-        while prev and prev not in walked:
-            walked.add(prev)
-            out.setdefault(prev, []).append(t["id"])
-            prev = by_id.get(prev, {}).get("recheck_of")
-    return out
-
-
-def _reviewed(tx: Tx, reviews: list[dict]) -> dict[str, list[tuple[dict, dict]]]:
-    """For each hypothesis, the passing reviews among reviews that were of it, in id order, each with its targets
-    edge: the revision it was of, and the evidence it saw (recorded since conclusion reviews are bound to them)."""
-    out: dict[str, list[tuple[dict, dict]]] = {}
-    for t in sorted((t for t in reviews if review_passes(t)), key=lambda t: _sort_key(t["id"])):
-        for e in tx.out(t["id"], "targets"):
-            out.setdefault(e["id"], []).append((t, e))
-    return out
-
-
-def _of(edge: dict, revision: int | None) -> bool:
-    """Whether a review edge was of this revision. One whose revision is unknown (an older review the upgrade could not
-    place) counts for any, as it did before."""
-    return revision is None or edge.get("revision") in (None, revision)
-
-
-def review_gap(tx: Tx, reviews: list[dict], hyps: dict[str, int | None]) -> str | None:
-    """Why a key conclusion on hyps (each at the revision it is about) has no passing independent check, or None when
-    each of them has one: a cited conclusion review of that hypothesis at that revision that passes."""
-    reviewed = _reviewed(tx, reviews)
-    missing = [h for h, rev in hyps.items() if not any(_of(e, rev) for _, e in reviewed.get(h, []))]
-    if not missing:
-        return None
-    parts = []
-    unreviewed = [h for h in missing if h not in reviewed]
-    passing = [t for t in reviews if review_passes(t)]
-    if unreviewed and passing:
-        parts.append(f"no passing conclusion review covers {', '.join(unreviewed)} "
-                     f"({', '.join(t['id'] for t in passing)} reviewed {', '.join(sorted(reviewed)) or 'no hypothesis'})")
-    elif unreviewed and reviews:
-        parts.append(f"conclusion review {reviews[-1]['id']} is {review_mark(reviews[-1])}, not a pass")
-    elif unreviewed:
-        parts.append("no conclusion review")
-    older = [f"{t['id']} was of {h}@{e.get('revision')}, the conclusion is on @{hyps[h]}"
-             for h in missing for t, e in reviewed.get(h, [])]
-    if older:
-        parts.append(f"{'; '.join(older)}: have the conclusion reviewed at this revision, or state in the "
-                     "decision's rationale why the revision does not change it")
-    return "; ".join(parts)
-
-
-def review_hints(tx: Tx, reviews: list[dict], hyps: dict[str, int | None]) -> list[str]:
-    """Evidence linked to a hypothesis after the latest passing review of its revision saw it: worth a look before
-    relying on the conclusion, not a gap. Older reviews did not record what they saw, and give none."""
-    out = []
-    reviewed = _reviewed(tx, reviews)
-    for h, rev in hyps.items():
-        last = [(t, e) for t, e in reviewed.get(h, []) if _of(e, rev)][-1:]
-        if not last or last[0][1].get("evidence") is None:
-            continue
-        t, e = last[0]
-        new = sorted({x["id"] for x in tx.inc(h) if x["rel"] in ("supports", "challenges")} - set(e["evidence"]),
-                     key=_sort_key)
-        if new:
-            out.append(f"{', '.join(new)} {'was' if len(new) == 1 else 'were'} linked to {h} after {t['id']} reviewed "
-                       f"it: check that {'it does' if len(new) == 1 else 'they do'} not change the conclusion")
-    return out
-
-
-def _review_hint(hyps: list[str], did: str) -> str:
-    return (f"rl review conclusion --target {','.join(hyps)} --proposal .. --author-model .., "
-            f"then rl link {did} based_on RV-x")
-
-
-def decide(store: Store, targets: list[str], action: str, rationale: str, based_on: list[str] = (),
-           reopen_condition: str | None = None, kind: str = "route", implementation_ready: str | None = None,
-           evidence_scope: str | None = None, set_evidence_status: str | None = None,
-           rationale_file: str | None = None) -> dict:
+def decide(store: Store, actor: Actor, kind: str, targets: list[str], rationale: str, based_on: list[str] = (),
+           status: str | None = None, supports: list[str] = (), challenges: list[str] = (), did: str | None = None,
+           means: str | None = None, highlights: list[dict] = (), rationale_file: str | None = None) -> dict:
+    """A decision by a scientist. verdict and stop are drafts until a conclusion review passes (rl decide --final);
+    route and phase decisions are final now and change no hypothesis."""
+    need(actor, "scientist", what="writing a decision")
+    if kind not in ("verdict", "stop", "route", "phase"):
+        raise RLError("INVALID", "--kind is verdict, stop, route or phase")
     if not targets:
-        raise RLError("INVALID", "a decision targets at least one hypothesis, experiment or task")
-    if action == "pause" and not reopen_condition:
-        raise RLError("INVALID", "pause needs --reopen-condition: what new evidence would reopen it")
-    if kind == "stage":
-        if action not in STAGE_ACTIONS:
-            raise RLError("INVALID", f"a stage delivery decides one of {', '.join(STAGE_ACTIONS)}")
-        if not implementation_ready or not evidence_scope:
-            raise RLError("INVALID", "a stage delivery records --implementation-ready and --evidence-scope separately")
-    prep = documents.prepare(store.project, rationale_file, "decision") if rationale_file else None
-    if not (rationale or "").strip():
-        rationale = _first_line(store.project.abs(prep.object_path)) if prep else ""
-        if not rationale:
-            raise RLError("INVALID", "give the decision's reason: --rationale \"<short reason>\", or --rationale-file "
-                                     "<file> whose first line of text is the short reason")
+        raise RLError("INVALID", "a decision targets a hypothesis, an experiment or a phase (--targets)")
+    if kind == "verdict" and status not in VERDICTS:
+        raise RLError("INVALID", f"a verdict sets --status {'|'.join(VERDICTS)}")
+    if kind == "stop" and status not in STOPS:
+        raise RLError("INVALID", f"a stop sets --status {'|'.join(STOPS)} (the hypothesis is not judged)")
+    if kind in ("route", "phase") and status:
+        raise RLError("INVALID", f"a {kind} decision changes no hypothesis state")
+    if kind == "verdict" and not (did and means):
+        raise RLError("INVALID", "a verdict carries the interpretation in two parts, --did (what was done) and "
+                                 "--means (what it means), three sentences at most together, no copied numbers")
+    if supports or challenges:
+        if kind != "verdict":
+            raise RLError("INVALID", "--supports/--challenges are written with a verdict")
+    prep = documents.prepare(store.project, rationale_file, "rationale") if rationale_file else None
     with store.write() as tx:
-        records = [tx.require(t, "Hypothesis", "Experiment", "Task") for t in targets]
-        for rec in records:
-            if rec["_label"] == "Hypothesis" and rec["disposition"] in ("paused", "retired") \
-                    and action not in ("reopen", "stop", "pause", "consult"):
-                raise RLError("INVALID", f"{rec['id']} is {rec['disposition']}; reopen it explicitly with new "
-                                         "evidence (action reopen) before continuing")
-        did = tx.next_id("Decision")
-        tx.create("Decision", {"id": did, "kind": kind, "action": action, "rationale": rationale,
-                               "rationale_ref": documents.register(tx, prep) if prep else None,
-                               "reopen_condition": reopen_condition, "implementation_ready": implementation_ready,
-                               "evidence_scope": evidence_scope, "evidence_status_set": set_evidence_status})
-        for rec in records:
-            tx.link("decides", did, rec["id"], revision=rec.get("revision"))
-            if rec["_label"] == "Hypothesis":
-                changes = {}
-                if action in ACTION_DISPOSITION:
-                    changes["disposition"] = ACTION_DISPOSITION[action]
-                elif rec["disposition"] == "candidate" and action != "consult":
-                    changes["disposition"] = "active"
-                if set_evidence_status:
-                    changes["evidence_status"] = set_evidence_status
-                if changes:
-                    tx.update(rec["id"], changes)
-            elif rec["_label"] == "Task" and action == "stop" and rec["state"] not in ("accepted", "stopped"):
-                tx.update(rec["id"], {"state": "stopped", "note": f"stopped by {did}"})
-        for ref in based_on:
-            tx.link("based_on", did, ref)
-        key = _is_key(kind, action, set_evidence_status)
-        hyps = {r["id"]: r["revision"] for r in records if r["_label"] == "Hypothesis"} if key else {}
-        reviews = conclusion_reviews(tx, list(based_on))
-        gap = review_gap(tx, reviews, hyps) if hyps else None
-        hints = review_hints(tx, reviews, hyps) if hyps else []
-        tx.event("decision", did, f"{action} {', '.join(targets)}: {rationale}")
-    note = (f"\nkey conclusion on {', '.join(hyps)}: {gap}; before relying on it: {_review_hint(hyps, did)}"
-            if gap else "") + "".join(f"\nnote: {hint}" for hint in hints)
-    return {"id": did, "conclusion_review_gap": gap, "review_hints": hints,
-            "summary": f"{did} {kind}:{action} on {', '.join(targets)}{note}"}
+        recs = [tx.require(t, "Hypothesis", "Experiment", "Phase") for t in targets]
+        if kind in ("verdict", "stop") and any(r["_label"] != "Hypothesis" for r in recs):
+            raise RLError("INVALID", f"a {kind} decides hypotheses only")
+        if kind == "phase" and (len(recs) != 1 or recs[0]["_label"] != "Phase"):
+            raise RLError("INVALID", "a phase conclusion decides exactly one phase")
+        refs = list(based_on) + list(supports) + list(challenges)
+        for ref in refs:
+            tx.require(ref)
+        for ev in list(supports) + list(challenges):
+            if tx.require(ev)["_label"] != "Evidence":
+                raise RLError("INVALID", f"{ev} is not evidence")
+        if kind == "phase":
+            phase_of = {e["id"] for e in tx.inc(recs[0]["id"], "in_phase")}
+            for h in highlights:
+                d = tx.require(h.get("decision", ""), "Decision")
+                if d.get("task_id") not in phase_of:
+                    raise RLError("INVALID", f"highlight {d['id']} is not a decision of {recs[0]['id']}'s hypothesis "
+                                             "tasks")
+        dec = tx.next_id("Decision")
+        final = kind in ("route", "phase")
+        tx.create("Decision", {"id": dec, "kind": kind, "state": "final" if final else "draft",
+                               "rationale": rationale, "evidence_status_set": status if kind == "verdict" else None,
+                               "disposition_set": status if kind == "stop" else None, "did": did, "means": means,
+                               "highlights": list(highlights) or None, "task_id": actor.subject,
+                               "supports": list(supports) or None, "challenges": list(challenges) or None,
+                               "author": actor.name, "final_at": now_utc() if final else None})
+        if prep:
+            tx.update(dec, {"rationale_ref": documents.register(tx, prep, dec)})
+        for r in recs:
+            tx.link("decides", dec, r["id"], revision=r.get("revision"))
+        for ref in dict.fromkeys(refs):
+            tx.link("based_on", dec, ref)
+        tx.event("decision.draft" if not final else "decision", dec, f"{kind} {', '.join(targets)}: {rationale}")
+    return {"id": dec, "summary": f"{dec} {kind} {'final' if final else 'draft'} on {', '.join(targets)}"
+                                  + ("" if final else f"; next: rl review request {dec} --kind conclusion")}
 
 
-def _first_line(path: Path) -> str:
-    """The first line of text of a rationale file, without Markdown heading marks."""
-    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
-        if text := line.strip().lstrip("#").strip():
-            return text
-    return ""
+def finalize(store: Store, actor: Actor, dec: str) -> dict:
+    """A draft verdict or stop becomes final: its conclusion review passed, and it rests on what the rules ask
+    (9.1). The hypothesis state changes now; evidence directions are written; dependents learn through the rules
+    table that an upstream conclusion changed (4.7)."""
+    need(actor, "scientist", what="finalizing a decision")
+    from .reviews import conclusion_passed
+    with store.write() as tx:
+        d = tx.require(dec, "Decision")
+        if d["state"] == "final":
+            return {"id": dec, "summary": f"{dec} is already final"}
+        review = conclusion_passed(tx, dec)
+        if not review:
+            raise RLError("INVALID", f"{dec} has no passing conclusion review: rl review request {dec} --kind "
+                                     "conclusion; it becomes final once that review passes")
+        hyps = [tx.require(e["id"]) for e in tx.out(dec, "decides") if e["label"] == "Hypothesis"]
+        cited = [tx.require(e["id"]) for e in tx.out(dec, "based_on")]
+        supports, challenges = d.get("supports") or [], d.get("challenges") or []
+        if d["kind"] == "verdict":
+            composite = all(h.get("composite") for h in hyps)
+            if composite:
+                kids = {c["id"] for h in hyps for c in children(tx, h["id"])}
+                if not any(c["_label"] == "Decision" and any(e["id"] in kids for e in tx.out(c["id"], "decides"))
+                           for c in cited):
+                    raise RLError("INVALID", f"{dec} decides a composite hypothesis: cite its children's decisions "
+                                             "(--based-on D-x)")
+            elif not (supports or challenges or any(c["_label"] == "Evidence" for c in cited)):
+                raise RLError("INVALID", f"{dec} cites no evidence: a verdict rests on evidence (--based-on EV-x, "
+                                         "--supports/--challenges EV-x)")
+        else:  # stop
+            if not any(c["_label"] == "Decision" or (c["_label"] == "Task" and _answered(tx, c["id"]))
+                       for c in cited):
+                raise RLError("INVALID", f"{dec} stops a hypothesis: cite the upstream decision that changed "
+                                         "(--based-on D-x) or the task whose decision request was answered stop "
+                                         "(--based-on T-x)")
+        for h in hyps:
+            changes = {"evidence_status": d["evidence_status_set"]} if d["kind"] == "verdict" else \
+                {"disposition": d["disposition_set"]}
+            if d["kind"] == "verdict" and h["disposition"] == "candidate":
+                changes["disposition"] = "active"
+            tx.update(h["id"], changes)
+            for ev in supports:
+                tx.link("supports", ev, h["id"], revision=h["revision"])
+            for ev in challenges:
+                tx.link("challenges", ev, h["id"], revision=h["revision"])
+        if review["id"] not in [c["id"] for c in cited]:
+            tx.link("based_on", dec, review["id"])
+        tx.update(dec, {"state": "final", "final_at": now_utc()})
+        tx.event("decision", dec, f"{d['kind']} final: {', '.join(h['id'] for h in hyps)} "
+                                  f"{d.get('evidence_status_set') or d.get('disposition_set')}")
+    return {"id": dec, "summary": f"{dec} final; {', '.join(h['id'] for h in hyps)} -> "
+                                  f"{d.get('evidence_status_set') or d.get('disposition_set')}"}
+
+
+def _answered(tx: Tx, task_id: str) -> bool:
+    return any(a["state"] == "answered" for a in tx.all("Ask", task_id=task_id))
+
+
+def children(tx: Tx, hid: str) -> list[dict]:
+    return [tx.require(e["id"]) for e in tx.inc(hid, "derived_from") if e.get("primary")]
+
+
+def parent_of(tx: Tx, hid: str) -> str | None:
+    found = [e["id"] for e in tx.out(hid, "derived_from") if e.get("primary")]
+    return found[0] if found else None
 
 
 def link(store: Store, source: str, rel: str, target: str, note: str | None = None, locator: str | None = None,
@@ -621,202 +489,67 @@ def link(store: Store, source: str, rel: str, target: str, note: str | None = No
         source_rec, target_rec = tx.require(source), tx.require(target)
         props = {"note": note, "locator": locator, "assessment": assessment}
         if RELATIONS[rel].revision_bound:
-            # bind to the claim's revision: the target's (tests, supports) or the citing hypothesis' (cites)
             props["revision"] = target_rec.get("revision")
             props["source_revision"] = source_rec.get("revision") if target_rec["_label"] == "Paper" else None
         tx.link(rel, source, target, **props)
         tx.event("link", source, f"{source} {rel} {target}")
-    rev = f"@{props['revision']}" if props.get("revision") else ""
-    return {"summary": f"{source} {rel} {target}{rev}"}
+    return {"summary": f"{source} {rel} {target}"}
 
 
 # -- reading --------------------------------------------------------------------------------------------------
 
 
-def _brief(rec: dict) -> str:
+def brief(rec: dict) -> str:
     label = rec["_label"]
     if label == "Hypothesis":
-        flag = " NEEDS-RECHECK" if rec.get("needs_recheck") else ""
-        return (f"{labels.name(rec)}@{rec['revision']} [{rec['disposition']}/{rec['evidence_status']}{flag}] "
-                f"{rec['title']}")
+        flag = " FLAGGED" if rec.get("flag") and not rec["flag"].get("settled") else ""
+        return (f"{labels.name(rec)} [{rec['disposition']}/{rec['evidence_status']}{flag}] {rec['title']}")
     if label == "Experiment":
-        return f"{labels.name(rec)}@{rec['revision']} [{rec.get('stage') or '-'}] {rec['title']}"
+        sealed = f"sealed {rec['design_commit'][:10]}" if rec.get("design_commit") else "draft"
+        return f"{labels.name(rec)}@{rec['revision']} [{sealed}] {rec['title']}"
     if label == "Evidence":
         return f"{rec['id']} [{rec['evidence_level']}/{rec['validity']}] {rec['summary']}"
     if label == "Decision":
-        status = f"->{rec['evidence_status_set']}" if rec.get("evidence_status_set") else ""
-        return f"{rec['id']} [{rec['kind']}:{rec['action']}{status}] {rec['rationale'][:160]}"
+        status = rec.get("evidence_status_set") or rec.get("disposition_set")
+        return f"{rec['id']} [{rec['kind']}/{rec['state']}{' -> ' + status if status else ''}] {rec['rationale'][:160]}"
     if label == "Task":
-        owner = f" owner={rec['owner_role']}" if rec.get("owner_role") else ""
-        return f"{rec['id']} [{rec['kind']}/{rec['state']}{owner}] {rec['title']}"
+        holder = f" held by {rec['holder']}" if rec.get("holder") else ""
+        return f"{rec['id']} [{rec['kind']}/{rec['state']}{holder}] {rec['title']}"
     if label == "Paper":
         ident = rec.get("arxiv_id") or rec.get("doi") or "no-id"
         return f"{rec['id']} [{ident}, {rec['metadata_status']}] {rec['title']}"
     if label == "Ticket":
-        kind = f"{rec['kind']}:{rec['subject']}" if rec.get("subject") == "conclusion" else rec["kind"]
-        verdict = f"/{review_mark(rec)}" if rec.get("verdict") else ""
-        return f"{rec['id']} [{kind}/{rec['status']}{verdict}] {rec.get('question') or rec.get('target_id') or ''}"
+        what = rec.get("review_kind") or rec.get("advice_kind")
+        return f"{rec['id']} [{rec['kind']}:{what}/{rec['status']}] {rec.get('task_id') or rec.get('target_id') or ''}"
     if label == "Attempt":
-        return (f"{rec['id']} [{rec['execution_state']}/{rec['outcome']}/result:{rec['result_status']}"
-                f"{' NEEDS-CHECK' if rec.get('needs_check') else ''}]")
+        return f"{rec['id']} [{rec['execution_state']}/{rec['outcome']}/result:{rec['result_status']}]"
+    if label == "Phase":
+        return f"{rec['id']} [phase] {rec['title']}"
+    if label == "Ask":
+        return f"{rec['id']} [{rec['kind']}/{rec['state']} on {rec['task_id']}] {rec['stuck'][:160]}"
     return f"{rec['id']} [{label}]"
-
-
-def brief(rec: dict) -> str:
-    return _brief(rec)
 
 
 def show(store: Store, entity_id: str) -> dict:
     with store.read() as tx:
-        label = label_of(entity_id)
-        if label == "Document" or label == "DocRevision":
+        label = label_of(entity_id.split("#")[0])
+        if label in ("Document", "DocRevision"):
             rev = documents.resolve(tx, entity_id)
             text = documents.read(store.project, rev)
-            return {"record": rev, "summary": f"{rev['id']} {rev['source_path']} {rev['digest']}\n\n{text}"}
-        rec = tx.require(entity_id)
-        out, inc = tx.out(entity_id), tx.inc(entity_id)
-        known = labels.names(tx)
-
-        def other(e: dict, rev: str = "") -> str:  # a related record by its label and its id
-            return f"{known[e['id']]}{rev} ({e['id']})" if e["id"] in known else f"{e['id']}{rev}"
-        lines = [_brief(rec)] + ([f"  id: {rec['id']}"] if rec.get("label") else [])
+            return {"record": rev, "summary": f"{rev['id']} {rev['source_path']}\n\n{text}"}
+        rec = tx.require(entity_id.split("#")[0])
+        out, inc = tx.out(rec["id"]), tx.inc(rec["id"])
+        lines = [brief(rec)] + ([f"  id: {rec['id']}"] if rec.get("label") else [])
         for key, value in rec.items():
             if key not in ("id", "_label", "title", "label") and value not in (None, "", []):
                 lines.append(f"  {key}: {value}")
-        if label == "Hypothesis":
-            for e in inc:
-                if e["rel"] in ("supports", "challenges"):
-                    ev = tx.require(e["id"])
-                    bound = "" if e.get("revision") == rec["revision"] else f" (bound to @{e.get('revision')}, re-check)"
-                    lines.append(f"  <- {e['rel']}: {_brief(ev)}{bound}")
         for e in out:
-            rev = f"@{e['revision']}" if e.get("revision") else ""
-            lines.append(f"  -> {e['rel']} {other(e, rev)}")
+            lines.append(f"  -> {e['rel']} {e['id']}" + (" (primary)" if e.get("primary") else ""))
         for e in inc:
-            if not (label == "Hypothesis" and e["rel"] in ("supports", "challenges")):
-                lines.append(f"  <- {e['rel']} {other(e)}")
+            lines.append(f"  <- {e['rel']} {e['id']}")
+        for m in tx.all("Message", subject=rec["id"]):
+            lines.append(f"  {m['id']} {m['kind']} {m['from_role']} -> {m['to_role']}: {m['text'][:300]}")
     return {"record": rec, "out": out, "in": inc, "summary": "\n".join(lines)}
-
-
-def _attention_items(tx: Tx) -> list[tuple[str, bool]]:
-    """What needs attention, in record ids, each with whether it states a fact (which the coordinator may
-    acknowledge, rl attention ack) rather than a condition still to meet (cleared by meeting it)."""
-    items: list[tuple[str, bool]] = []
-    last = tx.meta().get("last_build")
-    if not same_source(last, build()):
-        items.append((f"the plugin changed since this project was last used (build {last or 'unknown'} -> {build()}): "
-                      "run rl upgrade and adjust the old research assets to this version as it lists", False))
-    for h in tx.all("Hypothesis"):
-        if h.get("needs_recheck"):
-            items.append((f"{h['id']} needs re-check: {h.get('recheck_reason')}", False))
-    for d in tx.all("Decision"):
-        if d.get("needs_recheck"):
-            items.append((f"{d['id']} needs re-check: {d.get('recheck_reason')}", False))
-    for a in tx.all("Attempt"):
-        if a.get("needs_check"):
-            items.append((f"{a['id']} has conflicting observations: {(a.get('issues') or ['?'])[-1]}", False))
-        elif a["execution_state"] == "unknown":
-            items.append((f"{a['id']} execution state unknown since {a.get('last_observed_at')}; "
-                          f"last trusted {a.get('last_trusted_state')} — check with the execution tool", False))
-    for e in tx.all("Experiment"):
-        if e.get("revised_after_results"):  # the revision is part of the fact: the next one comes back
-            items.append((f"{e['id']}@{e['revision']} contract revised after results: later comparisons are "
-                          "exploratory", True))
-    review_tickets = tx.all("Ticket", kind="review")
-    rechecked = passing_rechecks(review_tickets)
-    for t in review_tickets:
-        if t.get("escalated") and not t.get("approved") and not t.get("resolved_by"):
-            head = (f"{t['id']} review round {t.get('round_of') or t['id']} used its two reviews with "
-                    f"{t.get('open_severity')} findings open")
-            if later := rechecked.get(t["id"]):  # a re-check does not show that every finding was looked at
-                items.append((f"{head}; {', '.join(later)} re-checked it and passed: when that resolved the "
-                              f"findings, rl review resolve {t['id']} --by {later[-1]} --reason ..; to accept "
-                              f"findings that remain, rl review approve {t['id']} --rationale ..", False))
-            else:
-                items.append((f"{head}: the coordinator approves it (rl review approve {t['id']} --rationale ..) or "
-                              "returns the work", False))
-    standing: dict[str, tuple[dict, int | None]] = {}  # hypothesis -> the latest decision stating a key conclusion
-    for d in tx.all("Decision"):                      # on it, and the revision it decided on
-        for hid, rev in key_hypotheses(tx, d).items():
-            standing[hid] = (d, rev)
-    for did in sorted({d["id"] for d, _ in standing.values()}):
-        hyps = {h: rev for h, (d, rev) in sorted(standing.items()) if d["id"] == did}
-        reviews = conclusion_reviews(tx, [e["id"] for e in tx.out(did, "based_on")])
-        gap = review_gap(tx, reviews, hyps)
-        if gap:
-            items.append((f"{did} key conclusion on {', '.join(hyps)}: {gap} — {_review_hint(list(hyps), did)}", False))
-        items += [(f"{did} key conclusion: {hint}", True) for hint in review_hints(tx, reviews, hyps)]
-    return items
-
-
-def attention_key(fact: str) -> str:
-    """The key of an attention item that states a fact: it names the fact as it stands (ids, revisions, evidence),
-    so a changed fact has a new key and comes back after an acknowledgement."""
-    return short(digest_json(fact), 8)
-
-
-def acknowledged(tx: Tx) -> dict:
-    """The facts taken into account (rl attention ack): key -> the item, the reason, when and by whom."""
-    return json.loads(tx.meta().get("attention_acks") or "{}")
-
-
-def attention(tx: Tx) -> list[str]:
-    noted, out = acknowledged(tx), []
-    for text, fact in _attention_items(tx):
-        if fact:
-            key = attention_key(text)
-            if key in noted:
-                continue
-            text += f" (once taken into account: rl attention ack {key} --reason ..)"
-        out.append(text)
-    known = labels.names(tx)
-    return [labels.relabel(item, known) for item in out]
-
-
-def ack_attention(store: Store, key: str, reason: str) -> dict:
-    """rl attention ack: an item that states a fact leaves attention once the coordinator has taken it into
-    account; the fact stays in the records and reports, and comes back when it changes (a new key). An item that
-    is a condition still to meet (a review gap, a re-check, an open review round) leaves only when it is met."""
-    if not (reason or "").strip():
-        raise RLError("INVALID", "say how it was taken into account: --reason ..")
-    with store.write() as tx:
-        facts = {attention_key(text): text for text, fact in _attention_items(tx) if fact}
-        if key not in facts:
-            raise RLError("NOT_FOUND", f"no attention item that states a fact has the key {key}: rl status shows "
-                                       "the keys of those it lists. An item without one is a condition, and leaves "
-                                       "when it is met")
-        noted = acknowledged(tx)
-        noted[key] = {"item": facts[key], "reason": reason.strip(), "at": now_utc(), "by": tx.actor}
-        tx.set_meta(attention_acks=json.dumps(noted, ensure_ascii=False, sort_keys=True))
-        tx.event("attention.ack", facts[key].split()[0].split("@")[0],
-                 f"{key}: {facts[key]} — taken into account: {reason.strip()}")
-        text = labels.relabel(facts[key], labels.names(tx))
-    return {"key": key, "item": text, "summary": f"acknowledged {key}: {text}\nreason: {reason.strip()}"}
-
-
-def list_hypotheses(store: Store, status: str | None = None, disposition: str | None = None) -> dict:
-    """The hypotheses, by label, with their state; --json gives the records."""
-    with store.read() as tx:
-        items = sorted((h for h in tx.all("Hypothesis") if status in (None, h["evidence_status"])
-                        and disposition in (None, h["disposition"])), key=lambda h: _sort_key(h.get("label") or h["id"]))
-    which = " ".join(f for f in (disposition, status) if f)
-    return {"hypotheses": items, "summary": "\n".join(_brief(h) for h in items) or f"no {which + ' ' if which else ''}"
-                                                                                   "hypotheses"}
-
-
-def list_evidence(store: Store, validity: str | None = None, level: str | None = None) -> dict:
-    """The evidence records with what each supports or challenges; --json gives the records."""
-    with store.read() as tx:
-        items = [e for e in tx.all("Evidence") if validity in (None, e["validity"]) and level in (None, e["evidence_level"])]
-        known = labels.names(tx)
-        lines = []
-        for ev in items:
-            claims = [f"{e['rel']} {e['id']}" + (f"@{e['revision']}" if e.get("revision") else "")
-                      for e in tx.out(ev["id"]) if e["rel"] in ("supports", "challenges")]
-            lines.append(_brief(ev) + (f" ({', '.join(claims)})" if claims else ""))
-    which = " ".join(f for f in (validity, level) if f)
-    return {"evidence": items, "summary": labels.relabel("\n".join(lines), known)
-            or f"no {which + ' ' if which else ''}evidence"}
 
 
 def history(store: Store, entity_id: str | None = None, limit: int = 30) -> dict:
@@ -825,3 +558,39 @@ def history(store: Store, entity_id: str | None = None, limit: int = 30) -> dict
     events = events[-limit:]
     return {"events": events, "summary": "\n".join(f"{e['created_at']} {e['type']} {e.get('entity_id') or ''} "
                                                    f"{e.get('summary') or ''}".rstrip() for e in events)}
+
+
+def tree_lines(tx: Tx, mark: dict[str, str] | None = None) -> list[str]:
+    """The hypothesis tree, one line each, indented by the primary parent edges (mark: id -> a note at the end)."""
+    hyps = {h["id"]: h for h in tx.all("Hypothesis")}
+    parent = {hid: parent_of(tx, hid) for hid in hyps}
+    kids: dict[str | None, list[str]] = {}
+    for hid, p in parent.items():
+        kids.setdefault(p, []).append(hid)
+    out: list[str] = []
+
+    def walk(node: str | None, depth: int) -> None:
+        for hid in sorted(kids.get(node, []), key=lambda h: _sort_key(hyps[h]["label"])):
+            h = hyps[hid]
+            status = h["evidence_status"] if h["evidence_status"] != "untested" else h["disposition"]
+            m = (mark or {}).get(hid)
+            out.append(f"{'  ' * depth}{h['label']} {hid} [{status}] {h['title']}" + (f"  <- {m}" if m else ""))
+            walk(hid, depth + 1)
+    walk(None, 0)
+    return out
+
+
+def commit_user_docs(store: Store, actor: Actor, paths: list[str], message: str) -> dict:
+    """The coordinator's explanations and glossary (docs/explanations/, docs/glossary.md), committed to the mainline
+    by the CLI (7.7)."""
+    need(actor, "coordinator", what="committing explanations")
+    for p in paths:
+        rel = store.project.rel(store.project.abs(p))
+        if not (rel == "docs/glossary.md" or (rel.startswith("docs/explanations/") and rel.endswith(".md"))):
+            raise RLError("INVALID", f"{p}: only docs/glossary.md and docs/explanations/*.md are committed this way")
+        if not store.project.abs(p).is_file():
+            raise RLError("NOT_FOUND", f"{p} does not exist")
+    commit = gitops.commit_paths(store.project, paths, message)
+    with store.write() as tx:
+        tx.event("docs.committed", None, f"{', '.join(paths)} at {commit[:12]}: {message}")
+    return {"commit": commit, "summary": f"committed {', '.join(paths)} on the mainline ({commit[:12]})"}

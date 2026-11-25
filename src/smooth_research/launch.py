@@ -2,8 +2,8 @@
 
 The agent runs in its own tab, with the environment that names its project, session and checkout, and with the
 command line its entry and role call for. A host's question whether to trust the folder rl opened the session
-in is answered for the coordinator; any other dialog is the coordinator's to decide (rl agent dialog, rl agent
-answer). rl agent open and the watcher's restart start agents the same way.
+in is answered by rl; any other dialog is recorded as the session needing a decision (design 11.3), which the
+coordinator answers (rl agent answer), or the user for the coordinator's own session.
 """
 
 from __future__ import annotations
@@ -17,9 +17,8 @@ from collections.abc import Callable
 from pathlib import Path
 
 from . import adapters, herdr, usage
-from .delegate import rl_command
-from .herdr import ENV_ROLE, ENV_SESSION
 from .project import ENV_CHECKOUT, ENV_PROJECT, agent_args
+from .roles import ENV_SESSION
 from .store import Store
 from .util import RLError
 
@@ -81,6 +80,11 @@ def unseen(host: str | None, screen: str) -> str | None:
     return next((d for d in UNSEEN.get(host or "", ()) if d in screen), None)
 
 
+def rl_command() -> str:
+    """How sessions call rl: the plugin's bin/rl when the plugin started this process, else rl on PATH."""
+    return os.environ.get("SMOOTH_RESEARCH_RL") or "rl"
+
+
 def decide(name: str) -> str:
     """How the coordinator decides a dialog in a session."""
     return (f"decide it: `rl agent dialog {name}` shows it, `rl agent answer {name} \"<option>\" --reason ..` "
@@ -109,47 +113,44 @@ def launch_args(store: Store, entry: adapters.Entry, kind: str, name: str, host_
 
 def new_tab(store: Store, s: dict) -> dict:
     """A herdr tab for a session, in its folder, with the environment that names its project, session and checkout."""
-    env = {ENV_PROJECT: str(store.project.root), "SMOOTH_RESEARCH_RL": rl_command(), ENV_SESSION: s["id"],
-           ENV_ROLE: s["role_id"], **({ENV_CHECKOUT: s["cwd"]} if s.get("worktree") else {})}
-    return herdr.new_tab("--cwd", s["cwd"], "--label", s["role_id"], "--no-focus",
+    env = {ENV_PROJECT: str(store.project.root), "SMOOTH_RESEARCH_RL": rl_command(), ENV_SESSION: s["name"],
+           **({ENV_CHECKOUT: s["cwd"]} if s.get("cwd") and Path(s["cwd"]) != store.project.root else {})}
+    return herdr.new_tab("--cwd", s["cwd"], "--label", s["name"], "--no-focus",
                          *[a for k, v in env.items() for a in ("--env", f"{k}={v}")])
 
 
 def start_agent(store: Store, s: dict, timeout: int = 90, tab: str | None = None, pane: str | None = None) -> dict:
     """Start the session's agent in a new conversation: in the pane given (of the tab given), else in a new tab;
     answer the host's question whether to trust the session's folder. Returns the tab, the pane, the host session
-    id, why the agent still waits when it is not ready (a dialog for the coordinator), and the note when the
-    trust question was answered. When the agent does not start, a tab made here is closed and the error raised."""
-    name, entry = s["role_id"], adapters.Entry.parse(s["entry"])
+    id, and why the agent still waits when it is not ready (a dialog someone decides). When the agent does not
+    start, a tab made here is closed and the error raised."""
+    name, entry = s["name"], adapters.Entry.parse(s["entry"])
     made = not pane
     if made:
         created = new_tab(store, s)
         tab, pane = created["tab"]["tab_id"], created["root_pane"]["pane_id"]
     host_session = str(uuid.uuid4()) if entry.entry in ("claude", "pi") else None
-    waiting = trusted = None
+    waiting = None
     try:
         herdr.call("agent", "start", name, "--kind", entry.entry, "--pane", pane, "--timeout", str(timeout * 1000),
-                   "--", *launch_args(store, entry, s["role_kind"], name, host_session), timeout=timeout + 30)
+                   "--", *launch_args(store, entry, s["role"], name, host_session), timeout=timeout + 30)
     except RLError as exc:
         if exc.details.get("herdr_code") != "agent_not_ready":
             if made:
                 herdr.call("tab", "close", tab, timeout=30)
             raise
-        waiting = answer_trust(name, entry.entry, Path(s["cwd"]), timeout)
+        waiting = answer_trust(pane, entry.entry, Path(s["cwd"]), timeout)
         if not waiting:
-            trusted = f"answered {entry.entry}'s folder trust question for {s['cwd']}: trusted"
             with store.write() as tx:
-                tx.event("session.trusted", s["id"], trusted)
+                tx.event("session.trusted", name, f"answered {entry.entry}'s folder trust question for {s['cwd']}")
     if not waiting:
-        screen = _until_started(name, entry.entry, timeout)
+        screen = _until_started(pane, entry.entry, timeout)
         if unseen(entry.entry, screen):
-            waiting = f"{name} waits at a dialog herdr does not see ({excerpt(screen)}): {decide(name)}"
-    # the id herdr reports (Codex chooses its own), else the one its /status shows: the watcher reads the session's
-    # log by it, and keeps it current
-    host_session = herdr.session_id(name) or host_session
+            waiting = f"{name} waits at a dialog herdr does not see ({excerpt(screen)})"
+    host_session = herdr.session_id(pane) or host_session
     if not host_session and not waiting:
-        host_session = status_id(name, entry.entry)
-    return {"tab": tab, "pane": pane, "host_session": host_session, "waiting": waiting, "trusted": trusted}
+        host_session = status_id(pane, entry.entry)
+    return {"tab": tab, "pane": pane, "host_session": host_session, "waiting": waiting}
 
 
 def _until_started(name: str, host: str, timeout: int) -> str:

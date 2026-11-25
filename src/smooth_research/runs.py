@@ -1,240 +1,214 @@
-"""Platform-independent run records: immutable RunSpecs, attempts, external references, observations,
-results and optional usage.
+"""Run records: registrations, attempts, external references, observations, results and usage (design 5.5, 9.1).
 
-Nothing here starts, polls, retries, cancels, downloads or validates external work. Executors run
-experiments with their own tools and hand the facts to register / record / import-result.
+Nothing here starts, polls, retries, cancels, downloads or validates external work. Executors run work with their
+own tools and hand the facts to register / record / import-result / ended.
+
+A run is one of three categories. A trial (tests, smoke runs, timing) needs no review, may last at most
+limits.trial_minutes, and is never evidence. A preparation run belongs to a preparation task and is never evidence.
+An evidence run is an arm of its experiment's sealed manifest: the review must cover the code commit (no open method
+finding, nothing medium or higher open) or the fast lane apply, and its configuration must match the manifest; a
+run that does not match may still be registered as deviating (--deviation), and is not evidence.
 """
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+import json
+import re
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from . import compute
-from .project import Project, coordinator_is_login
-from .research import brief, prepare_contract, recheck_dependents, seal_contract
+from . import compute, gitops, manifest
+from .project import Project, coordinator_is_login, limit
+from .research import brief, recheck_dependents, task_experiment
+from .reviews import covers
+from .roles import Actor, need
 from .schema import ENUMS
-from .scope import code_coverage
 from .store import Store, Tx
 from .util import RLError, digest_file, digest_json, now_utc, parse_time, short
 
-SPEC_FIELDS = {"arm", "seed", "replicate", "code_ref", "config_digest", "config_ref", "data_revision",
-               "model_revision", "metric_spec_ref", "metric", "environment_ref", "output_spec", "params",
-               "resume_from", "notes"}
-SPEC_REQUIRED = (("arm",), ("code_ref",), ("config_digest", "config_ref"), ("data_revision",),
-                 ("metric_spec_ref", "metric"), ("output_spec",))
-COMPARED = ("config_digest", "config_ref", "data_revision", "model_revision", "metric_spec_ref", "metric",
-            "environment_ref")
 FULL_COMMIT = compute.FULL_COMMIT
 OBS_FIELDS = {"record_id", "attempt_id", "source", "observed_at", "occurred_at", "source_sequence", "execution_state",
               "outcome", "raw_state", "source_ref", "execution_ref", "usage", "correction_of", "note"}
 STALE_AFTER_H = 6.0
+PURPOSES = ("merge-test", "review-test", "design-test")
 
 
 # -- register -------------------------------------------------------------------------------------------------
 
 
-def normalize_spec(spec: dict) -> dict:
-    unknown = set(spec) - SPEC_FIELDS
-    if unknown:
-        raise RLError("INVALID", f"unknown RunSpec fields {sorted(unknown)}; allowed: {sorted(SPEC_FIELDS)} "
-                                 "(experiment_ref and protocol_ref are filled by the tool)")
-    missing = [" or ".join(alts) for alts in SPEC_REQUIRED if all(spec.get(a) in (None, "") for a in alts)]
-    if missing:
-        raise RLError("INVALID", f"RunSpec needs {', '.join(missing)}; write \"unknown\" for facts you do not "
-                                 "have instead of guessing")
-    code = spec["code_ref"]
-    if code != "unknown":
-        if not isinstance(code, dict) or not (code.get("commit") or code.get("content_digest")):
-            raise RLError("INVALID", "code_ref is {commit: <full id>} and/or {content_digest: <algo:hex>}, or \"unknown\"")
-        commit = code.get("commit")
-        if commit and not FULL_COMMIT.match(str(commit)):
-            raise RLError("INVALID", f"code_ref.commit {commit!r} is not a full commit id; branch names, HEAD and "
-                                     "short ids are not immutable versions")
-        if code.get("content_digest") and ":" not in str(code["content_digest"]):
-            raise RLError("INVALID", "code_ref.content_digest must name its algorithm, e.g. blake2b:<hex>")
-    return spec
-
-
-def register(store: Store, experiment: str, spec: dict, request_id: str, run_id: str | None = None,
-             reviews: list[str] = (), no_review: str | None = None, resource: str | None = None) -> dict:
-    """resource names the compute resource the attempt is for (compute.resources); the attempt keeps it with the
-    planned code and output locations there. Without it nothing is recorded about where the attempt runs."""
-    spec = normalize_spec(dict(spec))
+def register(store: Store, actor: Actor, task_id: str, request_id: str, arm: str | None = None, seed=None,
+             config: dict | None = None, split: str | None = None, commit: str | None = None,
+             minutes: float | None = None, trial: bool = False, deviation: str | None = None,
+             purpose: str | None = None, ticket: str | None = None, run_id: str | None = None,
+             resource: str | None = None, params: dict | None = None) -> dict:
+    need(actor, "researcher", "scientist", what="registering a run")
     if coordinator_is_login(store.project.config) and not resource:
-        raise RLError("INVALID", "coordinator is a login node: register with --resource <cluster resource>; "
-                                 "workloads require the configured executor, never the login shell")
+        raise RLError("INVALID", "the project runs work through an executor (compute.coordinator: login): register "
+                                 "with --resource <cluster resource>")
+    if purpose and purpose not in PURPOSES:
+        raise RLError("INVALID", f"--purpose is one of {', '.join(PURPOSES)}")
+    if purpose:
+        trial = True
     res = compute.resource(store.project, resource) if resource else None
-    request = {"experiment": experiment, "spec": spec, "run": run_id}
-    payload = digest_json({**request, "resource": res.name} if res else request)
-    # a new run is a formal reference: seal the contract (an attempt of a run uses the run's sealed revision)
-    prep = None if run_id else prepare_contract(store, experiment, spec.get("arm"))
-    check = code_coverage(store, experiment, spec["code_ref"], list(reviews), no_review)
+    with store.read() as tx:
+        task = tx.require(task_id, "Task")
+        exp = task_experiment(tx, task_id)
+    holder_ok = task.get("holder") == actor.name or (purpose == "merge-test" and actor.name == task["creator"])
+    if not holder_ok:
+        raise RLError("INVALID", f"{task_id} is held by {task.get('holder') or 'nobody'}: its holder registers runs")
+    if commit is None:
+        if gitops.dirty(store.project, task_id) and not trial:
+            raise RLError("INVALID", f"{task_id}'s worktree has uncommitted changes: runs use committed code")
+        commit = task.get("merge_commit") if purpose == "merge-test" else gitops.head(store.project, task_id)
+    if not FULL_COMMIT.match(commit or ""):
+        resolved = gitops.rev(store.project, commit) if commit else None
+        if not resolved:
+            raise RLError("INVALID", f"--commit {commit!r} is not a commit of the repository")
+        commit = resolved
+    category = "trial" if trial else "prep" if task["kind"] == "prep" else "evidence" if task["kind"] == "execute"         else None
+    if category is None:
+        raise RLError("INVALID", f"runs belong to execute or prep tasks (or are trials); {task_id} is {task['kind']}")
+    cap = float(limit(store.project.config, "trial_minutes"))
+    if category == "trial" and (minutes is None or minutes > cap):
+        raise RLError("INVALID", f"a trial run gives --minutes, at most limits.trial_minutes ({cap:g}); a longer run "
+                                 "is an evidence or preparation run")
+    deviates = None
+    if category == "evidence" and not run_id:
+        if not exp or not exp.get("design_commit"):
+            raise RLError("INVALID", f"{task_id}'s experiment is not sealed: it is sealed when the task is dispatched")
+        if arm is None:
+            raise RLError("INVALID", "an evidence run names its arm (--arm) from the manifest")
+        problems = manifest.check_run(exp["manifest"], arm, seed, config, split)
+        with store.read() as tx:
+            ok, why = covers(tx, task_id, commit, for_evidence=True)
+            if not ok and task.get("fast_lane"):
+                changed = gitops.protected_changes(store.project, task["design_commit"], commit,
+                                                   list(exp.get("protected") or []))
+                ok, why = (not changed), (f"fast lane, protected scope unchanged since {task['design_commit'][:12]}"
+                                          if not changed else f"protected scope changed: {', '.join(changed)}")
+        if not ok:
+            raise RLError("INVALID", f"no evidence run at {commit[:12]}: {why}. Smoke and timing runs are trials "
+                                     "(--trial --minutes N)")
+        if problems:
+            if not deviation:
+                raise RLError("INVALID", "the run does not match the sealed manifest: " + "; ".join(problems)
+                              + ". Fix the run's configuration, or register it as deviating (--deviation "<why>"), "
+                                "which is not evidence")
+            deviates = True
+    spec = {"arm": arm, "seed": seed, "config": config, "split": split, "commit": commit, "params": params}
+    payload = digest_json({"task": task_id, "spec": spec, "run": run_id, "category": category,
+                           "resource": res.name if res else None})
     with store.write() as tx:
         previous = tx.request("run.register", request_id, payload)
         if previous:
             return {**previous, "duplicate": True,
-                    "summary": f"duplicate request {request_id}: {previous['run']} {previous['attempt']} (no new record)"}
+                    "summary": f"duplicate request {request_id}: {previous['run']} {previous['attempt']}"}
         if run_id:
             run = tx.require(run_id, "Run")
-            if run["experiment_id"] != experiment:
-                raise RLError("INVALID", f"{run_id} belongs to {run['experiment_id']}, not {experiment}")
-            stored = {k: v for k, v in run["spec"].items() if k not in ("experiment_ref", "protocol_ref")}
-            if digest_json(stored) != digest_json(spec):
-                raise RLError("CONFLICT", f"the spec differs from {run_id}'s immutable RunSpec; a scientific change "
-                                          "is a new run (omit --run)")
+            if run["task_id"] != task_id:
+                raise RLError("INVALID", f"{run_id} belongs to {run['task_id']}, not {task_id}")
+            if digest_json(run["spec"]) != digest_json(spec):
+                raise RLError("CONFLICT", f"the spec differs from {run_id}'s: a changed run is a new run (omit --run)")
             index = run["attempt_count"] + 1
             tx.update(run_id, {"attempt_count": index})
-            spec_digest = run["spec_digest"]
         else:
-            exp_ref = seal_contract(tx, experiment, prep, store.project)
-            exp = tx.require(experiment)
-            full = {"experiment_ref": exp_ref, "protocol_ref": exp["contract_ref"], **spec}
-            spec_digest = digest_json(full)
             run_id, index = tx.next_id("Run"), 1
-            tx.create("Run", {"id": run_id, "experiment_id": experiment, "experiment_ref": exp_ref,
-                              "request_id": request_id, "spec": full, "spec_digest": spec_digest, "attempt_count": 1})
-            tx.link("of_experiment", run_id, experiment)
+            tx.create("Run", {"id": run_id, "task_id": task_id, "experiment_id": exp["id"] if exp else None,
+                              "category": category, "arm": None if arm is None else str(arm),
+                              "seed": None if seed is None else str(seed), "deviates": deviates,
+                              "deviation": deviation if deviates else None, "request_id": request_id, "spec": spec,
+                              "spec_digest": digest_json(spec), "attempt_count": 1, "code_commit": commit,
+                              "minutes": minutes, "purpose": purpose, "ticket_id": ticket})
+            tx.link("of_task", run_id, task_id)
+            if exp:
+                tx.link("of_experiment", run_id, exp["id"])
         attempt = f"ATT-{run_id.split('-')[1]}-{index}"
-        commit = spec["code_ref"].get("commit") if isinstance(spec["code_ref"], dict) else None
         placed = {**res.record(), **compute.locations(store.project, res, commit, attempt)} if res else None
+        expected = (datetime.now(timezone.utc) + timedelta(minutes=minutes)).isoformat(timespec="seconds") \
+            if minutes else None
         tx.create("Attempt", {"id": attempt, "run_id": run_id, "index": index, "request_id": request_id,
                               "execution_state": "prepared", "outcome": "unknown", "result_status": "absent",
-                              "issues": [], "code_review": check, "resource": placed})
+                              "issues": [], "resource": placed, "expected_end": expected,
+                              "submitted_by": actor.name})
         tx.link("of_run", attempt, run_id)
-        result = {"run": run_id, "attempt": attempt, "spec_digest": spec_digest, "code_review": check,
-                  "resource": placed}
+        result = {"run": run_id, "attempt": attempt, "category": category, "deviates": bool(deviates)}
         tx.remember("run.register", request_id, payload, result)
-        tx.event("run.register", attempt, f"{run_id} attempt {index} prepared")
-    unknown = sorted(k for k, v in spec.items() if v == "unknown")
-    source = f" ({check['source']})" if check.get("source") else ""
-    status, *paths = code_review_lines(check)
-    return {**result, "summary": f"{run_id} {attempt} prepared (spec {short(spec_digest)})"
-                                 + (f"; unknown: {', '.join(unknown)}" if unknown else "")
-                                 + ". Nothing was started: run it with your own tool, then `rl run record`."
-                                 + f"\ncode review{source}: {status}{_review_hint(check)}"
-                                 + "".join(f"\n  {line}" for line in paths)
-                                 + (_placement_note(res, placed, attempt) if res else "")}
+        tx.event("run.register", attempt, f"{run_id} {category}{' (deviates)' if deviates else ''} attempt {index}")
+    note = (f"\nresource {res.name}: how to stage, run and fetch: rl compute steps --attempt {attempt}" if res and
+            res.remote else "")
+    return {**result, "summary": f"{run_id} {attempt} {category}" + (" DEVIATES (not evidence)" if deviates else "")
+                                 + f" at {commit[:12]}" + (f", expected end {expected[11:16]} UTC" if expected else "")
+                                 + ". Nothing was started: start it with your own tool, then rl run record" + note}
 
 
-def _placement_note(res, placed: dict, attempt: str) -> str:
-    if not res.remote:
-        return f"\nresource {res.name}: outputs in {placed['run_dir']}/"
-    text = (f"\nresource {res.name} ({res.host or 'shared filesystem'}): code {placed['project']} · outputs {placed['run_dir']}/; how to "
-            f"stage, run and fetch: rl compute steps --attempt {attempt}")
-    if "<commit>" in placed["snapshot"]:
-        text += ("\n  this RunSpec names no commit, so its code cannot be staged by commit: register the run with "
-                 "--code-commit <full id>")
-    return text
-
-
-def _review_hint(check: dict) -> str:
-    if check["status"] == "stale":
-        last = max(i for ids in check["changed"].values() for i in ids)
-        return f". Before a costly run, re-check the changed files: rl review request ... --recheck-of {last}"
-    if check["status"] in ("none", "not_passed"):
-        return (". A costly run on a new core path needs a code review first; for other runs say why "
-                "with --no-review \"<reason>\"")
-    return ""
-
-
-def _status(check: dict) -> str:
-    status = check["status"]
-    if status == "waived":
-        return f"not needed: {check['reason']}"
-    if status == "covered":
-        return f"covered by {', '.join(check['reviews'])}" + (" (file by file)" if check.get("per_file") else "")
-    if status == "stale":
-        paths = [f"{p} changed since {', '.join(ids)}" for p, ids in check["changed"].items()]
-        return "stale: " + "; ".join(paths[:3]) + (f"; {len(paths) - 3} more" if len(paths) > 3 else "")
-    if status == "unchecked":
-        return f"unchecked: {check['reason']}"
-    if status == "not_passed":
-        return f"no passing review ({', '.join(check['open'])})"
-    if check.get("absent") or check.get("tests"):
-        return "not reviewed: what the passing reviews saw is not in this code, or is tests"
-    return "not reviewed"
-
-
-def _names(paths: dict) -> str:
-    names = list(paths)
-    return ", ".join(names[:3]) + (f" and {len(names) - 3} more" if len(names) > 3 else "")
-
-
-def code_review_note(check: dict, tx: Tx | None = None) -> str:
-    """The code review check recorded when an attempt was registered, in one line: the paths that only call for
-    a look are counted or named in short (code_review_lines lists them). With tx it also names the reviews that
-    did not pass then and that the coordinator has approved since (the recorded check stays)."""
-    text = _status(check)
-    if check["status"] in ("covered", "stale") and check.get("open"):
-        text += f" ({', '.join(check['open'])})"
-    if check.get("seen_by"):
-        text += f"; a passing review of another experiment saw {_names(check['seen_by'])} as run here (--review)"
-    if check.get("tests"):
-        text += f"; test files changed: {_names(check['tests'])}"
-    if check.get("absent"):
-        text += f"; not in this code: {_names(check['absent'])}"
-    if check.get("not_passed"):
-        text += f"; not passed: {', '.join(check['not_passed'])}"
-    if tx is not None and (later := _approved_since(tx, check)):
-        text += f"; approved by the coordinator since: {', '.join(later)}"
-    return text
-
-
-def code_review_lines(check: dict, tx: Tx | None = None) -> list[str]:
-    """The code review check of an attempt for run register and run show: the status, then one line for each
-    path that no longer matches what a passing review saw, by its reason, and the reviews that did not pass."""
-    lines = [_status(check) if check["status"] != "stale" else
-             f"stale: {len(check['changed'])} path(s) changed since a passing review saw them"]
-    if check["status"] in ("covered", "stale") and check.get("open"):
-        lines[0] += f" ({', '.join(check['open'])})"
-    if tx is not None and (later := _approved_since(tx, check)):
-        lines[0] += f"; approved by the coordinator since: {', '.join(later)}"
-    for path, ids in (check.get("changed") or {}).items():
-        lines.append(f"changed: {path} (since {', '.join(ids)})")
-        if others := (check.get("seen_by") or {}).get(path):
-            lines.append(f"  as run here, it was seen by {', '.join(others)} (a review of another experiment, not "
-                         f"counted): --review {','.join(others)} counts it when it answers this experiment's question")
-    lines += [f"not in this code, so not executed: {path} ({', '.join(ids)})"
-              for path, ids in (check.get("absent") or {}).items()]
-    lines += [f"test file, changed: {path} ({', '.join(ids)}); a test does not change what the run computes"
-              for path, ids in (check.get("tests") or {}).items()]
-    if check["status"] == "stale" and check.get("reviews"):
-        lines.append(f"still matching: {', '.join(check['reviews'])}")
-    if check.get("per_file"):
-        lines.append("file by file: each file matches a passing review, but no review saw these files together")
-    if check.get("not_passed"):
-        lines.append(f"not passed: {', '.join(check['not_passed'])}")
-    return lines
-
-
-def _approved_since(tx: Tx, check: dict) -> list[str]:
-    marks = [*check.get("open", []), *check.get("reviews", []), *check.get("not_passed", [])]
-    ids = [m.split()[0] for m in marks if "approved" not in m]
-    return [i for i in ids if (t := tx.get(i, "Ticket")) and t.get("approved")]
-
-
-def evidence_attempts(tx: Tx, ev_id: str) -> list[dict]:
-    """The attempts behind an evidence record: linked directly or through its results."""
-    ids: list[str] = []
-    for e in tx.out(ev_id):
-        if e["rel"] == "from_attempt":
-            aid = e["id"]
-        elif e["rel"] == "from_result":
-            aid = tx.require(e["id"])["attempt_id"]
+def ended(store: Store, raw: str | None = None, attempt: str | None = None, outcome: str | None = None,
+          note: str | None = None) -> dict:
+    """The end of jobs, recorded on their attempts (8.8). The executor's command delivery runs this with the
+    notification on stdin ({notification, msg_id, message}); the attempts are found by the job ids the message names
+    (their bound execution references). With attempt and outcome, one attempt is recorded directly."""
+    found: list[tuple[str, str]] = []
+    text = ""
+    if raw:
+        try:
+            data = json.loads(raw)
+            text = str(data.get("message") or data)
+        except ValueError:
+            text = raw
+    with store.read() as tx:
+        if attempt:
+            found = [(attempt, outcome or "unknown")]
         else:
+            for x in tx.all("ExecRef"):
+                if x["opaque_id"] and re.search(rf"(?<![\w.]){re.escape(x['opaque_id'])}(?![\w])", text):
+                    for e in tx.inc(x["id"], "bound_to"):
+                        found.append((e["id"], _outcome_in(text)))
+    if not found:
+        return {"recorded": [], "summary": "no attempt of this project is bound to a job named there"}
+    done = []
+    for att_id, out in found:
+        with store.read() as tx:
+            att = tx.require(att_id, "Attempt")
+        if att["execution_state"] == "ended":
             continue
-        if aid not in ids:
-            ids.append(aid)
-    return [tx.require(a) for a in ids]
+        obs = {"attempt_id": att_id, "source": "executor", "observed_at": now_utc(), "execution_state": "ended",
+               "outcome": out, "note": (note or text)[:500] or None}
+        record(store, obs)
+        with store.write() as tx:
+            tx.update(att_id, {"ended_note": (note or text)[:500] or None})
+        done.append(att_id)
+    _finish_merge_tests(store, done)
+    return {"recorded": done, "summary": f"ended: {', '.join(done) or 'nothing new'}"}
 
 
-def code_review_summary(tx: Tx, attempts: list[dict]) -> str:
-    """Attempts grouped by the code review check recorded at their registration."""
-    groups: dict[str, list[str]] = {}
-    for att in attempts:
-        groups.setdefault(code_review_note(att["code_review"], tx), []).append(att["id"])
-    return "; ".join(f"{', '.join(ids)} {note}" for note, ids in groups.items())
+def _outcome_in(text: str) -> str:
+    low = text.lower()
+    if re.search(r"\b(fail|failed|error|killed|cancel)", low):
+        return "failed"
+    if re.search(r"\b(finished|completed|success|exit(?: status)?[ =:]*0\b)", low):
+        return "success"
+    return "unknown"
+
+
+def _finish_merge_tests(store: Store, attempts: list[str]) -> None:
+    from .tasks import finish_merge
+    for att_id in attempts:
+        with store.read() as tx:
+            att = tx.require(att_id)
+            run = tx.require(att["run_id"])
+            task = tx.require(run["task_id"])
+        if run.get("purpose") == "merge-test" and task["state"] == "merging":
+            finish_merge(store, task["id"], att["outcome"] == "success", att.get("ended_note") or "")
+
+
+def handled(store: Store, actor: Actor, attempts: list[str], note: str) -> dict:
+    """The submitter has dealt with ended attempts (results imported, or retried): they leave its to-do list."""
+    need(actor, "researcher", "scientist", "reviewer", what="marking attempts handled")
+    with store.write() as tx:
+        for a in attempts:
+            tx.require(a, "Attempt")
+            tx.update(a, {"handled_at": now_utc()})
+        tx.event("run.handled", attempts[0] if attempts else None, f"{', '.join(attempts)}: {note}")
+    return {"summary": f"handled: {', '.join(attempts)}"}
 
 
 # -- record ---------------------------------------------------------------------------------------------------
@@ -447,25 +421,27 @@ def _verify_artifacts(project: Project, artifacts: list) -> tuple[list[dict], st
     return out, scope
 
 
-def _mismatches(spec: dict, spec_digest: str, manifest: dict) -> tuple[list[dict], list[str]]:
+def _mismatches(tx: Tx, run: dict, reported: dict) -> tuple[list[dict], list[str]]:
+    """What a result reports about itself (arm, seed, commit, config, split) against the run's registration and,
+    for an evidence run, the experiment's sealed manifest (9.1 import)."""
     found, unreported = [], []
-    if manifest.get("spec_digest") and manifest["spec_digest"] != spec_digest:
-        found.append({"field": "spec_digest", "expected": spec_digest, "actual": manifest["spec_digest"]})
-    pairs = [(k, spec.get(k), manifest.get(k)) for k in COMPARED]
-    code = spec.get("code_ref") if isinstance(spec.get("code_ref"), dict) else {}
-    actual_code = manifest.get("code_ref") if isinstance(manifest.get("code_ref"), dict) else {}
-    pairs += [(f"code_ref.{k}", code.get(k), actual_code.get(k)) for k in ("commit", "content_digest")]
-    for field, expected, actual in pairs:
-        if expected in (None, "unknown"):
+    spec = run["spec"]
+    for field in ("arm", "seed", "commit", "split"):
+        expected, actual = spec.get(field), reported.get(field)
+        if expected is None:
             continue
         if actual is None:
             unreported.append(field)
-        elif actual != expected:
+        elif str(actual) != str(expected) and not (field == "commit" and str(expected).startswith(str(actual))):
             found.append({"field": field, "expected": expected, "actual": actual})
-    for field in ("arm", "seed", "replicate"):  # which run it is: compared when the manifest names it
-        expected, actual = spec.get(field), manifest.get(field)
-        if expected is not None and actual is not None and str(actual) != str(expected):
-            found.append({"field": field, "expected": expected, "actual": actual})
+    if "config" not in reported:
+        unreported.append("config")
+    elif run["category"] == "evidence" and run.get("experiment_id"):
+        exp = tx.require(run["experiment_id"])
+        if exp.get("manifest"):
+            for problem in manifest.check_run(exp["manifest"], spec.get("arm"), spec.get("seed"), reported["config"],
+                                              reported.get("split", spec.get("split"))):
+                found.append({"field": "config", "expected": "the sealed manifest", "actual": problem})
     return found, unreported
 
 
@@ -475,18 +451,22 @@ def _best(results: list[dict]) -> str:
         "rejected" if results else "absent")
 
 
-def import_result(store: Store, attempt: str, manifest: dict, request_id: str) -> dict:
-    if manifest.get("status") not in ("partial", "complete"):
-        raise RLError("INVALID", f"manifest.status is {manifest.get('status')!r}, not partial or complete: "
+def import_result(store: Store, actor: Actor, attempt: str, reported: dict, request_id: str) -> dict:
+    """Import the result manifest a run wrote (status, metrics, artifacts, and what it ran: arm, seed, commit,
+    config, split). One that differs from the registration or the sealed manifest is kept but marked unusable:
+    it cannot be evidence."""
+    need(actor, "researcher", "scientist", "reviewer", what="importing a result")
+    if reported.get("status") not in ("partial", "complete"):
+        raise RLError("INVALID", f"manifest.status is {reported.get('status')!r}, not partial or complete: "
                                  "import-result takes the manifest of a run that produced results. A run that ended "
                                  f"without any is recorded by its end: `rl run record --attempt {attempt} --state "
                                  "ended --outcome failed --source-ref <its log or manifest>`")
-    artifacts = manifest.get("artifacts") or []
+    artifacts = reported.get("artifacts") or []
     if not isinstance(artifacts, list):
         raise RLError("INVALID", "manifest.artifacts is a list")
     verification, scope = _verify_artifacts(store.project, artifacts)
-    manifest_digest = digest_json(manifest)
-    payload = digest_json({"attempt": attempt, "manifest": manifest})
+    manifest_digest = digest_json(reported)
+    payload = digest_json({"attempt": attempt, "manifest": reported})
     with store.write() as tx:
         previous = tx.request("run.import-result", request_id, payload)
         if previous:
@@ -499,24 +479,26 @@ def import_result(store: Store, attempt: str, manifest: dict, request_id: str) -
             result = {"result": same[0]["id"], "attempt": attempt}
             tx.remember("run.import-result", request_id, payload, result)
             return {**result, "duplicate": True, "summary": f"same manifest already imported as {same[0]['id']}"}
-        mismatches, unreported = _mismatches(run["spec"], run["spec_digest"], manifest)
+        mismatches, unreported = _mismatches(tx, run, reported)
         bad = [v["path"] for v in verification if v["check"] == "digest_mismatch"]
         rid = tx.next_id("Result")
         scope_text = scope + (f"; fields not reported: {', '.join(unreported)}" if unreported else "")
         tx.create("Result", {"id": rid, "attempt_id": attempt, "request_id": request_id, "revision": len(prior) + 1,
-                             "status": manifest["status"], "manifest": manifest, "manifest_digest": manifest_digest,
+                             "status": reported["status"], "manifest": reported, "manifest_digest": manifest_digest,
                              "spec_match": not mismatches, "mismatches": mismatches or None,
                              "verification": verification, "verification_scope": scope_text,
-                             "usable_for_planned_comparison": not mismatches and not bad})
-        tx.update(attempt, {"result_status": _best(prior + [{"status": manifest["status"]}])})
+                             "usable": not mismatches and not bad and not run.get("deviates")})
+        tx.update(attempt, {"result_status": _best(prior + [{"status": reported["status"]}])})
+        if mismatches and run["category"] == "evidence" and not run.get("deviates"):
+            tx.update(run["id"], {"deviates": True, "deviation": f"result {rid} differs: "
+                                  + ", ".join(m["field"] for m in mismatches)})
         result = {"result": rid, "attempt": attempt}
         tx.remember("run.import-result", request_id, payload, result)
-        tx.event("run.import_result", attempt, f"{rid} {manifest['status']} ({scope_text})")
+        tx.event("run.import_result", attempt, f"{rid} {reported['status']} ({scope_text})")
     notes = []
     if mismatches:
-        notes.append("differs from RunSpec in " + ", ".join(m["field"] for m in mismatches)
-                     + ": kept, but not usable as the pre-specified comparison (a manifest copies RunSpec fields "
-                       "exactly or leaves them out)")
+        notes.append("differs from the registration or the sealed manifest in " + ", ".join(
+            f"{m['field']} ({m['actual']})" for m in mismatches) + ": kept, marked deviating, not evidence")
     arm = next((m for m in mismatches if m["field"] == "arm"), None)
     if arm:
         notes.append(f"the run was registered as arm {arm['expected']!r} and the result says {arm['actual']!r}: if the "
@@ -527,16 +509,17 @@ def import_result(store: Store, attempt: str, manifest: dict, request_id: str) -
     if att["execution_state"] != "ended":
         notes.append(f"attempt is still {att['execution_state']}: a result file is not an execution end record")
     return {**result, "mismatches": mismatches, "verification_scope": scope_text,
-            "summary": f"{rid} {manifest['status']} for {attempt} (checked: {scope_text})"
+            "summary": f"{rid} {reported['status']} for {attempt} (checked: {scope_text})"
                        + ("; " + "; ".join(notes) if notes else "")}
 
 
-def reject_result(store: Store, result_id: str, reason: str) -> dict:
+def reject_result(store: Store, actor: Actor, result_id: str, reason: str) -> dict:
     """What rests on the result (the evidence drawn from it, their hypotheses, decisions based on either) is
     marked for re-checking; whether it still holds is the researcher's judgment."""
+    need(actor, "researcher", "scientist", what="rejecting a result")
     with store.write() as tx:
         res = tx.require(result_id, "Result")
-        tx.update(result_id, {"status": "rejected", "rejected_reason": reason, "usable_for_planned_comparison": False})
+        tx.update(result_id, {"status": "rejected", "rejected_reason": reason, "usable": False})
         results = tx.all("Result", attempt_id=res["attempt_id"])
         tx.update(res["attempt_id"], {"result_status": _best(results)})
         flagged = recheck_dependents(tx, result_id, f"{result_id} rejected: {reason}")
@@ -614,8 +597,8 @@ def _age_h(stamp: str | None) -> float | None:
     return (datetime.now(timezone.utc) - parse_time(stamp)).total_seconds() / 3600
 
 
-def describe_attempt(tx: Tx, att: dict, detail: bool = False) -> str:
-    """An attempt in one line; with detail, its code review check follows path by path on further lines."""
+def describe_attempt(tx: Tx, att: dict) -> str:
+    """An attempt in one line."""
     refs = [tx.require(e["id"]) for e in tx.out(att["id"], "bound_to")]
     on = f" on {att['resource']['name']}" if att.get("resource") else ""
     ref_text = ", ".join(f"{r['kind']} {r['executor_namespace']}/{r['opaque_id']}" for r in refs) or "no external ref yet"
@@ -624,27 +607,31 @@ def describe_attempt(tx: Tx, att: dict, detail: bool = False) -> str:
         " (stale? refresh with your execution tool)" if age > STALE_AFTER_H and att["execution_state"] != "ended" else "")
     trusted = (f"; last trusted {att['last_trusted_state']} at {att['last_trusted_at']}"
                if att.get("last_trusted_state") and att["execution_state"] == "unknown" else "")
-    review = code_review_lines(att["code_review"], tx) if detail else [code_review_note(att["code_review"], tx)]
-    return (f"{brief(att)}{on} {ref_text}; {fresh}{trusted}; code review: {review[0]}"
-            + "".join(f"\n    {line}" for line in review[1:]))
+    run = tx.require(att["run_id"])
+    end = f"; expected end {att['expected_end']}" if att.get("expected_end") and att["execution_state"] != "ended" \
+        else ""
+    return (f"{brief(att)} {run['category']}{' DEVIATES' if run.get('deviates') else ''}{on} {ref_text}; "
+            f"{fresh}{trusted}{end}")
 
 
 def show(store: Store, entity_id: str | None = None, active: bool = False) -> dict:
     with store.read() as tx:
         if entity_id:
-            rec = tx.require(entity_id, "Run", "Attempt", "Experiment")
+            rec = tx.require(entity_id, "Run", "Attempt", "Experiment", "Task")
             runs = ([rec] if rec["_label"] == "Run" else
-                    [tx.require(rec["run_id"])] if rec["_label"] == "Attempt" else tx.all("Run", experiment_id=entity_id))
+                    [tx.require(rec["run_id"])] if rec["_label"] == "Attempt" else
+                    tx.all("Run", task_id=entity_id) if rec["_label"] == "Task" else
+                    tx.all("Run", experiment_id=entity_id))
             lines = []
             for run in runs:
-                lines.append(f"{run['id']} {run['experiment_ref']} spec {short(run['spec_digest'])} "
-                             f"request {run['request_id']}")
+                lines.append(f"{run['id']} {run['category']} of {run['task_id']} arm {run.get('arm')} seed "
+                             f"{run.get('seed')} at {(run.get('code_commit') or '?')[:12]} request {run['request_id']}"
+                             + (f" DEVIATES: {run.get('deviation')}" if run.get("deviates") else ""))
                 lines.append(f"  spec: {run['spec']}")
                 for att in tx.all("Attempt", run_id=run["id"]):
                     if rec["_label"] == "Attempt" and att["id"] != entity_id:
                         continue
-                    # one run or attempt: its code review check path by path; an experiment's: in one line each
-                    lines.append(f"  {describe_attempt(tx, att, detail=rec['_label'] != 'Experiment')}")
+                    lines.append(f"  {describe_attempt(tx, att)}")
                     for issue in att.get("issues") or []:
                         lines.append(f"    issue: {issue}")
                     for o in sorted(tx.all("Observation", attempt_id=att["id"]), key=lambda o: o["received_at"])[-5:]:
@@ -652,7 +639,7 @@ def show(store: Store, entity_id: str | None = None, active: bool = False) -> di
                                      f"{o['execution_state']}/{o['outcome']} -> {o['effect']}"
                                      + (f" (event at {o['occurred_at']})" if o.get("occurred_at") else ""))
                     for r in tx.all("Result", attempt_id=att["id"]):
-                        lines.append(f"    result {r['id']} r{r['revision']} {r['status']} spec_match={r['spec_match']} "
+                        lines.append(f"    result {r['id']} r{r['revision']} {r['status']} usable={r.get('usable')} "
                                      f"({r['verification_scope']}) metrics={r['manifest'].get('metrics')}")
             return {"summary": "\n".join(lines) or f"no runs for {entity_id}"}
         atts = tx.all("Attempt")

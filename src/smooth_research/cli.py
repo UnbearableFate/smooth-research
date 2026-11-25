@@ -1,7 +1,8 @@
-"""`rl`: the single command-line entry point shared by every host.
+"""`rl`: the single command-line entry point shared by every host and role.
 
-Output is a short summary with ids and pointers; --json prints the full result. Errors print
-`error[CODE]: message` on stderr and exit 1 (3 for conflicts and stale revisions).
+Who calls is the session the command runs in (SMOOTH_RESEARCH_SESSION, set in every pane the watcher opens), or
+--as <session> outside a pane. Output is a short summary with ids and pointers; --json prints the full result.
+Errors print `error[CODE]: message` on stderr and exit 1 (3 for conflicts and stale revisions).
 """
 
 from __future__ import annotations
@@ -11,173 +12,143 @@ import json
 import sys
 from pathlib import Path
 
-from . import (adapters, agents, compute, context, delegate, explain, herdr, hooks, labels, literature,
-               manuscript, messages, research, reviews, runs, snapshot, tasks, upgrade, usage, view, watch)
-from .project import advice_limit, find_project, model_entries
-from .schema import ENUMS, LINKABLE, PAPER_ASSESSMENTS
+from . import (compute, herdr, hooks, inbox, labels, launch, literature, messages, pack, page, refs, research,
+               reviews, runs, snapshot, tasks, upgrade, usage, verify, watch)
+from .project import find_project
+from .roles import Actor, current, need
+from .schema import ENUMS, LINKABLE, PAPER_ASSESSMENTS, TASK_DONE
 from .store import Store
 from .util import LABEL_RE, RLError, load_json_arg, load_json_records, now_utc, split_list
 
 CONFLICT_CODES = {"CONFLICT", "STALE_REVISION"}
-HEADLESS_HELP = "run it in a headless session even inside herdr, where the role is a herdr session (rl agent open)"
-
-
-# The arguments that name hypotheses or experiments (among other records): a label in them (H2.1, EH2.1/3, also in
-# a comma-separated list or with @revision) becomes the internal id before the command runs.
-ID_ARGS = ("id", "source", "target", "targets", "experiment", "hypotheses", "derived_from", "combines",
-           "motivated_by", "based_on", "supports", "challenges", "compared_with", "depends_on", "code_from", "root",
-           "parent", "anchor", "stamp")
-# The commands that change what docs/research.html says; when the page exists they render it again (explain.py).
-# Run registrations, observations and usage are left to the next of these (or rl view): they are frequent, the page
-# only counts them, and a render reads the whole record graph.
-PAGE_COMMANDS = {"hypothesis": ("add", "revise", "set"), "experiment": ("add", "seal"), "evidence": ("add", "set"),
-                 "decide": None, "link": None, "run": ("import-result", "reject-result")}
-
-
-# what rl --read-only runs: the commands that read the records and write no file (None: every action); view only
-# with --todo, export only with --records-only, inbox without --ack
-READ_ONLY = {"status": None, "resume": None, "show": None, "history": None, "graph": None, "digest": None,
-             "doctor": None, "context": None, "inbox": None, "view": None, "export": None, "usage": None,
-             "hypothesis": ("list",), "evidence": ("list",), "task": ("list",), "run": ("show",), "review": ("show",),
-             "advise": ("show",), "paper": ("list",), "agent": ("brief", "list"), "compute": ("steps",)}
-
-
-def _check_read_only(args) -> None:
-    """rl --read-only refuses up front a command that would write records, files or caches; the ones it runs open
-    the records without upgrading them or creating anything (Store.read_only)."""
-    actions = READ_ONLY.get(args.command, ())
-    action = getattr(args, "action", None)
-    if (actions is not None and action not in actions) or (args.command == "view" and (args.stamp or not args.todo)) \
-            or (args.command == "export" and not args.records_only) or (args.command == "inbox" and args.ack):
-        what = " ".join(x for x in (args.command, action) if x)
-        raise RLError("READ_ONLY", f"rl {what} writes (records, files or caches), and --read-only writes nothing. "
-                                   "It reads with status, resume, show, history, graph, context, doctor, inbox, the "
-                                   "list, show and brief subcommands, view --todo and export --records-only")
+# arguments that may name hypotheses or experiments by label (H1.2): they become ids before the command runs
+ID_ARGS = ("id", "targets", "hypotheses", "parent", "assumes", "based_on", "supports", "challenges", "experiment",
+           "motivated_by", "target", "source", "on")
 
 
 def _store(args) -> Store:
-    project = find_project(args.project, read_only=args.read_only)
+    project = find_project(args.project)
     args.config_warnings = project.warnings
-    args.store = Store(project, args.actor or "agent", read_only=args.read_only)
+    args.store = Store(project, getattr(args, "as_", None) or "user")
     _resolve_labels(args, args.store)
     return args.store
 
 
 def _resolve_labels(args, store: Store) -> None:
-    """The labels in ID_ARGS become internal ids, all in one read."""
     def values(dest: str) -> list:
-        if dest == "source" and args.command not in ("link", "paper"):  # elsewhere: who observed or answered
-            return []
         value = getattr(args, dest, None)
         return [v for v in (value if isinstance(value, list) else [value]) if isinstance(v, str)]
-
-    found = [dest for dest in ID_ARGS
-             if any(LABEL_RE.match(part.strip()) for v in values(dest) for part in v.split(","))]
+    found = [d for d in ID_ARGS if any(LABEL_RE.match(p.strip()) for v in values(d) for p in v.split(","))]
     if not found:
         return
     with store.read() as tx:
         for dest in found:
             value = getattr(args, dest)
-            items = [",".join(labels.resolve(tx, part.strip()) for part in v.split(","))
+            items = [",".join(labels.resolve(tx, p.strip()) for p in v.split(","))
                      for v in (value if isinstance(value, list) else [value])]
             setattr(args, dest, items if isinstance(value, list) else items[0])
 
 
-def _upgrade_notice(args) -> list[str]:
-    """Told once, by the command whose first open upgraded the records of an older plugin."""
-    done = getattr(getattr(args, "store", None), "upgraded", None)
-    if not done or args.command == "upgrade":
-        return []
-    return [f"the records were upgraded from format {done['from']} to {done['to']} for this plugin version (a copy "
-            f"of the old database: {done['backup']}); run `rl upgrade` to see what else to adjust"]
+def _actor(args) -> Actor | None:
+    return current(getattr(args, "as_", None))
 
 
-def _refresh_page(args) -> list[str]:
-    """After a command that changed what docs/research.html shows: render it again when it exists. The command has
-    already succeeded, so a failure here is only a warning."""
-    store = getattr(args, "store", None)
-    if store is None or args.command not in PAGE_COMMANDS or (
-            PAGE_COMMANDS[args.command] and getattr(args, "action", None) not in PAGE_COMMANDS[args.command]):
-        return []
-    try:
-        explain.refresh(store)
-    except Exception as exc:  # noqa: BLE001 - whatever failed, the records were written
-        why = exc.message if isinstance(exc, RLError) else f"{type(exc).__name__}: {exc}"
-        return [f"docs/{explain.PAGE} was not rendered again ({why}); run rl view"]
-    return []
-
-
-def _list(value) -> list[str]:
+def L(value) -> list[str]:
     return split_list(value)
 
 
-# -- handlers -------------------------------------------------------------------------------------------------
+# -- project --------------------------------------------------------------------------------------------------
 
 
 def cmd_init(args):
     return research.init_project(Path(args.dir or "."), args.plan, args.title)
 
 
+def cmd_pack(args):
+    store = _store(args)
+    return pack.build(store, pack.who_for(_actor(args), args.for_))
+
+
+def cmd_inbox(args):
+    store = _store(args)
+    who = pack.who_for(_actor(args), args.for_).name if (args.for_ or _actor(args)) else "user"
+    if args.item:
+        return pack.item(store, who, args.item)
+    with store.read() as tx:
+        items = inbox.for_recipient(tx, store.project.config, who)
+    return {"items": [i.__dict__ for i in items], "summary": inbox.render(items, who)}
+
+
+def status_lines(store: Store) -> list[str]:
+    with store.read() as tx:
+        items = inbox.all_items(tx, store.project.config)
+        lines = [f"project {store.project.root} · data_version {tx.meta().get('data_version')}"]
+        lines.append("watcher: " + ("running" if watch.alive(store) else "NOT running (rl resume starts it)"))
+        work = [t for t in tx.all("Task") if t["kind"] in ("tree", "hypothesis", "phase") and t["state"]
+                not in TASK_DONE]
+        lines.append("now:")
+        for t in work:
+            who = next((i for i in items if i.subject == t["id"]), None)
+            lines.append(f"  {tasks.task_line(t)}" + (f" · waits on {who.to} ({inbox.age(inbox.minutes_since(who.since))})"
+                                                      if who else ""))
+        if not work:
+            lines.append("  nothing at work")
+        mine = [i for i in items if i.to == "user"]
+        lines.append(f"waiting on you ({len(mine)}):")
+        lines += [f"  {i.type} {i.subject}: {i.ask}" + (f" — {i.note}" if i.note else "") for i in mine]
+        reports = [a for a in tx.all("Ask", kind="report")]
+        since = reports[-1]["created_at"] if reports else ""
+        new = [t for t in tx.all("Task", kind="hypothesis") if t["state"] == "accepted"
+               and (t.get("delivered_at") or "") > since]
+        if new:
+            lines.append("hypothesis conclusions since the last phase report:")
+            lines += [f"  {t['id']}: {t.get('conclusion')}" for t in new]
+    return lines
+
+
 def cmd_status(args):
-    return context.status(_store(args))
+    store = _store(args)
+    return {"summary": "\n".join(status_lines(store))}
 
 
 def cmd_resume(args):
-    return context.resume_pack(_store(args), args.role, args.budget)
-
-
-def cmd_attention(args):
-    return research.ack_attention(_store(args), args.key, args.reason)
-
-
-def cmd_show(args):
-    return research.show(_store(args), args.id)
-
-
-def cmd_history(args):
-    return research.history(_store(args), args.id, args.limit)
-
-
-def cmd_graph(args):
+    """Run the project on: the watcher and the coordinator's pane, then the status (8.11)."""
     store = _store(args)
-    if args.mermaid:
-        with store.read() as tx:
-            return {"summary": view.mermaid(tx)}
-    return view.tree(store, args.root)
+    problem = herdr.problem()
+    if problem:
+        raise RLError("UNAVAILABLE", f"rl resume needs herdr: {problem}. Install herdr and run it inside a herdr pane")
+    done = [watch.start(store), watch.ensure_coordinator(store)]
+    return {"summary": "\n".join(done + [""] + status_lines(store))}
 
 
 def cmd_view(args):
-    store = _store(args)
-    if args.todo:
-        return explain.todo(store)
-    if args.stamp:
-        return explain.stamp(store, _list(args.stamp))
-    return explain.render(store)
-
-
-def cmd_report(args):
-    return view.report(_store(args), args.out, args.title)
-
-
-def cmd_manuscript(args):
-    return manuscript.write(_store(args), args.title)
-
-
-def cmd_export(args):
-    out = snapshot.export(_store(args), args.out, args.records_only)
-    return out["snapshot"] if args.records_only and args.json else out  # --json: the records, not a string of them
-
-
-def cmd_restore(args):
-    return snapshot.restore(args.snapshot, args.into)
+    return page.write(_store(args))
 
 
 def cmd_doctor(args):
     return snapshot.doctor(_store(args))
 
 
-def cmd_digest(args):
-    return runs.digest_paths(args.paths)
+def cmd_show(args):
+    store = _store(args)
+    out = research.show(store, args.id)
+    with store.read() as tx:
+        rec = out.get("record") or {}
+        if rec.get("_label") == "Task" and rec["kind"] in ("execute", "prep"):
+            out["summary"] += "\n\ncheck lines:\n" + "\n".join(verify.task_lines(tx, store.project, rec))
+        if rec.get("_label") == "Ticket":
+            out["summary"] += "\n" + "\n".join(messages.thread_lines(tx, rec["id"]))
+    return out
+
+
+def cmd_history(args):
+    return research.history(_store(args), args.id, args.limit)
+
+
+def cmd_tree(args):
+    store = _store(args)
+    with store.read() as tx:
+        return {"summary": "\n".join(research.tree_lines(tx)) or "no hypotheses yet"}
 
 
 def cmd_link(args):
@@ -185,263 +156,284 @@ def cmd_link(args):
                          args.assessment)
 
 
-def cmd_session(args):
+def cmd_export(args):
+    return snapshot.export(_store(args), args.out, args.records_only)
+
+
+def cmd_restore(args):
+    return snapshot.restore(args.snapshot, args.into)
+
+
+def cmd_digest(args):
+    return runs.digest_paths(args.paths)
+
+
+def cmd_upgrade(args):
+    store = _store(args)
+    if args.move:
+        return upgrade.move(store, *args.move)
+    return upgrade.report(store, args.note)
+
+
+def cmd_watch(args):
     store = _store(args)
     if args.action == "start":
-        out = tasks.start_session(store, args.role, args.host, args.host_session_id, args.model,
-                                  args.model_observed, args.effort, args.worktree)
-        if args.role == "coordinator" and args.host == "claude":  # its status line reports Claude's usage
-            note = usage.install_statusline(store.project.root, delegate.rl_command())
-            out["summary"] += f"\nClaude usage: {note}" if note else ""
-        if args.role == "coordinator" and not args.no_sync:  # remote resources get the committed code
-            try:
-                synced = compute.sync(store)
-            except RLError as exc:
-                synced = {"summary": f"compute sync: {exc}; fix it, then rl compute sync"}
-            out["summary"] += f"\n{synced['summary']}" if synced["summary"] else ""
-        return out
-    return tasks.end_session(store, args.id)
+        return {"summary": watch.start(store)}
+    if args.action == "once":
+        with watch.beat_lock(store) as mine:
+            if not mine:
+                return {"summary": "the watcher's own beat runs now"}
+            return watch.beat(store)
+    return watch.run(store)
+
+
+def cmd_hook(args):
+    return hooks.session_start(args.host, sys.stdin.read() if not sys.stdin.isatty() else "")
+
+
+def cmd_usage(args):
+    try:
+        raw = "" if sys.stdin.isatty() else sys.stdin.read()
+    except (OSError, ValueError):
+        raw = ""
+    return {"summary": usage.statusline(raw)}
+
+
+def cmd_compute(args):
+    store = _store(args)
+    if args.action == "steps":
+        return compute.steps(store, args.resource, args.commit, args.attempt)
+    if args.action == "sync":
+        return compute.sync(store, args.resource)
+    return compute.show(store, args.commit)
+
+
+def cmd_docs(args):
+    store = _store(args)
+    return research.commit_user_docs(store, _actor(args), L(args.paths), args.message)
+
+
+# -- records --------------------------------------------------------------------------------------------------
 
 
 def cmd_hypothesis(args):
-    store = _store(args)
-    if args.action == "add":
-        return research.add_hypothesis(store, args.title, args.statement, args.scope, args.disposition,
-                                       _list(args.derived_from), _list(args.combines), _list(args.motivated_by),
-                                       args.origin, args.statement_file, args.parent, args.root)
-    if args.action == "revise":
-        return research.revise_hypothesis(store, args.id, args.reason, args.statement, args.scope, args.title,
-                                          args.base_revision, args.statement_file)
-    if args.action == "list":
-        return research.list_hypotheses(store, args.status, args.disposition)
-    return research.set_hypothesis(store, args.id, args.reason, args.evidence_status, args.disposition,
-                                   args.rechecked)
+    store, actor, a = _store(args), _actor(args), args.action
+    if a == "add":
+        return research.add_hypothesis(store, actor, args.title, args.statement, args.purpose, args.scope,
+                                       args.source, args.parent, L(args.assumes), args.cost, args.composite,
+                                       motivated_by=L(args.motivated_by))
+    if a == "revise":
+        return research.revise_hypothesis(store, actor, args.id, args.reason, args.statement, args.scope, args.title,
+                                          args.purpose, args.source, args.cost)
+    if a == "flag":
+        return research.flag_hypothesis(store, actor, args.id, args.lack, args.basis, args.options)
+    if a in ("keep", "drop"):
+        return research.settle_flag(store, actor, args.id, a)
+    if a == "defer":
+        return research.defer_hypothesis(store, actor, args.id, None if args.clear else args.reason)
+    with store.read() as tx:
+        return {"summary": "\n".join(research.tree_lines(tx)) or "no hypotheses yet"}
 
 
 def cmd_experiment(args):
-    store = _store(args)
+    store, actor = _store(args), _actor(args)
     if args.action == "add":
-        return research.add_experiment(store, args.title, args.question, _list(args.hypotheses), args.stage,
-                                       _list(args.compared_with), args.code_from, _list(args.depends_on),
-                                       anchor=args.anchor, intervention=args.intervention, comparator=args.comparator,
-                                       metric=args.metric, scope=args.scope, outcome_actions=args.outcome_actions,
-                                       budget=args.budget, stop=args.stop)
-    return research.seal_experiment(store, args.id)
+        return research.add_experiment(store, actor, args.title, args.question, L(args.hypotheses),
+                                       args.motivated_by, args.manifest, L(args.protected), args.semantic_tests,
+                                       args.brief, args.estimate)
+    fields = {"manifest_path": args.manifest, "protected": L(args.protected) or None,
+              "semantic_tests": args.semantic_tests, "brief": args.brief, "estimate": args.estimate,
+              "title": args.title, "question": args.question}
+    return research.update_experiment(store, actor, args.id, args.reason, **fields)
 
 
 def cmd_evidence(args):
-    store = _store(args)
+    store, actor = _store(args), _actor(args)
     if args.action == "add":
-        return research.add_evidence(store, args.summary, args.level, args.validity, args.scope,
-                                     _list(args.supports), _list(args.challenges), _list(args.attempts),
-                                     _list(args.results), args.experiment, _list(args.artifacts), args.doc)
-    if args.action == "list":
-        return research.list_evidence(store, args.validity, args.level)
-    return research.set_evidence(store, args.id, args.validity, args.reason)
+        return research.add_evidence(store, actor, args.task, args.summary, args.level, L(args.results),
+                                     L(args.attempts), args.scope, L(args.artifacts), args.doc)
+    return research.set_evidence(store, actor, args.id, args.validity, args.reason)
 
 
 def cmd_decide(args):
-    return research.decide(_store(args), _list(args.targets), args.action, args.rationale, _list(args.based_on),
-                           args.reopen_condition, "stage" if args.stage else "route", args.implementation_ready,
-                           args.evidence_scope, args.set_evidence_status, args.rationale_file)
+    store, actor = _store(args), _actor(args)
+    if args.final:
+        return research.finalize(store, actor, args.final)
+    if not args.kind or not args.rationale:
+        raise RLError("INVALID", "rl decide --kind verdict|stop|route|phase --targets .. --rationale .. (or rl decide "
+                                 "--final D-x)")
+    highlights = load_json_arg(args.highlights) or []
+    return research.decide(store, actor, args.kind, L(args.targets), args.rationale, L(args.based_on), args.status,
+                           L(args.supports), L(args.challenges), args.did, args.means, highlights,
+                           args.rationale_file)
 
 
 def cmd_task(args):
-    store = _store(args)
-    a = args.action
+    store, actor, a = _store(args), _actor(args), args.action
     if a == "create":
-        return tasks.create_task(store, args.title, args.kind, _list(args.targets), args.request, args.to_role,
-                                 args.next_action, _list(args.depends_on))
+        return tasks.create(store, actor, args.kind, args.title, L(args.targets), args.priority, args.envelope,
+                            args.parallel, args.reason, args.phase, args.experiment, args.requirement,
+                            args.done_check, args.estimate, args.mandate, L(args.depends_on))
     if a == "claim":
-        return tasks.claim(store, args.id, args.role, args.session)
-    if a in ("deliver", "wait", "block", "resume"):
-        state = {"deliver": "delivered", "wait": "waiting", "block": "blocked", "resume": "active"}[a]
-        return tasks.progress(store, args.id, state, args.role, args.summary,
-                              _list(getattr(args, "output", None)), args.next_action,
-                              _list(getattr(args, "attempts", None)), getattr(args, "reason", None),
-                              getattr(args, "verified", None) or [])
-    if a == "handoff":
-        return tasks.handoff(store, args.id, args.doc, args.role, args.to_role)
-    if a == "list":
+        holder = need(actor, "scientist", "researcher", what="claiming a task").name
+        return tasks.claim(store, args.id, holder)
+    if a == "release":
+        return tasks.release(store, actor, args.id, args.to == "scientist")
+    if a == "cancel":
+        return tasks.cancel(store, actor, args.id, args.reason)
+    if a == "test":
+        return tasks.test(store, actor, args.id, args.record, args.commit, args.log)
+    if a == "dispatch":
+        return tasks.dispatch(store, actor, args.id, args.note)
+    if a == "block":
+        return tasks.block(store, actor, args.id, args.reason, args.note)
+    if a == "answer":
+        return tasks.answer(store, actor, args.id, args.text)
+    if a == "set":
+        if args.envelope or args.estimate:
+            with store.write() as tx:
+                t = tx.require(args.id, "Task")
+                need(actor, "coordinator" if args.envelope else "scientist", what="changing a task card")
+                tx.update(args.id, {k: v for k, v in (("envelope", args.envelope), ("estimate", args.estimate)) if v})
+                tx.event("task.envelope" if args.envelope else "task.estimate", args.id,
+                         args.envelope or args.estimate)
+            if not (args.requirement or args.done_check):
+                return {"summary": f"{t['id']} changed"}
+        return tasks.set_prep(store, actor, args.id, args.requirement, args.done_check)
+    if a == "deliver":
+        return tasks.deliver(store, actor, args.id, args.conclusion, args.limitations, L(args.outputs),
+                             args.reusable, args.note)
+    if a == "accept":
+        return tasks.accept(store, actor, args.id)
+    if a == "return":
+        return tasks.return_task(store, actor, args.id, args.reason)
+    if a == "check":
         with store.read() as tx:
-            items = tx.all("Task") if args.all else tasks.open_tasks(tx)
-            known = labels.names(tx)
-        return {"tasks": items, "summary": labels.relabel("\n".join(
-            research.brief(t) + (f" next: {t['next_action']}" if t.get("next_action") else "") for t in items),
-            known) or "no open tasks"}
-    return tasks.review_task(store, args.id, a, args.reason)
-
-
-def cmd_inbox(args):
-    return messages.inbox(_store(args), args.role, args.ack or False, args.all)
-
-
-def cmd_msg(args):
-    return messages.send(_store(args), args.type, args.sender, args.to, args.text, args.task, args.next_action,
-                      _list(args.doc), args.message_id)
-
-
-def cmd_context(args):
-    store = _store(args)
-    if args.purpose == "work":
-        if not args.task:
-            raise RLError("INVALID", "a work pack needs --task")
-        return context.work_pack(store, args.task, args.budget)
-    if args.purpose == "resume":
-        return context.resume_pack(store, args.role, args.budget)
-    if args.purpose == "review":
-        if not args.ticket:
-            raise RLError("INVALID", "a review pack needs --ticket RV-xxxx")
-        return research.show(store, _review_request(store, args.ticket))
-    if not args.question:
-        raise RLError("INVALID", "an advice pack needs --question")
-    return context.advice_pack(store, args.target, args.question, args.budget)
-
-
-def _review_request(store: Store, ticket: str) -> str:
+            t = tx.require(args.id, "Task")
+            lines = verify.hypothesis_lines(tx, t) if t["kind"] == "hypothesis" else \
+                verify.task_lines(tx, store.project, t)
+        return {"summary": "\n".join(lines)}
     with store.read() as tx:
-        t = tx.require(ticket, "Ticket")
-    if not t.get("request_ref"):
-        raise RLError("NOT_FOUND", f"{ticket} has no request package")
-    return t["request_ref"]
+        rows = [t for t in tx.all("Task") if args.all or t["state"] not in TASK_DONE]
+    return {"tasks": rows, "summary": "\n".join(tasks.task_line(t) for t in rows) or "no tasks"}
 
 
-def _spec_from_flags(args) -> dict:
-    spec: dict = {}
-    if args.arm:
-        spec["arm"] = args.arm
-    if args.seed is not None:
-        spec["seed"] = args.seed
-    code = {k: v for k, v in (("commit", args.code_commit), ("content_digest", args.code_digest)) if v}
-    if code:
-        spec["code_ref"] = code
-    elif args.code_unknown:
-        spec["code_ref"] = "unknown"
-    for key in ("config_digest", "config_ref", "data_revision", "model_revision", "metric", "metric_spec_ref",
-                "environment_ref", "output_spec", "resume_from"):
-        if getattr(args, key, None):
-            spec[key] = getattr(args, key)
-    if args.param:
-        params = {}
-        for item in args.param:
-            key, _, value = item.partition("=")
-            try:
-                params[key] = json.loads(value)
-            except json.JSONDecodeError:
-                params[key] = value
-        spec["params"] = params
-    return spec
+def cmd_phase(args):
+    store, actor = _store(args), _actor(args)
+    if args.action == "create":
+        return tasks.phase_create(store, actor, args.title, args.scientists, args.budget, L(args.tasks))
+    return tasks.phase_add(store, actor, args.id, L(args.tasks))
 
 
-def cmd_run(args):
-    store = _store(args)
-    a = args.action
-    if a == "register":
-        spec = load_json_arg(args.spec) or {}
-        spec.update(_spec_from_flags(args))
-        return runs.register(store, args.experiment, spec, args.request_id, args.run, _list(args.review),
-                             args.no_review, args.resource)
-    if a == "record":
-        items = load_json_records(args.observation) if args.observation else [{}]
-        flags = {"record_id": args.record_id, "attempt_id": args.attempt, "source": args.source,
-                 "observed_at": args.observed_at, "source_sequence": args.sequence, "execution_state": args.state,
-                 "outcome": args.outcome, "raw_state": args.raw_state, "source_ref": args.source_ref,
-                 "correction_of": args.correction_of, "note": args.note}
-        flags = {k: v for k, v in flags.items() if v is not None}
-        if len(items) > 1 and "record_id" in flags:
-            raise RLError("INVALID", "--record-id names one observation; a batch carries its ids in the records")
-        if args.exec_id:
-            flags["execution_ref"] = {"kind": args.exec_kind, "executor_namespace": args.exec_namespace,
-                                      "opaque_id": args.exec_id, "locator": args.exec_locator}
-        out = []
-        for n, obs in enumerate(items, 1):
-            obs = {"observed_at": now_utc(), **obs, **flags}
-            try:
-                out.append(runs.record(store, obs))
-            except RLError as exc:
-                if len(items) == 1:
-                    raise
-                raise RLError(exc.code, f"observation {n} of {len(items)}: {exc.message} ({n - 1} before it were "
-                                        "recorded; re-sending the batch is safe, received records are skipped)",
-                              **exc.details) from None
-        if args.exec_id and args.attempt and (hint := runs.executor_hint(store, args.attempt)):
-            out[-1]["warnings"] = [*(out[-1].get("warnings") or []), hint]
-        if len(out) == 1:
-            return out[0]
-        return {"records": out, "summary": "\n".join(r["summary"] for r in out)}
-    if a == "import-result":
-        manifest = load_json_arg(args.manifest)
-        if not isinstance(manifest, dict):
-            raise RLError("INVALID", "--manifest is a JSON object (inline, @file or a path)")
-        return runs.import_result(store, args.attempt, manifest, args.request_id)
-    if a == "reject-result":
-        return runs.reject_result(store, args.id, args.reason)
-    if a == "usage":
-        usage = {"accounting_ref": args.accounting_ref, "quantity": args.quantity, "unit": args.unit,
-                 "resource_type": args.resource_type, "hardware": args.hardware, "basis": args.basis,
-                 "source_ref": args.source_ref, "note": args.note}
-        return runs.add_usage(store, usage, _list(args.attempts), args.revise)
-    return runs.show(store, args.id, args.active)
+def cmd_request(args):
+    store, actor = _store(args), _actor(args)
+    if args.action == "forward":
+        return tasks.forward(store, actor, args.id)
+    if args.action == "answer":
+        return tasks.answer_ask(store, actor, args.id, args.by, args.text)
+    if not (args.stuck and args.options and args.recommend):
+        raise RLError("INVALID", "rl request --stuck .. --options .. --recommend .. [--cost ..] [--task T-x] "
+                                 "[--kind approval]")
+    return tasks.ask(store, actor, args.stuck, args.options, args.recommend, args.cost, args.task, args.kind)
 
 
 def cmd_review(args):
-    store = _store(args)
-    a = args.action
+    store, actor, a = _store(args), _actor(args), args.action
     if a == "request":
-        return reviews.request_review(store, args.target, _list(args.files), args.question,
-                                      _list(args.author_model), _list(args.configs), _list(args.deps),
-                                      _list(args.ignore_keys), args.scope or "", args.diff_base, args.recheck_of,
-                                      args.new_round)
-    if a == "conclusion":
-        return reviews.request_conclusion_review(store, _list(args.target), args.proposal, _list(args.author_model),
-                                                 args.question, args.recheck_of, args.new_round)
+        return reviews.request(store, actor, args.target, args.kind, args.question, args.recheck_of)
     if a == "answer":
-        return reviews.answer_live(store, args.id, args.answer, args.session)
-    if a == "approve":
-        return reviews.approve(store, args.id, args.rationale)
-    if a == "resolve":
-        return reviews.resolve(store, args.id, args.by, args.reason)
-    if a == "run":
-        _outside_herdr(args, "review run", f"a reviewer session answers {args.id}: the coordinator opens one "
-                                           f"(`rl agent open --role reviewer --ticket {args.id}{_entry(args)}`) or "
-                                           f"assigns an idle one (`rl agent assign <reviewer> --ticket {args.id}`)")
-        if args.background:
-            return reviews.start_background(store, args.id, args.timeout, args.entry)
-        return reviews.run_ticket(store, args.id, args.timeout, args.entry)
-    if a == "import":
-        return reviews.import_answer(store, args.id, args.answer, args.model_observed, args.source, args.provider,
-                                     args.session_id)
-    return reviews.show(store, args.id, "review")
+        findings = load_json_arg(args.findings) or []
+        close = load_json_arg(args.close) or []
+        if not isinstance(findings, list) or not isinstance(close, list):
+            raise RLError("INVALID", "--findings and --close are JSON lists")
+        return reviews.answer(store, actor, args.id, args.verdict, findings, close, args.doc)
+    rv, _, n = args.id.partition("#F")
+    if not n:
+        raise RLError("INVALID", "settle names a finding: RV-x#Fn")
+    return reviews.settle(store, actor, rv, int(n), args.status, args.conditions)
 
 
 def cmd_advise(args):
+    store, actor = _store(args), _actor(args)
+    if args.action == "ask":
+        return reviews.consult(store, actor, args.question)
+    rulings = load_json_arg(args.rulings) or []
+    return reviews.advise(store, actor, args.id, args.doc, rulings)
+
+
+def cmd_question(args):
+    store, actor = _store(args), _actor(args)
+    if args.close:
+        return messages.close(store, actor, args.close)
+    if not (args.to and args.on and args.text):
+        raise RLError("INVALID", "rl question --to <session> --on <record> --text .. (or --close MSG-x)")
+    return messages.ask(store, actor, args.to, args.on, args.text, L(args.ref))
+
+
+def cmd_reply(args):
+    store, actor = _store(args), _actor(args)
+    if actor is None:
+        raise RLError("INVALID", "a reply is written by a session (--as <session> outside a pane)")
+    return messages.reply(store, actor, args.id, args.text, L(args.ref))
+
+
+def cmd_discuss(args):
+    store, actor = _store(args), _actor(args)
+    if actor is None:
+        raise RLError("INVALID", "discussion is written by a session (--as <session> outside a pane)")
+    return messages.discuss(store, actor, args.id, args.text, L(args.ref))
+
+
+def cmd_refs(args):
     store = _store(args)
-    a = args.action
-    if a == "prepare":
-        return reviews.prepare_advice(store, args.question, args.target, args.user_approved)
-    if a == "answer":
-        return reviews.answer_live(store, args.id, args.answer, args.session)
-    if a == "run":
-        _outside_herdr(args, "advise run", "each advice ticket gets its own advisor session: " + ", ".join(
-            f"`rl agent open --role advisor --ticket {t}{_entry(args)}`" for t in args.id))
-        if len(args.id) > 1:
-            if args.entry:
-                raise RLError("INVALID", "--entry overrides the model of one ticket; name one ticket")
-            return reviews.run_many(store, args.id, args.timeout, args.background)
-        if args.background:
-            return reviews.start_background(store, args.id[0], args.timeout, args.entry)
-        return reviews.run_ticket(store, args.id[0], args.timeout, args.entry)
-    if a == "import":
-        return reviews.import_answer(store, args.id, args.answer, args.model_observed, args.source, args.provider,
-                                     args.session_id)
-    return reviews.show(store, args.id, "advice")
+    with store.read() as tx:
+        clean = refs.check(tx, store.project, L(args.refs), note_cap=None)
+        return {"refs": clean, "summary": "\n".join(refs.expand(tx, store.project, clean))}
+
+
+def cmd_run(args):
+    store, actor, a = _store(args), _actor(args), args.action
+    if a == "register":
+        config = load_json_arg(args.config)
+        params = dict(p.split("=", 1) for p in args.param or [])
+        return runs.register(store, actor, args.task, args.request_id, args.arm, args.seed, config, args.split,
+                             args.commit, args.minutes, args.trial, args.deviation, args.purpose, args.ticket,
+                             args.run, args.resource, params or None)
+    if a == "ended":
+        raw = None if sys.stdin.isatty() or args.attempt else sys.stdin.read()
+        return runs.ended(store, raw, args.attempt, args.outcome, args.note)
+    if a == "record":
+        items = load_json_records(args.observation) if args.observation else [{}]
+        flags = {"attempt_id": args.attempt, "source": args.source, "observed_at": args.observed_at,
+                 "execution_state": args.state, "outcome": args.outcome, "raw_state": args.raw_state,
+                 "source_ref": args.source_ref, "note": args.note, "record_id": args.record_id}
+        flags = {k: v for k, v in flags.items() if v is not None}
+        if args.exec_id:
+            flags["execution_ref"] = {"kind": args.exec_kind, "executor_namespace": args.exec_namespace,
+                                      "opaque_id": args.exec_id, "locator": args.exec_locator}
+        out = [runs.record(store, {"observed_at": now_utc(), **obs, **flags}) for obs in items]
+        return out[0] if len(out) == 1 else {"records": out, "summary": "\n".join(r["summary"] for r in out)}
+    if a == "import-result":
+        reported = load_json_arg(args.manifest)
+        if not isinstance(reported, dict):
+            raise RLError("INVALID", "--manifest is a JSON object (inline, @file or a path)")
+        return runs.import_result(store, actor, args.attempt, reported, args.request_id)
+    if a == "reject-result":
+        return runs.reject_result(store, actor, args.id, args.reason)
+    if a == "handled":
+        return runs.handled(store, actor, L(args.attempts), args.note)
+    if a == "usage":
+        use = {"accounting_ref": args.accounting_ref, "quantity": args.quantity, "unit": args.unit,
+               "resource_type": args.resource_type, "hardware": args.hardware, "basis": args.basis,
+               "source_ref": args.source_ref, "note": args.note}
+        return runs.add_usage(store, use, L(args.attempts), args.revise)
+    return runs.show(store, args.id, args.active)
 
 
 def cmd_paper(args):
-    store = _store(args)
-    a = args.action
+    store, a = _store(args), args.action
     if a == "add":
-        return literature.add_paper(store, args.identifier, args.title, _list(args.authors), args.year, args.url,
+        return literature.add_paper(store, args.identifier, args.title, L(args.authors), args.year, args.url,
                                     args.fetch)
     if a == "search":
         return literature.search(store, args.query, args.limit)
@@ -455,210 +447,72 @@ def cmd_paper(args):
     return {"papers": papers, "summary": "\n".join(research.brief(p) for p in papers) or "no papers"}
 
 
-def _entry(args) -> str:
-    return f" --entry {args.entry}" if args.entry else ""
-
-
-def _outside_herdr(args, command: str, instead: str) -> None:
-    """rl delegate, review run and advise run start headless sessions, the forms without herdr: inside herdr the
-    role is a herdr session (team.md), and they run only when asked for with --headless."""
-    if not args.headless and herdr.inside():
-        raise RLError("INVALID", f"inside herdr {instead} (team.md); `rl {command}` would use a headless session "
-                                 "instead. To do that anyway, add --headless.")
-
-
-def cmd_delegate(args):
-    _outside_herdr(args, "delegate", f"a researcher works in a herdr session: `rl agent open {args.role} --role "
-                                     f"researcher --task {args.task}{_entry(args)}`")
-    store = _store(args)
-    if args.background:
-        return delegate.start_background(store, args.task, args.entry, args.role, args.timeout)
-    return delegate.delegate(store, args.task, args.entry, args.role, args.timeout)
-
-
 def cmd_agent(args):
+    """The coordinator answers a session's dialog (11.3); anyone may look at it."""
     store = _store(args)
-    a = args.action
-    if a == "open":
-        return agents.open_session(store, args.role, args.name, args.entry, args.task, args.ticket,
-                                   not args.no_worktree, args.base, args.timeout)
-    if a == "assign":
-        return agents.assign(store, args.name, args.task, args.ticket)
-    if a == "tell":
-        if args.file and args.text:
-            raise RLError("INVALID", "give the message as text or with --file, not both")
-        text = Path(args.file).read_text(encoding="utf-8") if args.file else " ".join(args.text)
-        return agents.tell(store, args.to, text, args.sender, args.task)
-    if a == "reset":
-        return agents.reset(store, args.name, "compact" if args.compact else "clear")
-    if a == "close":
-        return agents.close(store, args.name, args.remove_worktree)
-    if a == "brief":
-        return agents.brief(store, args.name)
-    if a == "dialog":
-        return agents.dialog(store, args.name)
-    if a == "answer":
-        return agents.answer(store, args.name, args.option, args.reason)
-    if a == "switch":
-        return agents.switch(store, args.name, args.entry, args.now, args.timeout)
-    if a == "check":
-        return watch.check(store)
-    if a == "watch":
-        if args.stop:
-            return watch.stop(store)
-        if args.start:
-            return watch.start(store, args.every)
-        return watch.run(store, args.every, args.own_tab)
-    return agents.list_sessions(store, args.all)
-
-
-def cmd_usage(args):
-    if args.action == "statusline":  # Claude Code's status line: no project needed, and it never fails
-        try:
-            raw = "" if sys.stdin.isatty() else sys.stdin.read()
-        except (OSError, ValueError):
-            raw = ""
-        return {"summary": usage.statusline(raw, keep=not args.read_only)}
-    raise RLError("INVALID", "rl usage only runs as Claude Code's status line now (rl usage statusline): the hosts' "
-                             "usage windows, their reading times and which hosts are low are shown by rl agent list")
-
-
-def cmd_models(args):
-    store = _store(args)
-    config = store.project.config
-    lines = []
-    for role, rule in (("researcher", "the first available one is used"), ("reviewer", "the first available one is used"),
-                       ("advisor", "every available one is asked, each on its own")):
-        lines.append(f"{role} ({rule}):")
-        for text in model_entries(config, role):
-            try:
-                entry = adapters.Entry.parse(text)
-            except RLError as exc:
-                lines.append(f"  {text}: invalid ({exc.message})")
-                continue
-            problem = adapters.available(entry)
-            lines.append(f"  {entry} family={entry.family or 'unknown'} "
-                         + (f"unavailable ({problem})" if problem else "callable"))
     with store.read() as tx:
-        used = len(reviews.advice_rounds(tx))
-    lines.append(f"advice rounds used: {used} of {advice_limit(config)} (advice.max_rounds; more need the user's "
-                 "approval)")
-    return {"summary": "\n".join(lines) + "\n(callable = the CLI exists; the model itself is verified on first use)"}
-
-
-def cmd_compute(args):
-    store = _store(args)
-    if args.action == "steps":
-        return compute.steps(store, args.resource, args.commit, args.attempt)
-    if args.action == "sync":
-        if args.commit or args.attempt:
-            raise RLError("INVALID", "rl compute sync pushes the current branch; --commit and --attempt go with "
-                                     "`rl compute steps`")
-        return compute.sync(store, args.resource)
-    if args.resource or args.attempt:
-        raise RLError("INVALID", "rl compute lists every resource; a resource or --attempt goes with "
-                                 "`rl compute steps`")
-    return compute.show(store, args.commit)
-
-
-def cmd_upgrade(args):
-    store = _store(args)
-    if args.move:
-        return upgrade.move(store, *args.move)
-    return upgrade.report(store, args.note)
-
-
-def cmd_hook(args):
-    return hooks.session_start(args.host, sys.stdin.read() if not sys.stdin.isatty() else "")
+        s = next((x for x in tx.all("Session", name=args.name) if x["status"] == "open"), None)
+    if s is None or not s.get("herdr_pane"):
+        raise RLError("NOT_FOUND", f"no open session {args.name}")
+    if args.action == "dialog":
+        return {"summary": launch.excerpt(herdr.read(s["herdr_pane"]), 1500)}
+    actor = _actor(args)
+    if args.name == "coordinator":
+        pass  # the user answers the coordinator's own dialog in its pane; recorded here when asked to
+    else:
+        need(actor, "coordinator", what="answering a session's dialog")
+    screen = herdr.read(s["herdr_pane"])
+    why = launch.select(s["herdr_pane"], args.option, screen, lambda now: True)
+    if why:
+        raise RLError("INVALID", why)
+    herdr.keys(s["herdr_pane"], "enter")
+    with store.write() as tx:
+        tx.update(s["id"], {"needs_decision": None})
+        tx.event("session.answered", args.name, f"{args.option}: {args.reason}")
+    return {"summary": f"{args.name}: answered {args.option!r}"}
 
 
 # -- parser ---------------------------------------------------------------------------------------------------
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="rl", description="Smooth Research records: hypotheses, experiments, runs, "
-                                                        "evidence, decisions, reviews, advice and literature.")
-    p.add_argument("--project", help="project directory (default: nearest smooth-research.yaml above cwd)")
+    p = argparse.ArgumentParser(prog="rl", description="Smooth Research: hypotheses, experiments, tasks, runs, "
+                                                        "evidence, decisions, reviews and advice, as records.")
+    p.add_argument("--project", help="project directory (default: the nearest smooth-research.yaml above cwd)")
     p.add_argument("--json", action="store_true", help="print the full JSON result")
-    p.add_argument("--actor", help="name recorded in the event log")
-    p.add_argument("--read-only", action="store_true",
-                   help="change nothing: no record upgrade, no dependency sync, no write or cache; a command that "
-                        "would write is refused")
+    p.add_argument("--as", dest="as_", help="the session this command runs as (default: SMOOTH_RESEARCH_SESSION)")
     sub = p.add_subparsers(dest="command", required=True, metavar="command")
 
-    def add(name, fn, help_, **kw):
-        sp = sub.add_parser(name, help=help_, description=help_, **kw)
+    def add(name, fn, help_):
+        sp = sub.add_parser(name, help=help_, description=help_)
         sp.set_defaults(fn=fn)
         return sp
 
-    sp = add("init", cmd_init, "create a research project here and import the plan snapshot")
-    sp.add_argument("--plan", help="the research plan (copied once to docs/plan.md and sealed)")
+    def subs(sp):
+        return sp.add_subparsers(dest="action", required=True)
+
+    sp = add("init", cmd_init, "create a research project here from a plan")
+    sp.add_argument("--plan", help="the research plan (copied to docs/plan.md and sealed)")
     sp.add_argument("--title")
-    sp.add_argument("--dir", help="project directory (default: cwd)")
-    sp.add_argument("--python", default=research.DEFAULT_PYTHON,
-                    help=f"Python version of the project's environment (default {research.DEFAULT_PYTHON}). The "
-                         "plugin's rl makes it before the records: uv init --python (an existing pyproject.toml is "
-                         "kept), then uv add of rl's dependencies, and runs init on it")
-    add("status", cmd_status, "short project status and attention items")
-    sp = add("attention", cmd_attention, "take an attention item that states a fact into account")
-    ss = sp.add_subparsers(dest="action", required=True)
-    s = ss.add_parser("ack", help="the item leaves attention until its fact changes; the records and reports keep it")
-    s.add_argument("key", help="the key rl status shows with the item")
-    s.add_argument("--reason", required=True, help="how it was taken into account")
-    sp = add("resume", cmd_resume, "resume pack: roles, unfinished tasks and attempts, last observations")
-    sp.add_argument("--role")
-    sp.add_argument("--budget", type=int)
+    sp.add_argument("--dir")
+    sp.add_argument("--python", default=research.DEFAULT_PYTHON, help="Python of the project's environment (bin/rl)")
+    sp = add("pack", cmd_pack, "the pack of the calling session: role card, its card, inbox, material")
+    sp.add_argument("--for", dest="for_", help="another session's pack (for people and tests)")
+    sp = add("inbox", cmd_inbox, "what waits on the calling session now (computed from the records)")
+    sp.add_argument("--for", dest="for_", help="another recipient: a session name, or user")
+    sp.add_argument("--item", type=int, help="open item N: its subject expanded, check lines, next commands")
+    add("status", cmd_status, "the project now, what waits on you, whether the watcher runs (starts nothing)")
+    add("resume", cmd_resume, "run the project on: the watcher and the coordinator's pane in herdr, then the status")
+    add("view", cmd_view, "draw docs/research.html now")
+    add("doctor", cmd_doctor, "check sealed documents, run records and that every unfinished record waits on someone")
     sp = add("show", cmd_show, "one record with its relations (DOC ids print the sealed text)")
     sp.add_argument("id")
-    sp = add("history", cmd_history, "event log")
+    sp = add("history", cmd_history, "the event log")
     sp.add_argument("id", nargs="?")
     sp.add_argument("--limit", type=int, default=30)
-    sp = add("graph", cmd_graph, "tree projection of the hypothesis graph")
-    sp.add_argument("--root")
-    sp.add_argument("--mermaid", action="store_true")
-    sp = add("view", cmd_view, "render the research explanation page docs/research.html from the records and the "
-                               "words in research/notes/explanation.yaml")
-    g = sp.add_mutually_exclusive_group()
-    g.add_argument("--todo", action="store_true", help="list the explanations to write or revise, with their facts")
-    g.add_argument("--stamp", help="comma-separated hypotheses and experiments (labels or ids) and/or summary whose "
-                                   "explanations were checked against their current facts: records that, then "
-                                   "renders the page")
-    sp = add("report", cmd_report, "write a progress or stage report into research/reports/")
-    sp.add_argument("--out")
-    sp.add_argument("--title")
-    sp = add("manuscript", cmd_manuscript, "write or refresh the manuscript (the paper draft) from the records: "
-                                            "docs/manuscript.md, or LaTeX built into a PDF (manuscript.latex)")
-    sp.add_argument("--title", help="the title of a new draft")
-    sp = add("export", cmd_export, "consistent snapshot of records and sealed documents")
-    sp.add_argument("--out")
-    sp.add_argument("--records-only", action="store_true",
-                    help="print what snapshot.json would hold (records, relations, meta) and write nothing")
-    sp = add("restore", cmd_restore, "rebuild a project from a snapshot into a new directory (records only)")
-    sp.add_argument("snapshot")
-    sp.add_argument("--into", required=True)
-    add("doctor", cmd_doctor, "verify sealed documents and run records")
-    sp = add("digest", cmd_digest, "blake2b digests of files or directories (for RunSpecs and manifests)")
-    sp.add_argument("paths", nargs="+")
-    add("models", cmd_models, "configured reviewer and advisor entries and whether their CLIs exist")
-    sp = add("upgrade", cmd_upgrade, "after a plugin update: the project's record format and plugin build, the "
-                                     "upgrades done, what this version reads differently and what you may adjust")
-    sp.add_argument("--note", help="record what you adjusted by hand for this version (a project.adjusted event)")
-    sp.add_argument("--move", nargs=2, metavar=("OLD", "NEW"), help="move a file or directory of an older layout and "
-                    "rewrite the paths the records keep for it")
-    sp = add("compute", cmd_compute, "compute resources (compute in smooth-research.yaml) with local checks; "
-                                     "steps: how to stage a commit there, run it and fetch the results (rl "
-                                     "connects to, copies to and starts nothing); sync: push the current branch "
-                                     "for the resources that fetch code by git (creating a private GitHub "
-                                     "repository when compute.repository allows) and print their clone step")
-    sp.add_argument("action", nargs="?", choices=["show", "steps", "sync"], default="show")
-    sp.add_argument("resource", nargs="?", help="a resource name (steps: default the attempt's, else "
-                                                 "compute.default; sync: default every resource that uses git)")
-    sp.add_argument("--commit", help="full commit id (default: the attempt's, else HEAD of your checkout)")
-    sp.add_argument("--attempt", help="an attempt: its resource, commit and output directory")
-    sp = add("usage", cmd_usage, "Claude Code's status line command, which keeps Claude's usage windows for rl "
-                                 "(rl agent list shows the hosts' usage)")
-    sp.add_argument("action", nargs="?", choices=["statusline"],
-                    help="statusline: Claude Code's status line command (reads its input on stdin)")
+    add("tree", cmd_tree, "the hypothesis tree, one line each")
+    sp = add("refs", cmd_refs, "check locators and print their expansion")
+    sp.add_argument("refs", nargs="+")
     sp = add("link", cmd_link, "relate two records: " + ", ".join(LINKABLE))
     sp.add_argument("source")
     sp.add_argument("relation", choices=LINKABLE)
@@ -666,325 +520,319 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--note")
     sp.add_argument("--locator")
     sp.add_argument("--assessment", choices=PAPER_ASSESSMENTS)
+    sp = add("export", cmd_export, "a consistent snapshot of records and sealed documents")
+    sp.add_argument("--out")
+    sp.add_argument("--records-only", action="store_true")
+    sp = add("restore", cmd_restore, "rebuild a project from a snapshot into a new directory")
+    sp.add_argument("snapshot")
+    sp.add_argument("--into", required=True)
+    sp = add("digest", cmd_digest, "blake2b digests of files or directories")
+    sp.add_argument("paths", nargs="+")
+    sp = add("upgrade", cmd_upgrade, "after a plugin update: the record format, what to adjust")
+    sp.add_argument("--note")
+    sp.add_argument("--move", nargs=2, metavar=("OLD", "NEW"))
+    sp = add("watch", cmd_watch, "the watcher: run (the loop), once (one beat), start (in its own herdr tab)")
+    sp.add_argument("action", nargs="?", choices=["run", "once", "start"], default="run")
+    sp = add("hook", cmd_hook, "host hook handler (reads the hook event JSON on stdin)")
+    sp.add_argument("event", choices=["session-start"])
+    sp.add_argument("--host", required=True, choices=["claude", "codex"])
+    sp = add("usage", cmd_usage, "Claude Code's status line command (keeps the usage windows for the watcher)")
+    sp.add_argument("action", nargs="?", choices=["statusline"])
+    sp = add("compute", cmd_compute, "compute resources: show, steps (how to stage, run and fetch), sync")
+    sp.add_argument("action", nargs="?", choices=["show", "steps", "sync"], default="show")
+    sp.add_argument("resource", nargs="?")
+    sp.add_argument("--commit")
+    sp.add_argument("--attempt")
+    sp = add("docs", cmd_docs, "the coordinator commits docs/glossary.md or docs/explanations/*.md")
+    sp.add_argument("paths")
+    sp.add_argument("--message", required=True)
 
-    sp = add("session", cmd_session, "register or end a host session")
-    ss = sp.add_subparsers(dest="action", required=True)
-    s = ss.add_parser("start")
-    s.add_argument("--role", required=True, help="coordinator, researcher[-name], reviewer or advisor")
-    s.add_argument("--host", required=True, choices=["claude", "codex", "other"])
-    s.add_argument("--host-session-id")
-    s.add_argument("--model", help="requested model")
-    s.add_argument("--model-observed", help="model the host reports it is running")
-    s.add_argument("--effort")
-    s.add_argument("--worktree")
-    s.add_argument("--no-sync", action="store_true", help="coordinator: skip rl compute sync (push to the git "
-                                                          "remote of the remote resources, print their clone step)")
-    s = ss.add_parser("end")
-    s.add_argument("id")
-
-    sp = add("hypothesis", cmd_hypothesis, "add, revise, set the status of or list hypotheses")
-    ss = sp.add_subparsers(dest="action", required=True)
+    sp = add("hypothesis", cmd_hypothesis, "hypotheses: add, revise, flag, keep, drop, defer, list")
+    ss = subs(sp)
     s = ss.add_parser("add")
     s.add_argument("--title", required=True)
-    s.add_argument("--statement", required=True, help="the testable claim, one or two sentences")
-    s.add_argument("--scope", help="conditions the claim is about")
-    s.add_argument("--disposition", default="active", choices=ENUMS["disposition"])
-    s.add_argument("--derived-from", action="append", help="scientific source: hypotheses (H2.1 or H-0005), AD- or "
-                                                           "P- ids; the label goes under the latest hypothesis")
-    s.add_argument("--combines", action="append")
-    s.add_argument("--motivated-by", action="append")
-    s.add_argument("--origin", help="where it came from, e.g. 'plan §3' or 'advice AD-0002 #1'")
-    s.add_argument("--statement-file", help="longer statement document to seal")
-    g = s.add_mutually_exclusive_group()
-    g.add_argument("--parent", help="the --derived-from hypothesis its label goes under (default: the latest "
-                                    "created)")
-    g.add_argument("--root", action="store_true", help="a new top-level label (Hn): it opens a new line of research; "
-                                                       "its sources are recorded as usual")
+    s.add_argument("--statement", required=True, help="the testable claim")
+    s.add_argument("--purpose", required=True, help="one sentence: what testing it answers")
+    s.add_argument("--scope")
+    s.add_argument("--source", help="where in the plan it comes from (a heading)")
+    s.add_argument("--parent", help="its primary parent (the tree edge)")
+    s.add_argument("--assumes", help="hypotheses it takes as premises")
+    s.add_argument("--cost", help="rough cost, e.g. 'about 2 GPU·h'")
+    s.add_argument("--composite", action="store_true", help="decided by its children's verdicts")
+    s.add_argument("--motivated-by")
     s = ss.add_parser("revise")
     s.add_argument("id")
     s.add_argument("--reason", required=True)
-    s.add_argument("--statement")
-    s.add_argument("--scope")
-    s.add_argument("--title")
-    s.add_argument("--base-revision", type=int)
-    s.add_argument("--statement-file")
-    s = ss.add_parser("set")
+    for f in ("--statement", "--scope", "--title", "--purpose", "--source", "--cost"):
+        s.add_argument(f)
+    s = ss.add_parser("flag")
     s.add_argument("id")
-    s.add_argument("--reason", required=True)
-    s.add_argument("--evidence-status", choices=ENUMS["evidence_status"],
-                   help="supported and challenged are key conclusions: rl decide --set-evidence-status")
-    s.add_argument("--disposition", choices=ENUMS["disposition"])
-    s.add_argument("--rechecked", action="store_true", help="clear a needs-recheck flag after checking")
-    s = ss.add_parser("list", help="the hypotheses by label (rl --json hypothesis list: the records)")
-    s.add_argument("--status", choices=ENUMS["evidence_status"])
-    s.add_argument("--disposition", choices=ENUMS["disposition"])
+    s.add_argument("--lack", required=True, choices=["novelty", "feasibility"])
+    s.add_argument("--basis", required=True)
+    s.add_argument("--options", required=True)
+    for name in ("keep", "drop"):
+        ss.add_parser(name).add_argument("id")
+    s = ss.add_parser("defer")
+    s.add_argument("id")
+    s.add_argument("--reason")
+    s.add_argument("--clear", action="store_true")
+    ss.add_parser("list")
 
-    sp = add("experiment", cmd_experiment, "create an experiment contract draft or seal it")
-    ss = sp.add_subparsers(dest="action", required=True)
+    sp = add("experiment", cmd_experiment, "experiments: add, set")
+    ss = subs(sp)
     s = ss.add_parser("add")
     s.add_argument("--title", required=True)
     s.add_argument("--question", required=True)
-    s.add_argument("--hypotheses", action="append", required=True)
-    s.add_argument("--anchor", help="the hypothesis its label goes under (default: the deepest common ancestor of "
-                                    "--hypotheses, else the first)")
-    s.add_argument("--stage", choices=ENUMS["stage"])
-    for f in ("intervention", "comparator", "metric", "scope", "outcome-actions", "budget", "stop"):
-        s.add_argument(f"--{f}")
-    s.add_argument("--compared-with", action="append")
-    s.add_argument("--code-from", help="experiment whose code this starts from")
-    s.add_argument("--depends-on", action="append")
-    s = ss.add_parser("seal")
+    s.add_argument("--hypotheses", required=True)
+    s.add_argument("--motivated-by", required=True, help="the final route decision behind it")
+    s = ss.add_parser("set")
     s.add_argument("id")
+    s.add_argument("--reason", help="required once sealed: a new revision")
+    s.add_argument("--title")
+    s.add_argument("--question")
+    for sx in (ss.choices["add"], s):
+        sx.add_argument("--manifest", help="path of the manifest in the repository (arms, seeds, split, config)")
+        sx.add_argument("--protected", help="path::symbol units the researcher may not change")
+        sx.add_argument("--semantic-tests", help="the command that runs the semantic tests")
+        sx.add_argument("--brief", help="a document file explaining the design")
+        sx.add_argument("--estimate")
 
-    sp = add("evidence", cmd_evidence, "record evidence, change its validity or list it")
-    ss = sp.add_subparsers(dest="action", required=True)
+    sp = add("evidence", cmd_evidence, "evidence: add (a fact from evidence runs, no direction), set")
+    ss = subs(sp)
     s = ss.add_parser("add")
+    s.add_argument("--task", required=True)
     s.add_argument("--summary", required=True)
     s.add_argument("--level", required=True, choices=ENUMS["evidence_level"])
-    s.add_argument("--validity", default="pending", choices=ENUMS["validity"])
+    s.add_argument("--results")
+    s.add_argument("--attempts")
     s.add_argument("--scope")
-    s.add_argument("--supports", action="append")
-    s.add_argument("--challenges", action="append")
-    s.add_argument("--attempts", action="append")
-    s.add_argument("--results", action="append")
-    s.add_argument("--experiment")
-    s.add_argument("--artifacts", action="append")
-    s.add_argument("--doc", help="analysis document to seal")
+    s.add_argument("--artifacts")
+    s.add_argument("--doc")
     s = ss.add_parser("set")
     s.add_argument("id")
     s.add_argument("--validity", required=True, choices=ENUMS["validity"])
     s.add_argument("--reason", required=True)
-    s = ss.add_parser("list", help="the evidence and what it supports or challenges (rl --json evidence list: the "
-                                   "records)")
-    s.add_argument("--validity", choices=ENUMS["validity"])
-    s.add_argument("--level", choices=ENUMS["evidence_level"])
 
-    sp = add("decide", cmd_decide, "record a route or stage decision")
-    sp.add_argument("--targets", action="append", required=True)
-    sp.add_argument("--action", required=True, choices=ENUMS["decision_action"])
-    sp.add_argument("--rationale", help="the short reason, kept in the record and reports (default: the first line "
-                                        "of text of --rationale-file)")
-    sp.add_argument("--based-on", action="append", help="evidence, results, papers, tickets or earlier decisions")
-    sp.add_argument("--reopen-condition")
-    sp.add_argument("--stage", action="store_true", help="stage delivery: implementation, evidence scope, investment")
-    sp.add_argument("--implementation-ready")
-    sp.add_argument("--evidence-scope")
-    sp.add_argument("--set-evidence-status", choices=ENUMS["evidence_status"])
+    sp = add("decide", cmd_decide, "a decision: verdict or stop (drafts until a conclusion review passes), route, "
+                                   "phase; --final D-x finalizes a draft")
+    sp.add_argument("--final", metavar="D-x")
+    sp.add_argument("--kind", choices=["verdict", "stop", "route", "phase"])
+    sp.add_argument("--targets")
+    sp.add_argument("--rationale")
     sp.add_argument("--rationale-file")
+    sp.add_argument("--based-on")
+    sp.add_argument("--status", help="verdict: supported|challenged|inconclusive; stop: paused|retired")
+    sp.add_argument("--supports")
+    sp.add_argument("--challenges")
+    sp.add_argument("--did", help="verdict: what was done (one or two sentences, no copied numbers)")
+    sp.add_argument("--means", help="verdict: what it means")
+    sp.add_argument("--highlights", help="phase: JSON list of {decision, why}")
 
-    sp = add("task", cmd_task, "tasks: create, claim, deliver, wait, block, resume, handoff, accept, stop, reopen, list")
-    ss = sp.add_subparsers(dest="action", required=True)
+    sp = add("task", cmd_task, "tasks: create, claim, release, cancel, test, dispatch, block, answer, set, deliver, "
+                               "accept, return, check, list")
+    ss = subs(sp)
     s = ss.add_parser("create")
-    s.add_argument("--title", required=True)
     s.add_argument("--kind", required=True, choices=ENUMS["task_kind"])
-    s.add_argument("--targets", action="append")
-    s.add_argument("--request", help="task document to seal")
-    s.add_argument("--to-role")
-    s.add_argument("--next-action")
-    s.add_argument("--depends-on", action="append")
-    s = ss.add_parser("claim")
+    s.add_argument("--title", help="default for a hypothesis task: its hypothesis's title")
+    s.add_argument("--targets")
+    s.add_argument("--priority", type=int)
+    s.add_argument("--envelope")
+    s.add_argument("--parallel", type=int)
+    s.add_argument("--reason")
+    s.add_argument("--phase")
+    s.add_argument("--experiment")
+    s.add_argument("--requirement")
+    s.add_argument("--done-check")
+    s.add_argument("--estimate")
+    s.add_argument("--mandate", help="a mandate document file")
+    s.add_argument("--depends-on")
+    for name in ("claim", "accept", "check"):
+        ss.add_parser(name).add_argument("id")
+    s = ss.add_parser("release")
     s.add_argument("id")
-    s.add_argument("--role", required=True)
-    s.add_argument("--session")
-    for name in ("deliver", "wait", "block", "resume", "handoff"):
-        s = ss.add_parser(name)
-        s.add_argument("id")
-        s.add_argument("--role", required=True, help="your role, e.g. researcher")
-        if name == "handoff":
-            s.add_argument("--doc", required=True)
-            s.add_argument("--to-role")
-            continue
-        s.add_argument("--summary")
-        s.add_argument("--next-action")
-        if name == "deliver":
-            s.add_argument("--output", action="append")
-            s.add_argument("--verified", action="append", metavar="\"<command> @<commit>: pass|fail, log <path>\"",
-                           help="a test run of the changed code (repeatable); task accept shows it")
-        if name == "wait":
-            s.add_argument("--attempts", action="append")
-        if name == "block":
-            s.add_argument("--reason", required=True, choices=ENUMS["blocked_reason"])
-    for name in ("accept", "stop", "reopen"):
+    s.add_argument("--to", choices=["scientist"])
+    for name in ("cancel", "return"):
         s = ss.add_parser(name)
         s.add_argument("id")
         s.add_argument("--reason", required=True)
+    s = ss.add_parser("test")
+    s.add_argument("id")
+    s.add_argument("--record", choices=["pass", "fail"])
+    s.add_argument("--commit")
+    s.add_argument("--log")
+    s = ss.add_parser("dispatch")
+    s.add_argument("id")
+    s.add_argument("--note")
+    s = ss.add_parser("block")
+    s.add_argument("id")
+    s.add_argument("--reason", required=True, choices=["design", "mandate", "question"])
+    s.add_argument("--note", required=True)
+    s = ss.add_parser("answer")
+    s.add_argument("id")
+    s.add_argument("--text", required=True)
+    s = ss.add_parser("set")
+    s.add_argument("id")
+    s.add_argument("--requirement")
+    s.add_argument("--done-check")
+    s.add_argument("--envelope")
+    s.add_argument("--estimate")
+    s = ss.add_parser("deliver")
+    s.add_argument("id")
+    s.add_argument("--conclusion")
+    s.add_argument("--limitations")
+    s.add_argument("--outputs")
+    s.add_argument("--reusable", help="one sentence: what of its outputs others may reuse")
+    s.add_argument("--note")
     s = ss.add_parser("list")
     s.add_argument("--all", action="store_true")
 
-    sp = add("inbox", cmd_inbox, "messages for a role; --ack advances the cursor (no reply is sent)")
-    sp.add_argument("--role", required=True)
-    sp.add_argument("--ack", nargs="?", const=True, metavar="MSG-x",
-                    help="acknowledge the messages shown; with MSG-x, only up to that message")
-    sp.add_argument("--all", action="store_true")
-    sp = add("msg", cmd_msg, "send a short message that points to documents")
-    sp.add_argument("--type", required=True, choices=ENUMS["message_type"])
-    sp.add_argument("--from", dest="sender", required=True)
-    sp.add_argument("--to", required=True)
+    sp = add("phase", cmd_phase, "phases: create, add")
+    ss = subs(sp)
+    s = ss.add_parser("create")
+    s.add_argument("--title", required=True)
+    s.add_argument("--scientists", type=int)
+    s.add_argument("--budget", help="shown only")
+    s.add_argument("--tasks")
+    s = ss.add_parser("add")
+    s.add_argument("id")
+    s.add_argument("--tasks", required=True)
+
+    sp = add("request", cmd_request, "decision requests: rl request --stuck .. --options .. --recommend ..; forward; "
+                                     "answer")
+    sp.add_argument("action", nargs="?", choices=["new", "forward", "answer"], default="new")
+    sp.add_argument("id", nargs="?")
+    sp.add_argument("--stuck")
+    sp.add_argument("--options")
+    sp.add_argument("--recommend")
+    sp.add_argument("--cost")
     sp.add_argument("--task")
+    sp.add_argument("--kind", choices=["decision", "approval"], default="decision")
+    sp.add_argument("--by", choices=["coordinator", "user"])
     sp.add_argument("--text")
-    sp.add_argument("--next-action")
-    sp.add_argument("--doc", action="append")
-    sp.add_argument("--message-id")
 
-    sp = add("context", cmd_context, "purpose-specific context pack: work, resume, review or advice")
-    sp.add_argument("--purpose", required=True, choices=["work", "resume", "review", "advice"])
-    sp.add_argument("--task")
-    sp.add_argument("--role")
-    sp.add_argument("--ticket")
-    sp.add_argument("--target")
-    sp.add_argument("--question")
-    sp.add_argument("--budget", type=int, help="token target (estimated)")
+    sp = add("review", cmd_review, "review rounds: request, answer, settle")
+    ss = subs(sp)
+    s = ss.add_parser("request")
+    s.add_argument("target", help="a task (design or tree review) or a draft decision (conclusion review)")
+    s.add_argument("--kind", choices=["design", "conclusion", "tree"], default="design")
+    s.add_argument("--question")
+    s.add_argument("--recheck-of")
+    s = ss.add_parser("answer")
+    s.add_argument("id")
+    s.add_argument("--verdict", required=True, choices=["pass", "fail"])
+    s.add_argument("--findings", help="JSON list of {category, severity, text, loc[, engineering_reason]}")
+    s.add_argument("--close", help="JSON list of {n, status: fixed|constrained|withdrawn, conditions}")
+    s.add_argument("--doc", help="the answer document file")
+    s = ss.add_parser("settle")
+    s.add_argument("id", help="RV-x#Fn")
+    s.add_argument("--status", required=True, choices=["constrained", "withdrawn"])
+    s.add_argument("--conditions")
 
-    sp = add("run", cmd_run, "run records: register, record, import-result, reject-result, usage, show")
-    ss = sp.add_subparsers(dest="action", required=True)
-    s = ss.add_parser("register", help="register an immutable RunSpec and a prepared attempt (starts nothing); "
-                                       "records whether code reviews cover its code")
-    s.add_argument("--experiment", required=True)
-    s.add_argument("--request-id", required=True, help="caller id that makes retries idempotent")
-    s.add_argument("--spec", help="RunSpec JSON (inline, @file or path); flags below add to it")
-    s.add_argument("--run", help="register a new attempt of this existing run (re-execution)")
+    sp = add("advise", cmd_advise, "advice: ask (a consultation), answer")
+    ss = subs(sp)
+    s = ss.add_parser("ask")
+    s.add_argument("--question", required=True)
+    s = ss.add_parser("answer")
+    s.add_argument("id")
+    s.add_argument("--doc", required=True)
+    s.add_argument("--rulings", help="JSON list of {n, ruling: uphold|withdraw, reason}")
+
+    sp = add("question", cmd_question, "the coordinator asks a session a question; --close after reading the answer")
+    sp.add_argument("--to")
+    sp.add_argument("--on", help="the record it is about")
+    sp.add_argument("--text")
+    sp.add_argument("--ref", action="append")
+    sp.add_argument("--close", metavar="MSG-x")
+    sp = add("reply", cmd_reply, "reply to a dialogue entry addressed to you")
+    sp.add_argument("id")
+    sp.add_argument("--text", required=True)
+    sp.add_argument("--ref", action="append")
+    sp = add("discuss", cmd_discuss, "review discussion in an open round (RV-x) or on a finding (RV-x#Fn)")
+    sp.add_argument("id")
+    sp.add_argument("--text", required=True)
+    sp.add_argument("--ref", action="append")
+
+    sp = add("run", cmd_run, "runs: register, ended, record, import-result, reject-result, handled, usage, show")
+    ss = subs(sp)
+    s = ss.add_parser("register", help="register a run and a prepared attempt (starts nothing)")
+    s.add_argument("--task", required=True)
+    s.add_argument("--request-id", required=True)
     s.add_argument("--arm")
-    s.add_argument("--seed", type=int)
-    s.add_argument("--code-commit", help="full commit id")
-    s.add_argument("--code-digest", help="content digest of the code (rl digest src/)")
-    s.add_argument("--code-unknown", action="store_true")
-    s.add_argument("--config-digest")
-    s.add_argument("--config-ref")
-    s.add_argument("--data-revision")
-    s.add_argument("--model-revision")
-    s.add_argument("--metric")
-    s.add_argument("--metric-spec-ref")
-    s.add_argument("--environment-ref")
-    s.add_argument("--output-spec")
-    s.add_argument("--resume-from")
-    s.add_argument("--param", action="append", help="k=v (JSON values allowed)")
-    s.add_argument("--resource", help="the compute resource this attempt runs on (compute.resources); kept with "
-                                      "its planned code and output locations")
-    g = s.add_mutually_exclusive_group()
-    g.add_argument("--review", action="append", help="code review (RV-x) to check besides the experiment's own")
-    g.add_argument("--no-review", metavar="REASON", help="why this run needs no code review (e.g. smoke test)")
-    s = ss.add_parser("record", help="record an observation of an attempt (queries nothing)")
-    s.add_argument("--observation", help="one observation, a JSON array or JSON Lines (inline, @file, path or -); "
-                   "flags fill in or override every record")
+    s.add_argument("--seed")
+    s.add_argument("--config", help="the run's configuration as JSON")
+    s.add_argument("--split")
+    s.add_argument("--commit")
+    s.add_argument("--minutes", type=float, help="expected duration (the attempt's expected end)")
+    s.add_argument("--trial", action="store_true", help="a trial run (smoke, timing): at most limits.trial_minutes")
+    s.add_argument("--deviation", help="register a run that differs from the manifest (not evidence)")
+    s.add_argument("--purpose", choices=list(runs.PURPOSES))
+    s.add_argument("--ticket")
+    s.add_argument("--run", help="a new attempt of this run")
+    s.add_argument("--resource")
+    s.add_argument("--param", action="append")
+    s = ss.add_parser("ended", help="the executor's command delivery: the notification JSON on stdin")
     s.add_argument("--attempt")
-    s.add_argument("--source", help="tool or person that observed this, e.g. local-shell, qstat")
-    s.add_argument("--observed-at", help="when the fact was observed (default: now)")
+    s.add_argument("--outcome", choices=ENUMS["outcome"])
+    s.add_argument("--note")
+    s = ss.add_parser("record", help="record an observation of an attempt (queries nothing)")
+    s.add_argument("--observation")
+    s.add_argument("--attempt")
+    s.add_argument("--source", default="local-shell")
+    s.add_argument("--observed-at")
     s.add_argument("--state", choices=ENUMS["execution_state"])
     s.add_argument("--outcome", choices=ENUMS["outcome"])
     s.add_argument("--raw-state")
-    s.add_argument("--source-ref", help="log path or command output the fact comes from")
-    s.add_argument("--sequence", type=int, help="the source's own sequence number, when it has one")
-    s.add_argument("--record-id", help="stable id for deduplication (default: content digest)")
+    s.add_argument("--source-ref")
+    s.add_argument("--record-id")
     s.add_argument("--exec-kind", choices=ENUMS["exec_kind"], default="local_process")
-    s.add_argument("--exec-namespace", help="e.g. host:<hostname>:<boot-id> or scheduler")
-    s.add_argument("--exec-id", help="the external tool's full identifier")
+    s.add_argument("--exec-namespace")
+    s.add_argument("--exec-id")
     s.add_argument("--exec-locator")
-    s.add_argument("--correction-of")
     s.add_argument("--note")
-    s = ss.add_parser("import-result", help="import a result manifest (fetches and validates nothing)")
+    s = ss.add_parser("import-result")
     s.add_argument("--attempt", required=True)
-    s.add_argument("--manifest", required=True)
+    s.add_argument("--manifest", required=True, help="the result manifest JSON: status, arm, seed, commit, config, "
+                                                     "metrics, artifacts")
     s.add_argument("--request-id", required=True)
     s = ss.add_parser("reject-result")
     s.add_argument("id")
     s.add_argument("--reason", required=True)
-    s = ss.add_parser("usage", help="optional resource usage; unreported is never zero")
-    s.add_argument("--accounting-ref", required=True, help="namespaced, e.g. scheduler:12345")
+    s = ss.add_parser("handled")
+    s.add_argument("attempts")
+    s.add_argument("--note", required=True)
+    s = ss.add_parser("usage")
+    s.add_argument("--accounting-ref", required=True)
     s.add_argument("--quantity", type=float, required=True)
-    s.add_argument("--unit", required=True, help="e.g. s, cpu_h, gpu_h, node_h, usd")
-    s.add_argument("--resource-type", required=True, help="e.g. compute, api")
+    s.add_argument("--unit", required=True)
+    s.add_argument("--resource-type", required=True)
     s.add_argument("--hardware")
     s.add_argument("--basis", choices=ENUMS["usage_basis"], default="reported")
     s.add_argument("--source-ref")
     s.add_argument("--attempts", action="append")
     s.add_argument("--note")
     s.add_argument("--revise", action="store_true")
-    s = ss.add_parser("show", help="recorded run state; nothing is queried")
+    s = ss.add_parser("show")
     s.add_argument("id", nargs="?")
     s.add_argument("--active", action="store_true")
 
-    for name, fn, help_ in (("review", cmd_review, "independent reviews by the configured reviewer: code before "
-                                                   "costly runs, key conclusions before they are recorded"),
-                            ("advise", cmd_advise, "advice rounds: every configured advisor answers on its own; "
-                                                   "advice.max_rounds per project")):
-        sp = add(name, fn, help_)
-        ss = sp.add_subparsers(dest="action", required=True)
-        if name == "review":
-            s = ss.add_parser("request")
-            s.add_argument("--files", action="append", required=True)
-            s.add_argument("--author-model", action="append", required=True, help="model(s) that wrote the code")
-            s.add_argument("--question", required=True)
-            s.add_argument("--target")
-            s.add_argument("--configs", action="append")
-            s.add_argument("--deps", action="append")
-            s.add_argument("--ignore-keys", action="append", help="config keys allowed to vary, e.g. seed,output_dir")
-            s.add_argument("--scope")
-            s.add_argument("--diff-base")
-            s.add_argument("--recheck-of", help="the review this re-checks after fixes (the second of its round)")
-            s.add_argument("--new-round", help="start a new review round, with the coordinator's reason")
-            s = ss.add_parser("conclusion", help="check a key conclusion (supported/challenged, a retired route, "
-                                                 "a formal recommendation) before recording it")
-            s.add_argument("--target", action="append", required=True, help="hypothesis id(s) the conclusion is about")
-            s.add_argument("--proposal", required=True, help="the conclusion or decision you plan to record")
-            s.add_argument("--author-model", action="append", required=True,
-                           help="model(s) that drew the conclusion (you, and a researcher that interpreted results)")
-            s.add_argument("--question")
-            s.add_argument("--recheck-of", help="the review this re-checks after changes (the second of its round)")
-            s.add_argument("--new-round", help="start a new review round, with the coordinator's reason")
-            s = ss.add_parser("approve", help="the coordinator accepts a review's remaining findings")
-            s.add_argument("id")
-            s.add_argument("--rationale", required=True)
-            s = ss.add_parser("resolve", help="the coordinator records that a passing re-check resolved a "
-                                              "review's findings (the review leaves attention and still does not pass)")
-            s.add_argument("id")
-            s.add_argument("--by", required=True, help="the passing re-check (--recheck-of it, or down the chain)")
-            s.add_argument("--reason", required=True)
-        else:
-            s = ss.add_parser("prepare")
-            s.add_argument("--question", required=True)
-            s.add_argument("--target")
-            s.add_argument("--user-approved", help="the user's approval of a round beyond advice.max_rounds")
-        s = ss.add_parser("run")
-        if name == "review":
-            s.add_argument("id")
-        else:
-            s.add_argument("id", nargs="+", help="the tickets of a round; several run at the same time")
-        s.add_argument("--background", action="store_true")
-        s.add_argument("--timeout", type=int, default=1800)
-        s.add_argument("--entry", help="override: one model entry <claude|codex|pi>:<model>[@effort]")
-        s.add_argument("--headless", action="store_true", help=HEADLESS_HELP)
-        s = ss.add_parser("answer", help="the answer of a reviewer or advisor session opened with rl agent open")
-        s.add_argument("id")
-        s.add_argument("--answer", required=True, help="file with the answer, ending with its JSON block")
-        s.add_argument("--session", help="the session name (default: this session's)")
-        s = ss.add_parser("import")
-        s.add_argument("id")
-        s.add_argument("--answer", required=True)
-        s.add_argument("--source", required=True, help="where the answer came from")
-        s.add_argument("--model-observed")
-        s.add_argument("--provider")
-        s.add_argument("--session-id")
-        s = ss.add_parser("show")
-        s.add_argument("id", nargs="?")
-
     sp = add("paper", cmd_paper, "literature: add, search, link, access, list")
-    ss = sp.add_subparsers(dest="action", required=True)
+    ss = subs(sp)
     s = ss.add_parser("add")
-    s.add_argument("identifier", nargs="?", help="arXiv id or DOI")
+    s.add_argument("identifier", nargs="?")
     s.add_argument("--title")
     s.add_argument("--authors", action="append")
     s.add_argument("--year", type=int)
     s.add_argument("--url")
-    s.add_argument("--fetch", action="store_true", help="verify metadata with arXiv/Crossref")
+    s.add_argument("--fetch", action="store_true")
     s = ss.add_parser("search")
     s.add_argument("query")
     s.add_argument("--limit", type=int, default=5)
     s = ss.add_parser("link")
-    s.add_argument("source", help="hypothesis (or experiment/evidence/decision) the paper bears on")
+    s.add_argument("source")
     s.add_argument("paper")
     s.add_argument("--relation", required=True, choices=["nearest_work", "motivated_by", "cites"])
     s.add_argument("--assessment", required=True, choices=PAPER_ASSESSMENTS)
-    s.add_argument("--locator", help="section / equation / table / page")
+    s.add_argument("--locator")
     s.add_argument("--note")
     s.add_argument("--note-file")
     s = ss.add_parser("access")
@@ -993,122 +841,53 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--digest")
     ss.add_parser("list")
 
-    sp = add("agent", cmd_agent, "agent sessions in herdr tabs: open, assign, tell, reset, close, switch, list, "
-                                 "brief, dialog, answer, check, watch")
-    ss = sp.add_subparsers(dest="action", required=True)
-    s = ss.add_parser("open", help="open a researcher, reviewer or advisor session in a new herdr tab")
-    s.add_argument("name", nargs="?", help="session name, e.g. researcher-1 (default: <role>-<n>)")
-    s.add_argument("--role", required=True, choices=agents.ROLE_KINDS)
-    s.add_argument("--entry", help="<claude|codex|pi>:<model>[@effort] (default: the first available entry of "
-                                   "the ticket or of models.<role>)")
-    s.add_argument("--task", help="first assignment of a researcher")
-    s.add_argument("--ticket", help="first assignment of a reviewer (RV-x) or an advisor (AD-x)")
-    s.add_argument("--no-worktree", action="store_true", help="a researcher works in the project directory")
-    s.add_argument("--base", help="where new task branches start (default: the main checkout's branch)")
-    s.add_argument("--timeout", type=int, default=90, help="seconds to wait for the agent to start")
-    s = ss.add_parser("assign", help="give an open session its next assignment")
+    sp = add("agent", cmd_agent, "a session's dialog: dialog (show it), answer (the coordinator selects an option)")
+    ss = subs(sp)
+    s = ss.add_parser("dialog")
     s.add_argument("name")
-    s.add_argument("--task")
-    s.add_argument("--ticket")
-    s = ss.add_parser("tell", help="a recorded message to a role or session; its live session gets a notice")
-    s.add_argument("to", help="coordinator or a session name")
-    s.add_argument("text", nargs="*")
-    s.add_argument("--file", help="read the message text from this file (no shell quoting)")
-    s.add_argument("--from", dest="sender", help="default: this session's name, else coordinator")
-    s.add_argument("--task")
-    s = ss.add_parser("reset", help="prepare a session for reuse")
+    s = ss.add_parser("answer")
     s.add_argument("name")
-    g = s.add_mutually_exclusive_group(required=True)
-    g.add_argument("--compact", action="store_true", help="keep a summary of the conversation (/compact)")
-    g.add_argument("--clear", action="store_true", help="start a new conversation (/clear, or /new in Codex and pi)")
-    s = ss.add_parser("close", help="close the session and its herdr tab")
-    s.add_argument("name")
-    s.add_argument("--remove-worktree", action="store_true", help="also remove its worktree when it is clean")
-    s = ss.add_parser("switch", help="continue a researcher's or reviewer's work on another model (its host's "
-                                     "subscription is low): close it and open one of the same name on the next entry")
-    s.add_argument("name")
-    s.add_argument("--entry", help="<claude|codex|pi>:<model>[@effort] (default: the next entry of its role that is "
-                                   "not on a low host)")
-    s.add_argument("--now", action="store_true", help="also while it works (it stops mid-turn)")
-    s.add_argument("--timeout", type=int, default=90, help="seconds to wait for the new agent to start")
-    s = ss.add_parser("brief", help="what the session does now (read by the session itself)")
-    s.add_argument("name", nargs="?")
-    s = ss.add_parser("list", help="the sessions as the watcher sees them (herdr status, class, waits, progress, "
-                                   "last error, retries, next action) and the hosts' usage; it acts on nothing")
-    s.add_argument("--all", action="store_true", help="closed sessions too")
-    s = ss.add_parser("dialog", help="what a session's agent shows now: a dialog with its options, or a question")
-    s.add_argument("name")
-    s = ss.add_parser("answer", help="the coordinator answers a dialog in a session: select the option, confirm it, "
-                                     "record why")
-    s.add_argument("name")
-    s.add_argument("option", help="the option's number or the start of its text, as `rl agent dialog` shows it")
-    s.add_argument("--reason", required=True, help="why this option (recorded)")
-    ss.add_parser("check", help="one watcher beat now (skipped while the watcher's own beat runs): restart agents "
-                                "that exited, retry turns cut off by a service error, remind idle sessions of an "
-                                "unfinished assignment, report the rest to the coordinator")
-    s = ss.add_parser("watch", help="the watcher: a beat every agents.watch_minutes over the open sessions and the "
-                                    "coordinator (rl agent open starts it in its own herdr tab)")
-    s.add_argument("--every", type=float, help="minutes between beats (default: agents.watch_minutes, 5)")
-    g = s.add_mutually_exclusive_group()
-    g.add_argument("--start", action="store_true", help="run it in its own herdr tab unless it already runs")
-    g.add_argument("--stop", action="store_true", help="stop it and close its tab")
-    s.add_argument("--own-tab", action="store_true", help=argparse.SUPPRESS)
-
-    sp = add("delegate", cmd_delegate, "run a ready task in an independent Claude/Codex/pi CLI session")
-    sp.add_argument("task")
-    sp.add_argument("--entry", help="<claude|codex|pi>:<model>[@effort] (default: the models.researcher entries in "
-                                     "order)")
-    sp.add_argument("--role", default="researcher")
-    sp.add_argument("--timeout", type=int, default=3600)
-    sp.add_argument("--background", action="store_true")
-    sp.add_argument("--headless", action="store_true", help=HEADLESS_HELP)
-
-    sp = add("hook", cmd_hook, "host hook handler (reads the hook event JSON on stdin)")
-    sp.add_argument("event", choices=["session-start"])
-    sp.add_argument("--host", required=True, choices=["claude", "codex"])
+    s.add_argument("option")
+    s.add_argument("--reason", required=True)
     _accept_global_options_everywhere(p)
     return p
 
 
 def _accept_global_options_everywhere(parser: argparse.ArgumentParser) -> None:
-    """Let --project and --json also follow a subcommand (`rl decide ... --json`)."""
-    for action in parser._actions:
-        if isinstance(action, argparse._SubParsersAction):
-            for sub in set(action.choices.values()):
-                sub.add_argument("--project", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
-                sub.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
-                sub.add_argument("--read-only", action="store_true", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
-                _accept_global_options_everywhere(sub)
+    """Let --project, --json and --as also follow a subcommand (`rl decide ... --json`)."""
+    def walk(pp: argparse.ArgumentParser) -> None:
+        for action in pp._actions:
+            if isinstance(action, argparse._SubParsersAction):
+                for sub in set(action.choices.values()):
+                    sub.add_argument("--project", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
+                    sub.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
+                    sub.add_argument("--as", dest="as_", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
+                    walk(sub)
+    walk(parser)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        if args.read_only:
-            _check_read_only(args)
         result = args.fn(args)
     except RLError as exc:
-        if args.command == "hook":  # a hook must never break the host session
+        if args.command == "hook":
             print(json.dumps({"systemMessage": f"smooth-research: {exc.message}"}))
             return 0
         print(f"error[{exc.code}]: {exc.message}", file=sys.stderr)
         if exc.details:
             print(json.dumps(exc.details, ensure_ascii=False, default=str, indent=1), file=sys.stderr)
-        for warning in getattr(args, "config_warnings", None) or []:  # they may explain the error
-            print(f"warning: {warning}", file=sys.stderr)
         return 3 if exc.code in CONFLICT_CODES else 1
-    warnings = [*(getattr(args, "config_warnings", None) or []), *_upgrade_notice(args), *_refresh_page(args)]
-    if args.command == "export" and args.records_only:  # the output is the records themselves, kept as they are
-        for warning in warnings:
-            print(f"warning: {warning}", file=sys.stderr)
-    elif warnings:
-        result["warnings"] = [*(result.get("warnings") or []), *warnings]
+    warnings = list(getattr(args, "config_warnings", None) or [])
+    store = getattr(args, "store", None)
+    if store is not None and args.command not in ("watch", "hook", "usage"):
+        note = watch.stale_note(store)
+        if note:
+            warnings.append(note)
     if args.command == "hook" or args.json:
         print(json.dumps(result, ensure_ascii=False, default=str, indent=None if args.command == "hook" else 1))
     else:
         print(result.get("summary", ""))
-        for warning in result.get("warnings") or []:
-            print(f"warning: {warning}")
-        for step in result.get("next") or []:
-            print(f"next: {step}")
+        for w in [*(result.get("warnings") or []), *warnings]:
+            print(f"warning: {w}")
     return 0

@@ -10,7 +10,6 @@ from pathlib import Path
 from latticedb import Database
 
 from . import documents
-from .context import resume_pack
 from .project import CONFIG_NAME, Project, load_config
 from .schema import ENTITIES, SCHEMA_VERSION
 from .store import Store, Tx
@@ -95,7 +94,9 @@ def restore(snapshot: str, into: str) -> dict:
     store = Store(project, "restore")  # an older snapshot is upgraded on this first open
     with store.read() as tx:
         check = documents.verify(tx, project)
-    pack = resume_pack(store)
+    from .pack import build
+    from .roles import parse
+    pack = build(store, parse("coordinator"))
     problems = check["problems"]
     return {"project": str(root), "problems": problems,
             "summary": f"restored into {root} (data_version {restored}); sealed documents: "
@@ -119,6 +120,10 @@ def doctor(store: Store) -> dict:
                 if v.get("path") and v.get("local_digest") and store.project.abs(v["path"]).is_file() \
                         and digest_file(store.project.abs(v["path"])) != v["local_digest"]:
                     dangling.append(f"{res['id']}: {v['path']} changed since import")
+    from .inbox import unwatched
+    with store.read() as tx:
+        missed = unwatched(tx, store.project.config)
+    dangling += [f"missed: {m}" for m in missed]
     lines = [f"{check['documents']} sealed object(s) checked"]
     lines += [f"problem: {p}" for p in check["problems"] + dangling]
     if check["unregistered_objects"]:

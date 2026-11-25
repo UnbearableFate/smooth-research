@@ -30,48 +30,48 @@ PLAN_PATH, CONSTRAINTS_PATH = "docs/plan.md", "docs/constraints.md"
 LAST_READ = "research/state/config.last-read.json"
 UNREAD = "_unread"  # in a loaded configuration: why the file could not be read
 
-# Model entries are "<entry>:<model>[@effort]"; entry is claude, codex, pi or manual (a person submits the
-# package). Researchers and reviewers use the first available entry of their list; every available advisor is
-# asked, each on its own. agents.args are extra launch arguments for the sessions `rl agent open` starts in
-# herdr tabs (no sandbox or approval flags are added otherwise: each CLI's own settings apply);
-# agents.watch_minutes is the time between the watcher's beats over those sessions (0 turns it off),
-# agents.stall_minutes how long a turn may show no progress before the watcher reports it, and
-# agents.wait_check_minutes how long a task may wait on runs with no news of them before the watcher asks the
-# coordinator to check them with their executor: again after twice as long, and so on (0 turns it off; watch.py).
-# usage: a Claude or Codex subscription is low when a 5-hour or weekly window has switch_left_percent or less left
-# (coordinator_host_left_percent on the coordinator's own host); its researchers and reviewers then hand over to
-# another entry of their role, and advisors keep the rest (usage.py).
-# manuscript.latex is the command that builds the manuscript (the paper draft) as a PDF (null: Markdown).
-# compute: where experiments run (this machine, remote hosts, clusters), how the agent reaches each one and how
-# the code of a commit gets there; rl connects to none of them (compute.py). Budgets stay in docs/constraints.md.
-# compute.coordinator: login disables checkout/shell resources and requires explicit run placement; local keeps
-# the ordinary workstation workflow. This is an execution policy, not hostname or allocation detection.
-# compute.repository: when a remote resource fetches code by git and the git remote is missing, the
-# coordinator's rl session start creates it (github-private: gh repo create --private) or leaves it (none).
+# Model entries are "<entry>:<model>[@effort]"; entry is claude, codex, pi or manual (a person does the work).
+# Each role's sessions use the first available entry of its list; the watcher moves a session to the next one
+# when its host's subscription runs low (watch.py). agents.args are extra launch arguments per host for the
+# sessions the watcher opens in herdr panes. agents.* times are the watcher's (design 11.2, 11.3, 7.7, 8.8):
+# beat_seconds between beats; clear_idle_minutes and clear_context_tokens: a session idle longer than the first
+# (the prompt cache is gone) whose context is larger than the second is cleared before it is woken, and reads its
+# pack again; user_quiet_minutes: the coordinator's pane gets a reminder only when the user has not typed there for
+# this long; heartbeat_minutes: a watcher heartbeat older than this counts as stopped; page_minutes: the research
+# page is drawn again at least this often; deadlines: minutes a to-do item may wait before it is escalated, by
+# item type (default for the rest). limits: trial_minutes is the longest a trial run may be registered for;
+# fast_lane is the largest estimate (by unit) a task may have to skip a new review round (6.6); scientists is the
+# phase's default limit of scientists at work; envelope_lines are the shares of a hypothesis task's envelope at
+# which its usage is flagged. compute: where experiments run (compute.py). Budgets stay in docs/constraints.md.
+# compute.coordinator: login disables checkout/shell resources and requires explicit run placement.
+# compute.tests: local (rl runs semantic tests and done checks itself) or job (they run as short jobs).
+# compute.repository: when a remote resource fetches code by git and the git remote is missing, rl resume creates
+# it (github-private: gh repo create --private) or leaves it (none).
 # Every key here is read by the CLI; docs/configuration.md explains each one.
 DEFAULT_CONFIG: dict = {
     "version": 1,
     "models": {
-        "researcher": ["claude:claude-opus-5-5@high", "codex:gpt-6-astra@high"],
+        "coordinator": ["claude:claude-opus-5-5@high", "codex:gpt-6-astra@high"],
+        "scientist": ["claude:claude-opus-5-5@high", "codex:gpt-6-astra@high"],
+        "researcher": ["claude:claude-sonnet-5-5@medium", "codex:gpt-6-astra@medium"],
         "reviewer": ["codex:gpt-6-astra@medium", "claude:claude-opus-5-5@medium"],
-        "advisor": ["codex:gpt-6-astra@max", "claude:claude-fable-5-1@high"],
+        "advisor": ["codex:gpt-6-astra@high", "claude:claude-fable-5-2@high"],
     },
-    "advice": {"max_rounds": 3},
-    "agents": {"args": {"claude": ["--permission-mode", "auto"], "codex": [], "pi": []}, "watch_minutes": 5,
-               "stall_minutes": 30, "wait_check_minutes": 60},
-    "usage": {"switch_left_percent": 10, "coordinator_host_left_percent": 20},
-    "context": {"work_target_tokens": 4000, "advice_target_tokens": 10000},
-    "manuscript": {"latex": None},
-    "compute": {"coordinator": "local", "default": "local", "repository": "github-private",
+    "agents": {"args": {"claude": ["--permission-mode", "auto"], "codex": [], "pi": []}, "beat_seconds": 30,
+               "clear_idle_minutes": 60, "clear_context_tokens": 120000, "user_quiet_minutes": 3,
+               "heartbeat_minutes": 5, "page_minutes": 15, "deadlines": {"default": 240}},
+    "limits": {"trial_minutes": 30, "fast_lane": {}, "scientists": 2, "envelope_lines": [0.8, 1.0, 1.5]},
+    "usage": {"switch_left_percent": 10},
+    "compute": {"coordinator": "local", "default": "local", "repository": "none", "tests": "local",
                 "resources": {"local": {"kind": "local"}}},
 }
-MODEL_ROLES = ("researcher", "reviewer", "advisor")
+MODEL_ROLES = ("coordinator", "scientist", "researcher", "reviewer", "advisor")
 # Mappings the file replaces as a whole instead of merging into the defaults: compute.resources names the user's
-# own resources (a project without the default local one leaves it out), and their keys are not the defaults'.
-WHOLE = ("compute.resources",)
+# own resources (a project without the default local one leaves it out), and their keys are not the defaults';
+# deadlines and fast_lane are keyed by item type and by unit.
+WHOLE = ("compute.resources", "agents.deadlines", "limits.fast_lane")
 
-RESEARCH_DIRS = ("state", "documents/objects", "packages", "mailbox", "snapshots", "literature", "calls",
-                 "artifacts", "experiments", "tasks", "notes", "reviews", "advice", "reports")
+RESEARCH_DIRS = ("state", "documents/objects", "snapshots", "literature", "artifacts", "work")
 DOCS_DIRS = ("explanations",)
 
 
@@ -210,50 +210,47 @@ def config_warnings(config: dict) -> list[str]:
                 Entry.parse(text)
             except RLError as exc:
                 out.append(f"{CONFIG_NAME}: models.{role}: {exc.message}; it is skipped")
-    rounds = (config.get("advice") or {}).get("max_rounds") if isinstance(config.get("advice"), dict) else None
-    if not _count(rounds):
-        out.append(f"{CONFIG_NAME}: advice.max_rounds must be a whole number of rounds, not {rounds!r}; using "
-                   f"{DEFAULT_CONFIG['advice']['max_rounds']}")
-    agents = config.get("agents")
-    watch = agents.get("watch_minutes") if isinstance(agents, dict) else None
-    if watch is not None and not _minutes(watch):
-        out.append(f"{CONFIG_NAME}: agents.watch_minutes must be a number of minutes (0 turns the watcher off), not "
-                   f"{watch!r}; using {DEFAULT_CONFIG['agents']['watch_minutes']}")
-    stall = agents.get("stall_minutes") if isinstance(agents, dict) else None
-    if stall is not None and not (_minutes(stall) and stall > 0):
-        out.append(f"{CONFIG_NAME}: agents.stall_minutes must be a positive number of minutes, not {stall!r}; using "
-                   f"{DEFAULT_CONFIG['agents']['stall_minutes']}")
-    waits = agents.get("wait_check_minutes") if isinstance(agents, dict) else None
-    if waits is not None and not _minutes(waits):
-        out.append(f"{CONFIG_NAME}: agents.wait_check_minutes must be a number of minutes (0 turns the check off), "
-                   f"not {waits!r}; using {DEFAULT_CONFIG['agents']['wait_check_minutes']}")
-    args = agents.get("args") if isinstance(agents, dict) else None
+    agents = config.get("agents") if isinstance(config.get("agents"), dict) else {}
+    for key in ("beat_seconds", "clear_idle_minutes", "clear_context_tokens", "user_quiet_minutes",
+                "heartbeat_minutes", "page_minutes"):
+        value = agents.get(key)
+        if value is not None and not (_minutes(value) and value > 0):
+            out.append(f"{CONFIG_NAME}: agents.{key} must be a positive number, not {value!r}; using "
+                       f"{DEFAULT_CONFIG['agents'][key]}")
+    deadlines = agents.get("deadlines")
+    for key, value in deadlines.items() if isinstance(deadlines, dict) else ():
+        if not (_minutes(value) and value > 0):
+            out.append(f"{CONFIG_NAME}: agents.deadlines.{key} must be a positive number of minutes, not {value!r}; "
+                       "using the default")
+    args = agents.get("args")
     for host, value in args.items() if isinstance(args, dict) else ():
         if value is not None and not isinstance(value, (str, list)):
             out.append(f"{CONFIG_NAME}: agents.args.{host} must be a list of arguments, not {value!r}; using "
                        f"{agent_args(config, host)}")
+    limits = config.get("limits") if isinstance(config.get("limits"), dict) else {}
+    for key in ("trial_minutes", "scientists"):
+        value = limits.get(key)
+        if value is not None and not (_minutes(value) and value > 0):
+            out.append(f"{CONFIG_NAME}: limits.{key} must be a positive number, not {value!r}; using "
+                       f"{DEFAULT_CONFIG['limits'][key]}")
+    fast = limits.get("fast_lane")
+    for unit, value in fast.items() if isinstance(fast, dict) else ():
+        if not _minutes(value):
+            out.append(f"{CONFIG_NAME}: limits.fast_lane.{unit} must be a number, not {value!r}; ignored")
     usage = config.get("usage")
     for key in DEFAULT_CONFIG["usage"]:
         value = usage.get(key) if isinstance(usage, dict) else None
         if value is not None and not _percent(value):
             out.append(f"{CONFIG_NAME}: usage.{key} must be a percentage from 0 to 100, not {value!r}; using "
                        f"{DEFAULT_CONFIG['usage'][key]}")
-    context = config.get("context")
-    for key in DEFAULT_CONFIG["context"]:
-        value = context.get(key) if isinstance(context, dict) else None
-        if value is not None and not _tokens(value):
-            out.append(f"{CONFIG_NAME}: context.{key} must be a positive whole number of tokens, not {value!r}; "
-                       f"using {DEFAULT_CONFIG['context'][key]}")
-    manuscript = config.get("manuscript")
-    latex = manuscript.get("latex") if isinstance(manuscript, dict) else None
-    if latex is not None and not latex_command(config):
-        out.append(f"{CONFIG_NAME}: manuscript.latex must be a build command such as 'latexmk -pdf "
-                   f"-interaction=nonstopmode', or null for a Markdown draft, not {latex!r}; writing Markdown")
     compute = config.get("compute")
     repository = compute.get("repository") if isinstance(compute, dict) else None
     if repository is not None and repository not in REPOSITORIES:
         out.append(f"{CONFIG_NAME}: compute.repository must be {' or '.join(REPOSITORIES)}, not {repository!r}; "
                    "using none (rl creates no repository)")
+    tests = compute.get("tests") if isinstance(compute, dict) else None
+    if tests is not None and tests not in ("local", "job"):
+        out.append(f"{CONFIG_NAME}: compute.tests must be local or job, not {tests!r}; using local")
     return out + [f"{CONFIG_NAME}: {text}" for text in compute_resources(config)[1]]
 
 
@@ -300,53 +297,42 @@ def agent_args(config: dict, host: str) -> list[str]:
     return [] if value is None else list(DEFAULT_CONFIG["agents"]["args"].get(host) or [])
 
 
-def context_target(config: dict, key: str) -> int:
-    """A context pack's token target: context.work_target_tokens or context.advice_target_tokens."""
-    context = config.get("context")
-    value = context.get(key) if isinstance(context, dict) else None
-    return value if _tokens(value) else DEFAULT_CONFIG["context"][key]
-
-
-def _tokens(value) -> bool:
-    return _count(value) and value > 0
-
-
-def watch_minutes(config: dict) -> float:
-    """Minutes between the watcher's beats (agents.watch_minutes); 0 turns the watcher off."""
+def agents_value(config: dict, key: str) -> float:
+    """A positive number from agents.* (beat_seconds, clear_idle_minutes, ...), else its default."""
     agents = config.get("agents")
-    value = agents.get("watch_minutes") if isinstance(agents, dict) else None
-    return float(value) if _minutes(value) else float(DEFAULT_CONFIG["agents"]["watch_minutes"])
+    value = agents.get(key) if isinstance(agents, dict) else None
+    return float(value) if _minutes(value) and value > 0 else float(DEFAULT_CONFIG["agents"][key])
 
 
-def stall_minutes(config: dict) -> float:
-    """Minutes a turn may show no progress in its log before the watcher reports it (agents.stall_minutes)."""
+def deadline_minutes(config: dict, item_type: str) -> float:
+    """How long a to-do item of this type may wait before it is escalated (agents.deadlines)."""
     agents = config.get("agents")
-    value = agents.get("stall_minutes") if isinstance(agents, dict) else None
-    return float(value) if _minutes(value) and value > 0 else float(DEFAULT_CONFIG["agents"]["stall_minutes"])
+    given = agents.get("deadlines") if isinstance(agents, dict) else None
+    given = given if isinstance(given, dict) else {}
+    for key in (item_type, "default"):
+        value = given.get(key)
+        if _minutes(value) and value > 0:
+            return float(value)
+    return float(DEFAULT_CONFIG["agents"]["deadlines"]["default"])
 
 
-def wait_check_minutes(config: dict) -> float:
-    """Minutes a task may wait on runs with no news of them before the watcher asks the coordinator to check them
-    with their executor (agents.wait_check_minutes); 0 turns the check off."""
-    agents = config.get("agents")
-    value = agents.get("wait_check_minutes") if isinstance(agents, dict) else None
-    return float(value) if _minutes(value) else float(DEFAULT_CONFIG["agents"]["wait_check_minutes"])
+def limit(config: dict, key: str):
+    """limits.trial_minutes, limits.scientists, limits.envelope_lines or limits.fast_lane, else the default."""
+    limits = config.get("limits")
+    value = limits.get(key) if isinstance(limits, dict) else None
+    default = DEFAULT_CONFIG["limits"][key]
+    if key == "fast_lane":
+        return {str(k): float(v) for k, v in value.items() if _minutes(v)} if isinstance(value, dict) else {}
+    if key == "envelope_lines":
+        ok = isinstance(value, list) and value and all(_minutes(v) and v > 0 for v in value)
+        return sorted(float(v) for v in value) if ok else list(default)
+    return value if _minutes(value) and value > 0 else default
 
 
-def latex_command(config: dict) -> list[str] | None:
-    """The command that builds the manuscript as a PDF (manuscript.latex, a string or a list), or None: Markdown."""
-    manuscript = config.get("manuscript")
-    value = manuscript.get("latex") if isinstance(manuscript, dict) else None
-    if isinstance(value, str):
-        try:
-            words = shlex.split(value)
-        except ValueError:
-            return None
-    elif isinstance(value, list) and all(isinstance(v, str) for v in value):
-        words = list(value)
-    else:
-        return None
-    return words or None
+def tests_mode(config: dict) -> str:
+    compute = config.get("compute")
+    value = compute.get("tests") if isinstance(compute, dict) else None
+    return value if value in ("local", "job") else "local"
 
 
 def _minutes(value) -> bool:
@@ -553,12 +539,6 @@ def compute_default(config: dict) -> str | None:
     return default if default in found else next(iter(found), None)
 
 
-def advice_limit(config: dict) -> int:
-    advice = config.get("advice")
-    value = advice.get("max_rounds") if isinstance(advice, dict) else None
-    return value if _count(value) else DEFAULT_CONFIG["advice"]["max_rounds"]
-
-
 def load_config(root: Path, remember: bool = True) -> dict:
     """The configuration over the defaults. Nothing in the file stops a command: while it does not parse, the
     settings read the last time it did are used (the defaults before that), and config_warnings says so. remember
@@ -666,31 +646,12 @@ def write_default_config(root: Path) -> Path:
     if not path.exists():
         text = ("# Smooth Research configuration. Resource limits and scope live in docs/constraints.md; the\n"
                 "# layout is fixed: experiment code in src/, documents for people in docs/, records in research/.\n"
-                "# Model entries: <entry>:<model>[@effort]; entry is claude, codex, pi or manual. Researchers and\n"
-                "# reviewers use the first available entry of their list; every available advisor is asked.\n"
-                "# agents.args: extra launch arguments for sessions opened in herdr tabs (rl agent open);\n"
-                "# agents.watch_minutes: minutes between the watcher's beats over those sessions (0: off);\n"
-                "# agents.stall_minutes: minutes a turn may show no progress before the watcher reports it;\n"
-                "# agents.wait_check_minutes: minutes a task may wait on runs with no news of them before the\n"
-                "# watcher asks the coordinator to check them with their executor (doubling; 0: off).\n"
-                "# usage: when a Claude or Codex 5-hour or weekly window has this percent left or less, its\n"
-                "# researchers and reviewers hand over to the next model entry (more is kept on the coordinator's\n"
-                "# host); advisors keep the rest. rl agent list shows the windows.\n"
-                "# manuscript.latex: the command that builds the manuscript (rl manuscript) as a PDF, e.g.\n"
-                "# latexmk -pdf -interaction=nonstopmode (null: a Markdown draft, docs/manuscript.md).\n"
-                "# compute: where experiments run (default: the resource used unless a task says otherwise).\n"
-                "# rl connects to none of them; rl compute checks them, rl compute steps prints how to stage a\n"
-                "# commit there. A remote resource, for example:\n"
-                "#   cluster:\n"
-                "#     host: cluster-login            # ssh alias, or pi-env-mcp's host name\n"
-                "#     connect: ssh                   # ssh, or pi-env-mcp:<MCP server name>\n"
-                "#     jobs: mcp:cluster-jobs         # shell, mcp:<server> or skill:<name>; an MCP server is reached\n"
-                "#                                    # through connect (pi-env-mcp runs it: pi-env-mcp mcp add)\n"
-                "#     workspace: /shared/<user>/<project>        # absolute cluster workspace\n"
-                "#     code: git                       # git (push, the host fetches) or archive (upload)\n"
-                "# On a login node set compute.coordinator: login; use a remote resource with connect: local,\n"
-                "# jobs: mcp:<server>, code: archive and a shared workspace (no host, SSH or push needed).\n"
-                "# compute.repository: github-private lets the coordinator's rl session start create a missing git\n"
-                "# remote of those resources as a private GitHub repository (gh) before it pushes; none: never.\n")
+                "# models: <entry>:<model>[@effort] per role (coordinator, scientist, researcher, reviewer,\n"
+                "# advisor); entry is claude, codex, pi or manual; the first available one is used.\n"
+                "# agents: launch arguments per host and the watcher's times (docs/configuration.md).\n"
+                "# limits: trial_minutes (longest trial run), fast_lane (largest estimate per unit that skips a\n"
+                "# new review round, e.g. {MIG·h: 0.5}), scientists (default per phase), envelope_lines.\n"
+                "# compute: where experiments run; rl connects to none of them (rl compute steps prints how to\n"
+                "# stage a commit there). compute.tests: local, or job when even tests must run as jobs.\n")
         path.write_text(text + yaml.safe_dump(DEFAULT_CONFIG, sort_keys=False, allow_unicode=True), encoding="utf-8")
     return path

@@ -27,7 +27,7 @@ from .project import (Project, Resource, compute_default, compute_repository, co
                       coordinator_is_login, repo_top)
 from .store import Store
 from .util import RLError
-from .worktrees import _git
+from .gitops import git as _git
 
 FULL_COMMIT = re.compile(r"^[0-9a-f]{40}([0-9a-f]{24})?$")
 LOGIN_POLICY = ("Coordinator is on a login node: local shell is for control work only (records, edits, staging "

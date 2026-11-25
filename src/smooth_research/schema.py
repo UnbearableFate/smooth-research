@@ -1,45 +1,68 @@
-"""Record types, enumerations and relations of the research graph.
+"""Record types, enumerations and relations of the research graph (schema 5).
 
-Six scientific objects (Hypothesis, Task, Experiment, Evidence, Decision, Paper) are graph nodes; documents,
-runs, attempts, execution references, observations, results, usage, sessions, messages, tickets and events are
-auxiliary records in the same database with explicit fields, not one free-form JSON blob.
+Hypotheses, experiments, evidence, decisions, tasks, papers and phases are graph nodes; documents, runs, attempts,
+execution references, observations, results, usage, sessions, dialogue entries, asks, tickets and events are
+auxiliary records in the same database with explicit fields.
+
+Who waits on a record is not a field: the rules table (inbox.py) computes it from the records' states.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-# The record format. A change that older records do not already satisfy (a field every record of a type is read
-# with, a renamed field or enum value) raises it and adds a migration to upgrade.MIGRATIONS; tests open a frozen
-# project of every earlier version (tests/fixtures/projects/).
-SCHEMA_VERSION = 4
+# The record format. A change that older records do not already satisfy raises it and adds a migration to
+# upgrade.MIGRATIONS; tests open the frozen project of every supported earlier version (tests/fixtures/projects/).
+SCHEMA_VERSION = 5
+# Projects made before the 2026-11 redesign (schema < 5) are not opened: they continue with the plugin that made
+# them (design 10.4).
+MIN_SCHEMA_VERSION = 5
 
 ENUMS: dict[str, tuple[str, ...]] = {
     "evidence_status": ("untested", "supported", "challenged", "inconclusive"),
     "disposition": ("candidate", "active", "paused", "retired"),
-    "task_state": ("ready", "active", "waiting", "blocked", "delivered", "accepted", "stopped"),
-    "task_kind": ("framework", "implement", "experiment", "analysis", "literature", "review", "advice", "other"),
-    "stage": ("E0", "E1", "E2", "E3"),
+    "task_kind": ("tree", "hypothesis", "phase", "prep", "execute"),
+    # queued: made by the coordinator, not released; open: released or made, nobody holds it; active: held;
+    # blocked: its researcher waits on the scientist; delivered: waits for acceptance (or a merge conflict);
+    # merging: the acceptance test job runs; accepted: merged; cancelled
+    "task_state": ("queued", "open", "active", "blocked", "delivered", "merging", "accepted", "cancelled"),
+    "merge_state": ("merging", "merged", "conflict"),
+    "block_reason": ("design", "mandate", "question"),
+    "run_category": ("trial", "prep", "evidence"),
+    "decision_kind": ("verdict", "stop", "route", "phase"),
+    "decision_state": ("draft", "final"),
+    "ask_kind": ("decision", "approval", "report"),
+    "ask_state": ("open", "forwarded", "answered", "closed"),
+    "answerer": ("coordinator", "user"),
+    "ticket_kind": ("review", "advice"),
+    "review_kind": ("design", "conclusion", "tree"),
+    "advice_kind": ("consult", "ruling"),
+    # waiting: the reviewer or advisor works on it; answered: a verdict is in, the author acts; passed: closed with a
+    # pass; escalated: out of passes, a ruling or the scientist decides; closed: advice given or round abandoned
+    "ticket_status": ("waiting", "answered", "passed", "escalated", "closed"),
+    "segment": ("scientist", "researcher"),
+    "finding_category": ("method", "engineering"),
+    "finding_status": ("draft", "open", "fixed", "constrained", "withdrawn", "ruled"),
+    "severity": ("low", "medium", "high"),
+    "session_status": ("open", "ended"),
+    "message_kind": ("question", "answer", "discussion", "consult"),
     "execution_state": ("prepared", "queued", "running", "ended", "unknown"),
     "outcome": ("success", "failed", "cancelled", "unknown"),
     "result_status": ("absent", "partial", "complete", "rejected"),
     "validity": ("pending", "valid", "invalid"),
     "evidence_level": ("diagnostic", "screening", "exploratory", "confirmatory"),
-    "decision_action": ("continue", "expand", "modify", "diagnose", "consult", "pause", "stop", "reopen",
-                        "recommend_formal", "continue_probe"),
-    "decision_kind": ("route", "stage"),
-    "message_type": ("TASK", "RESULT", "WAIT", "BLOCKED", "HANDOFF", "CANCEL", "NOTE"),
-    "blocked_reason": ("engineering", "model_unavailable", "budget", "science"),
-    "ticket_kind": ("review", "advice"),
-    "review_subject": ("code", "conclusion"),
-    "ticket_status": ("pending", "running", "answered", "failed", "unavailable"),
     "exec_kind": ("local_process", "remote_process", "container", "hpc_job", "external"),
     "usage_basis": ("measured", "estimated", "reported"),
     "metadata_status": ("unverified", "verified", "failed"),
     "fulltext_access": ("unknown", "available", "unavailable"),
-    "session_status": ("active", "ended", "superseded"),
-    "severity": ("none", "low", "medium", "high"),
+    # documents attached to records; no handoff or notes type (design chapter 12)
+    "doc_type": ("plan", "constraints", "brief", "mandate", "analysis", "rationale", "answer", "advice",
+                 "phase_conclusion", "tree_rationale", "output", "literature"),
 }
+
+FINDING_CLOSED = ("fixed", "constrained", "withdrawn", "ruled")
+TASK_OPEN = ("queued", "open", "active", "blocked", "delivered", "merging")
+TASK_DONE = ("accepted", "cancelled")
 
 
 @dataclass(frozen=True)
@@ -67,47 +90,60 @@ def _e(entity: str, prefix: str, graph: bool = False, width: int = 4, **fields: 
 
 ENTITIES: dict[str, Entity] = {e.label: e for e in [
     _e("Hypothesis", "H", graph=True, title=F(required=True), statement=F(required=True), scope=F(),
-       statement_ref=F(), evidence_status=F(required=True, enum="evidence_status"),
-       disposition=F(required=True, enum="disposition"), revision=F("int", True), needs_recheck=F("bool"),
-       recheck_reason=F(), origin=F(), label=F(required=True)),
-    _e("Experiment", "E", graph=True, title=F(required=True), question=F(required=True),
-       stage=F(enum="stage"), contract_path=F(), contract_ref=F(), revision=F("int", True),
-       revised_after_results=F("bool"), code_origin=F(), label=F(required=True)),
+       source=F(), purpose=F(required=True), evidence_status=F(required=True, enum="evidence_status"),
+       disposition=F(required=True, enum="disposition"), revision=F("int", True), label=F(required=True),
+       composite=F("bool"), cost=F(), flag=F("json"), defer_reason=F(), origin=F(), needs_recheck=F("bool"),
+       recheck_reason=F()),
+    _e("Experiment", "E", graph=True, title=F(required=True), question=F(required=True), label=F(required=True),
+       revision=F("int", True), revision_reason=F(), brief_ref=F(), manifest_path=F(), manifest_digest=F(),
+       manifest=F("json"), protected=F("json"), semantic_tests=F(), design_commit=F(), sealed_at=F(),
+       sealed_by=F(), estimate=F()),
     _e("Evidence", "EV", graph=True, summary=F(required=True), validity=F(required=True, enum="validity"),
        evidence_level=F(required=True, enum="evidence_level"), scope=F(), artifact_refs=F("json"), doc_ref=F(),
-       validity_reason=F()),
+       validity_reason=F(), task_id=F(), needs_recheck=F("bool"), recheck_reason=F()),
     _e("Decision", "D", graph=True, kind=F(required=True, enum="decision_kind"),
-       action=F(required=True, enum="decision_action"), rationale=F(required=True), rationale_ref=F(),
-       reopen_condition=F(), implementation_ready=F(), evidence_scope=F(), needs_recheck=F("bool"),
-       recheck_reason=F(), evidence_status_set=F(enum="evidence_status")),
+       state=F(required=True, enum="decision_state"), rationale=F(required=True), rationale_ref=F(),
+       evidence_status_set=F(enum="evidence_status"), disposition_set=F(enum="disposition"), did=F(), means=F(),
+       highlights=F("json"), supports=F("json"), challenges=F("json"), task_id=F(), author=F(), final_at=F(),
+       needs_recheck=F("bool"), recheck_reason=F()),
     _e("Paper", "P", graph=True, title=F(required=True), authors=F("json"), year=F("int"), doi=F(), arxiv_id=F(),
        arxiv_version=F(), url=F(), metadata_status=F(required=True, enum="metadata_status"),
        fulltext_access=F(required=True, enum="fulltext_access"), metadata_source=F(), fetched_at=F(),
        content_digest=F(), note_refs=F("json")),
     _e("Task", "T", graph=True, title=F(required=True), kind=F(required=True, enum="task_kind"),
-       state=F(required=True, enum="task_state"), to_role=F(), owner_role=F(), owner_session=F(),
-       request_ref=F(), output_refs=F("json"), handoff_ref=F(), next_action=F(),
-       blocked_reason=F(enum="blocked_reason"), wait_attempts=F("json"), note=F(), revision=F("int", True),
-       branch=F(), verified=F("json")),
-    _e("Document", "DOC", path=F(required=True), doc_type=F(required=True), latest_revision=F("int", True),
-       latest_digest=F(required=True)),
+       state=F(required=True, enum="task_state"), revision=F("int", True), creator=F(required=True),
+       holder=F(), holders=F("json"), priority=F("int"), envelope=F(), parallel_limit=F("int"), reason=F(),
+       cancel_reason=F(), conclusion=F(), limitations=F(), block_reason=F(enum="block_reason"), block_note=F(),
+       answer_note=F(), return_note=F(), branch=F(), worktree=F(), design_commit=F(), delivered_commit=F(),
+       merge_state=F(enum="merge_state"), merge_note=F(), merge_commit=F(), requirement=F(), done_check=F(),
+       mandate_ref=F(), estimate=F(), released_at=F(), delivered_at=F(), outputs=F("json"), tests=F("json"),
+       fast_lane=F("bool"), scientist_session=F(), dispatch_note=F(), state_note=F()),
+    _e("Phase", "PH", graph=True, title=F(required=True), budget=F(), scientist_limit=F("int", True)),
+    _e("Ask", "RQ", kind=F(required=True, enum="ask_kind"), task_id=F(required=True),
+       state=F(required=True, enum="ask_state"), by=F(required=True), stuck=F(required=True), options=F(),
+       recommend=F(), cost=F(), answer=F(), answered_by=F(enum="answerer"), answered_at=F(), forwarded_at=F()),
+    _e("Document", "DOC", path=F(required=True), doc_type=F(required=True, enum="doc_type"),
+       owner=F(required=True), latest_revision=F("int", True), latest_digest=F(required=True)),
     _e("DocRevision", "DOC", document_id=F(required=True), revision=F("int", True), digest=F(required=True),
        object_path=F(required=True), source_path=F(required=True), git_commit=F(), size=F("int")),
-    _e("Session", "S", role_id=F(required=True), host=F(required=True), host_session_id=F(),
-       model_requested=F(), model_observed=F(), effort=F(), worktree=F(),
-       status=F(required=True, enum="session_status"), ended_at=F(), role_kind=F(), entry=F(), cwd=F(),
-       branch=F(), assignment=F(), herdr_agent=F(), herdr_tab=F(), herdr_pane=F(), watch=F("json")),
-    _e("Message", "MSG", seq=F("int", True), type=F(required=True, enum="message_type"), task_id=F(),
-       from_role=F(required=True), to_role=F(required=True), document_refs=F("json"), base_revision=F("int"),
-       in_reply_to=F(), next_action=F(), text=F(), digest=F(required=True)),
-    _e("Cursor", "CUR", role=F(required=True), position=F("int", True)),
-    _e("Run", "RUN", experiment_id=F(required=True), experiment_ref=F(required=True), request_id=F(required=True),
-       spec=F("json", True), spec_digest=F(required=True), attempt_count=F("int", True)),
+    _e("Session", "S", name=F(required=True), role=F(required=True), subject=F(required=True),
+       host=F(required=True), entry=F(), model=F(), effort=F(), status=F(required=True, enum="session_status"),
+       herdr_pane=F(), herdr_tab=F(), host_session_id=F(), cwd=F(), ended_at=F(), last_prompt_at=F(),
+       last_seq=F("int"), last_user_at=F(), last_active_at=F(), conversations=F("int"), needs_decision=F(),
+       context_tokens=F("int"), told=F("json")),
+    _e("Message", "MSG", kind=F(required=True, enum="message_kind"), subject=F(required=True),
+       from_role=F(required=True), to_role=F(required=True), text=F(required=True), refs=F("json"),
+       in_reply_to=F(), finding=F(), closed_at=F()),
+    _e("Run", "RUN", task_id=F(required=True), experiment_id=F(), category=F(required=True, enum="run_category"),
+       arm=F(), seed=F(), deviates=F("bool"), deviation=F(), request_id=F(required=True), spec=F("json", True),
+       spec_digest=F(required=True), attempt_count=F("int", True), code_commit=F(), minutes=F("float"),
+       purpose=F(), ticket_id=F()),
     _e("Attempt", "ATT", run_id=F(required=True), index=F("int", True), request_id=F(),
        execution_state=F(required=True, enum="execution_state"), outcome=F(required=True, enum="outcome"),
        result_status=F(required=True, enum="result_status"), last_trusted_state=F(), last_trusted_at=F(),
        last_observed_at=F(), last_record_id=F(), last_source=F(), last_sequence=F("int"), closed_at=F(),
-       needs_check=F("bool"), issues=F("json"), code_review=F("json"), resource=F("json")),
+       needs_check=F("bool"), issues=F("json"), resource=F("json"), expected_end=F(), submitted_by=F(),
+       ended_note=F(), handled_at=F()),
     _e("ExecRef", "X", kind=F(required=True, enum="exec_kind"), executor_namespace=F(required=True),
        opaque_id=F(required=True), locator=F()),
     _e("Observation", "OBS", attempt_id=F(required=True), source=F(required=True), observed_at=F(required=True),
@@ -117,20 +153,15 @@ ENTITIES: dict[str, Entity] = {e.label: e for e in [
     _e("Result", "RES", attempt_id=F(required=True), request_id=F(required=True), revision=F("int", True),
        status=F(required=True, enum="result_status"), manifest=F("json", True), manifest_digest=F(required=True),
        spec_match=F("bool"), mismatches=F("json"), verification=F("json"), verification_scope=F(),
-       usable_for_planned_comparison=F("bool"), rejected_reason=F()),
+       usable=F("bool"), rejected_reason=F()),
     _e("Usage", "U", accounting_ref=F(required=True), quantity=F("float", True), unit=F(required=True),
        resource_type=F(required=True), hardware=F(), basis=F(required=True, enum="usage_basis"), source_ref=F(),
        revision=F("int", True), superseded=F("bool"), content_digest=F(required=True), note=F()),
     _e("Ticket", "RV", kind=F(required=True, enum="ticket_kind"), status=F(required=True, enum="ticket_status"),
-       target_id=F(), question=F(), dedupe_key=F(required=True), request_ref=F(), answer_ref=F(),
-       candidates=F("json"), requested_entry=F(), requested_model=F(), observed_model=F(), provider=F(),
-       host_session_id=F(), author_models=F("json"), relation=F(), verdict=F(), summary=F(), usage=F("json"),
-       cost_usd=F("float"), error=F(), calls=F("json"), reused_from=F(), recheck_of=F(), answered_at=F(),
-       subject=F(enum="review_subject"), code_scope=F("json"), advice_round=F("int"), user_approved=F(),
-       round_of=F(), round_index=F("int"), round_reason=F(), requested_by=F(), assigned_session=F(), answered_by=F(),
-       open_severity=F(enum="severity"), escalated=F("bool"), approved=F(), approved_at=F(),
-       resolved_by=F(), resolved_reason=F(), resolved_at=F(),
-       earlier_answers=F("json"), code_checkout=F(), changed_during_review=F("json")),
+       review_kind=F(enum="review_kind"), advice_kind=F(enum="advice_kind"), task_id=F(), target_id=F(),
+       segment=F(enum="segment"), passes=F("json"), findings=F("json"), requested_by=F(required=True),
+       question=F(), answer_ref=F(), ruling_of=F(), ruled=F("json"), verdict=F(), answered_at=F(),
+       entry=F(), model=F()),
     _e("Event", "EVT", width=6, seq=F("int", True), type=F(required=True), entity_id=F(), actor=F(), summary=F()),
     _e("Request", "REQ", op=F(required=True), request_id=F(required=True), digest=F(required=True),
        result=F("json", True)),
@@ -152,39 +183,39 @@ class Relation:
     revision_bound: bool = False  # the edge records the target's revision at link time
 
 
-ANY_GRAPH = GRAPH_LABELS + ("Ticket",)
-
 RELATIONS: dict[str, Relation] = {
-    "derived_from": Relation("DERIVED_FROM", ("Hypothesis",), ("Hypothesis", "Ticket", "Paper"), acyclic=True),
-    "combines": Relation("COMBINES", ("Hypothesis",), ("Hypothesis",)),
+    # the primary parent edge carries primary=true; primary edges make the hypothesis tree
+    "derived_from": Relation("DERIVED_FROM", ("Hypothesis",), ("Hypothesis",), acyclic=True),
+    "assumes": Relation("ASSUMES", ("Hypothesis",), ("Hypothesis",), acyclic=True),
     "tests": Relation("TESTS", ("Experiment",), ("Hypothesis",), revision_bound=True),
     "supports": Relation("SUPPORTS", ("Evidence",), ("Hypothesis",), revision_bound=True),
     "challenges": Relation("CHALLENGES", ("Evidence",), ("Hypothesis",), revision_bound=True),
-    "depends_on": Relation("DEPENDS_ON", ("Task", "Experiment"), ("Task", "Experiment"), acyclic=True),
-    "compared_with": Relation("COMPARED_WITH", ("Experiment",), ("Experiment",)),
-    "code_from": Relation("CODE_FROM", ("Experiment",), ("Experiment",), acyclic=True),
-    "motivated_by": Relation("MOTIVATED_BY", ("Hypothesis", "Experiment"), ("Paper", "Ticket", "Evidence", "Decision")),
+    "depends_on": Relation("DEPENDS_ON", ("Task",), ("Task",), acyclic=True),
+    "motivated_by": Relation("MOTIVATED_BY", ("Hypothesis", "Experiment"), ("Paper", "Decision")),
     "nearest_work": Relation("NEAREST_WORK", ("Hypothesis",), ("Paper",), revision_bound=True),
     "cites": Relation("CITES", ("Hypothesis", "Experiment", "Evidence", "Decision"), ("Paper",), revision_bound=True),
-    # a decision may rest on an earlier one (a stage decision on the last): only a reference, so a re-check flag
-    # does not pass along it (research.recheck_dependents)
-    "based_on": Relation("BASED_ON", ("Decision",), ("Evidence", "Paper", "Ticket", "Result", "Experiment", "Decision"),
-                         acyclic=True),
-    "decides": Relation("DECIDES", ("Decision",), ("Hypothesis", "Experiment", "Task"), revision_bound=True),
+    "based_on": Relation("BASED_ON", ("Decision",), ("Evidence", "Paper", "Ticket", "Result", "Experiment",
+                                                     "Decision", "Task"), acyclic=True),
+    "decides": Relation("DECIDES", ("Decision",), ("Hypothesis", "Experiment", "Phase"), revision_bound=True),
     "supersedes": Relation("SUPERSEDES", ("Hypothesis", "Experiment", "Decision", "Evidence", "Result", "Usage"),
                            ("Hypothesis", "Experiment", "Decision", "Evidence", "Result", "Usage"), acyclic=True),
-    "targets": Relation("TARGETS", ("Task", "Ticket"), ANY_GRAPH),
+    "targets": Relation("TARGETS", ("Task",), ("Hypothesis", "Experiment", "Phase")),
+    "part_of": Relation("PART_OF", ("Task",), ("Task",), acyclic=True),
+    "in_phase": Relation("IN_PHASE", ("Task",), ("Phase",)),
     "about": Relation("ABOUT", ("Evidence",), ("Experiment",)),
     "from_attempt": Relation("FROM_ATTEMPT", ("Evidence",), ("Attempt",)),
     "from_result": Relation("FROM_RESULT", ("Evidence",), ("Result",)),
     "of_experiment": Relation("OF_EXPERIMENT", ("Run",), ("Experiment",)),
+    "of_task": Relation("OF_TASK", ("Run",), ("Task",)),
     "of_run": Relation("OF_RUN", ("Attempt",), ("Run",)),
     "bound_to": Relation("BOUND_TO", ("Attempt",), ("ExecRef",)),
     "covers": Relation("COVERS", ("Usage",), ("Attempt",)),
 }
 
 # Relations an agent may create directly with `rl link`; the rest are written by their own commands.
-LINKABLE = ("derived_from", "combines", "tests", "supports", "challenges", "depends_on", "compared_with",
-            "code_from", "motivated_by", "nearest_work", "cites", "based_on", "supersedes")
+LINKABLE = ("assumes", "depends_on", "motivated_by", "cites", "based_on", "supersedes")
 
 PAPER_ASSESSMENTS = ("search_hit", "metadata_checked", "fulltext_read", "checked")
+
+# Session roles (design chapter 3). The user is not a session; "user" is a recipient of to-do items only.
+ROLES = ("coordinator", "scientist", "researcher", "reviewer", "advisor")

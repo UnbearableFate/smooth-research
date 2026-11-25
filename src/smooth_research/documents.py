@@ -1,5 +1,9 @@
 """Sealed documents: drafts stay editable; the first formal reference freezes a content-addressed revision.
 
+Every document has an owner record and a type from a closed list (schema doc_type). Once its owner is finished (a
+task accepted or cancelled, a decision final, a ticket closed) the document takes no new revision, and no document
+takes more than MAX_REVISIONS.
+
 The immutable object is written atomically before the database transaction registers it. A crash in between
 leaves at most an unregistered object (reported by `rl doctor`), never a registered reference without content.
 """
@@ -13,6 +17,9 @@ from pathlib import Path
 from .project import Project
 from .store import Tx
 from .util import RLError, atomic_write, digest_bytes, digest_file, parse_ref, short
+
+MAX_REVISIONS = 12
+PROJECT = "project"  # the owner of the plan and the constraints
 
 
 @dataclass(frozen=True)
@@ -54,19 +61,42 @@ def prepare(project: Project, path: str | Path, doc_type: str) -> Prepared:
     return Prepared(project.rel(source), doc_type, digest, project.rel(obj), len(data), _git_commit(source))
 
 
-def register(tx: Tx, prep: Prepared) -> str:
-    """Register a prepared object; unchanged content returns the existing revision."""
+def _finished(tx: Tx, owner: str) -> str | None:
+    if owner == PROJECT:
+        return None
+    rec = tx.get(owner)
+    if rec is None:
+        return None
+    if rec["_label"] == "Task" and rec["state"] in ("accepted", "cancelled"):
+        return f"{owner} is {rec['state']}"
+    if rec["_label"] == "Decision" and rec["state"] == "final":
+        return f"{owner} is final"
+    if rec["_label"] == "Ticket" and rec["status"] in ("passed", "closed"):
+        return f"{owner} is {rec['status']}"
+    return None
+
+
+def register(tx: Tx, prep: Prepared, owner: str) -> str:
+    """Register a prepared object owned by a record; unchanged content returns the existing revision."""
+    if owner != PROJECT:
+        tx.require(owner)
     docs = tx.all("Document", path=prep.source_path)
     if docs:
         doc = docs[0]
         if doc["latest_digest"] == prep.digest:
             return f"{doc['id']}@{doc['latest_revision']}"
+        if why := _finished(tx, doc["owner"]):
+            raise RLError("CONFLICT", f"{prep.source_path} ({doc['id']}) belongs to {doc['owner']}, and {why}: its "
+                                      "documents are read only now. Write a new file for new work")
+        if doc["latest_revision"] >= MAX_REVISIONS:
+            raise RLError("CONFLICT", f"{doc['id']} has {MAX_REVISIONS} revisions, the most a document takes: put "
+                                      "what changed in a new record (a decision, a finding, a new experiment revision)")
         revision = doc["latest_revision"] + 1
         tx.update(doc["id"], {"latest_revision": revision, "latest_digest": prep.digest})
         doc_id = doc["id"]
     else:
         doc_id, revision = tx.next_id("Document"), 1
-        tx.create("Document", {"id": doc_id, "path": prep.source_path, "doc_type": prep.doc_type,
+        tx.create("Document", {"id": doc_id, "path": prep.source_path, "doc_type": prep.doc_type, "owner": owner,
                                "latest_revision": 1, "latest_digest": prep.digest})
     ref = f"{doc_id}@{revision}"
     tx.create("DocRevision", {"id": ref, "document_id": doc_id, "revision": revision, "digest": prep.digest,

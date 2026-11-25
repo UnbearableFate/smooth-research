@@ -1,241 +1,810 @@
-"""Sessions and tasks.
+"""Tasks, phases and decision requests (design chapters 6 and 7, checks of 9.1).
 
-The versioned task package is what a session resumes from. Every task transition writes one message (TASK,
-RESULT, WAIT, BLOCKED, HANDOFF, CANCEL; see messages.py), so a role can read its inbox without chat history.
+Five kinds: tree (the plan into a hypothesis tree), hypothesis (one hypothesis for one scientist), phase (the phase
+conclusion), prep (preparation work a researcher codes; public ones belong to the project) and execute (one piece of
+experiment code for one experiment). The coordinator makes tree, hypothesis, phase and public prep tasks (queued
+until released); a scientist makes execute and prep tasks under its hypothesis task (PART_OF) and holds them while
+it writes code; dispatch hands one to a researcher. Acceptance merges (gitops): the creator accepts.
+
+No transition writes a message: who has to act is computed from the states by the rules table (inbox.py).
 """
 
 from __future__ import annotations
 
-import os
 import re
+import shlex
+import subprocess
 
-from . import documents, messages
-from .research import prepare_contracts, seal_referenced
+from . import documents, gitops, manifest
+from .project import limit, tests_mode
+from .research import task_experiment
+from .reviews import covers, last_passed_design
+from .roles import Actor, need, session_name
+from .schema import TASK_DONE
 from .store import Store, Tx
 from .util import RLError, now_utc
-from .worktrees import branch_head, branch_status
 
-COORDINATOR = "coordinator"
-OPEN_STATES = ("ready", "active", "waiting", "blocked", "delivered")
-
-
-# -- sessions -------------------------------------------------------------------------------------------------
+NOTE_CHARS = 300
+PARALLEL_MAX = 10
+WORK = "research/work"
 
 
-def start_session(store: Store, role: str, host: str, host_session_id: str | None = None,
-                  model_requested: str | None = None, model_observed: str | None = None,
-                  effort: str | None = None, worktree: str | None = None) -> dict:
-    """Register a session. A new coordinator session marks the earlier active ones superseded. A coordinator
-    inside a herdr pane records that pane, so notices from other sessions reach it."""
-    pane = os.environ.get("HERDR_PANE_ID") if role == COORDINATOR and os.environ.get("HERDR_ENV") == "1" else None
+def work_dir(tid: str) -> str:
+    return f"{WORK}/{tid}"
+
+
+def _note(text: str | None) -> str | None:
+    if text and len(text) > NOTE_CHARS:
+        raise RLError("INVALID", f"a note is at most {NOTE_CHARS} characters ({len(text)} given): put the rest in a "
+                                 "record (a finding, evidence, a decision) or a document on the task, and point to it")
+    return text
+
+
+def _hold(tx: Tx, task: dict, holder: str | None) -> dict:
+    history = list(task.get("holders") or [])
+    if holder:
+        history.append({"holder": holder, "at": now_utc()})
+    return {"holder": holder, "holders": history}
+
+
+def hypothesis_task_of(tx: Tx, task: dict) -> dict | None:
+    """The hypothesis task an execute or prep task is part of."""
+    found = [e["id"] for e in tx.out(task["id"], "part_of")]
+    return tx.require(found[0]) if found else None
+
+
+def phase_of(tx: Tx, task_id: str) -> dict | None:
+    found = [e["id"] for e in tx.out(task_id, "in_phase")]
+    return tx.require(found[0]) if found else None
+
+
+def latest_tree(tx: Tx) -> dict | None:
+    trees = [t for t in tx.all("Task", kind="tree") if t["state"] != "cancelled"]
+    return trees[-1] if trees else None
+
+
+def approval(tx: Tx, tree: dict | None) -> dict | None:
+    """The user's answered approval of a tree and its first phase schedule."""
+    if tree is None:
+        return None
+    asks = [a for a in tx.all("Ask", task_id=tree["id"]) if a["kind"] == "approval"]
+    return asks[-1] if asks and asks[-1]["state"] == "answered" and asks[-1]["answer"].lower().startswith("approve") \
+        else None
+
+
+# -- making tasks ---------------------------------------------------------------------------------------------
+
+
+def create(store: Store, actor: Actor, kind: str, title: str, targets: list[str] = (), priority: int | None = None,
+           envelope: str | None = None, parallel: int | None = None, reason: str | None = None,
+           phase: str | None = None, experiment: str | None = None, requirement: str | None = None,
+           done_check: str | None = None, estimate: str | None = None, mandate: str | None = None,
+           depends_on: list[str] = ()) -> dict:
+    """The coordinator queues tree, hypothesis, phase and public prep tasks; a scientist makes execute and prep tasks
+    in its hypothesis task, and holds one at once unless it waits on unaccepted tasks (DEPENDS_ON)."""
+    if kind in ("tree", "hypothesis", "phase") or (kind == "prep" and actor and actor.role == "coordinator"):
+        need(actor, "coordinator", what=f"making a {kind} task")
+    else:
+        need(actor, "scientist", what=f"making a {kind} task")
+    if kind == "hypothesis":
+        if not targets or priority is None or not envelope or not reason:
+            raise RLError("INVALID", "a hypothesis task card has five items: --targets H-x, --priority N, --envelope "
+                                     "\"about 4 MIG·h\", --parallel N (default 10), --reason \"<why here>\"")
+        parallel = PARALLEL_MAX if parallel is None else parallel
+        if not 1 <= parallel <= PARALLEL_MAX:
+            raise RLError("INVALID", f"--parallel is 1 to {PARALLEL_MAX}")
+    if kind == "phase" and not phase:
+        raise RLError("INVALID", "a phase conclusion task names its phase (--phase PH-x)")
+    if kind == "execute" and not experiment:
+        raise RLError("INVALID", "an execute task carries one experiment (--experiment E-x)")
+    if kind == "prep" and (not requirement or not done_check):
+        raise RLError("INVALID", "a preparation task needs --requirement (what to produce) and --done-check (a "
+                                 "command that passes when it is done)")
+    prep = documents.prepare(store.project, mandate, "mandate") if mandate else None
     with store.write() as tx:
-        if host_session_id:
-            for s in tx.all("Session", host_session_id=host_session_id, status="active"):
-                if s["role_id"] == role:
-                    return {"id": s["id"], "reused": True, "summary": f"{s['id']} already registered as {role}"}
-        sid = tx.next_id("Session")
-        if role == COORDINATOR:
-            for s in tx.all("Session", status="active"):
-                if s["role_id"] == COORDINATOR:
-                    tx.update(s["id"], {"status": "superseded", "ended_at": now_utc()})
-        tx.create("Session", {"id": sid, "role_id": role, "host": host, "host_session_id": host_session_id,
-                              "model_requested": model_requested, "model_observed": model_observed,
-                              "effort": effort, "worktree": worktree, "status": "active", "herdr_pane": pane,
-                              "herdr_tab": os.environ.get("HERDR_TAB_ID") if pane else None})
-        tx.event("session.start", sid, f"{role} on {host} {model_observed or model_requested or 'model unverified'}")
-    return {"id": sid, "summary": f"{sid} {role} on {host}" + (f" (herdr pane {pane})" if pane else "")}
-
-
-def end_session(store: Store, sid: str) -> dict:
-    with store.write() as tx:
-        s = tx.require(sid, "Session")
-        if s["status"] == "active":
-            tx.update(sid, {"status": "ended", "ended_at": now_utc()})
-        tx.event("session.end", sid, s["role_id"])
-    return {"id": sid, "summary": f"{sid} ended (running external work is not affected)"}
-
-
-# -- tasks ----------------------------------------------------------------------------------------------------
-
-
-def create_task(store: Store, title: str, kind: str, targets: list[str] = (), request: str | None = None,
-                to_role: str | None = None, next_action: str | None = None, depends_on: list[str] = (),
-                from_role: str = COORDINATOR) -> dict:
-    """A new task. The contract of each experiment it targets is sealed now (a complete one), and the task is bound
-    to that revision: its work pack shows what changed when the contract is revised later. A task on a hypothesis
-    seals nothing below it."""
-    prep = documents.prepare(store.project, request, "task_request") if request else None
-    contracts = prepare_contracts(store, list(targets))
-    with store.write() as tx:
+        parent = None
+        if actor.role == "scientist":
+            parent = tx.require(actor.subject, "Task")
+            if parent["kind"] != "hypothesis":
+                raise RLError("INVALID", f"execute and prep tasks are made in a hypothesis task; {parent['id']} is "
+                                         f"{parent['kind']}")
+        if not title:
+            named = [tx.require(t, "Hypothesis")["title"] for t in targets] or \
+                [tx.require(experiment, "Experiment")["title"]] if (targets or experiment) else []
+            if not named:
+                raise RLError("INVALID", "--title is needed (a hypothesis task takes its hypothesis's title)")
+            title = ("Test " if kind == "hypothesis" else "") + "; ".join(named)
         tid = tx.next_id("Task")
-        ref = documents.register(tx, prep) if prep else None
-        tx.create("Task", {"id": tid, "title": title, "kind": kind, "state": "ready", "to_role": to_role,
-                           "request_ref": ref, "next_action": next_action, "revision": 1})
-        bound, sealed = seal_referenced(tx, contracts, store.project)
-        for target in targets:
-            tx.link("targets", tid, target, **bound.get(target, {}))
-        for dep in depends_on:
-            tx.link("depends_on", tid, dep)
-        msg = messages.record(tx, "TASK", from_role, to_role, tid, next_action, [ref] if ref else [], title,
-                              base_revision=1) if to_role else None
-        tx.event("task.created", tid, title)
-    return {"id": tid, "request_ref": ref,
-            "summary": f"{tid} ready: {title}" + (f" (request {ref})" if ref else "") + (f" -> {to_role}" if to_role else "")
-                       + "".join(f"; {note}" for note in sealed) + messages.notice(store, msg)}
+        deps = [tx.require(d, "Task") for d in depends_on]
+        held = actor.role == "scientist" and all(d["state"] == "accepted" for d in deps)
+        tx.create("Task", {"id": tid, "title": title, "kind": kind, "state": "active" if held else
+                           ("open" if actor.role == "scientist" else "queued"), "revision": 1,
+                           "creator": actor.name, "priority": priority, "envelope": envelope,
+                           "parallel_limit": parallel, "reason": reason, "requirement": requirement,
+                           "done_check": done_check, "estimate": estimate})
+        if prep:
+            tx.update(tid, {"mandate_ref": documents.register(tx, prep, tid)})
+        for t in targets:
+            rec = tx.require(t, "Hypothesis")
+            tx.link("targets", tid, rec["id"])
+        if experiment:
+            tx.require(experiment, "Experiment")
+            tx.link("targets", tid, experiment)
+        if phase:
+            tx.require(phase, "Phase")
+            if kind == "phase":
+                tx.link("targets", tid, phase)
+            else:
+                tx.link("in_phase", tid, phase)
+        if parent:
+            tx.link("part_of", tid, parent["id"])
+        for d in deps:
+            tx.link("depends_on", tid, d["id"])
+        if held:
+            tx.update(tid, _claim_changes(tx, store, tx.require(tid), actor.name))
+        tx.event("task.created", tid, f"{kind}: {title}")
+        task = tx.require(tid)
+    where = f"; worktree {task['worktree']}" if task.get("worktree") else ""
+    return {"id": tid, "summary": f"{tid} {kind} {task['state']}: {title}{where}"}
 
 
-def claim(store: Store, tid: str, role: str, session: str | None = None) -> dict:
-    """Exactly one claimant wins."""
+def _claim_changes(tx: Tx, store: Store, task: dict, holder: str) -> dict:
+    branch, path = gitops.make_worktree(store.project, task["id"])
+    return {"state": "active", **_hold(tx, task, holder), "branch": branch,
+            "worktree": str(gitops.checkout_in(store.project, task["id"])), "revision": task["revision"] + 1}
+
+
+def claim(store: Store, tid: str, holder: str) -> dict:
+    """Take an open task: its branch and worktree are made from the mainline now (6.5). Every DEPENDS_ON task must
+    be accepted (10.2 rule 7)."""
     with store.write() as tx:
         task = tx.require(tid, "Task")
-        if task["state"] != "ready" or task.get("owner_role"):
-            raise RLError("CONFLICT", f"{tid} is {task['state']} (owner {task.get('owner_role') or 'none'}); "
-                                      "it cannot be claimed now",
-                          current={k: task.get(k) for k in ("state", "owner_role", "owner_session", "next_action")})
-        open_deps = [d["id"] for d in tx.out(tid, "depends_on")
-                     if d["label"] == "Task" and tx.require(d["id"])["state"] not in ("delivered", "accepted")]
-        # the branch to merge is the claimant's: another session may have been assigned the task before
-        mine = [s for s in tx.all("Session", status="active")
-                if s.get("role_id") == role and s.get("assignment") == tid]
-        tx.update(tid, {"state": "active", "owner_role": role, "owner_session": session,
-                        "branch": mine[-1].get("branch") if mine else None, "revision": task["revision"] + 1})
-        tx.event("task.claimed", tid, role)
-    warn = f"; waiting dependencies: {', '.join(open_deps)}" if open_deps else ""
-    return {"id": tid, "summary": f"{tid} claimed by {role}{warn}"}
+        if task["state"] != "open" or task.get("holder"):
+            raise RLError("CONFLICT", f"{tid} is {task['state']}" + (f", held by {task['holder']}" if task.get("holder")
+                                                                     else "") + ": it cannot be claimed now")
+        waiting = [d["id"] for d in tx.out(tid, "depends_on") if tx.require(d["id"])["state"] != "accepted"]
+        if waiting:
+            raise RLError("INVALID", f"{tid} depends on {', '.join(waiting)}, not accepted yet")
+        tx.update(tid, _claim_changes(tx, store, task, holder))
+        tx.event("task.claimed", tid, holder)
+        task = tx.require(tid)
+    return {"id": tid, "summary": f"{tid} held by {holder}; worktree {task['worktree']}"}
 
 
-def _owner_write(store: Store, tid: str, docs: list[str], doc_type: str, from_role: str, fn) -> dict:
-    """Seal the documents and apply fn in one write. Only the task's owner updates it, and not after the
-    coordinator accepted or stopped it."""
-    preps = [documents.prepare(store.project, d, doc_type) for d in docs]
+def release(store: Store, actor: Actor, tid: str, to_scientist: bool = False) -> dict:
+    """The coordinator releases a queued task; the watcher starts its session. A hypothesis or public preparation
+    task needs the user's approval of the latest tree and schedule (9.1). --to scientist hands a blocked public
+    preparation task to a short scientist session (6.4)."""
+    need(actor, "coordinator", what="releasing a task")
     with store.write() as tx:
         task = tx.require(tid, "Task")
-        if not task.get("owner_role"):
-            raise RLError("CONFLICT", f"{tid} is {task['state']} and has no owner; claim it first "
-                                      f"(rl task claim {tid} --role <role>)", current_state=task["state"])
-        if task["owner_role"] != from_role:
-            raise RLError("CONFLICT", f"{tid} is owned by {task['owner_role']}, not {from_role}: only its owner "
-                                      "updates it", current_state=task["state"])
-        if task["state"] in ("accepted", "stopped"):
-            raise RLError("CONFLICT", f"{tid} is {task['state']}: the coordinator closed it, and reopens it if it "
-                                      f"needs more work (rl task reopen {tid})", current_state=task["state"])
-        return fn(tx, task, [documents.register(tx, p) for p in preps])
+        if to_scientist:
+            if task["kind"] != "prep" or task["creator"] != "coordinator":
+                raise RLError("INVALID", "--to scientist is for a public preparation task")
+            if task.get("scientist_session"):
+                raise RLError("CONFLICT", f"{tid} is already with {task['scientist_session']}")
+            tx.update(tid, {"scientist_session": session_name("scientist", tid), "revision": task["revision"] + 1})
+            tx.event("task.to_scientist", tid, "handed to a short scientist session")
+            return {"id": tid, "summary": f"{tid} handed to scientist-{tid}"}
+        if task["state"] != "queued":
+            raise RLError("CONFLICT", f"{tid} is {task['state']}, not queued")
+        if task["kind"] in ("hypothesis", "prep"):
+            if not approval(tx, latest_tree(tx)):
+                raise RLError("INVALID", "the user has not approved the latest tree and its schedule: record their "
+                                         "answer first (rl request answer RQ-x --by user --text \"approve ...\")")
+        if task["kind"] == "prep" and not (task.get("requirement") and task.get("done_check")):
+            raise RLError("INVALID", f"{tid} needs a requirement and a done check before it is released")
+        tx.update(tid, {"state": "open", "released_at": now_utc(), "revision": task["revision"] + 1})
+        tx.event("task.released", tid, task["title"])
+    return {"id": tid, "summary": f"{tid} released; the watcher starts its session"}
 
 
-VERIFIED = re.compile(r"^(?P<command>.+?) @(?P<commit>[0-9a-fA-F]{7,40}): (?P<outcome>pass|fail)(?:,? log (?P<log>\S.*))?$")
+def cancel(store: Store, actor: Actor, tid: str, reason: str) -> dict:
+    """The coordinator cancels a queued task; a scientist cancels a task it made (answering a blocker with stop).
+    A released hypothesis task stops through a stop conclusion instead (7.6)."""
+    need(actor, "coordinator", "scientist", what="cancelling a task")
+    with store.write() as tx:
+        task = tx.require(tid, "Task")
+        if task["state"] in TASK_DONE:
+            raise RLError("CONFLICT", f"{tid} is already {task['state']}")
+        if actor.role == "coordinator":
+            if task["creator"] != "coordinator" or (task["kind"] == "hypothesis" and task["state"] != "queued"):
+                raise RLError("INVALID", f"{tid}: the coordinator cancels its own queued tasks; a released hypothesis "
+                                         "task stops through its scientist's stop conclusion")
+        elif task["creator"] != actor.name and task.get("scientist_session") != actor.name:
+            raise RLError("INVALID", f"{tid} was made by {task['creator']}")
+        tx.update(tid, {"state": "cancelled", "cancel_reason": reason, "revision": task["revision"] + 1})
+        tx.event("task.cancelled", tid, reason)
+    return {"id": tid, "summary": f"{tid} cancelled: {reason} (running jobs are not cancelled by this)"}
 
 
-def parse_verified(text: str) -> dict:
-    """A test run that a delivery records: "<command> @<commit>: pass|fail, log <path>"."""
-    m = VERIFIED.match(text.strip())
+# -- tests ----------------------------------------------------------------------------------------------------
+
+
+def test_command(tx: Tx, task: dict) -> str | None:
+    if task["kind"] == "prep":
+        return task.get("done_check")
+    exp = task_experiment(tx, task["id"])
+    return (exp or {}).get("semantic_tests")
+
+
+def run_check(store: Store, task_id: str, command: str, cwd=None) -> tuple[bool, str]:
+    where = cwd or gitops.checkout_in(store.project, task_id)
+    try:
+        out = subprocess.run(command, shell=True, cwd=where, capture_output=True, text=True, timeout=1800,
+                             env=_check_env(store))
+    except subprocess.TimeoutExpired:
+        return False, "timed out after 30 minutes"
+    tail = (out.stdout + out.stderr).strip().splitlines()[-6:]
+    return out.returncode == 0, " | ".join(tail)[-400:]
+
+
+def _check_env(store: Store) -> dict:
+    import os
+    env = dict(os.environ)
+    env.pop("VIRTUAL_ENV", None)
+    return env
+
+
+def test(store: Store, actor: Actor, tid: str, record: str | None = None, commit: str | None = None,
+         log: str | None = None) -> dict:
+    """Run the task's tests (an execute task's semantic tests, a prep task's done check) at its committed head and
+    record the outcome; with record (pass|fail), record the outcome of a test job instead (compute.tests: job)."""
+    need(actor, "scientist", "researcher", what="testing a task")
+    with store.read() as tx:
+        task = tx.require(tid, "Task")
+        command = test_command(tx, task)
+    if task.get("holder") != actor.name:
+        raise RLError("INVALID", f"{tid} is held by {task.get('holder') or 'nobody'}")
+    if not command:
+        raise RLError("INVALID", f"{tid} has no test command: set the experiment's --semantic-tests (execute) or the "
+                                 "task's done check (prep)")
+    if record:
+        if record not in ("pass", "fail") or not commit:
+            raise RLError("INVALID", "--record pass|fail with --commit <the commit the job tested>")
+        ok, detail, at = record == "pass", f"job result, log {log or 'not given'}", commit
+    else:
+        if tests_mode(store.project.config) == "job":
+            raise RLError("INVALID", "compute.tests is job: run the tests as a short job (rl run register --trial ..), "
+                                     "then record its outcome: rl task test T-x --record pass|fail --commit <c>")
+        if gitops.dirty(store.project, tid):
+            raise RLError("INVALID", f"{tid}'s worktree has uncommitted changes: tests are recorded for a commit")
+        at = gitops.head(store.project, tid)
+        ok, detail = run_check(store, tid, command)
+    with store.write() as tx:
+        task = tx.require(tid, "Task")
+        tests = list(task.get("tests") or []) + [{"commit": at, "command": command, "outcome": "pass" if ok else "fail",
+                                                  "at": now_utc(), "by": actor.name, "detail": detail}]
+        tx.update(tid, {"tests": tests})
+        tx.event("task.tested", tid, f"{'pass' if ok else 'fail'} at {at[:12]}: {command}")
+    return {"id": tid, "passed": ok, "summary": f"{tid} tests {'pass' if ok else 'FAIL'} at {at[:12]} ({command})"
+                                                + ("" if ok else f": {detail}")}
+
+
+def passed_at(task: dict, commit: str) -> bool:
+    return any(t["commit"] == commit and t["outcome"] == "pass" for t in task.get("tests") or [])
+
+
+# -- dispatch -------------------------------------------------------------------------------------------------
+
+
+def fast_lane(store: Store, tx: Tx, task: dict, exp: dict, commit: str) -> tuple[bool, list[str]]:
+    """The three conditions of 6.6, judged by the CLI: the protected scope is unchanged since the last passed
+    review of this experiment's tasks; the experiment is sealed and its manifest unchanged; the estimate is below
+    the project's fast-lane limit for its unit."""
+    why = []
+    others = [e["id"] for e in tx.inc(exp["id"], "targets") if e["id"] != task["id"]]
+    last = last_passed_design(tx, others)
+    if not exp.get("design_commit"):
+        why.append(f"{exp['id']} is not sealed yet")
+    if last is None:
+        why.append(f"no passed review on an earlier task of {exp['id']}")
+    else:
+        changed = gitops.protected_changes(store.project, last[1], commit, list(exp.get("protected") or []))
+        if changed:
+            why.append(f"protected scope changed since {last[0]['id']}: {', '.join(changed)}")
+    if exp.get("manifest_path") and exp.get("manifest_digest"):
+        text = gitops.show(store.project, commit, exp["manifest_path"])
+        if text is None or manifest.parse(text, exp["manifest_path"]) != exp.get("manifest"):
+            why.append("the manifest differs from the sealed one")
+    m = re.match(r"^\s*(?:about\s+)?([0-9.]+)\s*(\S.*)$", task.get("estimate") or "")
+    caps = limit(store.project.config, "fast_lane")
     if not m:
-        raise RLError("INVALID", f"--verified is \"<command> @<commit>: pass|fail, log <path>\", for example "
-                                 f"\"uv run pytest -q tests @3f2c9a1: pass, log research/notes/T-0035-tests.log\"; "
-                                 f"got {text!r}")
-    return {"command": m["command"].strip(), "commit": m["commit"].lower(), "outcome": m["outcome"],
-            "log": m["log"].strip() if m["log"] else None}
+        why.append("the task has no estimate (--estimate \"0.2 MIG·h\")")
+    elif m[2].strip() not in caps or float(m[1]) > caps[m[2].strip()]:
+        why.append(f"estimate {task['estimate']} is not under limits.fast_lane ({caps or 'none set'})")
+    return not why, why
 
 
-def progress(store: Store, tid: str, state: str, from_role: str, summary: str | None = None,
-             outputs: list[str] = (), next_action: str | None = None, attempts: list[str] = (),
-             reason: str | None = None, verified: list[str] = ()) -> dict:
-    """deliver (RESULT, with the test runs that verified changed code), wait (WAIT on attempts), block (BLOCKED
-    with a reason) or resume work (active)."""
-    if state == "blocked" and not reason:
-        raise RLError("INVALID", "blocked needs --reason engineering|model_unavailable|budget|science")
-    if state == "waiting" and not next_action:
-        raise RLError("INVALID", "waiting needs --next-action: what to do when the awaited facts arrive")
-    checks = [parse_verified(v) for v in verified]
-
-    def apply(tx: Tx, task: dict, refs: list[str]) -> dict:
-        changes = {"state": state, "revision": task["revision"] + 1, "note": summary or task.get("note")}
-        if next_action:
-            changes["next_action"] = next_action
-        if refs:
-            changes["output_refs"] = (task.get("output_refs") or []) + refs
-        if checks:
-            changes["verified"] = (task.get("verified") or []) + checks
-        if state == "waiting":
-            for a in attempts:
-                tx.require(a, "Attempt")
-            changes["wait_attempts"] = list(attempts)
-        changes["blocked_reason"] = reason if state == "blocked" else None
-        tx.update(tid, changes)
-        mtype = {"delivered": "RESULT", "waiting": "WAIT", "blocked": "BLOCKED"}.get(state)
-        msg = messages.record(tx, mtype, from_role, COORDINATOR, tid, next_action, refs,
-                              summary or (f"waiting on {', '.join(attempts)}" if attempts else reason),
-                              base_revision=changes["revision"]) if mtype else None
-        tx.event(f"task.{state}", tid, summary or next_action or reason or "")
-        return {"id": tid, "outputs": refs, "message": msg,
-                "summary": f"{tid} -> {state}" + (f" outputs {', '.join(refs)}" if refs else "")
-                           + "".join(f"\nverified: {_check_line(c)}" for c in checks)}
-
-    out = _owner_write(store, tid, list(outputs), "task_output", from_role, apply)
-    out["summary"] += messages.notice(store, out.pop("message"))
-    return out
-
-
-def handoff(store: Store, tid: str, doc: str, from_role: str, to_role: str | None = None) -> dict:
-    """Seal the handoff and release ownership; the task is ready to claim again."""
-    def apply(tx: Tx, task: dict, refs: list[str]) -> dict:
-        tx.update(tid, {"state": "ready", "owner_role": None, "owner_session": None, "handoff_ref": refs[0],
-                        "revision": task["revision"] + 1, "to_role": to_role or task.get("to_role")})
-        msg = messages.record(tx, "HANDOFF", from_role, to_role or task.get("to_role") or COORDINATOR, tid,
-                              "read the handoff, verify code and run records, then continue", refs)
-        tx.event("task.handoff", tid, refs[0])
-        return {"id": tid, "handoff_ref": refs[0], "message": msg,
-                "summary": f"{tid} handed off ({refs[0]}); ready to claim"}
-
-    out = _owner_write(store, tid, [doc], "handoff", from_role, apply)
-    out["summary"] += messages.notice(store, out.pop("message"))
-    return out
-
-
-def review_task(store: Store, tid: str, verdict: str, reason: str) -> dict:
-    """Coordinator acceptance or stop. Stopping a research task does not cancel any external execution. A task
-    worked on its own branch names the branch to merge."""
-    msg = None
+def dispatch(store: Store, actor: Actor, tid: str, note: str | None = None) -> dict:
+    """Hand a task to a researcher (9.1): an execute task needs passing tests at its committed head, a review that
+    covers that commit with no open method finding (or the fast lane), and a manifest that parses; its design commit
+    is sealed now (4.6). A preparation task needs its requirement and done check. The watcher starts the
+    researcher in the task's worktree."""
+    need(actor, "scientist", what="dispatching a task")
+    _note(note)
+    with store.read() as tx:
+        task = tx.require(tid, "Task")
+    if task.get("holder") != actor.name or task["state"] != "active":
+        raise RLError("INVALID", f"{tid} is {task['state']}, held by {task.get('holder') or 'nobody'}: you dispatch "
+                                 "a task you hold")
+    if task["kind"] not in ("execute", "prep"):
+        raise RLError("INVALID", f"{task['kind']} tasks are not dispatched")
+    commit = None
+    if task["kind"] == "execute":
+        if gitops.dirty(store.project, tid):
+            raise RLError("INVALID", f"{tid}'s worktree has uncommitted changes: commit the design first")
+        commit = gitops.head(store.project, tid)
     with store.write() as tx:
         task = tx.require(tid, "Task")
-        if verdict == "accept" and task["state"] != "delivered":
-            raise RLError("INVALID", f"{tid} is {task['state']}; only delivered work can be accepted")
-        state = "accepted" if verdict == "accept" else "stopped" if verdict == "stop" else "active"
-        if verdict == "reopen" and not task.get("owner_role"):
-            state = "ready"
-        tx.update(tid, {"state": state, "note": reason, "revision": task["revision"] + 1})
-        if verdict == "stop" and task.get("owner_role"):
-            msg = messages.record(tx, "CANCEL", COORDINATOR, task["owner_role"], tid, None, [],
-                                  f"{reason} (external runs are not cancelled by this)")
-        tx.event(f"task.{verdict}", tid, reason)
-    merge = ""
-    if verdict == "accept" and task.get("branch"):
-        merge = "; " + branch_status(store, task["branch"])
-    checked = verification_lines(store, task) if verdict == "accept" else []
-    return {"id": tid, "summary": f"{tid} -> {state}{merge}" + messages.notice(store, msg)
-                                  + "".join(f"\n{line}" for line in checked)}
+        changes = {"state": "active", **_hold(tx, task, session_name("researcher", tid)),
+                   "dispatch_note": note, "revision": task["revision"] + 1}
+        if task["kind"] == "execute":
+            exp = task_experiment(tx, tid)
+            missing = [k for k in ("manifest_path", "semantic_tests") if not exp.get(k)]
+            if missing:
+                raise RLError("INVALID", f"{exp['id']} needs {', '.join(missing)} before its code is handed over "
+                                         "(rl experiment set ..)")
+            if not passed_at(task, commit):
+                raise RLError("INVALID", f"no passing test is recorded at {commit[:12]}: rl task test {tid}")
+            ok, why = covers(tx, tid, commit, for_evidence=False)
+            lane = False
+            if not ok:
+                lane, lane_why = fast_lane(store, tx, task, exp, commit)
+                if not lane:
+                    raise RLError("INVALID", f"{why}; the fast lane does not apply either: {'; '.join(lane_why)}")
+            text = gitops.show(store.project, commit, exp["manifest_path"])
+            if text is None:
+                raise RLError("INVALID", f"{exp['manifest_path']} is not in {commit[:12]}")
+            parsed = manifest.parse(text, exp["manifest_path"])
+            from .util import digest_json
+            digest = digest_json(parsed)
+            if exp.get("design_commit"):
+                if exp.get("manifest_digest") != digest:
+                    raise RLError("INVALID", f"{exp['id']}@{exp['revision']} was sealed with another manifest: a "
+                                             "changed manifest is a new revision (rl experiment set "
+                                             f"{exp['id']} --reason ..)")
+                changed = gitops.protected_changes(store.project, exp["design_commit"], commit,
+                                                   list(exp.get("protected") or []))
+                if changed and not ok:
+                    raise RLError("INVALID", f"the protected scope changed since {exp['id']} was sealed "
+                                             f"({', '.join(changed)}): a new revision and a review")
+            else:
+                tx.update(exp["id"], {"design_commit": commit, "sealed_at": now_utc(), "sealed_by": tid,
+                                      "manifest": parsed, "manifest_digest": digest})
+                tx.event("experiment.sealed", exp["id"], f"@{exp['revision']} at {commit[:12]} by dispatch of {tid}")
+            changes.update(design_commit=commit, fast_lane=lane or None)
+        tx.update(tid, changes)
+        tx.event("task.dispatched", tid, note or "")
+    return {"id": tid, "summary": f"{tid} dispatched to researcher-{tid}" + (f"; design {commit[:12]} sealed" if commit
+                                                                          else "")}
 
 
-def _check_line(c: dict) -> str:
-    return f"{c['command']} @{c['commit'][:12]}: {c['outcome']}" + (f", log {c['log']}" if c.get("log") else "")
+# -- blockers -------------------------------------------------------------------------------------------------
 
 
-def verification_lines(store: Store, task: dict) -> list[str]:
-    """What task accept says about the tests the delivery ran: the last recorded runs, and a note (never a
-    refusal) when the task's branch has commits but none of its passing runs was of the branch's head."""
-    checks = task.get("verified") or []
-    lines = [f"verified: {_check_line(c)}" for c in checks[-3:]]
-    head, ahead = branch_head(store, task["branch"]) if task.get("branch") else (None, 0)
-    if head and ahead:
-        passed = [c["commit"] for c in checks if c["outcome"] == "pass"]
-        if not checks:
-            lines.append(f"note: {task['branch']} has {ahead} commit(s) and the delivery recorded no test run "
-                         "(rl task deliver --verified \"<command> @<commit>: pass|fail, log <path>\"); ask for one "
-                         "before merging, or merge knowing it")
-        elif not any(head.startswith(c) for c in passed):
-            lines.append(f"note: the head of {task['branch']} ({head[:12]}) is not a commit whose recorded tests "
-                         "passed: the code changed after the run, or the run failed")
-    return lines
+def block(store: Store, actor: Actor, tid: str, reason: str, note: str) -> dict:
+    """A researcher stops on a design or mandate problem, or only asks what something means (8.2)."""
+    need(actor, "researcher", what="blocking a task")
+    _note(note)
+    with store.write() as tx:
+        task = tx.require(tid, "Task")
+        if task.get("holder") != actor.name or task["state"] != "active":
+            raise RLError("INVALID", f"{tid} is {task['state']}, held by {task.get('holder')}")
+        tx.update(tid, {"state": "blocked", "block_reason": reason, "block_note": note, "answer_note": None,
+                        "revision": task["revision"] + 1})
+        tx.event("task.blocked", tid, f"{reason}: {note}")
+    return {"id": tid, "summary": f"{tid} blocked ({reason})"}
 
 
-def open_tasks(tx: Tx) -> list[dict]:
-    return [t for t in tx.all("Task") if t["state"] in OPEN_STATES]
+def answer(store: Store, actor: Actor, tid: str, text: str) -> dict:
+    """The scientist (or the short scientist session of a public prep task) answers a blocker; the task goes back to
+    its researcher. A changed design is a new experiment revision written before this answer."""
+    need(actor, "scientist", what="answering a blocker")
+    with store.write() as tx:
+        task = tx.require(tid, "Task")
+        if task["state"] != "blocked":
+            raise RLError("CONFLICT", f"{tid} is {task['state']}, not blocked")
+        if actor.name not in (task["creator"], task.get("scientist_session")) and \
+                (hypothesis_task_of(tx, task) or {}).get("holder") != actor.name:
+            raise RLError("INVALID", f"{tid}'s blockers go to {task['creator']}")
+        tx.update(tid, {"state": "active", "answer_note": text, "revision": task["revision"] + 1})
+        tx.event("task.answered", tid, text[:300])
+    return {"id": tid, "summary": f"{tid} back with its researcher"}
+
+
+def set_prep(store: Store, actor: Actor, tid: str, requirement: str | None, done_check: str | None) -> dict:
+    """The short scientist session of a public prep task changes its requirement or done check."""
+    need(actor, "scientist", what="changing a preparation task")
+    with store.write() as tx:
+        task = tx.require(tid, "Task")
+        if task["kind"] != "prep" or actor.name not in (task["creator"], task.get("scientist_session")):
+            raise RLError("INVALID", f"{tid} is not a preparation task of yours")
+        tx.update(tid, {k: v for k, v in (("requirement", requirement), ("done_check", done_check)) if v})
+        tx.event("task.prep_changed", tid, f"requirement/done check changed by {actor.name}")
+    return {"id": tid, "summary": f"{tid} changed"}
+
+
+# -- delivery -------------------------------------------------------------------------------------------------
+
+
+def deliver(store: Store, actor: Actor, tid: str, conclusion: str | None = None, limitations: str | None = None,
+            outputs: list[str] = (), reusable: str | None = None, note: str | None = None) -> dict:
+    _note(note)
+    with store.read() as tx:
+        task = tx.require(tid, "Task")
+    if task.get("holder") != actor.name or task["state"] != "active":
+        raise RLError("INVALID", f"{tid} is {task['state']}, held by {task.get('holder') or 'nobody'}: its holder "
+                                 "delivers it")
+    if task["kind"] in ("execute", "prep"):
+        need(actor, "researcher", what=f"delivering a {task['kind']} task")
+        return _deliver_work(store, actor, tid, conclusion, limitations, list(outputs), reusable, note)
+    need(actor, "scientist", what=f"delivering a {task['kind']} task")
+    return _deliver_scientist(store, actor, tid, conclusion, note)
+
+
+def _deliver_work(store: Store, actor: Actor, tid: str, conclusion, limitations, outputs, reusable, note) -> dict:
+    if not conclusion or not limitations:
+        raise RLError("INVALID", "a task conclusion has one sentence (--conclusion, its direction only, citing "
+                                 "evidence; no copied numbers) and its limits (--limitations)")
+    if gitops.dirty(store.project, tid):
+        raise RLError("INVALID", f"{tid}'s worktree has uncommitted changes: commit them; outputs stay on the branch")
+    head = gitops.head(store.project, tid)
+    bad = gitops.tracked_and_committed(store.project, tid, outputs)
+    if bad:
+        raise RLError("INVALID", f"outputs not committed on {gitops.branch_name(tid)}: {', '.join(bad)}")
+    with store.read() as tx:
+        task = tx.require(tid, "Task")
+        if task["kind"] == "execute" and not tx.all("Evidence", task_id=tid):
+            raise RLError("INVALID", f"{tid}'s conclusion cites evidence: write it first (rl evidence add --task {tid})")
+        command = test_command(tx, task)
+    public = task["creator"] == "coordinator"
+    check = None
+    if task["kind"] == "prep":
+        if tests_mode(store.project.config) == "local":
+            ok, detail = run_check(store, tid, command)
+            check = {"commit": head, "command": command, "outcome": "pass" if ok else "fail", "at": now_utc(),
+                     "by": "cli", "detail": detail}
+            if not ok:
+                raise RLError("INVALID", f"the done check fails at {head[:12]}: {detail}")
+        elif not passed_at(task, head):
+            raise RLError("INVALID", f"no passing done check is recorded at {head[:12]} (rl task test {tid} --record)")
+    with store.write() as tx:
+        task = tx.require(tid, "Task")
+        changes = {"state": "delivered", "conclusion": conclusion, "limitations": limitations,
+                   "delivered_commit": head, "delivered_at": now_utc(), "state_note": note, "return_note": None,
+                   "outputs": [{"path": p, **({"reusable": reusable} if reusable else {})} for p in outputs] or None,
+                   "revision": task["revision"] + 1, "merge_state": None, "merge_note": None}
+        if check:
+            changes["tests"] = list(task.get("tests") or []) + [check]
+        tx.update(tid, changes)
+        tx.event("task.delivered", tid, conclusion)
+    out = {"id": tid, "summary": f"{tid} delivered at {head[:12]}"}
+    if public:  # the CLI accepts a public preparation task on its done check (6.4)
+        merged = _merge(store, tid, run_tests=False)
+        out["summary"] += "; " + merged
+    return out
+
+
+def _deliver_scientist(store: Store, actor: Actor, tid: str, conclusion: str | None, note: str | None) -> dict:
+    from .reviews import tree_passed
+    with store.read() as tx:
+        task = tx.require(tid, "Task")
+        base = gitops.fork_point(store.project, tid)
+    head = gitops.head(store.project, tid)
+    if gitops.dirty(store.project, tid):
+        raise RLError("INVALID", f"{tid}'s worktree has uncommitted changes: commit the documents in {work_dir(tid)}/")
+    outside = gitops.only_under(store.project, base, head, work_dir(tid)) if base else []
+    if outside:
+        raise RLError("INVALID", f"a {task['kind']} task changes only {work_dir(tid)}/; it also changed "
+                                 f"{', '.join(outside[:5])}")
+    with store.write() as tx:
+        task = tx.require(tid, "Task")
+        problems: list[str] = []
+        if task["kind"] == "hypothesis":
+            if not conclusion:
+                problems.append("--conclusion: one sentence, its direction only")
+            targets = [e["id"] for e in tx.out(tid, "targets") if e["label"] == "Hypothesis"]
+            finals = [d for d in tx.all("Decision", task_id=tid) if d["state"] == "final"
+                      and d["kind"] in ("verdict", "stop")]
+            decided = {e["id"] for d in finals for e in tx.out(d["id"], "decides")}
+            missing = [h for h in targets if h not in decided]
+            if missing:
+                problems.append(f"no final verdict or stop on {', '.join(missing)} (rl decide .., a conclusion review, "
+                                "rl decide --final D-x)")
+            if any(d["kind"] == "verdict" and not (d.get("did") and d.get("means")) for d in finals):
+                problems.append("a verdict lacks its interpretation (--did, --means)")
+            unfinished = [e["id"] for e in tx.inc(tid, "part_of") if tx.require(e["id"])["state"] not in TASK_DONE]
+            if unfinished:
+                problems.append(f"tasks still open under it: {', '.join(unfinished)} (accept or cancel them)")
+        elif task["kind"] == "tree":
+            hyps = [h for h in tx.all("Hypothesis") if h.get("origin") == tid]
+            if not hyps:
+                problems.append("no hypotheses were added on this tree task")
+            for h in hyps:
+                lacks = [k for k in ("statement", "scope", "source", "purpose") if not h.get(k)]
+                if lacks:
+                    problems.append(f"{h['label']} lacks {', '.join(lacks)}")
+                f = h.get("flag")
+                if f and not (f.get("basis") and f.get("options")):
+                    problems.append(f"{h['label']} is flagged without basis and options")
+            problems += _plan_coverage(store, tx, tid, hyps)
+            if not tree_passed(tx, tid):
+                problems.append("the tree review has not passed (rl review request T-x --kind tree)")
+            if not any(d["kind"] == "route" for d in tx.all("Decision", task_id=tid)):
+                problems.append("no route decision on why the tree is split this way (rl decide --kind route ..)")
+            prep_list = gitops.show(store.project, head, f"{work_dir(tid)}/prep.yaml")
+            if prep_list is not None:
+                problems += _prep_list_problems(prep_list)
+        elif task["kind"] == "phase":
+            phase = [e["id"] for e in tx.out(tid, "targets") if e["label"] == "Phase"][0]
+            ds = [d for d in tx.all("Decision", task_id=tid) if d["kind"] == "phase"
+                  and any(e["id"] == phase for e in tx.out(d["id"], "decides"))]
+            if not ds:
+                problems.append(f"no phase decision decides {phase} (rl decide --kind phase --targets {phase} ..)")
+        if problems:
+            raise RLError("INVALID", f"{tid} cannot be delivered yet:\n- " + "\n- ".join(problems))
+        tx.update(tid, {"state": "delivered", "conclusion": conclusion, "delivered_commit": head,
+                        "delivered_at": now_utc(), "state_note": note, "return_note": None,
+                        "revision": task["revision"] + 1})
+        if task["kind"] == "phase":
+            for old in tx.all("Ask", kind="report"):
+                if old["state"] == "open":
+                    tx.update(old["id"], {"state": "closed"})
+            rq = tx.next_id("Ask")
+            tx.create("Ask", {"id": rq, "kind": "report", "task_id": tid, "state": "open", "by": "cli",
+                              "stuck": f"the phase report of {phase} is on the research page"})
+        tx.event("task.delivered", tid, conclusion or task["kind"])
+    return {"id": tid, "summary": f"{tid} delivered; the coordinator receives it"}
+
+
+def _plan_coverage(store: Store, tx: Tx, tid: str, hyps: list[dict]) -> list[str]:
+    """Every heading of the plan has a hypothesis whose source names it, or is listed in left-out.md (4.8)."""
+    plan = store.project.plan_path
+    if not plan.is_file():
+        return []
+    heads = [m[2].strip() for m in re.finditer(r"^(#{1,3})\s+(.+)$", plan.read_text(encoding="utf-8"), re.M)][1:]
+    left = gitops.checkout_in(store.project, tid) / work_dir(tid) / "left-out.md"
+    left_text = left.read_text(encoding="utf-8").lower() if left.is_file() else ""
+    sources = " ".join((h.get("source") or "").lower() for h in hyps)
+    missing = [h for h in heads if h.lower() not in sources and h.lower() not in left_text]
+    return [f"plan sections with no hypothesis and not in {work_dir(tid)}/left-out.md: {', '.join(missing[:8])}"] \
+        if missing else []
+
+
+def _prep_list_problems(text: str) -> list[str]:
+    import yaml
+    try:
+        data = yaml.safe_load(text) or []
+    except yaml.YAMLError as exc:
+        return [f"prep.yaml does not parse: {exc}"]
+    bad = [str(i) for i, p in enumerate(data if isinstance(data, list) else [None])
+           if not isinstance(p, dict) or not (p.get("title") and p.get("requirement") and p.get("done_check"))]
+    return [f"prep.yaml entries need title, requirement and done_check (entries {', '.join(bad)})"] if bad else []
+
+
+# -- acceptance -----------------------------------------------------------------------------------------------
+
+
+def accept(store: Store, actor: Actor, tid: str) -> dict:
+    """The creator accepts a delivery, which merges it (6.5). A scientist accepts the execute and prep tasks it made;
+    the coordinator receives tree, hypothesis and phase tasks."""
+    with store.read() as tx:
+        task = tx.require(tid, "Task")
+    if task["state"] != "delivered":
+        raise RLError("CONFLICT", f"{tid} is {task['state']}, not delivered")
+    if task["kind"] in ("tree", "hypothesis", "phase"):
+        need(actor, "coordinator", what=f"receiving a {task['kind']} task")
+        return {"id": tid, "summary": f"{tid}: " + _merge(store, tid, run_tests=False)}
+    need(actor, "scientist", what="accepting a task")
+    if task["creator"] != actor.name and task.get("scientist_session") != actor.name:
+        raise RLError("INVALID", f"{tid} was made by {task['creator']}, who accepts it")
+    return {"id": tid, "summary": f"{tid}: " + _merge(store, tid, run_tests=True)}
+
+
+def _merge(store: Store, tid: str, run_tests: bool) -> str:
+    """Merge commit on the task branch, the task's tests on it, then the mainline moves (6.5). A conflict or a
+    failing test leaves the mainline where it was and is recorded on the task."""
+    commit, conflicts = gitops.merge_on_task_branch(store.project, tid)
+    with store.read() as tx:
+        task = tx.require(tid, "Task")
+        command = test_command(tx, task) if run_tests or task["kind"] == "prep" else None
+    public = task["kind"] == "prep" and task["creator"] == "coordinator"
+    if conflicts:
+        return _conflict(store, tid, f"merge conflict in {', '.join(conflicts[:8])}", public)
+    if command:
+        if tests_mode(store.project.config) == "job":
+            with store.write() as tx:
+                tx.update(tid, {"state": "merging", "merge_state": "merging", "merge_commit": commit})
+                tx.event("task.merging", tid, f"merge commit {commit[:12]}: its tests run as a job")
+            return (f"merge commit {commit[:12]} made; run its tests as a short job and record it: rl run register "
+                    f"--task {tid} --trial --purpose merge-test --commit {commit} ..; the mainline moves when it passes")
+        ok, detail = run_check(store, tid, command)
+        if not ok:
+            return _conflict(store, tid, f"tests fail on the merge commit {commit[:12]}: {detail}", public)
+    why = gitops.move_mainline(store.project, commit)
+    if why:
+        return _conflict(store, tid, f"the mainline could not move to {commit[:12]}: {why}", public)
+    with store.write() as tx:
+        task = tx.require(tid, "Task")
+        tx.update(tid, {"state": "accepted", "merge_state": "merged", "merge_commit": commit, "merge_note": None,
+                        "revision": task["revision"] + 1})
+        tx.event("task.accepted", tid, f"merged at {commit[:12]}")
+    return f"accepted and merged ({commit[:12]}); the mainline moved"
+
+
+def _conflict(store: Store, tid: str, why: str, public: bool) -> str:
+    with store.write() as tx:
+        task = tx.require(tid, "Task")
+        changes = {"merge_state": "conflict", "merge_note": why, "revision": task["revision"] + 1}
+        if public:  # back to the researcher who delivered it (6.4)
+            changes.update(state="active")
+        else:
+            changes.update(state="delivered")
+        tx.update(tid, changes)
+        tx.event("task.merge_conflict", tid, why)
+    return (f"NOT merged, the mainline did not move: {why}. "
+            + ("It is back with its researcher, who merges the mainline into the branch and delivers again"
+               if public else "Open a small task for a researcher to resolve it, or fix it and accept again"))
+
+
+def finish_merge(store: Store, tid: str, passed: bool, detail: str) -> str:
+    """The acceptance test job of a jobs-only project ended (runs.ended): move the mainline or record a conflict."""
+    with store.read() as tx:
+        task = tx.require(tid, "Task")
+    public = task["kind"] == "prep" and task["creator"] == "coordinator"
+    if not passed:
+        return _conflict(store, tid, f"the test job on {task['merge_commit'][:12]} failed: {detail}", public)
+    why = gitops.move_mainline(store.project, task["merge_commit"])
+    if why:
+        return _conflict(store, tid, f"the mainline could not move: {why}", public)
+    with store.write() as tx:
+        tx.update(tid, {"state": "accepted", "merge_state": "merged", "revision": task["revision"] + 1})
+        tx.event("task.accepted", tid, f"merged at {task['merge_commit'][:12]} after its test job")
+    return f"{tid} accepted and merged"
+
+
+def return_task(store: Store, actor: Actor, tid: str, reason: str) -> dict:
+    """Send a delivery back: a scientist to the researcher, the coordinator to the scientist (8.2)."""
+    with store.write() as tx:
+        task = tx.require(tid, "Task")
+        if task["state"] != "delivered":
+            raise RLError("CONFLICT", f"{tid} is {task['state']}, not delivered")
+        if task["kind"] in ("tree", "hypothesis", "phase"):
+            need(actor, "coordinator", what="returning a delivery")
+        else:
+            need(actor, "scientist", what="returning a delivery")
+            if actor.name not in (task["creator"], task.get("scientist_session")):
+                raise RLError("INVALID", f"{tid} was made by {task['creator']}")
+        tx.update(tid, {"state": "active", "return_note": reason, "merge_state": None,
+                        "revision": task["revision"] + 1})
+        tx.event("task.returned", tid, reason)
+    return {"id": tid, "summary": f"{tid} returned to {task['holder']}: {reason}"}
+
+
+# -- phases ---------------------------------------------------------------------------------------------------
+
+
+def phase_create(store: Store, actor: Actor, title: str, scientists: int | None, budget: str | None,
+                 tasks: list[str] = ()) -> dict:
+    """A phase: the hypothesis tasks it holds (the first phase also the public preparation tasks), the scientists
+    at work at once, and a budget that is only shown (7.5)."""
+    need(actor, "coordinator", what="making a phase")
+    with store.write() as tx:
+        ph = tx.next_id("Phase")
+        tx.create("Phase", {"id": ph, "title": title, "budget": budget,
+                            "scientist_limit": scientists or int(limit(store.project.config, "scientists"))})
+        for t in tasks:
+            _add_to_phase(tx, ph, t)
+        tx.event("phase.created", ph, title)
+    return {"id": ph, "summary": f"{ph} {title}"}
+
+
+def phase_add(store: Store, actor: Actor, ph: str, tasks: list[str]) -> dict:
+    need(actor, "coordinator", what="changing a phase")
+    with store.write() as tx:
+        tx.require(ph, "Phase")
+        for t in tasks:
+            _add_to_phase(tx, ph, t)
+        tx.event("phase.changed", ph, f"added {', '.join(tasks)}")
+    return {"id": ph, "summary": f"{ph}: added {', '.join(tasks)}"}
+
+
+def _add_to_phase(tx: Tx, ph: str, tid: str) -> None:
+    task = tx.require(tid, "Task")
+    if task["kind"] not in ("hypothesis", "prep"):
+        raise RLError("INVALID", f"a phase holds hypothesis and public preparation tasks; {tid} is {task['kind']}")
+    if tx.out(tid, "in_phase"):
+        raise RLError("CONFLICT", f"{tid} is already in a phase")
+    tx.link("in_phase", tid, ph)
+
+
+def phase_tasks(tx: Tx, ph: str) -> list[dict]:
+    return [tx.require(e["id"]) for e in tx.inc(ph, "in_phase")]
+
+
+def phase_ended(tx: Tx, ph: str) -> bool:
+    """Every hypothesis task of the phase received or cancelled (7.5); the budget does not end it."""
+    hyp = [t for t in phase_tasks(tx, ph) if t["kind"] == "hypothesis"]
+    return bool(hyp) and all(t["state"] in TASK_DONE for t in hyp)
+
+
+# -- decision requests ----------------------------------------------------------------------------------------
+
+
+def ask(store: Store, actor: Actor, stuck: str, options: str, recommend: str, cost: str | None = None,
+        task_id: str | None = None, kind: str = "decision") -> dict:
+    """A decision request (7.3): a scientist on its hypothesis or tree task to the coordinator; the coordinator's
+    request to the user for the approval of a tree and its schedule (kind approval, on the tree task)."""
+    if kind == "approval":
+        need(actor, "coordinator", what="asking the user to approve the tree")
+        if not task_id:
+            raise RLError("INVALID", "an approval is asked on the tree task (--task T-x)")
+    else:
+        need(actor, "scientist", "coordinator", what="a decision request")
+        task_id = task_id or actor.subject
+    with store.write() as tx:
+        task = tx.require(task_id, "Task")
+        if kind == "approval":
+            if task["kind"] != "tree" or task["state"] != "accepted":
+                raise RLError("INVALID", f"approval is asked on a received tree task; {task_id} is "
+                                         f"{task['kind']}/{task['state']}")
+        elif actor.role == "scientist" and task["kind"] not in ("hypothesis", "tree"):
+            raise RLError("INVALID", f"a decision request is made on a hypothesis or tree task, not {task['kind']}")
+        rq = tx.next_id("Ask")
+        tx.create("Ask", {"id": rq, "kind": kind, "task_id": task_id, "by": actor.name,
+                          "state": "forwarded" if kind == "approval" or actor.role == "coordinator" else "open",
+                          "stuck": stuck, "options": options, "recommend": recommend, "cost": cost,
+                          "forwarded_at": now_utc() if kind == "approval" or actor.role == "coordinator" else None})
+        tx.event("ask.created", rq, f"{kind} on {task_id}: {stuck[:200]}")
+    to = "the user" if kind == "approval" or actor.role == "coordinator" else "the coordinator"
+    return {"id": rq, "summary": f"{rq} waits for {to}"}
+
+
+def forward(store: Store, actor: Actor, rq: str) -> dict:
+    need(actor, "coordinator", what="forwarding a request to the user")
+    with store.write() as tx:
+        a = tx.require(rq, "Ask")
+        if a["state"] != "open":
+            raise RLError("CONFLICT", f"{rq} is {a['state']}")
+        tx.update(rq, {"state": "forwarded", "forwarded_at": now_utc()})
+        tx.event("ask.forwarded", rq, "to the user")
+    return {"id": rq, "summary": f"{rq} waits for the user"}
+
+
+def answer_ask(store: Store, actor: Actor, rq: str, by: str, text: str) -> dict:
+    """The coordinator records an answer: its own, or the user's words said in its pane (--by user, 7.3). The user
+    runs no write command."""
+    need(actor, "coordinator", what="recording an answer")
+    if by not in ("coordinator", "user"):
+        raise RLError("INVALID", "--by is coordinator or user")
+    with store.write() as tx:
+        a = tx.require(rq, "Ask")
+        if a["state"] in ("answered", "closed"):
+            raise RLError("CONFLICT", f"{rq} is already {a['state']}")
+        if a["kind"] in ("approval", "report") and by != "user":
+            raise RLError("INVALID", f"{rq} is the user's to answer: record their words with --by user")
+        tx.update(rq, {"state": "answered", "answer": text, "answered_by": by, "answered_at": now_utc()})
+        tx.event("ask.answered", rq, f"by {by}: {text[:200]}")
+    return {"id": rq, "summary": f"{rq} answered by {by}"}
+
+
+def schedule_lines(tx: Tx) -> list[str]:
+    """The schedule (7.1): hypothesis tasks queued or at work, by priority, each with its reason."""
+    from .usage_view import task_usage_short
+    rows = [t for t in tx.all("Task", kind="hypothesis") if t["state"] not in TASK_DONE]
+    rows.sort(key=lambda t: (t["state"] != "queued", t.get("priority") or 99, t["id"]))
+    out = []
+    for t in rows:
+        hyps = ",".join(e["id"] for e in tx.out(t["id"], "targets"))
+        out.append(f"{t['id']} {hyps:<8} {t['state']:<9} P{t.get('priority')} {task_usage_short(tx, t)}  "
+                   f"{t.get('reason') or ''}")
+    return out
+
+
+def task_line(t: dict) -> str:
+    return f"{t['id']} {t['kind']}/{t['state']}" + (f" ({t['holder']})" if t.get("holder") else "") + f" {t['title']}"
+
+
+def shell_quote(text: str) -> str:
+    return shlex.quote(text)

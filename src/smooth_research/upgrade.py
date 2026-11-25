@@ -37,96 +37,10 @@ class Migration:
     apply: Callable[["Tx"], list[str]]  # returns what it changed, one line each
 
 
-def _v2(tx: "Tx") -> list[str]:
-    """Fields that later versions read on every record of a type, filled in on records written before them."""
-    out = []
-    old = [a for a in tx.all("Attempt") if not a.get("code_review")]
-    for att in old:
-        tx.update(att["id"], {"code_review": {"status": "unchecked",
-                                              "reason": "registered before code review checks were recorded"}})
-    if old:
-        out.append(f"{len(old)} attempt(s) registered before code review checks: code review 'unchecked'")
-    advice = tx.all("Ticket", kind="advice")
-    rounds: dict[str, list[dict]] = {}  # one request package = one round
-    for t in advice:
-        if t.get("advice_round") is None:
-            rounds.setdefault(t.get("request_ref") or t["id"], []).append(t)
-    number = max([t["advice_round"] for t in advice if t.get("advice_round") is not None], default=0)
-    for tickets in sorted(rounds.values(), key=lambda ts: min(t["id"] for t in ts)):
-        number += 1
-        for t in tickets:
-            tx.update(t["id"], {"advice_round": number})
-    if rounds:
-        out.append(f"{sum(len(ts) for ts in rounds.values())} advice ticket(s) from before advice rounds: grouped "
-                   f"into {len(rounds)} round(s) by request package")
-    return out
-
-
-def _v3(tx: "Tx") -> list[str]:
-    """Labels (H2.1, EH2.1/3) for the hypotheses and experiments written before them, by the rules new records
-    follow (labels), in the order they were created: the hypotheses by id, each placed by the hypotheses it is
-    derived from that were created before it; then the experiments by id, each by the hypotheses it tests that
-    existed when it was created, the first by id standing in for the first one named. Which hypotheses opened a
-    new line of research (--root) was never recorded, so the labels of an older project run deeper than new ones."""
-    from .labels import for_experiment, for_hypothesis
-    from .store import _sort_key
-    hyps = [h for h in tx.all("Hypothesis") if not h.get("label")]
-    for h in hyps:
-        sources = [e["id"] for e in tx.out(h["id"], "derived_from")
-                   if e["label"] == "Hypothesis" and _sort_key(e["id"]) < _sort_key(h["id"])]
-        tx.update(h["id"], {"label": for_hypothesis(tx, list(dict.fromkeys(sources)))})
-    exps, untested = [e for e in tx.all("Experiment") if not e.get("label")], []
-    for exp in exps:
-        tested = [tx.require(e["id"]) for e in tx.out(exp["id"], "tests")]
-        before = [h["id"] for h in tested if h["created_at"] <= exp["created_at"]] or [h["id"] for h in tested]
-        if not before:
-            untested.append(exp["id"])
-            continue
-        tx.update(exp["id"], {"label": for_experiment(tx, before)})
-    out = [f"{len(hyps)} hypothes{'i' if len(hyps) == 1 else 'e'}s and {len(exps) - len(untested)} experiment(s) "
-           "labelled in the order they were created (rl upgrade lists them)"] if hyps or exps else []
-    out += [f"{', '.join(untested)} test(s) no hypothesis: no label, shown by id"] if untested else []
-    return out
-
-
-def _v4(tx: "Tx") -> list[str]:
-    """The revision each conclusion review was of, on its targets edges: a review now counts only for the revision
-    of the hypothesis it reviewed. It is the revision when the review was requested (or reused), read from the
-    event log, where every revision of a hypothesis wrote 'rev N: ..'. Which evidence a review saw was not recorded,
-    so older reviews point out no evidence linked after them."""
-    import re
-    revised: dict[str, list[tuple[int, int]]] = {}  # hypothesis -> (event seq, revision from then on)
-    asked: dict[str, int] = {}  # review ticket -> the event seq of its request
-    for ev in tx.all("Event"):
-        if ev["type"] == "hypothesis.revised" and (m := re.match(r"rev (\d+):", ev.get("summary") or "")):
-            revised.setdefault(ev["entity_id"], []).append((ev["seq"], int(m[1])))
-        elif ev["type"] in ("review.requested", "review.reused") and ev.get("entity_id"):
-            asked.setdefault(ev["entity_id"], ev["seq"])
-    bound, unknown = 0, []
-    for t in tx.all("Ticket", kind="review"):
-        if t.get("subject") != "conclusion":
-            continue
-        for e in tx.out(t["id"], "targets"):
-            if e["label"] != "Hypothesis" or e.get("revision") is not None:
-                continue
-            if t["id"] not in asked:
-                unknown.append(t["id"])
-                continue
-            rev = max((r for seq, r in revised.get(e["id"], []) if seq < asked[t["id"]]), default=1)
-            tx.link("targets", t["id"], e["id"], revision=rev)
-            bound += 1
-    out = [f"{bound} hypothesis target(s) of conclusion reviews bound to the revision reviewed"] if bound else []
-    out += [f"{', '.join(sorted(set(unknown)))}: no request in the event log, so the revision reviewed is unknown "
-            "and the review counts for any"] if unknown else []
-    return out
-
-
-MIGRATIONS = [
-    Migration(2, "fill in fields that records written before them lack (attempt code review check, advice round)",
-              _v2),
-    Migration(3, "labels for hypotheses and experiments (H2.1, EH2.1/3)", _v3),
-    Migration(4, "conclusion reviews bound to the revision of each hypothesis they reviewed", _v4),
-]
+# The migrations from schema 5 on, in order. Emptied with the 2026-11 redesign, which opens no earlier project
+# (design 10.4); a later change of the record format adds its migration here and freezes a fixture of the format
+# it upgrades from (tests/fixtures/projects/schema-<n>).
+MIGRATIONS: list[Migration] = []
 
 
 def environment(project) -> tuple[str, bool]:
@@ -190,16 +104,10 @@ def migrate(store: "Store") -> dict | None:
 # Where earlier versions kept things, and where this one does. Files there keep working (records point to them);
 # rl upgrade lists them and rl upgrade --move moves them together with the paths recorded for them. Nested
 # entries come first, so a parent directory is moved after its children went elsewhere.
-OLDER_LAYOUT = (
-    ("docs/plan/original.md", "docs/plan.md", "the imported plan"),
-    ("docs/plan/constraints.md", "docs/constraints.md", "the constraints document"),
-    ("docs/experiments", "research/experiments", "experiment contracts"),
-    ("docs/tasks", "research/tasks", "task notes"),
-    ("docs/notes", "research/notes", "researcher notes"),
-    ("reports/reviews", "research/reviews", "review answers"),
-    ("reports/advice", "research/advice", "advice answers"),
-    ("reports", "research/reports", "stage reports"),
-)
+# Where earlier versions kept things, and where this one does: (old, new, what). Files there keep working (records
+# point to them); rl upgrade lists them and rl upgrade --move moves them together with the paths recorded for them.
+# Emptied with the 2026-11 redesign; later versions add to it.
+OLDER_LAYOUT: tuple[tuple[str, str, str], ...] = ()
 PROTECTED = ("research/state", "research/documents")  # the database and the sealed objects
 
 
@@ -262,10 +170,6 @@ def move(store: "Store", old: str, new: str) -> dict:
     changed: list[str] = []
     try:
         with store.write() as tx:
-            for exp in tx.all("Experiment"):
-                if to := moved(exp.get("contract_path")):
-                    tx.update(exp["id"], {"contract_path": to})
-                    changed.append(f"{exp['id']} contract")
             for doc in tx.all("Document"):
                 if to := moved(doc.get("path")):
                     tx.update(doc["id"], {"path": to})
@@ -294,25 +198,12 @@ ADJUST = """A plugin update does not stop the research: adjust the old research 
 - You may change: smooth-research.yaml (the warnings say what this version reads differently), the wording of
   docs/constraints.md where only the format changed, files an older layout put elsewhere (move them with
   rl upgrade --move, which rewrites the paths the records keep; a plain mv breaks those links), unsealed
-  contract drafts, task notes, notes, worktrees and their branches, and you may add records that this version
+  drafts in task work directories, worktrees and their branches, and you may add records that this version
   expects (rl commands only; never edit research/state/ by hand).
 - Ask the user only when an adjustment would change the goal, the claims in scope, the data or the budget.
 - Never rewrite recorded facts (observations, results, evidence, decisions, reviews) or sealed documents: when
   this version wants them in another form, add a new record or revision that cites the old one.
 - Say what you changed: rl upgrade --note "<what and why>", and commit it."""
-
-
-def _labels_given(tx: "Tx", upgrades: list[dict]) -> list[str]:
-    """The labels the upgrade to schema 3 gave the hypotheses and experiments that existed then, a few per row;
-    shown while that upgrade is in the history rl upgrade lists."""
-    import re
-    done = [e for e in upgrades if (m := re.match(r"schema (\d+) -> (\d+)", e.get("summary") or ""))
-            and int(m[1]) < 3 <= int(m[2])]
-    if not done:
-        return []
-    pairs = [f"{r['id']} {r['label']}" for entity in ("Hypothesis", "Experiment") for r in tx.all(entity)
-             if r.get("label") and r["created_at"] <= done[-1]["created_at"]]
-    return [" · ".join(pairs[i:i + 6]) for i in range(0, len(pairs), 6)]
 
 
 def report(store: "Store", note: str | None = None) -> dict:
@@ -325,7 +216,6 @@ def report(store: "Store", note: str | None = None) -> dict:
     with store.read() as tx:
         meta = tx.meta()
         upgrades = [e for e in tx.all("Event") if e["type"] in ("project.upgrade", "project.adjusted")]
-        given = _labels_given(tx, upgrades[-5:])
     last = meta.get("last_build")
     with store.write() as tx:
         tx.set_meta(last_build=build())
@@ -334,28 +224,18 @@ def report(store: "Store", note: str | None = None) -> dict:
     lines = [f"project format: schema {meta.get('schema_version')} (this CLI: {SCHEMA_VERSION}) · plugin build "
              f"{build()} (last used with {last or 'unknown'})", environment(project)[0]]
     lines += [f"history: {e['created_at'][:16]} {e['type']}: {e['summary']}" for e in upgrades[-5:]]
-    if given:
-        lines += ["labels the schema 3 upgrade gave the records (id label; commands take either, paths, job names "
-                  "and commits keep the ids):"] + [f"  {row}" for row in given]
     if note and note.strip():
         lines.append(f"recorded: project.adjusted: {note.strip()}")
     lines += [f"layout: created {', '.join(created)}" for _ in [0] if created]
     lines += [f"older layout: {old} ({what}) works where it is, since the records point there; this version keeps "
               f"them in {new}. To move them with their records: rl upgrade --move {old} {new}"
               for old, new, what in older]
-    if (project.docs_root / "research-graph.html").exists():
-        lines.append("docs/research-graph.html is no longer updated: rl view writes docs/research.html, the records "
-                     "with the explanations in research/notes/explanation.yaml (rl view --todo lists what to write). "
-                     "Delete the old page when nobody needs it")
     with store.read() as tx:
-        lost = [f"{e['id']} contract {e['contract_path']}" for e in tx.all("Experiment")
-                if e.get("contract_path") and not project.abs(e["contract_path"]).is_file()]
+        lost = [f"{d['id']} {d['path']}" for d in tx.all("Document") if not project.abs(d["path"]).is_file()]
     lines += [f"records: {item} is missing (moved by hand? move it back, then use rl upgrade --move)" for item in lost]
     warnings = project.warnings  # printed after the summary as warning: lines
     lines.append(f"configuration: {len(warnings)} warning(s) below: fix them in smooth-research.yaml" if warnings
                  else "configuration: read as written")
-    from .watch import config_hint
-    lines += [f"configuration: {hint}" for hint in [config_hint(store)] if hint]
     check = snapshot.doctor(store)
     problems = check["problems"] + check["record_problems"]
     lines += [f"records: {p}" for p in problems] or [f"records: {check['documents']} sealed object(s) verified"]

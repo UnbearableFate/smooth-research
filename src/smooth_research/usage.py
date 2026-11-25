@@ -9,11 +9,9 @@ was written last); one older than STALE_MINUTES is stale. A stale or missing rea
 it is shown as such (rl agent list); a window whose reset time has passed with no reading since is shown as reset,
 with no reading yet, and is not low.
 
-A host is low when one of its windows has usage.switch_left_percent (10) or less left, or
-usage.coordinator_host_left_percent (20) on the host the coordinator runs on, which keeps working on it. Then
-its researcher and reviewer sessions finish and another model takes over (the watcher tells them and the
-coordinator, which runs rl agent switch), and new ones start on another entry of their role; advisors keep what
-is left. pi reports no windows.
+A host is low when one of its windows has usage.switch_left_percent (10) or less left. Then the watcher moves the
+sessions on it to the next model entry of their role: it ends the old conversation and starts the new one from the
+session's pack, with no handover document (design 11.3). pi reports no windows.
 """
 
 from __future__ import annotations
@@ -193,14 +191,11 @@ def _epoch(at: str | None) -> float:
 def hosts(store) -> dict[str, dict]:
     """Every host's reading, the percent left at which its sessions hand over, and why it is low (None when it
     is not): the narrowest window at or below that percent."""
-    with store.read() as tx:
-        coordinator = next((s["host"] for s in tx.all("Session", status="active") if s["role_id"] == "coordinator"),
-                           None)
     now, out = time.time(), {}
     for host in HOSTS:
         found = reading(host)
-        mine = host == coordinator
-        limit = usage_percent(store.project.config, "coordinator_host_left_percent" if mine else "switch_left_percent")
+        mine = False
+        limit = usage_percent(store.project.config, "switch_left_percent")
         stale = bool(found) and _minutes_since(found["at"]) > STALE_MINUTES
         short = [] if stale else [w for w in (found or {}).get("windows", []) if left(w, now) <= limit]
         low = None

@@ -20,15 +20,16 @@ from latticedb import Database
 from latticedb import LatticeDatabaseLockedError
 
 from .project import Project
-from .schema import ENTITIES, ENUMS, PREFIX_LABEL, RELATIONS, SCHEMA_VERSION
+from .schema import ENTITIES, ENUMS, MIN_SCHEMA_VERSION, PREFIX_LABEL, RELATIONS, SCHEMA_VERSION
 from .upgrade import build, migrate
 from .util import LABEL_RE, RLError, now_utc
 
 LOCK_TIMEOUT_S = 60.0
 OPEN_RETRY_S = 10.0
-EXTRA_INDEXES = [("Observation", "attempt_id"), ("Attempt", "run_id"), ("Message", "to_role"),
-                 ("Ticket", "dedupe_key"), ("Usage", "accounting_ref"), ("ExecRef", "opaque_id"),
-                 ("Document", "path"), ("Run", "experiment_id"), ("Result", "attempt_id")]
+EXTRA_INDEXES = [("Observation", "attempt_id"), ("Attempt", "run_id"), ("Message", "subject"),
+                 ("Ticket", "task_id"), ("Usage", "accounting_ref"), ("ExecRef", "opaque_id"),
+                 ("Document", "path"), ("Run", "task_id"), ("Result", "attempt_id"), ("Ask", "task_id"),
+                 ("Session", "name")]
 
 
 def _holder(fd: int) -> str:
@@ -38,7 +39,7 @@ def _holder(fd: int) -> str:
     except (OSError, ValueError):
         note = {}
     if not note.get("pid"):
-        return "no writer holds it, so readers do (rl status, rl view and other reads hold it while they read)"
+        return "no writer holds it, so readers do (rl status, rl pack and other reads hold it while they read)"
     if note.get("host") == socket.gethostname():
         try:
             os.kill(int(note["pid"]), 0)
@@ -393,6 +394,11 @@ class Store:
             version = Tx(txn, False, self.actor).meta().get("schema_version")
         if not isinstance(version, int):
             raise RLError("CORRUPT", f"the research database has no schema version: {self.path}")
+        if version < MIN_SCHEMA_VERSION:
+            raise RLError("UNSUPPORTED", f"this project was made before the 2026-11 redesign (record format {version}; "
+                                         f"this plugin opens format {MIN_SCHEMA_VERSION} and later). Continue it "
+                                         "with the plugin version that made it, or start a new project from its "
+                                         "plan (rl init --plan <plan>); its records are not carried over")
         if version < SCHEMA_VERSION:
             if self.read_only:
                 raise RLError("READ_ONLY", f"the records are in format {version} and this CLI reads format "
