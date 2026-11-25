@@ -58,7 +58,10 @@ attempt it made.
 
 `arm`, `seed`, `commit` and `config` (and `split` when the arm has one) say what ran; a result without them is
 kept but marked unverified and cannot be evidence, and one that differs from its registration or from the sealed
-arm is marked deviating. Local paths are read and digested; remote URIs are only registered. `{{rl}} run
+arm is marked deviating. `commit` is the commit the run ran at (the one it was registered at), not a later commit
+of its outputs; `config` is the arm's config as the manifest writes it, nothing added (keys shared by all arms are
+written into each arm). Local paths are read and digested (relative to the project, or to the task's worktree);
+remote URIs are only registered. `{{rl}} run
 reject-result RES-x --reason ..` when the result itself is wrong: what rests on it is flagged for re-checking.
 
 ## Compute resources and remote runs

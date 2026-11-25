@@ -334,7 +334,24 @@ def test(store: Store, actor: Actor, tid: str, record: str | None = None, commit
         tx.update(tid, {"tests": tests})
         tx.event("task.tested", tid, f"{'pass' if ok else 'fail'} at {at[:12]}: {command}")
     return {"id": tid, "passed": ok, "summary": f"{tid} tests {'pass' if ok else 'FAIL'} at {at[:12]} ({command})"
-                                                + ("" if ok else f": {detail}")}
+                                                + ("" if ok else f": {detail}") + _manifest_note(store, tid, at)}
+
+
+def _manifest_note(store: Store, tid: str, commit: str) -> str:
+    """A warning about the task's manifest at this commit (manifest.unapplied), or a parse error, for the one who
+    tests it before the review; empty when there is nothing to say."""
+    with store.read() as tx:
+        exp = task_design(tx, tid)
+    if not exp or not exp.get("manifest_path"):
+        return ""
+    text = gitops.show(store.project, commit, exp["manifest_path"])
+    if text is None:
+        return f"\nWARNING: {exp['manifest_path']} is not in {commit[:12]}"
+    try:
+        why = manifest.unapplied(manifest.parse(text, exp["manifest_path"]))
+    except RLError as exc:
+        return f"\nWARNING: {exc.message}"
+    return f"\nWARNING: {why}" if why else ""
 
 
 def test_runs(task: dict, commit: str, command: str | None, design: str | None = None) -> list[dict]:
@@ -460,7 +477,8 @@ def dispatch(store: Store, actor: Actor, tid: str, note: str | None = None) -> d
         tx.update(tid, changes)
         tx.event("task.dispatched", tid, note or "")
     return {"id": tid, "summary": f"{tid} dispatched to researcher-{tid}" + (f"; design {commit[:12]} sealed" if commit
-                                                                          else "")}
+                                                                          else "")
+            + (_manifest_note(store, tid, commit) if commit else "")}
 
 
 # -- blockers -------------------------------------------------------------------------------------------------

@@ -269,7 +269,11 @@ def test_the_whole_way_to_the_phase_report(project, rl):
     ok(rl("task", "deliver", "T-0004", "--conclusion", "phase done", who=s))
     assert types(project, "user") == ["phase-report"]
     assert types(project, c) == ["phase-conclusion"]
+    [report] = flow.items(project, "user")
+    assert report.subject.startswith("RQ-") and report.subject in flow.items(project, c)[0].note
     ok(rl("task", "accept", "T-0004", who=c))
+    ok(rl("request", "answer", report.subject, "--by", "user", "--text", "read it", who=c))
+    assert types(project, "user") == []
     out = ok(rl("doctor"))
     assert "missed" not in out
     ok(rl("view"))

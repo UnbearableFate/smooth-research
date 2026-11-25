@@ -399,10 +399,13 @@ class Rules:
             if t["state"] != "delivered" or t["kind"] not in ("hypothesis", "tree", "phase"):
                 continue
             kind = {"hypothesis": "hypothesis-conclusion", "tree": "tree", "phase": "phase-conclusion"}[t["kind"]]
+            report = next((a["id"] for a in self.asks if a["kind"] == "report" and a["task_id"] == t["id"]
+                           and a["state"] == "open"), None)
             self.add(type=kind, to="coordinator", subject=t["id"], ask=f"receive {t['id']} or return it",
                      cmd=f"rl task accept {t['id']} | rl task return {t['id']} --reason ..",
-                     since=t.get("delivered_at") or now_utc(), frm=t.get("holder"), note=t.get("state_note")
-                     or t.get("conclusion"))
+                     since=t.get("delivered_at") or now_utc(), frm=t.get("holder"), note=(t.get("state_note")
+                     or t.get("conclusion") or "") + (f" · the user reads its report ({report}); record what they "
+                     f"say: rl request answer {report} --by user --text .." if report else ""))
         from .tasks import approval, latest_tree, phase_ended
         tree = latest_tree(self.tx)
         if tree and tree["state"] == "accepted":
@@ -460,9 +463,11 @@ class Rules:
                          cmd="tell the coordinator", since=a.get("forwarded_at") or a["created_at"],
                          frm="coordinator", note=a["stuck"])
             elif a["kind"] == "report" and a["state"] == "open":
-                self.add(type="phase-report", to="user", subject=a["task_id"], ask="read the phase report on the "
+                self.add(type="phase-report", to="user", subject=a["id"], ask="read the phase report on the "
                          "research page; say in the coordinator's pane that you read it, or what to change",
-                         cmd="tell the coordinator", since=a["created_at"], frm="cli", timed=False, note=a["stuck"])
+                         cmd=f"tell the coordinator (it records your words: rl request answer {a['id']} --by user "
+                         "--text ..)", since=a["created_at"], frm="cli", timed=False,
+                         note=f"{a['stuck']} ({a['task_id']})")
 
     def asks_answered(self) -> None:
         """An answer stays with the scientist until it writes a decision citing the task after it (52); on a tree

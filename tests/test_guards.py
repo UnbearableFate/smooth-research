@@ -661,3 +661,34 @@ def test_one_passed_attempt_waits_for_the_rest_of_its_round(project, rl):
     with project.read() as tx:
         assert tx.require("T-0003")["merge_state"] == "conflict"
     assert git(top, "rev-parse", "HEAD") == main
+
+
+def test_a_manifest_with_top_level_arm_keys_is_warned_about_when_tested(project, rl):
+    """Found in the all-Claude trial: a top-level config was silently not applied, and every import mismatched."""
+    flow.designed(project, rl)
+    wt = flow.worktree(project, "T-0003")
+    (wt / "src" / "avg" / "arms.yaml").write_text(flow.ARMS + "config: {mu: 5}\nseeds: [0, 1]\n")
+    git(wt, "add", "-A")
+    git(wt, "commit", "-qm", "shared config")
+    out = ok(rl("task", "test", "T-0003", who="scientist-T-0002"))
+    assert "WARNING" in out and "top-level config, seeds is not applied" in out
+
+
+def test_an_artifact_in_the_task_worktree_is_read_and_digested(project, rl):
+    flow.dispatched(project, rl)
+    r = "researcher-T-0003"
+    code, out, err = rl("--json", "run", "register", "--task", "T-0003", "--request-id", "r1", "--arm", "single",
+                        "--seed", 0, "--config", json.dumps({"k": 1}), "--minutes", 1, who=r)
+    att = json.loads(out)["attempt"]
+    wt = flow.worktree(project, "T-0003")
+    (wt / "research" / "work" / "T-0003").mkdir(parents=True, exist_ok=True)
+    (wt / "research" / "work" / "T-0003" / "m.json").write_text("{}")
+    ok(rl("run", "record", "--attempt", att, "--state", "ended", "--outcome", "success", who=r))
+    with project.read() as tx:
+        commit = tx.require(tx.require(att, "Attempt")["run_id"])["code_commit"]
+    res = {"status": "complete", "arm": "single", "seed": 0, "commit": commit, "config": {"k": 1},
+           "metrics": {"abs_error": 1.0}, "artifacts": [{"path": "research/work/T-0003/m.json"}]}
+    out = json.loads(ok(rl("--json", "run", "import-result", "--attempt", att, "--request-id", "i1", "--manifest",
+                           json.dumps(res), who=r)))
+    with project.read() as tx:
+        assert tx.require(out["result"])["verification"][0]["check"].startswith("read_locally")

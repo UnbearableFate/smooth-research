@@ -33,7 +33,9 @@ Steps of a project:
 5. Then handle what comes: `hypothesis-conclusion` (read the check lines, `rl task accept T-x` or return it),
    `decision-request` (`rl request answer RQ-x --by coordinator --text ..` or `rl request forward RQ-x` for the
    user), `phase-ended` (`rl task create --kind phase --phase PH-x --title ..` then release it),
-   `phase-conclusion` (accept it; plan the next phase or tell the user the research ends), `session-needs-decision`
+   `phase-conclusion` (accept it; plan the next phase or tell the user the research ends; the phase report waits on
+   the user as RQ-x: when they say they read it, or what to change, record their words with
+   `rl request answer RQ-x --by user --text ..`), `session-needs-decision`
    (`rl agent dialog NAME`, then `rl agent answer NAME "<option>" --reason ..`), `timeout` items.
 6. A question to any session: `rl question --to NAME --on RECORD --text ..`; close it after reading the answer:
    `rl question --close MSG-x`.
@@ -94,8 +96,10 @@ Execute task:
    --state running|ended [--outcome success|failed] --source <tool> [--exec-kind hpc_job --exec-namespace <ns>
    --exec-id <job id>]`. A job's end may also come from the executor (`rl run ended`): then do not record it again.
 3. Import what it wrote: `rl run import-result --attempt ATT-x --request-id <unique> --manifest @<manifest.json>`.
-   The run writes {"status": "complete", "arm", "seed", "commit": <git rev-parse HEAD>, "config", "split" (if the
-   arm has one), "metrics", "artifacts": [{"path", "digest"}]}. A result that does not say what it ran is not
+   The run writes {"status": "complete", "arm", "seed", "commit": <git rev-parse HEAD when it ran: the commit the
+   run was registered at, not a later commit of its outputs>, "config" (exactly the arm's config in the manifest,
+   nothing added), "split" (if the arm has one), "metrics", "artifacts": [{"path"}]}. rl reads and digests local
+   artifact files itself (a digest you give is "blake2b:<hex>"). A result that does not say what it ran is not
    evidence.
 4. Evidence (no direction, just the fact): `rl evidence add --task T-x --summary ".." --level <level>
    --results RES-x,RES-y`.

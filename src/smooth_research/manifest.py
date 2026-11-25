@@ -54,6 +54,20 @@ def parse(text: str, where: str) -> dict:
     return data
 
 
+PER_ARM = ("config", "seeds", "split")
+
+
+def unapplied(data: dict) -> str | None:
+    """A warning for top-level keys that belong to each arm (config, seeds, split): they are not applied to the arms,
+    so a run's actual configuration would not match its arm's. Warned, not refused: a manifest sealed with them
+    stays usable."""
+    found = [k for k in PER_ARM if k in data]
+    if not found:
+        return None
+    return (f"the manifest's top-level {', '.join(found)} is not applied to the arms: each arm carries its own "
+            f"(arms: - name: .. seeds: [..] config: {{..}}); a run is checked against its arm only")
+
+
 def arm(manifest: dict, name: str) -> dict | None:
     return next((a for a in manifest.get("arms") or [] if str(a.get("name")) == str(name)), None)
 

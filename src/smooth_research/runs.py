@@ -503,14 +503,25 @@ def executor_hint(store: Store, attempt: str) -> str | None:
 # -- results --------------------------------------------------------------------------------------------------
 
 
-def _verify_artifacts(project: Project, artifacts: list) -> tuple[list[dict], str]:
+def _artifact_file(project: Project, path: str, task_id: str | None) -> Path:
+    """A local artifact path: as written relative to the project, else in the caller's checkout, else in the task's
+    worktree (a run writes research/work/T-x/.. on its task branch before it is merged)."""
+    from .gitops import worktree_path
+    p = Path(path)
+    if p.is_absolute():
+        return p
+    places = [project.root / p, project.checkout / p] + ([worktree_path(project, task_id) / p] if task_id else [])
+    return next((x for x in places if x.is_file()), places[0])
+
+
+def _verify_artifacts(project: Project, artifacts: list, task_id: str | None = None) -> tuple[list[dict], str]:
     out, counts = [], {}
     for art in artifacts:
         if not isinstance(art, dict) or not (art.get("path") or art.get("uri")):
             raise RLError("INVALID", "each artifact is {path: <local path>} or {uri: <remote>}, with optional digest")
         entry = {k: art.get(k) for k in ("path", "uri", "role", "digest") if art.get(k)}
         if art.get("path"):
-            local = project.abs(art["path"])
+            local = _artifact_file(project, art["path"], task_id)
             if not local.is_file():
                 entry["check"] = "missing_locally"
             else:
@@ -576,7 +587,9 @@ def import_result(store: Store, actor: Actor, attempt: str, reported: dict, requ
     artifacts = reported.get("artifacts") or []
     if not isinstance(artifacts, list):
         raise RLError("INVALID", "manifest.artifacts is a list")
-    verification, scope = _verify_artifacts(store.project, artifacts)
+    with store.read() as tx:
+        run_task = tx.require(tx.require(attempt, "Attempt")["run_id"], "Run")["task_id"]
+    verification, scope = _verify_artifacts(store.project, artifacts, run_task)
     manifest_digest = digest_json(reported)
     payload = digest_json({"attempt": attempt, "manifest": reported})
     with store.write() as tx:
