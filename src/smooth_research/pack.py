@@ -81,7 +81,10 @@ def build(store: Store, actor: Actor) -> dict:
         else:
             raise RLError("INVALID", f"no pack for {actor.name}")
         blocks = body + [("Your inbox", _inbox(tx, store, actor.name), False)]
-    head = f"# Pack · {actor.name} · {now_utc()[:16]} UTC\nRead from the records only; nothing was queried."
+    from .launch import rl_command
+    cli = rl_command()
+    head = (f"# Pack · {actor.name} · {now_utc()[:16]} UTC\nRead from the records only; nothing was queried."
+            + (f"\nThe CLI is {cli}: write that path wherever this pack says `rl`." if cli != "rl" else ""))
     text = head + "\n\n" + card(role) + "\n\n" + _fit(blocks, BUDGETS[role])
     return {"pack": text, "summary": text}
 

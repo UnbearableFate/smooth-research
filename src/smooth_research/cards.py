@@ -38,6 +38,11 @@ Steps of a project:
 6. A question to any session: `rl question --to NAME --on RECORD --text ..`; close it after reading the answer:
    `rl question --close MSG-x`.
 Budgets are shown, never enforced. Speak to the user briefly and concretely: what is being tested, why, what came out.
+Explaining to the user: read the records and docs/research.html. A question about code, logs, a review discussion or
+run outputs goes to a read-only subagent of a lower model tier that brings back the answer and its locators; the
+material stays out of your context. What it finds wrong goes as a question to the scientist who owns it, never as
+an instruction to a researcher. Explanations the user asks for go into docs/explanations/<topic>.md, terms into
+docs/glossary.md.
 """
 
 SCIENTIST = """# Role: scientist
@@ -82,11 +87,16 @@ design: the protected scope, the manifest, the semantic tests. A design problem 
 
 Execute task:
 1. Read the card in `rl pack`. Runs follow the manifest's arms and seeds.
-2. Per run: `rl run register --task T-x --request-id <unique> --arm <arm> --seed <n> --config '<arm config JSON>'
-   --minutes <expected>` (prints RUN-x and ATT-x). Start it yourself (locally: run the command), then record its end:
-   `rl run record --attempt ATT-x --state ended --outcome success|failed --source local-shell`.
-3. Import what it wrote: `rl run import-result --attempt ATT-x --request-id <unique> --manifest '{"status":
-   "complete", "arm": "..", "seed": n, "config": {...}, "metrics": {...}, "artifacts": [{"path": ".."}]}'`.
+2. Per run: `rl run register --task T-x --request-id <unique> --arm <arm> --seed <n> --minutes <expected>` (the
+   arm's config and split are recorded; give --config/--split only for a run that deviates, with --deviation).
+   On a remote resource add `--resource <name>` and follow `rl compute steps --attempt ATT-x`. Start it yourself
+   (locally: run the command; a cluster: the job tools), record what you see: `rl run record --attempt ATT-x
+   --state running|ended [--outcome success|failed] --source <tool> [--exec-kind hpc_job --exec-namespace <ns>
+   --exec-id <job id>]`. A job's end may also come from the executor (`rl run ended`): then do not record it again.
+3. Import what it wrote: `rl run import-result --attempt ATT-x --request-id <unique> --manifest @<manifest.json>`.
+   The run writes {"status": "complete", "arm", "seed", "commit": <git rev-parse HEAD>, "config", "split" (if the
+   arm has one), "metrics", "artifacts": [{"path", "digest"}]}. A result that does not say what it ran is not
+   evidence.
 4. Evidence (no direction, just the fact): `rl evidence add --task T-x --summary ".." --level <level>
    --results RES-x,RES-y`.
 5. Commit outputs on the task branch, then `rl task deliver T-x --conclusion "<one sentence>" --limitations ".."

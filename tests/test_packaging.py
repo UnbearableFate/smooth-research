@@ -28,7 +28,7 @@ def test_both_hosts_share_the_core_and_differ_only_in_adapters(built):
     claude, codex = (set(records[t]["files"]) for t in ("claude", "codex"))
     shared = {f for f in claude & codex if records["claude"]["files"][f] == records["codex"]["files"][f]}
     assert {"bin/rl", "src/smooth_research/cli.py", "src/smooth_research/store.py", "pyproject.toml"} <= shared
-    assert ".claude-plugin/plugin.json" in claude - codex and "agents/researcher.md" in claude - codex
+    assert ".claude-plugin/plugin.json" in claude - codex and not any(f.startswith("agents/") for f in claude)
     assert ".codex-plugin/plugin.json" in codex - claude
     for target in ("claude", "codex"):
         digests = records[target]["files"].values()
@@ -61,8 +61,8 @@ def test_placeholders_are_filled_per_host(built):
     out, _ = built
     claude = (out / "claude/plugins/smooth-research/skills/smooth-research/SKILL.md").read_text()
     codex = (out / "codex/plugins/smooth-research/skills/smooth-research/SKILL.md").read_text()
-    assert "${CLAUDE_PLUGIN_ROOT}/bin/rl resume" in claude and "${CLAUDE_SESSION_ID}" in claude
-    assert "rl resume" in codex and "CLAUDE_PLUGIN_ROOT" not in codex and "--host codex" in codex
+    assert "${CLAUDE_PLUGIN_ROOT}/bin/rl resume" in claude and "${CLAUDE_PLUGIN_ROOT}/bin/rl pack" in claude
+    assert "`rl resume`" in codex and "CLAUDE_PLUGIN_ROOT" not in codex and "not on PATH" in codex
     for root in (out / "claude", out / "codex"):
         for md in root.rglob("*.md"):
             assert not re.search(r"\{\{[a-z_]+\}\}", md.read_text()), md
