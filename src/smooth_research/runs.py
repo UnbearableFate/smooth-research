@@ -19,7 +19,7 @@ from pathlib import Path
 
 from . import compute, gitops, manifest
 from .project import Project, coordinator_is_login, limit
-from .research import brief, recheck_dependents, task_design, task_experiment
+from .research import brief, design_keys, recheck_dependents, task_design, task_experiment
 from .reviews import covers, open_blockers
 from .roles import Actor, need
 from .schema import ENUMS
@@ -159,6 +159,10 @@ def register(store: Store, actor: Actor, task_id: str, request_id: str, arm: str
             run = tx.require(run_id, "Run")
             if run["task_id"] != task_id:
                 raise RLError("INVALID", f"{run_id} belongs to {run['task_id']}, not {task_id}")
+            was, now_test = (run["spec"].get("test") or {}), (spec.get("test") or {})
+            if was.get("design") != now_test.get("design") and {was.get("design"), now_test.get("design")} <= \
+                    design_keys(task_design(tx, task_id)):  # the same never-edited design under its older key
+                spec = {**spec, "test": {**now_test, "design": was["design"]}}  # the run keeps its spec
             if _comparable(run["spec"], spec) != _comparable(spec, run["spec"]):
                 raise RLError("CONFLICT", f"the spec differs from {run_id}'s: a changed run is a new run (omit --run)")
             index = run["attempt_count"] + 1
@@ -503,31 +507,45 @@ def executor_hint(store: Store, attempt: str) -> str | None:
 # -- results --------------------------------------------------------------------------------------------------
 
 
-def _artifact_file(project: Project, path: str, task_id: str | None) -> Path:
-    """A local artifact path: as written relative to the project, else in the caller's checkout, else in the task's
-    worktree (a run writes research/work/T-x/.. on its task branch before it is merged)."""
-    from .gitops import worktree_path
+def _artifact_places(project: Project, path: str, task_id: str | None) -> list[tuple[str, Path]]:
+    """Where a local artifact path may be: (which, file) for those that exist. Relative paths are relative to the
+    project: in its main checkout, in the caller's checkout, or in the task's worktree (a run writes
+    research/work/T-x/.. on its task branch before it is merged)."""
+    from .gitops import checkout_in
     p = Path(path)
     if p.is_absolute():
-        return p
-    places = [project.root / p, project.checkout / p] + ([worktree_path(project, task_id) / p] if task_id else [])
-    return next((x for x in places if x.is_file()), places[0])
+        return [("absolute", p)] if p.is_file() else []
+    places = [("project", project.root / p), ("checkout", project.checkout / p)]
+    if task_id:
+        places.append(("task", checkout_in(project, task_id) / p))
+    found, seen = [], set()
+    for which, f in places:
+        if f.is_file() and f.resolve() not in seen:
+            seen.add(f.resolve())
+            found.append((which, f))
+    return found
 
 
 def _verify_artifacts(project: Project, artifacts: list, task_id: str | None = None) -> tuple[list[dict], str]:
+    """Each artifact checked against the file it names. The file read is kept on the entry (local_file), so later
+    checks (rl doctor) read the same one; copies that differ make the entry ambiguous rather than picking one."""
     out, counts = [], {}
     for art in artifacts:
         if not isinstance(art, dict) or not (art.get("path") or art.get("uri")):
             raise RLError("INVALID", "each artifact is {path: <local path>} or {uri: <remote>}, with optional digest")
         entry = {k: art.get(k) for k in ("path", "uri", "role", "digest") if art.get(k)}
         if art.get("path"):
-            local = _artifact_file(project, art["path"], task_id)
-            if not local.is_file():
+            found = [(which, f, digest_file(f)) for which, f in _artifact_places(project, art["path"], task_id)]
+            reported = art.get("digest")
+            matching = [x for x in found if reported and x[2] == reported]
+            if not found:
                 entry["check"] = "missing_locally"
+            elif len({d for _, _, d in found}) > 1 and not matching:
+                entry["check"] = "ambiguous_locally"
+                entry["copies"] = [{"at": which, "local_digest": d} for which, _, d in found]
             else:
-                actual = digest_file(local)
-                entry["local_digest"] = actual
-                reported = art.get("digest")
+                which, f, actual = (matching or found)[0]
+                entry.update(local_digest=actual, local_file=str(f.resolve()), read_at=which)
                 if not reported or not reported.startswith("blake2b:"):
                     entry["check"] = "read_locally" + ("" if not reported else "; reported digest uses another algorithm, not compared")
                 else:
@@ -557,7 +575,8 @@ def _mismatches(tx: Tx, run: dict, reported: dict) -> tuple[list[dict], list[str
             found.append({"field": field, "expected": expected, "actual": actual})
     if not isinstance(reported.get("config"), dict):  # absent or null: what ran is not said
         unreported.append("config")
-    elif run.get("category") == "evidence" and not (spec.get("design") or {}).get("arm"):
+        return found, unreported
+    if run.get("category") == "evidence" and not (spec.get("design") or {}).get("arm"):
         unreported.append("the sealed design of its run")  # registered before runs kept it: nothing to check against
     elif (spec.get("design") or {}).get("arm"):
         sealed = {"arms": [spec["design"]["arm"]], "allowed": spec["design"].get("allowed") or []}
@@ -565,6 +584,9 @@ def _mismatches(tx: Tx, run: dict, reported: dict) -> tuple[list[dict], list[str
                                           reported.get("split", spec.get("split"))):
             found.append({"field": "config", "expected": f"the sealed manifest of {spec['design']['experiment']}@"
                                                          f"{spec['design']['revision']}", "actual": problem})
+    if isinstance(spec.get("config"), dict) and reported["config"] != spec["config"]:
+        # what ran is what was registered, an allowed override included (allowed against the design only)
+        found.append({"field": "config", "expected": spec["config"], "actual": reported["config"]})
     return found, unreported
 
 
@@ -605,7 +627,7 @@ def import_result(store: Store, actor: Actor, attempt: str, reported: dict, requ
             tx.remember("run.import-result", request_id, payload, result)
             return {**result, "duplicate": True, "summary": f"same manifest already imported as {same[0]['id']}"}
         mismatches, unreported = _mismatches(tx, run, reported)
-        bad = [v["path"] for v in verification if v["check"] == "digest_mismatch"]
+        bad = [v["path"] for v in verification if v["check"] in ("digest_mismatch", "ambiguous_locally")]
         rid = tx.next_id("Result")
         scope_text = scope + (f"; fields not reported: {', '.join(unreported)}" if unreported else "")
         tx.create("Result", {"id": rid, "attempt_id": attempt, "request_id": request_id, "revision": len(prior) + 1,

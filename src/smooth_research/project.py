@@ -13,7 +13,7 @@ from pathlib import Path
 import yaml
 
 from .adapters import Entry
-from .util import RLError, atomic_write
+from .util import RLError, atomic_write, redact
 
 CONFIG_NAME = "smooth-research.yaml"
 ENV_PROJECT = "SMOOTH_RESEARCH_PROJECT"
@@ -414,7 +414,7 @@ class Resource:
             text = f"{self.name}: this machine, code from your checkout · jobs {self.jobs}"
         else:
             via = f"pi-env-mcp (server {self.server or 'pi-env-mcp'})" if self.connect == "pi-env-mcp" else self.connect
-            code = (f"git (push to {self.git_remote}; the host clones {self.git_url or 'the same URL'})"
+            code = (f"git (push to {self.git_remote}; the host clones {redact(self.git_url or '') or 'the same URL'})"
                     if self.code == "git" else "archive (git archive, shared filesystem)" if self.connect == "local"
                     else "archive (git archive, uploaded)")
             access = "shared cluster filesystem via local" if self.connect == "local" else f"host {self.host} via {via}"

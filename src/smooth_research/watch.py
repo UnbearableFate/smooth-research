@@ -245,8 +245,7 @@ def rebind(store: Store, name: str) -> dict | None:
         return None
     pane, tab = info["pane_id"], info.get("tab_id")
     with store.read() as tx:
-        rows = tx.all("Session", name=name)  # in id order: S-9999 before S-10000
-    old = rows[-1] if rows else None
+        old = _rebind_row(tx.all("Session", name=name))
     if old is None:
         return None
     if old["status"] == "open" and old.get("herdr_pane") == pane:
@@ -254,9 +253,8 @@ def rebind(store: Store, name: str) -> dict | None:
     if launch.own_tab(store, {**old, "herdr_tab": tab}) is None:
         return None
     with store.write() as tx:
-        rows = tx.all("Session", name=name)
-        s = rows[-1] if rows else None
-        if s is None or s["id"] != old["id"]:  # a newer record meanwhile: it decides
+        s = _rebind_row(tx.all("Session", name=name))
+        if s is None or s["id"] != old["id"]:  # another record meanwhile: it decides
             return None
         if s["status"] == "open" and s.get("herdr_pane") == pane:
             return s
@@ -266,6 +264,13 @@ def rebind(store: Store, name: str) -> dict | None:
                             "last_seq": info.get("state_change_seq")})
         tx.event("session.rebound", name, f"its agent lives on in {pane}")
         return tx.require(s["id"], "Session")
+
+
+def _rebind_row(rows: list[dict]) -> dict | None:
+    """The record a live agent belongs to: the open one (the newest, if an old race left two), else the newest
+    (rows in id order: S-9999 before S-10000)."""
+    live = [r for r in rows if r["status"] == "open"]
+    return live[-1] if live else (rows[-1] if rows else None)
 
 
 def close_session(store: Store, s: dict, why: str) -> str:
@@ -481,7 +486,7 @@ def start(store: Store) -> str:
 def ensure_coordinator(store: Store) -> str:
     """The coordinator's pane (11.2): one session on the project, opened from its pack."""
     with store.read() as tx:
-        s = next((x for x in tx.all("Session", name="coordinator") if x["status"] == "open"), None)
+        s = next((x for x in reversed(tx.all("Session", name="coordinator")) if x["status"] == "open"), None)
     if s:
         try:
             pane, _ = launch.bound(store, s)

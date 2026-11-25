@@ -751,3 +751,76 @@ def test_candidates_reach_every_push_destination_and_no_credential_is_printed(pr
     compute._push_candidates(project, project.project.checkout, "origin", lines, problems)
     assert problems and not any("s3cr3t" in x or "someone" in x for x in lines + problems)
     assert compute.redact(f"push to {secret} failed") == "push to https://127.0.0.1:9/repo.git failed"
+
+
+def test_differing_copies_of_an_artifact_are_ambiguous_and_doctor_reads_the_file_imported(project, rl):
+    from smooth_research.util import digest_file
+    flow.dispatched(project, rl)
+    r = "researcher-T-0003"
+    wt = flow.worktree(project, "T-0003")
+    rel = "research/work/T-0003/m.json"
+    for where, text in ((wt, '{"a": 1}'), (project.project.root, '{"a": 0}')):  # the task's file, an older copy
+        (where / rel).parent.mkdir(parents=True, exist_ok=True)
+        (where / rel).write_text(text)
+
+    def imported(n, artifact):
+        code, out, err = rl("--json", "run", "register", "--task", "T-0003", "--request-id", f"r{n}", "--arm",
+                            "single", "--seed", 0, "--config", json.dumps({"k": 1}), "--minutes", 1, who=r)
+        att = json.loads(out)["attempt"]
+        ok(rl("run", "record", "--attempt", att, "--state", "ended", "--outcome", "success", who=r))
+        with project.read() as tx:
+            commit = tx.require(tx.require(att, "Attempt")["run_id"])["code_commit"]
+        res = {"status": "complete", "arm": "single", "seed": 0, "commit": commit, "config": {"k": 1},
+               "metrics": {"abs_error": 1.0}, "artifacts": [artifact]}
+        out = json.loads(ok(rl("--json", "run", "import-result", "--attempt", att, "--request-id", f"i{n}",
+                               "--manifest", json.dumps(res), who=r)))
+        with project.read() as tx:
+            return tx.require(out["result"])
+    res = imported(1, {"path": rel})
+    assert res["verification"][0]["check"] == "ambiguous_locally" and res["usable"] is False
+    res = imported(2, {"path": rel, "digest": digest_file(wt / rel)})
+    v = res["verification"][0]
+    assert v["check"] == "verified_locally" and v["read_at"] in ("task", "checkout") and res["usable"]
+    (wt / rel).write_text('{"a": 2}')  # the file it read changed; the main checkout's copy did not
+    assert f"{res['id']}: {rel} changed since import" in ok(rl("doctor"))
+
+
+def test_a_result_reports_the_configuration_it_ran_as_registered():
+    from smooth_research.runs import _mismatches
+    run = {"spec": {"arm": "a", "seed": "0", "config": {"lr": 1, "batch_size": 32}}, "category": "trial"}
+    assert _mismatches(None, run, {"arm": "a", "seed": 0, "config": {"lr": 1, "batch_size": 32}})[0] == []
+    found, _ = _mismatches(None, run, {"arm": "a", "seed": 0, "config": {"lr": 1, "batch_size": 8}})
+    assert [f["field"] for f in found] == ["config"]
+
+
+def test_no_credential_of_a_fetch_url_is_shown():
+    from smooth_research import compute
+    from smooth_research.project import Resource
+    url = "https://someone:s3cr3t@example.org/r.git"
+    assert "s3cr3t" not in compute._clone(url) and "example.org/r.git" in compute._clone(url)
+    res = Resource(name="box", kind="remote", host="box", connect="ssh", jobs="shell", workspace="/w", code="git",
+                   git_remote="origin", git_url=url)
+    assert "s3cr3t" not in res.describe() and "someone" not in res.describe()
+
+
+def test_a_test_job_registered_under_the_null_edit_seq_key_can_be_retried(project, rl):
+    from smooth_research.research import KEY_FIELDS
+    from smooth_research.util import digest_json
+    flow.designed(project, rl)
+    s = "scientist-T-0002"
+    _job_tests(project)
+    from smooth_research.project import find_project
+    from smooth_research.store import Store
+    project = Store(find_project(), "test")
+    run = json.loads(ok(rl("--json", "run", "register", "--task", "T-0003", "--request-id", "t1", "--purpose",
+                           "design-test", "--minutes", "5", who=s)))
+    with project.write() as tx:  # as 298955e registered it: a never-edited experiment, the explicit-null key
+        tx.update("E-0001", {"edit_seq": None})
+        exp = tx.require("E-0001")
+        old = f"E-0001@{exp['revision']}#{digest_json({k: exp.get(k) for k in KEY_FIELDS})}"
+        spec = tx.require(run["run"])["spec"]
+        tx.update(run["run"], {"spec": {**spec, "test": {**spec["test"], "design": old}}})
+    ok(rl("run", "register", "--task", "T-0003", "--request-id", "t2", "--purpose", "design-test", "--minutes", "5",
+          "--run", run["run"], who=s))
+    with project.read() as tx:
+        assert tx.require(run["run"])["spec"]["test"]["design"] == old  # the run keeps its spec

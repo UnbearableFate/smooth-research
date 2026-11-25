@@ -117,9 +117,13 @@ def doctor(store: Store) -> dict:
                 dangling.append(f"{att['id']} points to missing {att['run_id']}")
         for res in tx.all("Result"):
             for v in res.get("verification") or []:
-                if v.get("path") and v.get("local_digest") and store.project.abs(v["path"]).is_file() \
-                        and digest_file(store.project.abs(v["path"])) != v["local_digest"]:
-                    dangling.append(f"{res['id']}: {v['path']} changed since import")
+                if not (v.get("path") and v.get("local_digest")):
+                    continue
+                # the file the import read (a task worktree's, until it is merged and the worktree removed)
+                read = Path(v["local_file"]) if v.get("local_file") else None
+                f = read if read and read.is_file() else store.project.abs(v["path"])
+                if f.is_file() and digest_file(f) != v["local_digest"]:
+                    dangling.append(f"{res['id']}: {v['path']} changed since import ({f})")
     from .inbox import unwatched
     with store.read() as tx:
         missed = unwatched(tx, store.project.config)

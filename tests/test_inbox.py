@@ -171,3 +171,26 @@ def test_the_go_on_item_follows_the_latest_round_and_the_event_order(project, rl
         [{"category": "method", "severity": "high", "text": "wrong baseline", "loc": None}]), who="reviewer-RV-0004"))
     verdicts = [i for i in flow.items(project, r) if i.type == "review-verdict"]
     assert [i.subject for i in verdicts] == ["RV-0004"] and "fix" in verdicts[0].ask
+
+
+def test_a_task_delivered_again_after_a_return_is_news_to_the_coordinator(project, rl):
+    flow.tree(project, rl)
+    [first] = flow.items(project, "coordinator")
+    flow.ok(rl("task", "return", "T-0001", "--reason", "add the second section", who="coordinator"))
+    flow.ok(rl("task", "deliver", "T-0001", "--conclusion", "one hypothesis, revised", who="scientist-T-0001"))
+    [again] = flow.items(project, "coordinator")
+    assert again.type == first.type == "tree" and again.key() != first.key()
+
+
+def test_a_settlement_after_a_trial_still_says_go_on(project, rl):
+    """The round passed when the scientist settled its last finding; a trial registered before that is not the
+    researcher going on."""
+    flow.dispatched(project, rl)
+    r = "researcher-T-0003"
+    flow.ok(rl("review", "request", "T-0003", who=r))
+    flow.ok(rl("review", "answer", "RV-0003", "--verdict", "pass", who="reviewer-RV-0003"))
+    flow.ok(rl("run", "register", "--task", "T-0003", "--request-id", "smoke", "--trial", "--minutes", "1", who=r))
+    assert "review-verdict" not in flow.types(project, r)
+    with project.write() as tx:  # the settlement that made the round pass came after the trial
+        tx.event("review.settled", "RV-0003", "F1 withdrawn by scientist-T-0002")
+    assert "review-verdict" in flow.types(project, r)

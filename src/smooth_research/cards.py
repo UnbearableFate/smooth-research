@@ -97,10 +97,10 @@ Execute task:
    --exec-id <job id>]`. A job's end may also come from the executor (`rl run ended`): then do not record it again.
 3. Import what it wrote: `rl run import-result --attempt ATT-x --request-id <unique> --manifest @<manifest.json>`.
    The run writes {"status": "complete", "arm", "seed", "commit": <git rev-parse HEAD when it ran: the commit the
-   run was registered at, not a later commit of its outputs>, "config" (exactly the arm's config in the manifest,
-   nothing added), "split" (if the arm has one), "metrics", "artifacts": [{"path"}]}. rl reads and digests local
-   artifact files itself (a digest you give is "blake2b:<hex>"). A result that does not say what it ran is not
-   evidence.
+   run was registered at, not a later commit of its outputs>, "config" (the configuration it actually ran with,
+   exactly as you registered it: the arm's, or with an allowed override), "split" (if the arm has one),
+   "metrics", "artifacts": [{"path"}]}. rl reads and digests local artifact files itself (a digest you give is
+   "blake2b:<hex>"). A result that does not say what it ran is not evidence.
 4. Evidence (no direction, just the fact): `rl evidence add --task T-x --summary ".." --level <level>
    --results RES-x,RES-y`.
 5. Commit outputs on the task branch, then `rl task deliver T-x --conclusion "<one sentence>" --limitations ".."

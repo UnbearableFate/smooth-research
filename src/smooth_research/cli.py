@@ -474,8 +474,9 @@ def cmd_agent(args):
     """The coordinator answers a session's dialog (11.3); anyone may look at it."""
     store = _store(args)
     with store.read() as tx:
-        s = next((x for x in tx.all("Session", name=args.name) if x["status"] == "open"), None)
-    pane = launch.bound(store, s)[0] if s else None
+        opened = [x for x in tx.all("Session", name=args.name) if x["status"] == "open"]
+    s, pane = next(((x, p) for x, p in ((x, launch.bound(store, x)[0]) for x in reversed(opened)) if p),
+                   (None, None))  # the open record whose agent lives (an old race may have left two)
     if pane is None:
         raise RLError("NOT_FOUND", f"no open session {args.name} with its agent in herdr")
     if args.action == "dialog":

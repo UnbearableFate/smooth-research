@@ -323,3 +323,35 @@ def test_a_session_bound_meanwhile_is_returned_and_not_started_again(project, rl
     assert watch.rebind(project, "coordinator")["herdr_pane"] == "w1:p7"  # the watcher bound it a moment ago
     out = watch.open_session(project, "coordinator", [], {})  # rl resume, on its older reading
     assert out.startswith("coordinator: runs already") and not any(c[:2] == ("agent", "start") for c in fake.calls)
+
+
+def test_a_tab_lookup_herdr_cannot_answer_closes_nothing(project, rl, fake, monkeypatch):
+    flow.tree(project, rl)
+    name = launch.herdr_name(project, "coordinator")
+    _coordinator_row(project, "open", pane="w1:p3")  # stale: its agent lives in w1:p7
+    fake.tabs["w1:t7"] = name
+    fake.agents["w1:p7"] = {"name": name, "agent_status": "idle", "state_change_seq": 1}
+    real, failed = fake.call, []
+
+    def timeout_once(*args, timeout=90):
+        if args[:2] == ("tab", "get") and not failed:
+            failed.append(args)
+            raise RLError("HERDR", "timed out", herdr_code="timeout")
+        return real(*args, timeout=timeout)
+    monkeypatch.setattr(herdr, "call", timeout_once)
+    assert "could not be checked" in watch.ensure_coordinator(project)
+    assert "w1:t7" in fake.tabs and not any(c[:2] in (("tab", "close"), ("agent", "start")) for c in fake.calls)
+    assert watch.ensure_coordinator(project).endswith("(its session bound again)")  # the next look binds it
+
+
+def test_an_old_race_that_left_two_records_binds_the_open_one(project, rl, fake):
+    flow.tree(project, rl)
+    name = launch.herdr_name(project, "coordinator")
+    first = _coordinator_row(project, "open", pane="w1:p3")
+    _coordinator_row(project, "ended")  # the failed second start of the old race
+    fake.tabs["w1:t7"] = name
+    fake.agents["w1:p7"] = {"name": name, "agent_status": "idle", "state_change_seq": 1}
+    watch.ensure_coordinator(project)
+    assert sessions(project)["coordinator"]["id"] == first
+    with project.read() as tx:
+        assert [s["status"] for s in tx.all("Session", name="coordinator")] == ["open", "ended"]

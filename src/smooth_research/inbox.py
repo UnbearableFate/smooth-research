@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from .project import deadline_minutes, limit
-from .reviews import blocking, last_pass, latest_round, open_findings
+from .reviews import blocking, last_pass, open_findings
 from .roles import session_name
 from .schema import TASK_DONE
 from .store import Tx, id_order
@@ -43,9 +43,12 @@ class Item:
 
     def key(self) -> str:
         """The item's identity for the watcher's told record; a review item carries its pass, so a recheck on the
-        same ticket is news to the reviewer and its verdict to the author."""
+        same ticket is news to the reviewer and its verdict to the author; a delivered task its delivery, so a
+        revision delivered after a return is news to the coordinator."""
         base = f"{self.type}:{self.subject}:{self.to}"
-        return f"{base}#{self.extra['pass']}" if "pass" in self.extra else base
+        if "pass" in self.extra:
+            return f"{base}#{self.extra['pass']}"
+        return f"{base}@{self.extra['delivered']}" if self.extra.get("delivered") is not None else base
 
 
 TEST_PURPOSES = ("merge-test", "design-test", "review-test")  # runs that are not the task's evidence
@@ -83,7 +86,11 @@ class Rules:
         self.config = config or {}
         self.tasks = tx.all("Task")
         self.by_id = {t["id"]: t for t in self.tasks}
-        self.tickets = tx.all("Ticket")
+        self.tickets = tx.all("Ticket")  # in id order, as reviews.latest_round reads them
+        self.latest: dict[tuple, dict] = {}  # (task, review kind) -> its newest round, the same choice
+        for t in self.tickets:
+            if t["kind"] == "review" and t.get("task_id"):
+                self.latest[(t["task_id"], t.get("review_kind"))] = t
         self.asks = tx.all("Ask")
         self.attempts = tx.all("Attempt")
         self.runs = {r["id"]: r for r in tx.all("Run")}
@@ -287,7 +294,7 @@ class Rules:
                              since=r.get("answered_at") or now_utc(), frm=reviewer)
             elif r["status"] == "passed" and r.get("review_kind") == "design":
                 t = self.by_id.get(r.get("task_id"))
-                if t and (latest_round(self.tx, t["id"], "design") or {}).get("id") != r["id"]:
+                if t and self.latest.get((t["id"], "design"), {}).get("id") != r["id"]:
                     continue  # a newer round of the task decides (one that failed says fix, not go on)
                 if t and t["state"] == "active" and t.get("holder", "").startswith("scientist-") \
                         and last_pass(r) and last_pass(r).get("segment") == "scientist":
@@ -307,7 +314,7 @@ class Rules:
                 t = self.by_id.get(r.get("task_id"))
                 # only the task's latest tree round says deliver
                 if t and t["state"] == "active" and t.get("holder") and \
-                        (latest_round(self.tx, t["id"], "tree") or {}).get("id") == r["id"]:
+                        self.latest.get((t["id"], "tree"), {}).get("id") == r["id"]:
                     self.add(type="review-verdict", extra=pass_of(r), to=t["holder"], subject=r["id"],
                              ask=f"deliver {t['id']}", cmd=f"rl task deliver {t['id']} ..",
                              since=r.get("answered_at") or now_utc(), frm=reviewer)
@@ -328,9 +335,11 @@ class Rules:
                              since=r["ruled"].get("at") or now_utc(), frm=r["ruled"].get("by"))
 
     def went_on(self, task_id: str, rv: str) -> bool:
-        """An attempt of a non-test run of the task was registered after the round's last answer, by event seq
-        (two in the same second keep their order)."""
-        answered = [e["seq"] for e in self.tx.all("Event", entity_id=rv, type="review.answered")]
+        """An attempt of a non-test run of the task was registered after the round's last answer or settlement, by
+        event seq (two in the same second keep their order)."""
+        # the change that made the round pass: the reviewer's answer, or the scientist settling the last finding
+        answered = [e["seq"] for kind in ("review.answered", "review.settled")
+                    for e in self.tx.all("Event", entity_id=rv, type=kind)]
         if not answered:
             return False
         mine = [a["id"] for a in self.attempts if (self.runs.get(a["run_id"]) or {}).get("task_id") == task_id
@@ -412,6 +421,7 @@ class Rules:
             report = next((a["id"] for a in self.asks if a["kind"] == "report" and a["task_id"] == t["id"]
                            and a["state"] == "open"), None)
             self.add(type=kind, to="coordinator", subject=t["id"], ask=f"receive {t['id']} or return it",
+                     extra={"delivered": t["revision"]},  # each delivery (or a changed acceptance) is news
                      cmd=f"rl task accept {t['id']} | rl task return {t['id']} --reason ..",
                      since=t.get("delivered_at") or now_utc(), frm=t.get("holder"), note=(t.get("state_note")
                      or t.get("conclusion") or "") + (f" · the user reads its report ({report}); record what they "

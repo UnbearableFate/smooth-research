@@ -158,3 +158,13 @@ def load_json_records(value: str) -> list[dict]:
     if not data or not all(isinstance(item, dict) for item in data):
         raise RLError("INVALID", f"{value[:60]!r} holds no records, or a record that is not a JSON object")
     return data
+
+
+CREDENTIALS = re.compile(r"(?<=://)[^/@\s]+@")
+
+
+def redact(text: str) -> str:
+    """Text with the user and password of any URL in it left out (https://user:token@host -> https://host): what
+    rl prints or records never carries a credential a remote URL holds. A host fetching code authenticates by its
+    own means (a deploy key, gh auth login)."""
+    return CREDENTIALS.sub("", text or "")

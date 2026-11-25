@@ -137,14 +137,12 @@ def bound(store: Store, s: dict) -> tuple[str | None, dict | None]:
 
 
 def own_tab(store: Store, s: dict) -> str | None:
-    """The session's tab when it is still the one rl made for it (by its label), else None."""
+    """The session's tab when it is still the one rl made for it (by its label), else None. A lookup herdr could not
+    answer (a timeout, say) raises: it does not show the tab is gone, so nothing is closed or rebound on it."""
     tab = s.get("herdr_tab")
     if not tab:
         return None
-    try:
-        found = herdr.get("tab", tab)
-    except RLError:
-        return None
+    found = herdr.get("tab", tab)  # None when herdr says it is closed
     mine = herdr_name(store, s["name"])
     if not found or found.get("label") != mine:
         return None

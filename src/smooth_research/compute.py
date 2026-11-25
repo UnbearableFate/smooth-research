@@ -29,7 +29,7 @@ from typing import Iterator
 from .project import (Project, Resource, compute_default, compute_repository, compute_resources,
                       coordinator_is_login, repo_top)
 from .store import Store
-from .util import RLError
+from .util import RLError, redact
 from .gitops import git as _git
 
 FULL_COMMIT = re.compile(r"^[0-9a-f]{40}([0-9a-f]{24})?$")
@@ -300,7 +300,7 @@ def _sync_steps(project: Project, res: Resource, commit: str | None, facts: dict
 
 def _clone(url: str) -> str:
     """Shell lines (with $ws set) that keep $ws/repo.git a bare clone of url with every branch fetched."""
-    return (f"[ -d \"$ws/repo.git\" ] || git clone --bare --quiet {_sh(url)} \"$ws/repo.git\"\n"
+    return (f"[ -d \"$ws/repo.git\" ] || git clone --bare --quiet {_sh(redact(url))} \"$ws/repo.git\"\n"
             "git -C \"$ws/repo.git\" fetch --quiet --prune origin '+refs/heads/*:refs/heads/*'\n")
 
 
@@ -360,15 +360,6 @@ def _fetch_steps(project: Project, res: Resource, att: str, where: dict) -> list
 QUIET = {"GIT_TERMINAL_PROMPT": "0", "GH_PROMPT_DISABLED": "1"}  # fail instead of asking for a password
 
 
-CREDENTIALS = re.compile(r"(?<=://)[^/@\s]+@")
-
-
-def redact(text: str) -> str:
-    """Text with the user and password of any URL in it left out (https://user:token@host -> https://host): what
-    rl prints or records never carries a credential a remote URL holds."""
-    return CREDENTIALS.sub("", text or "")
-
-
 def _call(cwd: Path, *args: str, timeout: int = 300) -> tuple[bool, str]:
     """Run git or gh without prompts: (succeeded, the last of its output, credentials left out)."""
     try:
@@ -393,8 +384,9 @@ def _create_repository(store: Store, top: Path, remote: str) -> tuple[str | None
                       f"another name if it exists), or add a repository yourself (git remote add {remote} <URL>), "
                       "then rl compute sync")
     with store.write() as tx:
-        tx.event("compute.repository", None, f"created the private GitHub repository {url} (git remote {remote})")
-    return url, f"created the private GitHub repository {url} as git remote {remote} (compute.repository)"
+        tx.event("compute.repository", None, f"created the private GitHub repository {redact(url)} (git remote "
+                                             f"{remote})")
+    return url, f"created the private GitHub repository {redact(url)} as git remote {remote} (compute.repository)"
 
 
 def _push_urls(checkout: Path, remote: str) -> list[str]:
