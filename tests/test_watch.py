@@ -389,7 +389,8 @@ def test_nothing_is_typed_into_a_dialog_herdr_reports_as_idle(project, rl, fake,
     assert len(fake.prompts) == 1  # held: only the first item, before the dialog
     assert "Hooks need review" in sessions(project)["scientist-T-0002"]["needs_decision"]
     assert "session-needs-decision" in flow.types(project, "coordinator")
-    screen["text"] = "› Ask Codex to do anything"
-    watch.beat(project)
+    screen["text"] = ("• read the reviewer's screen: Hooks need review / 1 hook is new or changed.\n"
+                      "› Ask Codex to do anything\n  GPT-Reserve medium · /tmp/x\n  ← for agents · ? for shortcuts")
+    watch.beat(project)  # its own transcript quotes another's dialog: it takes prompts
     assert sessions(project)["scientist-T-0002"].get("needs_decision") is None
     assert len(fake.prompts) == 2 and "which arm first?" in fake.prompts[-1][1]

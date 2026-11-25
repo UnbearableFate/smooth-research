@@ -39,6 +39,9 @@ NEW_CONVERSATION = {"codex": ("Where should the new conversation run?", "Use cur
 # Dialogs a host shows that herdr does not recognize (it sees the agent idle, and what is typed then goes to the
 # dialog), by the text that marks them: Codex's review of new or changed hooks, and its question after /new
 UNSEEN = {"codex": ("Hooks need review", NEW_CONVERSATION["codex"][0])}
+# The footer a host shows under its prompt box when it takes prompts: no dialog is open then, whatever the
+# transcript above quotes (an agent that read another's dialog shows its text).
+TAKES_PROMPTS = {"codex": "? for shortcuts"}
 
 
 # The command that shows a host's session id on its screen without calling its model, and the line that holds it:
@@ -77,8 +80,14 @@ def redact(screen: str) -> str:
 
 
 def unseen(host: str | None, screen: str) -> str | None:
-    """The dialog on the screen that herdr does not recognize as one, if any."""
-    return next((d for d in UNSEEN.get(host or "", ()) if d in screen), None)
+    """The dialog at the bottom of the screen that herdr does not recognize as one, if any: never while the host
+    shows its prompt box, and not text quoted higher up in the transcript (Codex trial, 11-25)."""
+    lines = [x for x in screen.splitlines() if x.strip()]
+    footer = TAKES_PROMPTS.get(host or "")
+    if footer and any(footer in x for x in lines[-3:]):
+        return None
+    bottom = "\n".join(lines[-15:])
+    return next((d for d in UNSEEN.get(host or "", ()) if d in bottom), None)
 
 
 def rl_command() -> str:
