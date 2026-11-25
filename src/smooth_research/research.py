@@ -365,11 +365,22 @@ def task_design(tx: Tx, task_id: str) -> dict | None:
     return task.get("sealed_design") or task_experiment(tx, task_id)
 
 
+KEY_FIELDS = ("id", "revision", "question", "manifest_path", "semantic_tests", "protected", "brief_ref")
+
+
+def design_key(exp: dict | None) -> str | None:
+    """What a review pass and a test record clear: the experiment revision and its contents (E-x@n#digest), so a
+    new revision, or a draft edited after its review (another manifest in the same commit), needs its own (9.1).
+    Sealing adds the design commit and the parsed manifest, which the commit and the path already fix."""
+    if not exp:
+        return None
+    from .util import digest_json
+    return f"{exp['id']}@{exp['revision']}#{digest_json({k: exp.get(k) for k in KEY_FIELDS})[:12]}"
+
+
 def design_id(tx: Tx, task_id: str) -> str | None:
-    """The experiment revision a task's code is designed for now (E-x@n), or None: what a review pass and a test
-    record clear, so a new revision needs its own (9.1)."""
-    exp = task_experiment(tx, task_id)
-    return f"{exp['id']}@{exp['revision']}" if exp else None
+    """The key of the experiment as it stands now for a task (design_key)."""
+    return design_key(task_experiment(tx, task_id))
 
 
 def sealed_copy(exp: dict) -> dict:

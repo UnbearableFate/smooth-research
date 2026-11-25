@@ -68,10 +68,12 @@ def task_lines(tx: Tx, project: Project, task: dict) -> list[str]:
                          + (f", rechecked in {', '.join(rechecked)}" if rechecked else ", NOT rechecked"))
         else:
             lines.append("protected  unchanged since design")
-        from .tasks import test_runs
+        from .research import design_key
+        from .tasks import passed_at, test_runs
         command = exp.get("semantic_tests")
-        runs = test_runs(task, tip, command)
-        state = "not recorded" if not runs else "passed" if runs[-1]["outcome"] == "pass" else "FAILED (latest run)"
+        runs = test_runs(task, tip, command, design_key(exp))
+        state = "not recorded" if not runs else "passed" if passed_at(task, tip, command, design_key(exp)) \
+            else "FAILED (latest run, or a failure as late as the pass)"
         lines.append(f"tests      semantic tests {state} at the delivered commit ({command})")
         def on_main() -> str:
             main = gitops.mainline(project)
@@ -109,20 +111,20 @@ def hypothesis_lines(tx: Tx, task: dict) -> list[str]:
             lines.append(f"review       conclusion review {r['id']} {r['status']}{ruled}")
         else:
             lines.append("review       no conclusion review")
-    exps: dict[str, str] = {}  # each child's experiment as handed over to it; a later draft is marked as such
+    exps: dict[str, str] = {}  # the experiments as handed over to the children first, then drafts not handed over
     kids = [tx.require(e["id"]) for e in tx.inc(task["id"], "part_of")]
-    for k in kids:
-        if k["kind"] != "execute":
-            continue
-        exp, live = task_design(tx, k["id"]), task_experiment(tx, k["id"])
-        if not exp:
-            continue
-        key = f"{exp['id']}@{exp['revision']}"
-        exps.setdefault(key, key + (f" sealed for {k['id']}" if k.get("sealed_design") else " draft")
-                        + (f" (revised: {exp['revision_reason'][:60]})" if exp.get("revision_reason") else ""))
-        if live and live["revision"] != exp["revision"]:
-            exps.setdefault(f"{live['id']}@{live['revision']}", f"{live['id']}@{live['revision']} newer draft, "
-                                                               "not handed over")
+    execs = [k for k in kids if k["kind"] == "execute"]
+    for k in execs:
+        exp = k.get("sealed_design")
+        if exp:
+            key = f"{exp['id']}@{exp['revision']}"
+            exps[key] = (exps.get(key) or key + " sealed for") + f" {k['id']}"
+    for k in execs:
+        live = task_experiment(tx, k["id"])
+        if live:
+            key = f"{live['id']}@{live['revision']}"
+            exps.setdefault(key, key + (" draft" if not k.get("sealed_design") else " newer draft, not handed over")
+                            + (f" (revised: {live['revision_reason'][:60]})" if live.get("revision_reason") else ""))
     lines.append("experiments  " + ("; ".join(exps.values()) or "none (a composite or a stop)"))
     done = [k for k in kids if k["state"] == "accepted"]
     cancelled = [k for k in kids if k["state"] == "cancelled"]

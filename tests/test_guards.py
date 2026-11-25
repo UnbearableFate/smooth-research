@@ -361,3 +361,61 @@ def test_a_retry_of_another_design_revision_is_a_new_run():
     assert runs._comparable(a, {"arm": "x", "design": {"revision": 2}}) != runs._comparable(
         {"arm": "x", "design": {"revision": 2}}, a)
     assert runs._comparable({"arm": "x"}, a) == runs._comparable(a, {"arm": "x"})  # a run from before designs
+
+
+def test_a_draft_changed_after_its_review_needs_a_new_review(project, rl):
+    flow.designed(project, rl)
+    s = "scientist-T-0002"
+    ok(rl("review", "request", "T-0003", who=s))
+    ok(rl("review", "answer", "RV-0002", "--verdict", "pass", who="reviewer-RV-0002"))
+    wt = flow.worktree(project, "T-0003")
+    (wt / "src" / "avg" / "other.yaml").write_text((wt / "src" / "avg" / "arms.yaml").read_text())
+    git(wt, "add", "-A")
+    git(wt, "commit", "-qm", "a second manifest")
+    ok(rl("review", "request", "T-0003", who=s))
+    ok(rl("review", "answer", "RV-0003", "--verdict", "pass", who="reviewer-RV-0003"))
+    ok(rl("experiment", "set", "E-0001", "--manifest", "src/avg/other.yaml", who=s))  # same commit, same revision
+    ok(rl("task", "test", "T-0003", who=s))
+    code, _, err = rl("task", "dispatch", "T-0003", who=s)
+    assert code == 1 and "the draft changed since" in err
+
+
+def test_a_failure_in_the_same_second_as_the_pass_needs_another_pass():
+    from smooth_research.tasks import passed_at
+    t = {"tests": [{"commit": "c", "command": "x", "outcome": "fail", "at": "2026-11-25T01:00:00+00:00"},
+                   {"commit": "c", "command": "x", "outcome": "pass", "at": "2026-11-25T01:00:00+00:00"}]}
+    assert not passed_at(t, "c", "x")
+
+
+def test_recovery_waits_for_a_merge_test_still_out(project, rl):
+    from smooth_research import tasks
+    flow.delivered(project, rl)
+    s = "scientist-T-0002"
+    _job_tests(project)
+    from smooth_research.project import find_project
+    from smooth_research.store import Store
+    project = Store(find_project(), "test")
+    top = gitops.top(project.project)
+    (top / "other.txt").write_text("main moved\n")
+    git(top, "add", "-A")
+    git(top, "commit", "-qm", "main moves on")
+    ok(rl("task", "accept", "T-0003", who=s))
+    ok(rl("run", "register", "--task", "T-0003", "--request-id", "m", "--purpose", "merge-test", "--minutes", "5",
+          who=s))
+    with project.read() as tx:
+        cand = tx.require("T-0003")["merge_commit"]
+    git(top, "merge", "-q", "--ff-only", cand)  # the candidate reached main some other way
+    assert tasks.reconcile_merges(project) == []
+    with project.read() as tx:
+        assert tx.require("T-0003")["state"] == "merging"
+
+
+def test_a_candidate_branch_is_removed_only_by_its_own_acceptance(project, rl):
+    flow.delivered(project, rl)
+    top = gitops.top(project.project)
+    head = git(top, "rev-parse", "HEAD")
+    gitops.name_candidate(project.project, "T-0003", head)
+    gitops.retire_candidate(project.project, "T-0003", "1" * 40)  # a losing acceptance with another commit
+    assert gitops.candidate_branches(top) == ["sr-accept/T-0003"]
+    gitops.retire_candidate(project.project, "T-0003", head)
+    assert gitops.candidate_branches(top) == []

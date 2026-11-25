@@ -191,9 +191,6 @@ def merge_candidate(project: Project, task_id: str, delivered: str) -> tuple[str
     tree = lines[0].strip()
     commit = git(root, "commit-tree", tree, "-p", delivered, "-p", main, "-m",
                  f"Merge {mainline(project)} into {branch_name(task_id)} for acceptance of {task_id}")
-    # a branch names the candidate while its acceptance waits, so a remote test job can fetch it (compute sync
-    # pushes these branches); it is removed when the acceptance ends
-    git(root, "branch", "-f", candidate_branch(task_id), commit)
     return commit, []
 
 
@@ -204,8 +201,16 @@ def candidate_branch(task_id: str) -> str:
     return CANDIDATES + task_id
 
 
-def retire_candidate(project: Project, task_id: str) -> None:
-    git(top(project), "branch", "-D", candidate_branch(task_id), check=False)
+def name_candidate(project: Project, task_id: str, commit: str) -> None:
+    """A branch names the candidate of the acceptance that recorded it, while its test job waits, so a remote job
+    can fetch it (compute sync pushes these branches). Only the acceptance that won the record names it."""
+    git(top(project), "update-ref", f"refs/heads/{candidate_branch(task_id)}", commit)
+
+
+def retire_candidate(project: Project, task_id: str, commit: str | None) -> None:
+    """Remove the candidate branch when it still names this acceptance's commit (never another's)."""
+    if commit:
+        git(top(project), "update-ref", "-d", f"refs/heads/{candidate_branch(task_id)}", commit, check=False)
 
 
 def candidate_branches(checkout: Path) -> list[str]:

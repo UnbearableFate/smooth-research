@@ -288,7 +288,7 @@ def _reviewer(store: Store, tx: Tx, actor: Actor) -> list[tuple[str, list[str], 
     kind = r.get("review_kind")
     if kind == "design":
         t = tx.require(r["task_id"], "Task")
-        exp = task_design(tx, t["id"])
+        exp = lp.get("design_snapshot") or task_design(tx, t["id"])  # the design this pass was requested for
         commit = lp.get("commit")
         material += [f"commit under review: {commit}", f"worktree: {t.get('worktree')} (read with git show "
                      f"{(commit or '')[:12]}:<path>)"]

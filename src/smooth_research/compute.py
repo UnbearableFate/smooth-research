@@ -263,6 +263,8 @@ def _sync_steps(project: Project, res: Resource, commit: str | None, facts: dict
         pushed = facts.get("pushed") or []
         if pushed:
             lines.append(f"   a. Already on {', '.join(pushed)} (as of the last push or fetch).")
+        elif branch and branch.startswith("sr-accept/"):  # a merge candidate: rl replaces it on each round
+            lines.append(f"   a. Push it: rl compute sync (it pushes the merge candidate {branch})")
         elif branch:
             lines.append(f"   a. Push it (in {facts['checkout']}): git push {res.git_remote} {branch}")
         else:

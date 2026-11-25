@@ -74,8 +74,8 @@ def covers(tx: Tx, task_id: str, commit: str, for_evidence: bool) -> tuple[bool,
     from .research import design_id
     now = design_id(tx, task_id)
     if now and lp.get("design") != now:
-        return False, (f"{t['id']} reviewed {lp.get('design') or 'another design'}, and the experiment is {now} now: "
-                       "request a review of this revision")
+        return False, (f"{t['id']} reviewed {lp.get('design') or 'another design'}, and the experiment is {now} now "
+                       "(another revision, or the draft changed since): request a review of it")
     seg = "researcher" if for_evidence else "scientist"
     open_ = blocking(t, seg)
     if open_:
@@ -168,14 +168,15 @@ def _design_request(store: Store, tx: Tx, actor: Actor, target: str, question: s
         raise RLError("INVALID", f"{target}'s worktree has uncommitted changes: commit them; a review is of a commit")
     commit = gitops.head(store.project, target)
     segment = "scientist" if actor.role == "scientist" else "researcher"
-    from .research import design_id
+    from .research import design_key, sealed_copy, task_experiment
+    exp = task_experiment(tx, target)  # what the reviewer is shown and what the verdict clears
     return _round(tx, actor, "design", target, target, commit, recheck_of, question, segment,
-                  design_id(tx, target))
+                  design_key(exp), sealed_copy(exp) if exp else None)
 
 
 def _round(tx: Tx, actor: Actor, kind: str, task_id: str | None, target: str, commit: str | None,
            recheck_of: str | None, question: str | None, segment: str | None = None,
-           design: str | None = None) -> dict:
+           design: str | None = None, snapshot: dict | None = None) -> dict:
     current = None
     if recheck_of:
         current = tx.require(recheck_of, "Ticket")
@@ -202,7 +203,8 @@ def _round(tx: Tx, actor: Actor, kind: str, task_id: str | None, target: str, co
         raise RLError("INVALID", f"{current['id']} has used its {MAX_PASSES} reviews"
                                  + (f" in the {segment}'s segment" if segment else ""))
     entry = {"n": len(passes) + 1, "segment": segment, "commit": commit, "target": target, "requested_by": actor.name,
-             "requested_at": now_utc(), "question": question, **({"design": design} if design else {})}
+             "requested_at": now_utc(), "question": question, **({"design": design} if design else {}),
+             **({"design_snapshot": snapshot} if snapshot else {})}
     if current:
         tx.update(current["id"], {"passes": passes + [entry], "status": "waiting", "segment": segment,
                                   "target_id": target, "verdict": None})
@@ -225,7 +227,9 @@ def _protected(tx: Tx, t: dict) -> list[str]:
     if t.get("review_kind") != "design" or not t.get("task_id"):
         return []
     from .research import task_design
-    exp = task_design(tx, t["task_id"])  # the revision the task was handed, not a later draft
+    passes = t.get("passes") or []
+    # the design the reviewer was shown for this pass; else the revision the task was handed
+    exp = (passes[-1].get("design_snapshot") if passes else None) or task_design(tx, t["task_id"])
     return list((exp or {}).get("protected") or [])
 
 
