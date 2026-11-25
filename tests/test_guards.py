@@ -478,3 +478,15 @@ def test_a_running_merge_test_can_be_overdue(project, rl):
     with project.write() as tx:
         tx.update(att, {"expected_end": "2026-01-01T00:00:00+00:00"})
     assert "job-overdue" in flow.types(project, s)
+
+
+def test_a_researchers_passed_review_wakes_the_researcher(project, rl):
+    flow.dispatched(project, rl)
+    r = "researcher-T-0003"
+    wt = flow.worktree(project, "T-0003")
+    (wt / "note.txt").write_text("a change\n")
+    git(wt, "add", "-A")
+    git(wt, "commit", "-qm", "a change")
+    ok(rl("review", "request", "T-0003", who=r))
+    ok(rl("review", "answer", "RV-0003", "--verdict", "pass", who="reviewer-RV-0003"))
+    assert "review-verdict" in flow.types(project, r)

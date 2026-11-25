@@ -280,6 +280,18 @@ class Rules:
                     self.add(type="review-verdict", to=t["holder"], subject=r["id"],
                              ask=f"dispatch {t['id']}", cmd=f"rl task dispatch {t['id']} --note ..",
                              since=r.get("answered_at") or now_utc(), frm=reviewer)
+                elif t and t["state"] == "active" and t.get("holder", "").startswith("researcher-") \
+                        and last_pass(r) and last_pass(r).get("segment") == "researcher":
+                    # the researcher waits on this pass to run; its task card stays the item that times
+                    self.add(type="review-verdict", to=t["holder"], subject=r["id"],
+                             ask=f"the review passed: go on with {t['id']} (run, then deliver)",
+                             cmd="rl pack", since=r.get("answered_at") or now_utc(), frm=reviewer, timed=False)
+            elif r["status"] == "passed" and r.get("review_kind") == "tree":
+                t = self.by_id.get(r.get("task_id"))
+                if t and t["state"] == "active" and t.get("holder"):
+                    self.add(type="review-verdict", to=t["holder"], subject=r["id"], ask=f"deliver {t['id']}",
+                             cmd=f"rl task deliver {t['id']} ..", since=r.get("answered_at") or now_utc(),
+                             frm=reviewer)
             elif r["status"] == "escalated" and r.get("segment") == "researcher":
                 t = self.by_id.get(r.get("task_id"))
                 if t:

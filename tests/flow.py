@@ -63,6 +63,7 @@ def tree(store, rl) -> None:
     ok(rl("decide", "--kind", "route", "--targets", "H-0001", "--rationale", "one hypothesis covers it", who=s))
     ok(rl("review", "request", "T-0001", "--kind", "tree", who=s))
     ok(rl("review", "answer", "RV-0001", "--verdict", "pass", who="reviewer-RV-0001"))
+    assert "review-verdict" in types(store, s)  # the scientist is woken to deliver
     ok(rl("task", "deliver", "T-0001", "--conclusion", "one hypothesis", who=s))
 
 
