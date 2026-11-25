@@ -51,11 +51,12 @@ class FakeHerdr:
             self.agents[pane] = {"name": name, "agent_status": "idle", "state_change_seq": 1,
                                  "args": rest[rest.index("--") + 1:]}
             return {"agent": {"pane_id": pane}}
-        if (group, command) == ("agent", "get"):
-            a = self.agents.get(rest[0])
-            if a is None:
+        if (group, command) == ("agent", "get"):  # by pane id or by name
+            pane = rest[0] if rest[0] in self.agents else next(
+                (p for p, a in self.agents.items() if a["name"] == rest[0]), None)
+            if pane is None:
                 raise RLError("HERDR", "no agent", herdr_code="agent_not_found")
-            return {"agent": {**a, "pane_id": rest[0]}}
+            return {"agent": {**self.agents[pane], "pane_id": pane, "tab_id": pane.replace(":p", ":t")}}
         if (group, command) == ("agent", "prompt"):
             if self.agents.get(rest[0], {}).get("agent_status") == "blocked":
                 raise RLError("HERDR", "blocked", herdr_code="agent_blocked")
@@ -146,6 +147,53 @@ def test_a_gone_agent_ends_its_session_and_the_next_beat_opens_it_again(project,
     assert again["id"] != first["id"] and again["conversations"] == 2
     with project.read() as tx:
         assert tx.require("T-0002")["holder"] == "scientist-T-0002"  # still its task
+
+
+def test_a_session_being_started_is_left_to_its_opener(project, rl, fake):
+    """rl resume writes the coordinator's record before its agent starts; a beat meanwhile neither ends it (which
+    would orphan the agent) nor opens another."""
+    flow.tree(project, rl)
+    with project.write() as tx:
+        tx.create("Session", {"id": tx.next_id("Session"), "name": "coordinator", "role": "coordinator",
+                              "subject": "project", "host": "claude", "entry": "claude:m", "status": "open",
+                              "cwd": str(project.project.root)})
+    out = watch.beat(project)
+    assert not any("closed" in a for a in out["actions"]), out
+    assert "coordinator" in sessions(project) and not fake.prompts
+    assert watch.ensure_coordinator(project) == "the coordinator is being started"
+
+
+def test_a_coordinator_whose_record_ended_while_its_agent_lives_is_bound_again(project, rl, fake):
+    flow.tree(project, rl)  # the delivered tree waits on the coordinator
+    name = launch.herdr_name(project, "coordinator")
+    with project.write() as tx:
+        tx.create("Session", {"id": tx.next_id("Session"), "name": "coordinator", "role": "coordinator",
+                              "subject": "project", "host": "claude", "entry": "claude:m", "status": "ended",
+                              "cwd": str(project.project.root)})
+    fake.tabs["w1:t7"] = name
+    fake.agents["w1:p7"] = {"name": name, "agent_status": "idle", "state_change_seq": 1}
+    out = watch.beat(project)
+    assert "coordinator: bound again to its live agent in w1:p7" in out["actions"], out
+    s = sessions(project)["coordinator"]
+    assert s["herdr_pane"] == "w1:p7" and s["herdr_tab"] == "w1:t7"
+    assert [p for p, _ in fake.prompts] == ["w1:p7"] and "T-0001" in fake.prompts[0][1]
+    assert not any(c[:2] == ("agent", "start") for c in fake.calls)  # no second agent under its name
+    with project.write() as tx:  # ended again: rl resume binds it too, rather than starting another
+        tx.update(s["id"], {"status": "ended"})
+    assert watch.ensure_coordinator(project) == "the coordinator runs in pane w1:p7 (its session bound again)"
+
+
+def test_a_live_agent_in_a_tab_rl_did_not_make_is_not_bound(project, rl, fake):
+    flow.tree(project, rl)
+    name = launch.herdr_name(project, "coordinator")
+    with project.write() as tx:
+        tx.create("Session", {"id": tx.next_id("Session"), "name": "coordinator", "role": "coordinator",
+                              "subject": "project", "host": "claude", "entry": "claude:m", "status": "ended",
+                              "cwd": str(project.project.root)})
+    fake.tabs["w1:t7"] = "someone else's"
+    fake.agents["w1:p7"] = {"name": name, "agent_status": "idle", "state_change_seq": 1}
+    watch.beat(project)
+    assert "coordinator" not in sessions(project) and not fake.prompts
 
 
 def test_a_finished_session_is_closed_with_its_tab(project, rl, fake):

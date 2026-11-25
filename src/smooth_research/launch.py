@@ -188,7 +188,7 @@ def start_agent(store: Store, s: dict, timeout: int = 90, tab: str | None = None
             if made:
                 herdr.call("tab", "close", tab, timeout=30)
             raise
-        waiting = answer_trust(pane, entry.entry, Path(s["cwd"]), timeout)
+        waiting = answer_trust(pane, entry.entry, Path(s["cwd"]), timeout, label=name)
         if not waiting:
             with store.write() as tx:
                 tx.event("session.trusted", name, f"answered {entry.entry}'s folder trust question for {s['cwd']}")
@@ -242,30 +242,33 @@ def answer_new(name: str, host: str, timeout: int = 30, asked: float = 5.0) -> s
     return None
 
 
-def answer_trust(name: str, host: str, folder: Path, timeout: int) -> str | None:
+def answer_trust(name: str, host: str, folder: Path, timeout: int, label: str | None = None) -> str | None:
     """Answer the host's question whether to trust the folder rl opened the session in, as the coordinator's
     choice. None once the agent is ready; otherwise why it still waits (any other dialog is the coordinator's
-    to decide)."""
-    ask = decide(name)
+    to decide). name: the pane to act on; label: the session it is, for the messages."""
+    ask = decide(label or name)
+    pane, name = name, label or name
     question, accept = TRUST_QUESTIONS.get(host, (None, None))
     try:
-        screen = herdr.read(name)
+        screen = herdr.read(pane)
         if not question or question not in screen:
             return f"{name} waits at a dialog ({excerpt(screen)}): {ask}"
         if not _names(screen, folder):
             return f"{name} waits at a folder trust question that does not name {folder}: {ask}"
-        problem = select(name, accept, screen, lambda now: question in now)
+        problem = select(pane, accept, screen, lambda now: question in now)
         if problem:
             return f"{name} waits at the folder trust question for {folder}; {problem}: {ask}"
-        herdr.keys(name, "enter")
-        deadline = time.monotonic() + timeout
+        herdr.keys(pane, "enter")
+        deadline, other = time.monotonic() + timeout, 0
         while time.monotonic() < deadline:
-            state = herdr.status(name)
+            state = herdr.status(pane)
             if state in ("idle", "done"):
                 return None
             if state == "gone":
-                return f"{name} exited at the folder trust question; close it with `rl agent close {name}`"
-            if state == "blocked" and question not in herdr.read(name):
+                return f"{name} exited at the folder trust question; the watcher opens it again when it has work"
+            # blocked on something else for a few looks in a row (not the moment the trust dialog goes away)
+            other = other + 1 if state == "blocked" and question not in herdr.read(pane) else 0
+            if other >= 6:
                 return f"{name} trusted {folder} and now waits at another dialog: {ask}"
             time.sleep(0.5)
         return f"{name} trusted {folder} but was not ready within {timeout}s: {ask}"

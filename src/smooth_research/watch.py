@@ -223,6 +223,37 @@ def tell(store: Store, sid: str, pane: str, items: list[inbox.Item], text: str |
     return "told " + ", ".join(i.key() for i in items) if why is None else f"held ({why})"
 
 
+START_MINUTES = 5  # longer than an agent's start and the folder trust question (start_agent waits 90 s)
+
+
+def starting(s: dict) -> bool:
+    """The session is being started: its record is open but the opener has not yet written its pane. A beat
+    leaves it alone (ending it would orphan the agent the opener is starting)."""
+    return not s.get("herdr_pane") and _minutes(s.get("created_at")) < START_MINUTES
+
+
+def rebind(store: Store, name: str) -> dict | None:
+    """Open again the latest ended record of a session whose agent still lives in the tab rl made for it (its
+    record ended while the agent ran on); the reopened record, or None when there is no such agent."""
+    info = herdr.agent(launch.herdr_name(store, name))
+    if not info or not info.get("pane_id"):
+        return None
+    with store.read() as tx:
+        old = max(tx.all("Session", name=name), key=lambda x: x["id"], default=None)
+    if old is None or launch.own_tab(store, {**old, "herdr_tab": info.get("tab_id")}) is None:
+        return None
+    with store.write() as tx:
+        s = max(tx.all("Session", name=name), key=lambda x: x["id"], default=None)
+        if s is None or s["id"] != old["id"] or s["status"] == "open":  # opened or rebound meanwhile
+            return None
+        tx.update(s["id"], {"status": "open", "ended_at": None, "herdr_pane": info["pane_id"],
+                            "herdr_tab": info.get("tab_id"), "last_active_at": now_utc(),
+                            # what it did so far is not the user talking to it
+                            "last_seq": info.get("state_change_seq")})
+        tx.event("session.rebound", name, f"its agent lives on in {info['pane_id']}")
+        return tx.require(s["id"], "Session")
+
+
 def close_session(store: Store, s: dict, why: str) -> str:
     try:
         tab = launch.own_tab(store, s)
@@ -253,6 +284,8 @@ def _due(s: dict, items: list[inbox.Item], config: dict) -> list[inbox.Item]:
 def look(store: Store, s: dict, items: list[inbox.Item], low: dict) -> str | None:
     """One open session: gone, at a dialog, working, or idle with something to tell."""
     config = store.project.config
+    if starting(s):
+        return None
     try:
         pane, info = launch.bound(store, s)
     except RLError as exc:
@@ -319,7 +352,7 @@ def beat(store: Store) -> dict:
             by_to.setdefault(it.to, []).append(it)
     done = []
     with store.read() as tx:
-        ending = [s for n, s in sessions.items() if n not in by_to and finished(tx, n)]
+        ending = [s for n, s in sessions.items() if n not in by_to and not starting(s) and finished(tx, n)]
     for s in ending:
         done.append(close_session(store, s, "its work is finished"))
         sessions.pop(s["name"], None)
@@ -327,16 +360,21 @@ def beat(store: Store) -> dict:
         try:
             s = sessions.get(name)
             if s is None:
-                if name == "coordinator":
-                    continue  # the coordinator's pane is opened by rl resume
-                with store.read() as tx:
-                    why = may_open(tx, config, name, set(sessions))
-                if why:
+                if name != "coordinator":  # the coordinator's pane is opened by rl resume
+                    with store.read() as tx:
+                        if may_open(tx, config, name, set(sessions)):
+                            continue
+                # a session whose record ended while its agent lives on (closed by an older watcher, say) is
+                # bound to that agent again; another agent under its herdr name could not be started
+                s = rebind(store, name)
+                if s is None:
+                    if name != "coordinator":
+                        done.append(open_session(store, name, its, low))
+                    with store.read() as tx:
+                        sessions = {x["name"]: x for x in tx.all("Session") if x["status"] == "open"}
                     continue
-                done.append(open_session(store, name, its, low))
-                with store.read() as tx:
-                    sessions = {x["name"]: x for x in tx.all("Session") if x["status"] == "open"}
-                continue
+                sessions[name] = s
+                done.append(f"{name}: bound again to its live agent in {s['herdr_pane']}")
             out = look(store, s, its, low)
             if out:
                 done.append(out)
@@ -431,8 +469,16 @@ def ensure_coordinator(store: Store) -> str:
             return f"the coordinator's pane could not be checked ({exc.message})"
         if pane:
             return f"the coordinator runs in pane {pane}"
+    if s and starting(s):
+        return "the coordinator is being started"
     if s:
         close_session(store, s, "its pane is gone")
+    try:
+        again = rebind(store, "coordinator")
+    except RLError as exc:
+        return f"the coordinator's agent could not be checked ({exc.message})"
+    if again:
+        return f"the coordinator runs in pane {again['herdr_pane']} (its session bound again)"
     with store.read() as tx:
         items = [i for i in inbox.all_items(tx, store.project.config) if i.to == "coordinator"]
     return open_session(store, session_name("coordinator", None), items, usage.low_hosts(store))

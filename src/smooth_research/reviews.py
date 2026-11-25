@@ -114,11 +114,16 @@ def conclusion_passed(tx: Tx, decision_id: str) -> dict | None:
     return None
 
 
+def latest_tree_round(tx: Tx, task_id: str) -> dict | None:
+    rounds = [t for t in task_rounds(tx, task_id) if t.get("review_kind") == "tree"]
+    return max(rounds, key=lambda t: t["id"]) if rounds else None
+
+
 def tree_passed(tx: Tx, task_id: str) -> dict | None:
-    for t in task_rounds(tx, task_id):
-        if t.get("review_kind") == "tree" and t["status"] == "passed":
-            return t
-    return None
+    """The task's tree round when its latest one passed: an older pass does not clear a tree whose newer round
+    failed or still waits."""
+    t = latest_tree_round(tx, task_id)
+    return t if t and t["status"] == "passed" else None
 
 
 def ruled_after(tx: Tx, rv: str) -> str | None:

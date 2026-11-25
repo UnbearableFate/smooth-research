@@ -377,7 +377,10 @@ def design_key(exp: dict | None) -> str | None:
     if not exp:
         return None
     from .util import digest_json
-    return f"{exp['id']}@{exp['revision']}#{digest_json({k: exp.get(k) for k in KEY_FIELDS})}"
+    # a field a record has never had (edit_seq on one from before it existed) is left out, so the key such a record
+    # was cleared under stays the same
+    fields = {k: exp.get(k) for k in KEY_FIELDS if not (k == "edit_seq" and exp.get(k) is None)}
+    return f"{exp['id']}@{exp['revision']}#{digest_json(fields)}"
 
 
 def design_id(tx: Tx, task_id: str) -> str | None:

@@ -42,7 +42,18 @@ class Item:
     extra: dict = field(default_factory=dict)
 
     def key(self) -> str:
-        return f"{self.type}:{self.subject}:{self.to}"
+        """The item's identity for the watcher's told record; a review item carries its pass, so a recheck on the
+        same ticket is news to the reviewer and its verdict to the author."""
+        base = f"{self.type}:{self.subject}:{self.to}"
+        return f"{base}#{self.extra['pass']}" if "pass" in self.extra else base
+
+
+TEST_PURPOSES = ("merge-test", "design-test", "review-test")  # runs that are not the task's evidence
+
+
+def pass_of(r: dict) -> dict:
+    """A review item's pass number (Item.key)."""
+    return {"pass": len(r.get("passes") or [])}
 
 
 def _ts(value: str | None) -> datetime:
@@ -259,11 +270,11 @@ class Rules:
                 self.add(type="review-request", to=reviewer, subject=r["id"], ask="review",
                          cmd=f"rl review answer {r['id']} --verdict pass|fail ..",
                          since=lp.get("requested_at") or r["created_at"], frm=lp.get("requested_by"),
-                         note=lp.get("question"))
+                         note=lp.get("question"), extra=pass_of(r))
                 continue
             author = self.round_author(r)
             if r["status"] == "answered":
-                self.add(type="review-verdict", to=author, subject=r["id"],
+                self.add(type="review-verdict", extra=pass_of(r), to=author, subject=r["id"],
                          ask="fix, then request a recheck" if blocking(r) else "go on: dispatch, run or deliver",
                          cmd=f"rl review request {r.get('target_id')} --recheck-of {r['id']}",
                          since=r.get("answered_at") or now_utc(), frm=reviewer,
@@ -271,27 +282,36 @@ class Rules:
             elif r["status"] == "passed" and r.get("review_kind") == "conclusion":
                 d = next((x for x in self.decisions if x["id"] == r.get("target_id")), None)
                 if d and d["state"] == "draft":
-                    self.add(type="review-verdict", to=author, subject=r["id"], ask=f"finalize {d['id']}",
-                             cmd=f"rl decide --final {d["id"]}", since=r.get("answered_at") or now_utc(), frm=reviewer)
+                    self.add(type="review-verdict", extra=pass_of(r), to=author, subject=r["id"],
+                             ask=f"finalize {d['id']}", cmd=f"rl decide --final {d['id']}",
+                             since=r.get("answered_at") or now_utc(), frm=reviewer)
             elif r["status"] == "passed" and r.get("review_kind") == "design":
                 t = self.by_id.get(r.get("task_id"))
                 if t and t["state"] == "active" and t.get("holder", "").startswith("scientist-") \
                         and last_pass(r) and last_pass(r).get("segment") == "scientist":
-                    self.add(type="review-verdict", to=t["holder"], subject=r["id"],
+                    self.add(type="review-verdict", extra=pass_of(r), to=t["holder"], subject=r["id"],
                              ask=f"dispatch {t['id']}", cmd=f"rl task dispatch {t['id']} --note ..",
                              since=r.get("answered_at") or now_utc(), frm=reviewer)
                 elif t and t["state"] == "active" and t.get("holder", "").startswith("researcher-") \
                         and last_pass(r) and last_pass(r).get("segment") == "researcher":
-                    # the researcher waits on this pass to run; its task card stays the item that times
-                    self.add(type="review-verdict", to=t["holder"], subject=r["id"],
+                    # the researcher waits on this pass to run; its task card stays the item that times. A run
+                    # registered after the pass shows it went on.
+                    went_on = any(x["task_id"] == t["id"] and x.get("purpose") not in TEST_PURPOSES
+                                  and x["created_at"] >= (last_pass(r).get("answered_at") or "")
+                                  for x in self.runs.values())
+                    if went_on:
+                        continue
+                    self.add(type="review-verdict", extra=pass_of(r), to=t["holder"], subject=r["id"],
                              ask=f"the review passed: go on with {t['id']} (run, then deliver)",
                              cmd="rl pack", since=r.get("answered_at") or now_utc(), frm=reviewer, timed=False)
             elif r["status"] == "passed" and r.get("review_kind") == "tree":
                 t = self.by_id.get(r.get("task_id"))
-                if t and t["state"] == "active" and t.get("holder"):
-                    self.add(type="review-verdict", to=t["holder"], subject=r["id"], ask=f"deliver {t['id']}",
-                             cmd=f"rl task deliver {t['id']} ..", since=r.get("answered_at") or now_utc(),
-                             frm=reviewer)
+                if t and t["state"] == "active" and t.get("holder") and r["id"] == max(
+                        x["id"] for x in self.tickets if x["kind"] == "review" and x.get("review_kind") == "tree"
+                        and x.get("task_id") == t["id"]):  # only the latest tree round says deliver
+                    self.add(type="review-verdict", extra=pass_of(r), to=t["holder"], subject=r["id"],
+                             ask=f"deliver {t['id']}", cmd=f"rl task deliver {t['id']} ..",
+                             since=r.get("answered_at") or now_utc(), frm=reviewer)
             elif r["status"] == "escalated" and r.get("segment") == "researcher":
                 t = self.by_id.get(r.get("task_id"))
                 if t:
