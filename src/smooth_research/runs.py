@@ -116,10 +116,10 @@ def register(store: Store, actor: Actor, task_id: str, request_id: str, arm: str
         else None
     tested = None
     if purpose in ("merge-test", "design-test", "review-test"):
-        from .tasks import test_command
-        from .research import design_id
+        from .tasks import test_target
         with store.read() as tx:
-            tested = {"command": test_command(tx, task), "design": design_id(tx, task_id)}
+            command, key = test_target(tx, tx.require(task_id, "Task"))
+            tested = {"command": command, "design": key}
     spec = {"arm": arm, "seed": seed, "config": config, "split": split, "commit": commit, "params": params,
             **({"design": design} if design else {}), **({"acceptance": acceptance} if acceptance else {}),
             **({"test": tested} if tested else {})}

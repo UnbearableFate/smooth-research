@@ -448,6 +448,9 @@ def sync(store: Store, name: str | None = None) -> dict:
                 problems.append(f"git push {remote} {branch} failed: {said}. Fix it (never force a shared branch), "
                                 "then rl compute sync")
         from .gitops import candidate_branches
+        from .tasks import repair_candidates
+        if url:
+            repair_candidates(store)  # the branches as the records say, before they go out
         for cand in candidate_branches(checkout) if url else []:  # merge candidates waiting on a test job
             ok, said = _call(checkout, "git", "push", "--force", remote, cand)
             (lines if ok else problems).append(f"pushed the merge candidate {cand} to {remote}" if ok else

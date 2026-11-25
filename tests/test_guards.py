@@ -296,7 +296,7 @@ def test_an_acceptance_interrupted_after_the_mainline_moved_is_finished_as_teste
     top = gitops.top(project.project)
     with project.read() as tx:
         task = tx.require("T-0003")
-    commit, _ = gitops.merge_candidate(project.project, "T-0003", task["delivered_commit"])
+    commit, _, _ = gitops.merge_candidate(project.project, "T-0003", task["delivered_commit"])
     with project.write() as tx:  # the acceptance was recorded and main moved, then the process died
         tx.update("T-0003", {"merge_commit": commit, "merge_state": "merging", "revision": task["revision"] + 1})
     git(top, "merge", "-q", "--ff-only", commit)
@@ -410,12 +410,42 @@ def test_recovery_waits_for_a_merge_test_still_out(project, rl):
         assert tx.require("T-0003")["state"] == "merging"
 
 
-def test_a_candidate_branch_is_removed_only_by_its_own_acceptance(project, rl):
+def test_candidate_branches_follow_the_records(project, rl):
+    from smooth_research import tasks
     flow.delivered(project, rl)
     top = gitops.top(project.project)
     head = git(top, "rev-parse", "HEAD")
-    gitops.name_candidate(project.project, "T-0003", head)
-    gitops.retire_candidate(project.project, "T-0003", "1" * 40)  # a losing acceptance with another commit
+    git(top, "branch", "sr-accept/T-0099", head)  # left by a stopped process: no acceptance waits on it
+    with project.write() as tx:  # an acceptance recorded, its branch never made
+        tx.update("T-0003", {"state": "merging", "merge_state": "merging", "merge_commit": head})
+    assert tasks.repair_candidates(project)
     assert gitops.candidate_branches(top) == ["sr-accept/T-0003"]
-    gitops.retire_candidate(project.project, "T-0003", head)
-    assert gitops.candidate_branches(top) == []
+    assert not tasks.repair_candidates(project)  # nothing to repair: nothing written
+
+
+def test_a_waiting_merge_test_is_someones_item(project, rl):
+    flow.delivered(project, rl)
+    s = "scientist-T-0002"
+    _job_tests(project)
+    from smooth_research.project import find_project
+    from smooth_research.store import Store
+    project = Store(find_project(), "test")
+    top = gitops.top(project.project)
+    (top / "other.txt").write_text("main moved\n")
+    git(top, "add", "-A")
+    git(top, "commit", "-qm", "main moves on")
+    ok(rl("task", "accept", "T-0003", who=s))
+    assert "merge-test" in flow.types(project, s)
+    ok(rl("run", "register", "--task", "T-0003", "--request-id", "m", "--purpose", "merge-test", "--minutes", "5",
+          who=s))
+    assert "merge-test" not in flow.types(project, s)
+
+
+def test_a_test_credits_the_design_it_read(project, rl):
+    flow.dispatched(project, rl)
+    r, s = "researcher-T-0003", "scientist-T-0002"
+    ok(rl("experiment", "set", "E-0001", "--question", "revision 2", "--reason", "redesign", who=s))
+    ok(rl("task", "test", "T-0003", who=r))  # the researcher tests its handoff (revision 1)
+    with project.read() as tx:
+        task = tx.require("T-0003")
+    assert task["tests"][-1]["design"].startswith("E-0001@1#")

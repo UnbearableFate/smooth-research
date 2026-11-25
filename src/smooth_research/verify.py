@@ -123,7 +123,9 @@ def hypothesis_lines(tx: Tx, task: dict) -> list[str]:
         live = task_experiment(tx, k["id"])
         if live:
             key = f"{live['id']}@{live['revision']}"
-            exps.setdefault(key, key + (" draft" if not k.get("sealed_design") else " newer draft, not handed over")
+            state = ("sealed by another task's handover" if live.get("design_commit") else
+                     "draft" if not k.get("sealed_design") else "newer draft, not handed over")
+            exps.setdefault(key, f"{key} {state}"
                             + (f" (revised: {live['revision_reason'][:60]})" if live.get("revision_reason") else ""))
     lines.append("experiments  " + ("; ".join(exps.values()) or "none (a composite or a stop)"))
     done = [k for k in kids if k["state"] == "accepted"]

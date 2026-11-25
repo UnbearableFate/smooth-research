@@ -323,6 +323,20 @@ class Rules:
                              since=t.get("answered_at") or now_utc(), frm=session_name("advisor", t["id"]))
 
     def jobs(self) -> None:
+        for t in self.tasks:  # an acceptance waits on a merge test that nobody registered for this round yet
+            if t["state"] != "merging" or not t.get("merge_commit"):
+                continue
+            rounds = [r for r in self.runs.values() if r["task_id"] == t["id"] and r.get("purpose") == "merge-test"
+                      and r.get("code_commit") == t["merge_commit"]
+                      and ((r.get("spec") or {}).get("acceptance") or {}).get("round") == t["revision"]]
+            if not rounds:
+                public = t["kind"] == "prep" and t["creator"] == "coordinator"
+                who = t.get("holder") if public else self.scientist_for(t)
+                if who:
+                    self.add(type="merge-test", to=who, subject=t["id"], ask="run the merge test of its acceptance "
+                             "as a short job", cmd=f"rl run register --task {t['id']} --request-id <new id> --purpose "
+                             "merge-test --minutes N [--resource R]", since=self.since([t["id"]]), frm="cli",
+                             note=f"candidate {t['merge_commit'][:12]} (branch sr-accept/{t['id']})")
         for a in self.attempts:
             run = self.runs.get(a["run_id"]) or {}
             who = a.get("submitted_by")

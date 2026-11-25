@@ -375,7 +375,7 @@ def design_key(exp: dict | None) -> str | None:
     if not exp:
         return None
     from .util import digest_json
-    return f"{exp['id']}@{exp['revision']}#{digest_json({k: exp.get(k) for k in KEY_FIELDS})[:12]}"
+    return f"{exp['id']}@{exp['revision']}#{digest_json({k: exp.get(k) for k in KEY_FIELDS})}"
 
 
 def design_id(tx: Tx, task_id: str) -> str | None:

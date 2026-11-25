@@ -174,24 +174,24 @@ def commits_after(project: Project, base: str, tip: str) -> int:
     return int(out or 0)
 
 
-def merge_candidate(project: Project, task_id: str, delivered: str) -> tuple[str | None, list[str]]:
+def merge_candidate(project: Project, task_id: str, delivered: str) -> tuple[str | None, list[str], bool]:
     """The commit an acceptance tests and moves the mainline to, made from the delivered commit itself (never from
     whatever the task branch holds now) without touching any checkout: a merge commit of the delivery (first
-    parent) and the mainline. (commit, []) or (None, conflicting files). A mainline that already holds the delivery
-    (an acceptance whose record was interrupted) is its own candidate."""
+    parent) and the mainline. (commit, [], contained) or (None, conflicting files, False). A mainline that already
+    holds the delivery is its own candidate (contained: decided here, from the one reading of the mainline)."""
     root = top(project)
     main = rev(project, mainline(project))
     if is_ancestor(project, delivered, main):
-        return main, []
+        return main, [], True
     out = subprocess.run(["git", "merge-tree", "--write-tree", "--name-only", "--no-messages", delivered, main],
                          cwd=root, capture_output=True, text=True, timeout=120)
     lines = out.stdout.splitlines()
     if out.returncode != 0:
-        return None, [x for x in lines[1:] if x.strip()][:20] or [(out.stderr or out.stdout).strip()[-300:]]
+        return None, [x for x in lines[1:] if x.strip()][:20] or [(out.stderr or out.stdout).strip()[-300:]], False
     tree = lines[0].strip()
     commit = git(root, "commit-tree", tree, "-p", delivered, "-p", main, "-m",
                  f"Merge {mainline(project)} into {branch_name(task_id)} for acceptance of {task_id}")
-    return commit, []
+    return commit, [], False
 
 
 CANDIDATES = "sr-accept/"
@@ -201,16 +201,17 @@ def candidate_branch(task_id: str) -> str:
     return CANDIDATES + task_id
 
 
-def name_candidate(project: Project, task_id: str, commit: str) -> None:
-    """A branch names the candidate of the acceptance that recorded it, while its test job waits, so a remote job
-    can fetch it (compute sync pushes these branches). Only the acceptance that won the record names it."""
-    git(top(project), "update-ref", f"refs/heads/{candidate_branch(task_id)}", commit)
-
-
-def retire_candidate(project: Project, task_id: str, commit: str | None) -> None:
-    """Remove the candidate branch when it still names this acceptance's commit (never another's)."""
-    if commit:
-        git(top(project), "update-ref", "-d", f"refs/heads/{candidate_branch(task_id)}", commit, check=False)
+def set_candidates(project: Project, wanted: dict[str, str]) -> None:
+    """Make the candidate branches exactly wanted (task id -> the candidate its acceptance waits on with a test
+    job): a remote job fetches its candidate through it (compute sync pushes these branches). The caller holds the
+    records' write lock and derives wanted from them, so the branches follow the records, never a stale process."""
+    root = top(project)
+    have = {b[len(CANDIDATES):]: rev(project, b) for b in candidate_branches(root)}
+    for tid, commit in wanted.items():
+        if have.get(tid) != commit:
+            git(root, "update-ref", f"refs/heads/{candidate_branch(tid)}", commit)
+    for tid in set(have) - set(wanted):
+        git(root, "update-ref", "-d", f"refs/heads/{candidate_branch(tid)}", check=False)
 
 
 def candidate_branches(checkout: Path) -> list[str]:
