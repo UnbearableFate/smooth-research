@@ -733,7 +733,10 @@ def usage_summary(tx: Tx) -> dict:
         key = (u["resource_type"], u["unit"], u.get("hardware") or "-", u["basis"])
         totals[key] = totals.get(key, 0.0) + u["quantity"]
         covered |= {e["id"] for e in tx.out(u["id"], "covers")}
-    attempts = [a["id"] for a in tx.all("Attempt") if a["execution_state"] != "prepared"]
+    # an attempt on this machine counts no usage (11-25, the user's decision): never "unreported"
+    from .usage_view import on_this_machine
+    attempts = [a["id"] for a in tx.all("Attempt") if a["execution_state"] != "prepared"
+                and not on_this_machine(tx, a)]
     return {"totals": [{"resource_type": k[0], "unit": k[1], "hardware": k[2], "basis": k[3], "quantity": v}
                        for k, v in sorted(totals.items())],
             "unreported_attempts": [a for a in attempts if a not in covered]}

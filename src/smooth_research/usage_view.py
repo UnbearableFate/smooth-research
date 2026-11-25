@@ -32,7 +32,7 @@ def task_usage(tx: Tx, task: dict) -> dict:
     used: dict[str, float] = {}
     shared: dict[str, float] = {}
     counted: set[str] = set()  # one accounting record covers several attempts: counted once
-    pending_hours, pending, unreported = 0.0, 0, 0
+    pending_hours, pending, unreported, local = 0.0, 0, 0, 0
     mine = set(task_ids(tx, task))
     for tid in mine:
         for run in tx.all("Run", task_id=tid):
@@ -45,14 +45,25 @@ def task_usage(tx: Tx, task: dict) -> dict:
                         used[u["unit"]] = used.get(u["unit"], 0.0) + u["quantity"]
                         if any(_task_of(tx, e["id"]) not in mine for e in tx.out(u["id"], "covers")):
                             shared[u["unit"]] = shared.get(u["unit"], 0.0) + u["quantity"]
+                here = on_this_machine(tx, att)
                 if att["execution_state"] in ("prepared", "queued", "running", "unknown"):
                     pending += 1
-                    pending_hours += (run.get("minutes") or 0) / 60
+                    pending_hours += 0 if here else (run.get("minutes") or 0) / 60
+                elif here and not records:
+                    local += 1  # a run on this machine counts no usage (11-25, the user's decision)
                 elif not records:
                     unreported += 1
     return {"used": used, "shared": shared, "pending": pending, "pending_hours": pending_hours,
-            "unreported": unreported,
+            "unreported": unreported, "local": local,
             "envelope": envelope(task.get("envelope") or task.get("estimate"))}
+
+
+def on_this_machine(tx: Tx, att: dict) -> bool:
+    """An attempt that ran on this machine: registered for no remote resource and bound to no job, container or
+    remote process. It counts no usage (11-25, the user's decision)."""
+    if (att.get("resource") or {}).get("kind") == "remote":
+        return False
+    return all(tx.require(e["id"], "ExecRef")["kind"] == "local_process" for e in tx.out(att["id"], "bound_to"))
 
 
 def _task_of(tx: Tx, attempt: str) -> str | None:
@@ -80,7 +91,8 @@ def usage_line(tx: Tx, task: dict) -> str:
             + (f" ({card}: about {fmt(u['envelope'])})" if u["envelope"] else "")
             + (f"; of it {fmt(u['shared'])} is shared with other tasks and counted in each (not additive)"
                if u["shared"] else "")
-            + f"; {u['unreported']} attempt(s) unreported")
+            + f"; {u['unreported']} attempt(s) unreported"
+            + (f"; {u['local']} attempt(s) on this machine, not counted" if u["local"] else ""))
 
 
 def lines_crossed(tx: Tx, task: dict, shares: list[float]) -> list[tuple[float, str]]:

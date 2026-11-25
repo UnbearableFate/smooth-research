@@ -824,3 +824,16 @@ def test_a_test_job_registered_under_the_null_edit_seq_key_can_be_retried(projec
           "--run", run["run"], who=s))
     with project.read() as tx:
         assert tx.require(run["run"])["spec"]["test"]["design"] == old  # the run keeps its spec
+
+
+def test_a_run_on_this_machine_counts_no_usage_and_is_not_unreported(project, rl):
+    """11-25, the user's decision: local runs do not count usage time."""
+    from smooth_research import runs
+    from smooth_research.usage_view import task_usage, usage_line
+    flow.delivered(project, rl)
+    with project.read() as tx:
+        task = tx.require("T-0003")
+        u = task_usage(tx, task)
+        assert u["used"] == {} and u["unreported"] == 0 and u["local"] == 2
+        assert "2 attempt(s) on this machine, not counted" in usage_line(tx, task)
+        assert runs.usage_summary(tx)["unreported_attempts"] == []
