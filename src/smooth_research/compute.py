@@ -385,6 +385,40 @@ def _create_repository(store: Store, top: Path, remote: str) -> tuple[str | None
     return url, f"created the private GitHub repository {url} as git remote {remote} (compute.repository)"
 
 
+def _push_candidates(store: Store, checkout: Path, remote: str, lines: list[str], problems: list[str]) -> None:
+    """Publish the merge candidates the records wait on (one read of committed records: the exact commits, whatever
+    local branches a stopped process left), and retire this project's candidate branches on the remote that no
+    acceptance waits on any more (only while they still name the commit seen)."""
+    from .gitops import candidate_branch, candidate_prefix
+    from .tasks import _wanted, repair_candidates
+    try:
+        repair_candidates(store)
+    except RLError as exc:
+        problems.append(f"the local merge candidate branches could not be brought to the records ({exc.message}); "
+                        "fix it, then rl compute sync")
+    with store.read() as tx:
+        wanted = _wanted(tx)
+    for tid, commit in wanted.items():
+        ref = f"refs/heads/{candidate_branch(store.project, tid)}"
+        ok, said = _call(checkout, "git", "push", "--force", remote, f"{commit}:{ref}")
+        (lines if ok else problems).append(f"pushed the merge candidate of {tid} ({commit[:12]}) to {remote}" if ok
+                                           else f"git push {remote} {commit[:12]}:{ref} failed: {said}")
+    prefix = f"refs/heads/{candidate_prefix(store.project)}"
+    try:
+        listed = subprocess.run(["git", "ls-remote", remote, f"{prefix}*"], cwd=checkout, capture_output=True,
+                                text=True, timeout=120, env={**os.environ, **QUIET}).stdout
+    except (OSError, subprocess.SubprocessError):
+        listed = ""
+    for line in listed.splitlines():
+        parts = line.split()
+        if len(parts) != 2 or not parts[1].startswith(prefix) or parts[1][len(prefix):] in wanted:
+            continue
+        sha, ref = parts
+        done, said = _call(checkout, "git", "push", f"--force-with-lease={ref}:{sha}", remote, f":{ref}")
+        (lines if done else problems).append(f"removed the finished merge candidate {ref} from {remote}" if done
+                                             else f"could not remove {ref} from {remote}: {said}")
+
+
 def sync(store: Store, name: str | None = None) -> dict:
     """rl compute sync: for the remote resources that fetch code by git,
     push the current branch of the caller's checkout to their git remote (creating it first as a private GitHub
@@ -433,7 +467,10 @@ def sync(store: Store, name: str | None = None) -> dict:
                 url, said = _create_repository(store, own, remote)
                 (lines if url else problems).append(said)
         urls[remote] = url
-        if url and head and branch:
+        if url and head and branch and branch.startswith("sr-accept/"):
+            problems.append(f"{branch} is a merge candidate branch: rl pushes those from the records, not as the "
+                            "current branch")
+        elif url and head and branch:
             upstream = _git(checkout, "rev-parse", "--abbrev-ref", f"{branch}@{{upstream}}", check=False)
             ok, said = _call(checkout, "git", "push", *([] if upstream else ["-u"]), remote, branch)
             if ok:
@@ -447,20 +484,8 @@ def sync(store: Store, name: str | None = None) -> dict:
             else:
                 problems.append(f"git push {remote} {branch} failed: {said}. Fix it (never force a shared branch), "
                                 "then rl compute sync")
-        from .gitops import candidate_branch, candidate_refs
-        from .tasks import repair_candidates
-        cands: list[str] = []
         if url:
-            try:  # the branches as the records say, before they go out
-                repair_candidates(store)
-                cands = [candidate_branch(project, t) for t in candidate_refs(project)]
-            except RLError as exc:
-                problems.append(f"the merge candidate branches could not be brought to the records ({exc.message}): "
-                                "none was pushed; fix it, then rl compute sync")
-        for cand in cands:  # merge candidates waiting on a test job
-            ok, said = _call(checkout, "git", "push", "--force", remote, cand)
-            (lines if ok else problems).append(f"pushed the merge candidate {cand} to {remote}" if ok else
-                                               f"git push {remote} {cand} failed: {said}")
+            _push_candidates(store, checkout, remote, lines, problems)
     if head and branch and _git(checkout, "status", "--porcelain", "--untracked-files=no", check=False):
         lines.append("uncommitted changes to tracked files are not pushed: a run uses only committed code")
     for res in targets:

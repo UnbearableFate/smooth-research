@@ -284,6 +284,8 @@ def test(store: Store, actor: Actor, tid: str, record: str | None = None, commit
     if not command:
         raise RLError("INVALID", f"{tid} has no test command: set the experiment's --semantic-tests (execute) or the "
                                  "task's done check (prep)")
+    if attempt and not record:
+        raise RLError("INVALID", "--attempt names a test job whose outcome you record: give --record pass|fail")
     if record:
         if record not in ("pass", "fail") or not attempt:
             raise RLError("INVALID", "--record pass|fail with --attempt <the attempt of the test job>")
@@ -816,10 +818,16 @@ def _advance(store: Store, tid: str, commit: str, delivered: str, rnd: int, publ
         if not _same(task, delivered, rnd) or task.get("merge_commit") != commit:
             raise RLError("CONFLICT", f"{tid} changed during its acceptance (now {task['state']}): the mainline did "
                                       "not move")
-        jobs = _round_jobs(tx, task)
-        if needs_job and not (jobs and all(a["execution_state"] == "ended" and a["outcome"] == "success"
-                                           for a in jobs)):
-            raise RLError("CONFLICT", f"{tid} waits on its merge test (none of this round passed yet)")
+        jobs = _round_jobs(tx, task) if needs_job else []
+        failed = [a for a in jobs if a["execution_state"] == "ended" and a["outcome"] != "success"]
+        if failed:  # any test job of the round that did not pass decides it
+            why = f"the test job {failed[0]['id']} on {commit[:12]} ended {failed[0]['outcome']}"
+            tx.update(tid, _conflict_changes(task, why, public))
+            tx.event("task.merge_conflict", tid, why)
+            sync_candidates(tx, store)
+            return _conflict_text(why, public)
+        if needs_job and not (jobs and all(a["execution_state"] == "ended" for a in jobs)):
+            return f"{tid} waits on its other merge-test attempts of this round"  # not an error: they decide later
         main = gitops.mainline(store.project)
         why = None if gitops.is_ancestor(store.project, commit, main) else gitops.move_mainline(store.project, commit)
         if why:
@@ -893,6 +901,8 @@ def reconcile_merges(store: Store) -> list[str]:
         stuck = [t for t in tx.all("Task") if t["state"] in ("delivered", "merging") and (
             t.get("merge_state") == "merging" or (_public(t) and t["state"] == "delivered"
                                                   and t.get("merge_state") != "conflict"))]
+    with store.read() as tx:  # a failure decides a round before any success of it
+        ended.sort(key=lambda a: tx.require(a)["outcome"] == "success")
     done = [x for x in (finish_merge(store, a) for a in ended) if x]
     for t in stuck:
         try:

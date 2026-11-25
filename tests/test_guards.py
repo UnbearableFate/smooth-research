@@ -39,6 +39,10 @@ def test_a_later_failing_test_or_a_changed_command_needs_a_new_pass(project, rl)
     assert code == 1 and "did not pass" in err
     ok(rl("experiment", "set", "E-0001", "--semantic-tests", "cd src/avg && python3 test_sim.py", who=s))
     ok(rl("task", "test", "T-0003", who=s))
+    code, _, err = rl("task", "dispatch", "T-0003", who=s)  # edited and restored after the review: review again
+    assert code == 1 and "the draft changed since" in err
+    ok(rl("review", "request", "T-0003", who=s))
+    ok(rl("review", "answer", "RV-0003", "--verdict", "pass", who="reviewer-RV-0003"))
     ok(rl("task", "dispatch", "T-0003", who=s))
 
 
@@ -490,3 +494,78 @@ def test_a_researchers_passed_review_wakes_the_researcher(project, rl):
     ok(rl("review", "request", "T-0003", who=r))
     ok(rl("review", "answer", "RV-0003", "--verdict", "pass", who="reviewer-RV-0003"))
     assert "review-verdict" in flow.types(project, r)
+
+
+def test_compute_sync_publishes_the_candidates_the_records_wait_on_and_retires_the_rest(project, rl, tmp_path):
+    from smooth_research import tasks
+    flow.delivered(project, rl)
+    path = project.project.root / "smooth-research.yaml"
+    config = yaml.safe_load(path.read_text())
+    config["compute"] = {"default": "box", "tests": "job", "resources": {"box": {
+        "kind": "remote", "connect": "ssh", "host": "box", "jobs": "shell", "workspace": "/w", "code": "git",
+        "git_remote": "origin"}}}
+    path.write_text(yaml.safe_dump(config, sort_keys=False))
+    from smooth_research.project import find_project
+    from smooth_research.store import Store
+    project = Store(find_project(), "test")
+    top = gitops.top(project.project)
+    origin = tmp_path / "origin.git"
+    git(tmp_path, "init", "-q", "--bare", str(origin))
+    git(top, "remote", "add", "origin", str(origin))
+    (top / "other.txt").write_text("main moved\n")
+    git(top, "add", "-A")
+    git(top, "commit", "-qm", "main moves on")
+    ok(rl("task", "accept", "T-0003", who="scientist-T-0002"))
+    with project.read() as tx:
+        cand = tx.require("T-0003")["merge_commit"]
+    gitops.git(top, "branch", gitops.candidate_branch(project.project, "T-0099"), cand)  # a stray local branch
+    ok(rl("compute", "sync", who="scientist-T-0002"))
+    remote = git(tmp_path, "--git-dir", str(origin), "for-each-ref", "--format=%(refname:short) %(objectname)")
+    assert remote.count("sr-accept/") == 1 and f"/T-0003 {cand}" in remote
+    ok(rl("task", "cancel", "T-0003", "--reason", "no longer needed", who="scientist-T-0002"))
+    ok(rl("compute", "sync", who="scientist-T-0002"))
+    remote = git(tmp_path, "--git-dir", str(origin), "for-each-ref", "--format=%(refname:short)")
+    assert "sr-accept/" not in remote
+    assert tasks.repair_candidates(project) is False
+
+
+def test_a_draft_edited_and_restored_while_its_test_runs_is_not_credited(project, rl, monkeypatch):
+    from smooth_research import tasks
+    flow.designed(project, rl)
+    real = tasks.run_check
+
+    def edit_meanwhile(store, tid, command, cwd=None):
+        out = real(store, tid, command, cwd)
+        for path in ("src/avg/other.yaml", "src/avg/arms.yaml"):  # edited, then put back
+            with store.write() as tx:
+                exp = tx.require("E-0001")
+                tx.update("E-0001", {"manifest_path": path, "edit_seq": (exp.get("edit_seq") or 0) + 1})
+        return out
+    monkeypatch.setattr(tasks, "run_check", edit_meanwhile)
+    code, _, err = rl("task", "test", "T-0003", who="scientist-T-0002")
+    assert code == 3 and "changed while the test ran" in err
+
+
+def test_one_passed_attempt_waits_for_the_rest_of_its_round(project, rl):
+    flow.delivered(project, rl)
+    s = "scientist-T-0002"
+    _job_tests(project)
+    from smooth_research.project import find_project
+    from smooth_research.store import Store
+    project = Store(find_project(), "test")
+    top = gitops.top(project.project)
+    (top / "other.txt").write_text("main moved\n")
+    git(top, "add", "-A")
+    git(top, "commit", "-qm", "main moves on")
+    main = git(top, "rev-parse", "HEAD")
+    ok(rl("task", "accept", "T-0003", who=s))
+    run = json.loads(ok(rl("--json", "run", "register", "--task", "T-0003", "--request-id", "m1", "--purpose",
+                           "merge-test", "--minutes", "5", who=s)))
+    retry = json.loads(ok(rl("--json", "run", "register", "--task", "T-0003", "--request-id", "m2", "--purpose",
+                             "merge-test", "--minutes", "5", "--run", run["run"], who=s)))
+    out = ok(rl("run", "record", "--attempt", run["attempt"], "--state", "ended", "--outcome", "success", who=s))
+    assert git(top, "rev-parse", "HEAD") == main and "error" not in out.lower()
+    ok(rl("run", "record", "--attempt", retry["attempt"], "--state", "ended", "--outcome", "failed", who=s))
+    with project.read() as tx:
+        assert tx.require("T-0003")["merge_state"] == "conflict"
+    assert git(top, "rev-parse", "HEAD") == main

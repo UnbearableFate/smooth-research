@@ -264,6 +264,8 @@ def update_experiment(store: Store, actor: Actor, eid: str, reason: str | None =
                            manifest=None, manifest_digest=None)
             tx.event("experiment.revised", eid, f"@{exp['revision'] + 1} "
                                                 f"{'after' if first else 'before'} the first evidence run: {reason}")
+        # every edit counts, so a clearance never carries over an edit and its undoing (design_key)
+        changes["edit_seq"] = (exp.get("edit_seq") or 0) + 1
         tx.update(eid, changes)
     return {"id": eid, "summary": f"{eid} updated" + (f" (new revision: {reason})" if reason else "")}
 
@@ -353,8 +355,8 @@ def task_experiment(tx: Tx, task_id: str) -> dict | None:
     return tx.require(found[0]["id"]) if found else None
 
 
-DESIGN_FIELDS = ("id", "revision", "question", "manifest_path", "manifest", "manifest_digest", "design_commit",
-                 "semantic_tests", "protected", "brief_ref", "label")
+DESIGN_FIELDS = ("id", "revision", "edit_seq", "question", "manifest_path", "manifest", "manifest_digest",
+                 "design_commit", "semantic_tests", "protected", "brief_ref", "label")
 
 
 def task_design(tx: Tx, task_id: str) -> dict | None:
@@ -365,7 +367,7 @@ def task_design(tx: Tx, task_id: str) -> dict | None:
     return task.get("sealed_design") or task_experiment(tx, task_id)
 
 
-KEY_FIELDS = ("id", "revision", "question", "manifest_path", "semantic_tests", "protected", "brief_ref")
+KEY_FIELDS = ("id", "revision", "edit_seq", "question", "manifest_path", "semantic_tests", "protected", "brief_ref")
 
 
 def design_key(exp: dict | None) -> str | None:

@@ -97,7 +97,7 @@ ENTITIES: dict[str, Entity] = {e.label: e for e in [
     _e("Experiment", "E", graph=True, title=F(required=True), question=F(required=True), label=F(required=True),
        revision=F("int", True), revision_reason=F(), brief_ref=F(), manifest_path=F(), manifest_digest=F(),
        manifest=F("json"), protected=F("json"), semantic_tests=F(), design_commit=F(), sealed_at=F(),
-       sealed_by=F(), estimate=F()),
+       sealed_by=F(), estimate=F(), edit_seq=F("int")),
     _e("Evidence", "EV", graph=True, summary=F(required=True), validity=F(required=True, enum="validity"),
        evidence_level=F(required=True, enum="evidence_level"), scope=F(), artifact_refs=F("json"), doc_ref=F(),
        validity_reason=F(), task_id=F(), needs_recheck=F("bool"), recheck_reason=F()),

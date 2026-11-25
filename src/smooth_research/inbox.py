@@ -367,11 +367,12 @@ class Rules:
                              since=a.get("closed_at") or now_utc(), frm="executor",
                              note=a.get("ended_note") or a["outcome"])
             elif a.get("expected_end") and _ts(a["expected_end"]) <= self.now \
-                    and a["execution_state"] in ("queued", "running", "unknown", "prepared") \
-                    and a.get("last_observed_at"):
-                self.add(type="job-overdue", to=who, subject=a["id"], ask="check it with the executor and record "
-                         "what you find", cmd=f"rl run record --attempt {a['id']} ..", since=a["expected_end"],
-                         frm="cli")
+                    and a["execution_state"] in ("queued", "running", "unknown", "prepared"):
+                never = a["execution_state"] == "prepared" and not a.get("last_observed_at")
+                self.add(type="job-overdue", to=who, subject=a["id"],
+                         ask="nothing was recorded since it was registered: check whether it was submitted, and "
+                         "record what happened" if never else "check it with the executor and record what you find",
+                         cmd=f"rl run record --attempt {a['id']} ..", since=a["expected_end"], frm="cli")
 
     def coordinator(self) -> None:
         for t in self.tasks:

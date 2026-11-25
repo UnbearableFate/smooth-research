@@ -397,7 +397,11 @@ def run(store: Store, once: bool = False) -> dict:
                 print(f"{now_utc()} beat failed: {exc.message}", flush=True)
         if once:
             return out
-        time.sleep(every)
+        try:
+            time.sleep(every)
+        except KeyboardInterrupt:  # the user stops it in its tab: no traceback
+            print(f"{now_utc()} stopped; rl resume starts it again", flush=True)
+            return {"summary": "stopped"}
 
 
 def start(store: Store) -> str:
