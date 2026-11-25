@@ -6,6 +6,7 @@
 2. 自行使用uv管理所需依赖, 自行使用git管理代码库状态.
 3. 避免在生成代码中使用SHA-256
 4. 设计文档(位于design路径下)为事前制作的参考文档,并非权威, 实际执行中应当根据实际情况调整计划并对文档进行更新
+5. 在需要review的时间节点使用 `$herdr` 启动codex ,调用模型 gpt-6.2-astra xhigh,按照design/review_prompt.md 规则进行review,并且与reviewer沟通以解决问题.
 
 ## 关于miyabi
 
