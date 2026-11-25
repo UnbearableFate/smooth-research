@@ -530,7 +530,7 @@ def escalations(items: list[Item], config: dict, now: datetime, by_id: dict) -> 
             ladder = ["user"]
         elif it.to != "user":
             creator = task.get("creator") if task else None
-            ladder = [x for x in (creator, "coordinator", "user") if x and x != it.to]
+            ladder = list(dict.fromkeys(x for x in (creator, "coordinator", "user") if x and x != it.to))
         for level, who in enumerate(ladder[:max(0, steps - 1)], start=1):
             out.append(Item(type="timeout", to=who, subject=it.subject, ask=f"{it.type} for {it.to} waits "
                             f"{waited / 60:.1f} h: handle it, or restart the session on it",

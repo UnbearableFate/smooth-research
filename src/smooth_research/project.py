@@ -233,6 +233,10 @@ def config_warnings(config: dict) -> list[str]:
         if value is not None and not (_minutes(value) and value > 0):
             out.append(f"{CONFIG_NAME}: limits.{key} must be a positive number, not {value!r}; using "
                        f"{DEFAULT_CONFIG['limits'][key]}")
+    value = limits.get("envelope_lines")
+    if value is not None and not (isinstance(value, list) and value and all(_minutes(v) and v > 0 for v in value)):
+        out.append(f"{CONFIG_NAME}: limits.envelope_lines must be a list of positive shares, not {value!r}; using "
+                   f"{DEFAULT_CONFIG['limits']['envelope_lines']}")
     fast = limits.get("fast_lane")
     for unit, value in fast.items() if isinstance(fast, dict) else ():
         if not _minutes(value):
@@ -522,8 +526,8 @@ REPOSITORIES = ("github-private", "none")
 
 
 def compute_repository(config: dict) -> str:
-    """How rl session start creates a missing git remote for the resources that fetch code by git: github-private
-    (gh repo create --private) or none. An unknown value creates nothing."""
+    """How rl compute sync creates a missing git remote for the resources that fetch code by git: github-private
+    (gh repo create --private) or none (the default). An unknown value creates nothing."""
     compute = config.get("compute")
     value = compute.get("repository", DEFAULT_CONFIG["compute"]["repository"]) if isinstance(compute, dict) \
         else DEFAULT_CONFIG["compute"]["repository"]

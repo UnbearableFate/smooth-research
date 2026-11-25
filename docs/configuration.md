@@ -127,7 +127,7 @@ compute:
 | `agents.clear_idle_minutes` | `60` | 会话空闲超过这么久、上下文又超过 `clear_context_tokens` 时，唤醒它之前先清空对话（prompt 缓存已经过期） |
 | `agents.clear_context_tokens` | `120000` | 见上一行。比较的是会话记录里的上下文 token 数；目前没有代码写入这个数，所以清空实际上不会发生 |
 | `agents.user_quiet_minutes` | `3` | 用户在协调者的 pane 里说过话之后，这么久之内监视程序不往协调者的 pane 里输入 |
-| `agents.heartbeat_minutes` | `5` | 本意是心跳超过这么久算作监视程序停了。目前 CLI 只检查它的格式；判断用的是 2 × `beat_seconds` + 60 秒 |
+| `agents.heartbeat_minutes` | `5` | 心跳超过这么久（且至少 2 × `beat_seconds` + 60 秒）算作监视程序停了 |
 | `agents.page_minutes` | `15` | 研究页至少每隔这么久重画一次；记录变了时每一拍都重画 |
 | `agents.deadlines` | `{default: 240}` | 一条待办事项最多等几分钟，超过就升级（见下面）。键是事项的类型，即 `rl inbox` 每条第一行的名字，比如 `hypothesis-task`、`prep-task`、`review-request`、`job-ended`、`decision-request`；没写的类型用 `default` |
 
@@ -145,7 +145,7 @@ compute:
 5. 没有事项的会话也看一次，记下它是否停在对话框。
 6. 记录变了（`data_version` 变了）或者距上次超过 `page_minutes` 时重画 `docs/research.html`，然后写心跳 `research/state/watch.json`。
 
-心跳比 2 × `beat_seconds` + 60 秒更旧时，算作监视程序停了：除了 `rl watch`、`rl hook` 和 `rl usage`，每条 rl 命令都会警告 “the watcher is not running: run `rl resume`”，`rl status` 也会显示。
+心跳比 `heartbeat_minutes`（至少 2 × `beat_seconds` + 60 秒）更旧时，算作监视程序停了：除了 `rl watch`、`rl hook` 和 `rl usage`，每条 rl 命令都会警告 “the watcher is not running: run `rl resume`”，`rl status` 也会显示。
 
 输入的提示通过 `herdr agent prompt` 送出，不等 agent 反应。送不出去（停在对话框、没有 agent）的事项不算告诉过，下一拍再送。
 

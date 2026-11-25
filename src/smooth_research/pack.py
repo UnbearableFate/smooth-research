@@ -256,8 +256,8 @@ def _researcher(store: Store, tx: Tx, actor: Actor) -> list[tuple[str, list[str]
     deps = [f"{d['id']} {tx.require(d['id'])['title']}: " + ", ".join(
         o["path"] if isinstance(o, dict) else o for o in tx.require(d["id"]).get("outputs") or [])
         for d in tx.out(t["id"], "depends_on")]
-    from .project import compute_default
-    compute = [f"default resource: {compute_default(store.project.config) or 'local'} (rl compute steps for a cluster)"]
+    from .compute import pack_text
+    compute = pack_text(store.project).splitlines()  # the resources, and the login-node policy when it applies
     return [("Task card", cardl, False),
             ("Jobs still running (check them first)", running, False),
             ("Ended attempts", ended, True),

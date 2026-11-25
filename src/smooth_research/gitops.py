@@ -1,15 +1,20 @@
 """Git for task branches and worktrees, design commits, protected scope and the merge on acceptance (design 6.5).
 
 Every task that is claimed gets the branch sr/T-xxxx and the worktree <project>-worktrees/T-xxxx, made from the
-mainline at that moment. Acceptance merges: a merge commit of the task branch and the mainline is made on the task
-branch, the task's tests run on it, and only when they pass does the mainline move to it (a fast-forward of the
-main checkout). Only the CLI moves the mainline.
+mainline at that moment. Acceptance merges: a merge commit of the delivered commit and the mainline is made
+without touching any checkout, the task's tests run on it in a temporary checkout, and only when they pass does
+the mainline move to it (a fast-forward of the main checkout); the task branch then follows. Only the CLI moves
+the mainline.
 """
 
 from __future__ import annotations
 
 import ast
+import shutil
 import subprocess
+import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 from .project import Project, linked_worktree, repo_top
@@ -169,20 +174,46 @@ def commits_after(project: Project, base: str, tip: str) -> int:
     return int(out or 0)
 
 
-def merge_on_task_branch(project: Project, task_id: str) -> tuple[str | None, list[str]]:
-    """Merge the mainline into the task branch in its worktree with a merge commit: (the commit to test, []) or
-    (None, conflicting files) after aborting a conflicted merge. Nothing to merge gives the task head."""
-    path = worktree_path(project, task_id)
-    main = mainline(project)
-    if dirty(project, task_id):
-        return None, [f"uncommitted: {p}" for p in dirty(project, task_id)][:20]
-    out = subprocess.run(["git", "merge", "--no-ff", "--no-edit", "-m", f"Merge {main} into {branch_name(task_id)} "
-                          f"for acceptance of {task_id}", main], cwd=path, capture_output=True, text=True, timeout=120)
+def merge_candidate(project: Project, task_id: str, delivered: str) -> tuple[str | None, list[str]]:
+    """The commit an acceptance tests and moves the mainline to, made from the delivered commit itself (never from
+    whatever the task branch holds now) without touching any checkout: a merge commit of the delivery (first
+    parent) and the mainline. (commit, []) or (None, conflicting files). A mainline that already holds the delivery
+    (an acceptance whose record was interrupted) is its own candidate."""
+    root = top(project)
+    main = rev(project, mainline(project))
+    if is_ancestor(project, delivered, main):
+        return main, []
+    out = subprocess.run(["git", "merge-tree", "--write-tree", "--name-only", "--no-messages", delivered, main],
+                         cwd=root, capture_output=True, text=True, timeout=120)
+    lines = out.stdout.splitlines()
     if out.returncode != 0:
-        files = git(path, "diff", "--name-only", "--diff-filter=U", check=False).splitlines()
-        git(path, "merge", "--abort", check=False)
-        return None, files or [(out.stderr or out.stdout).strip()[-300:]]
-    return git(path, "rev-parse", "HEAD"), []
+        return None, [x for x in lines[1:] if x.strip()][:20] or [(out.stderr or out.stdout).strip()[-300:]]
+    tree = lines[0].strip()
+    commit = git(root, "commit-tree", tree, "-p", delivered, "-p", main, "-m",
+                 f"Merge {mainline(project)} into {branch_name(task_id)} for acceptance of {task_id}")
+    return commit, []
+
+
+@contextmanager
+def temp_checkout(project: Project, commit: str) -> Iterator[Path]:
+    """A detached checkout of commit for a test run, removed afterwards; yields the project's directory in it."""
+    root = top(project)
+    base = Path(tempfile.mkdtemp(prefix="sr-accept-", dir=project.worktrees_dir.parent))
+    path = base / "co"
+    git(root, "worktree", "add", "--detach", str(path), commit)
+    try:
+        yield path / prefix(project)
+    finally:
+        git(root, "worktree", "remove", "--force", str(path), check=False)
+        shutil.rmtree(base, ignore_errors=True)
+
+
+def follow(project: Project, task_id: str, delivered: str, commit: str) -> None:
+    """After acceptance, bring the task branch to the merge commit when its worktree still stands at the
+    delivery (best effort: a branch that moved on is left as it is)."""
+    path = worktree_path(project, task_id)
+    if path.exists() and git(path, "rev-parse", "HEAD", check=False) == delivered and not dirty(project, task_id):
+        git(path, "merge", "--ff-only", commit, check=False)
 
 
 def move_mainline(project: Project, commit: str) -> str | None:

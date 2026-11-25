@@ -174,3 +174,44 @@ def test_one_accounting_record_over_two_attempts_counts_once(project, rl):
     with project.read() as tx:
         assert usage_view.task_usage(tx, tx.require("T-0002"))["used"] == {"GPU·h": 3.0}
         assert usage_view.task_usage(tx, tx.require("T-0003"))["used"] == {"GPU·h": 3.0}
+
+
+def test_a_new_acceptance_is_not_decided_by_the_test_job_of_an_earlier_one(project, rl):
+    flow.delivered(project, rl)
+    s = "scientist-T-0002"
+    _job_tests(project)
+    from smooth_research import tasks
+    from smooth_research.project import find_project
+    from smooth_research.store import Store
+    project = Store(find_project(), "test")
+    ok(rl("task", "accept", "T-0003", who=s))
+    att = json.loads(ok(rl("--json", "run", "register", "--task", "T-0003", "--request-id", "m1", "--purpose",
+                           "merge-test", "--minutes", "5", who=s)))["attempt"]
+    ok(rl("run", "record", "--attempt", att, "--state", "ended", "--outcome", "failed", who=s))
+    with project.read() as tx:
+        assert tx.require("T-0003")["merge_state"] == "conflict"
+    ok(rl("task", "accept", "T-0003", who=s))  # a second acceptance of the same delivery
+    assert tasks.reconcile_merges(project) == []  # the old failed job does not decide it
+    with project.read() as tx:
+        assert tx.require("T-0003")["state"] == "merging"
+    att2 = json.loads(ok(rl("--json", "run", "register", "--task", "T-0003", "--request-id", "m2", "--purpose",
+                            "merge-test", "--minutes", "5", who=s)))["attempt"]
+    ok(rl("run", "record", "--attempt", att2, "--state", "ended", "--outcome", "success", who=s))
+    with project.read() as tx:
+        assert tx.require("T-0003")["state"] == "accepted"
+    # the first request again returns what it made, though the task is no longer merging
+    assert "duplicate request" in ok(rl("run", "register", "--task", "T-0003", "--request-id", "m1", "--purpose",
+                                        "merge-test", "--minutes", "5", who=s))
+
+
+def test_a_delivery_already_on_the_mainline_is_accepted_without_a_merge(project, rl):
+    flow.delivered(project, rl)
+    s = "scientist-T-0002"
+    top = gitops.top(project.project)
+    with project.read() as tx:
+        delivered = tx.require("T-0003")["delivered_commit"]
+    git(top, "merge", "-q", "--ff-only", delivered)  # as if a move whose record was interrupted
+    ok(rl("task", "accept", "T-0003", who=s))
+    with project.read() as tx:
+        task = tx.require("T-0003")
+    assert task["state"] == "accepted" and git(top, "rev-parse", "HEAD") == delivered

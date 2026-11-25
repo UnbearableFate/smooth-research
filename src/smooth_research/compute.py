@@ -6,7 +6,7 @@ locally (the ssh command, the git remote, whether a commit is on a branch and pu
 fetch) and prints the steps for the agent's own tools: Bash, ssh, pi-env-mcp, and the MCP server or skill that
 submits jobs. That MCP server is reached through the resource's connection: under pi-env-mcp, pi-env-mcp runs it
 on the host and offers its tools as its own (Resource.executor). The one exception is the git side of sync: for the resources that fetch code by git, rl compute
-sync (and the coordinator's rl session start) pushes the current branch, after creating the git remote as a
+sync pushes the current branch, after creating the git remote as a
 private GitHub repository when it is missing and compute.repository allows it; the clone on the host is again a
 printed step. A remote run always executes a read-only snapshot of one full commit,
 <workspace>/snapshots/<commit>/, so the branch or worktree it came from does not matter and a branch that moves
@@ -118,7 +118,7 @@ def show(store: Store, commit: str | None = None) -> dict:
 
 
 def pack_text(project: Project) -> str:
-    """The compute section of work and resume packs."""
+    """The compute section of a researcher's or scientist's pack."""
     found, warnings = compute_resources(project.config)
     default = compute_default(project.config)
     lines = [f"default: {default or 'none'} · register with --resource <name>; rl compute steps --attempt ATT "
@@ -132,7 +132,7 @@ def pack_text(project: Project) -> str:
         lines.append("Python packages: one committed pyproject.toml and uv.lock for every resource (a CPU or CUDA "
                      "build as mutually exclusive extras, the same version in each); change and lock them only "
                      "here; on a host build the environment from the snapshot, outside it, keyed by the lock, and "
-                     "name it with run register --environment-ref (workflow.md, Python environments)")
+                     "record its name in the run's result manifest (workflow.md, Python environments)")
     return "\n".join(lines)
 
 
@@ -170,7 +170,7 @@ def steps(store: Store, name: str | None = None, commit: str | None = None, atte
         commit = commit or spec_commit
         if not commit:
             problems.append(f"the RunSpec of {attempt} names no commit (only a content digest or unknown): a "
-                            "remote run stages one commit, so register the run with --code-commit <full id>")
+                            "remote run stages one commit, so register the run again at a commit (--commit <full id>)")
     res = resource(project, name or recorded)
     if commit is None and not attempt:
         commit = _git(project.checkout, "rev-parse", "--verify", "--quiet", "HEAD", check=False) or None
@@ -206,8 +206,8 @@ def _local_steps(project: Project, res: Resource, commit: str | None, facts: dic
     lines = [f"1. Code: your checkout {where['checkout']}"
              + (f" at {head[:12]}" if head else "") + "; nothing to copy."]
     if facts.get("dirty"):
-        lines.append("   The checkout has uncommitted changes to tracked files: commit them, or register with "
-                     "--code-digest instead of --code-commit.")
+        lines.append("   The checkout has uncommitted changes to tracked files: commit them; a run uses "
+                     "committed code.")
     if head and facts.get("commit") and facts["commit"] != _git(project.checkout, "rev-parse", "HEAD", check=False):
         lines.append(f"   HEAD is not {head[:12]}: check it out (or use a worktree of it) before running.")
     if res.jobs != "shell":
@@ -384,12 +384,12 @@ def _create_repository(store: Store, top: Path, remote: str) -> tuple[str | None
 
 
 def sync(store: Store, name: str | None = None) -> dict:
-    """rl compute sync, and the coordinator's rl session start: for the remote resources that fetch code by git,
+    """rl compute sync: for the remote resources that fetch code by git,
     push the current branch of the caller's checkout to their git remote (creating it first as a private GitHub
     repository when it is missing, compute.repository allows it and the project is its own repository), then
     print the step that clones it into each resource's workspace and checks that the host has the commit. The
     clone runs through the resource's connection (pi-env-mcp or ssh), so the agent runs it; every step is safe
-    to repeat. Problems are reported, never raised: a session start does not fail on them."""
+    to repeat. Problems are reported, never raised."""
     project = store.project
     found, _ = compute_resources(project.config)
     if name:

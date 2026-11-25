@@ -114,12 +114,12 @@ def launch_args(store: Store, entry: adapters.Entry, kind: str, name: str, host_
 
 def herdr_name(store: Store, name: str) -> str:
     """The herdr agent name (and tab label) of a session: herdr takes [a-z][a-z0-9_-]{0,31}, unique on its server,
-    so the session name is lowercased behind a tag of the project (a few letters of its folder and a short digest
-    of its path), and two projects with the same record ids keep apart."""
+    so the session name is lowercased behind a tag of the project (four letters of its folder and eight hex digits
+    of a digest of its path), and two projects with the same record ids keep apart."""
     root = str(store.project.root.resolve())
-    slug = re.sub(r"[^a-z0-9]", "", store.project.root.name.lower())[:6]
-    slug = slug if slug[:1].isalpha() else "p" + slug[:5]
-    tag = hashlib.blake2b(root.encode(), digest_size=2).hexdigest()
+    slug = re.sub(r"[^a-z0-9]", "", store.project.root.name.lower())[:4]
+    slug = slug if slug[:1].isalpha() else "p" + slug[:3]
+    tag = hashlib.blake2b(root.encode(), digest_size=4).hexdigest()
     return f"{slug}{tag}-{name.lower()}"[:32]
 
 
@@ -145,7 +145,18 @@ def own_tab(store: Store, s: dict) -> str | None:
         found = herdr.get("tab", tab)
     except RLError:
         return None
-    return tab if found and found.get("label") == herdr_name(store, s["name"]) else None
+    mine = herdr_name(store, s["name"])
+    if not found or found.get("label") != mine:
+        return None
+    # and nothing else lives there: every agent in the tab is the session's own (a user's shell may stay)
+    panes = herdr.call("pane", "list", "--workspace", found.get("workspace_id") or tab.split(":")[0],
+                       timeout=15).get("panes") or []
+    for pane in panes:
+        if pane.get("tab_id") == tab and pane.get("agent"):
+            info = herdr.agent(pane["pane_id"])
+            if info is not None and (info.get("name") or "") != mine:
+                return None
+    return tab
 
 
 def new_tab(store: Store, s: dict) -> dict:

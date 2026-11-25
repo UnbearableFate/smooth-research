@@ -56,7 +56,9 @@ def alive(store: Store) -> bool:
     beat = heartbeat(store)
     if not beat:
         return False
-    stale = 2 * agents_value(store.project.config, "beat_seconds") + 60
+    # agents.heartbeat_minutes, and never less than two beats and a minute (a long beat_seconds)
+    config = store.project.config
+    stale = max(60 * agents_value(config, "heartbeat_minutes"), 2 * agents_value(config, "beat_seconds") + 60)
     return (datetime.now(timezone.utc) - parse_time(beat["at"])).total_seconds() < stale
 
 
@@ -131,8 +133,13 @@ def may_open(tx: Tx, config: dict, name: str, open_names: set[str]) -> str | Non
     return None
 
 
+SWITCHING = ("researcher", "reviewer")  # the roles that move to another host when theirs runs low (usage)
+
+
 def choose_entry(store: Store, role: str, low: dict) -> adapters.Entry | None:
-    """The first configured entry of the role whose executable is there and whose host is not low on usage."""
+    """The first configured entry of the role whose executable is there and, for a researcher or reviewer, whose
+    host is not low on usage (the coordinator, scientists and advisors keep their model)."""
+    low = low if role in SWITCHING else {}
     entries = usable_entries(store.project.config, role)
     fine = [e for e in entries if e.entry != "manual" and adapters.available(e) is None and e.entry not in low]
     return (fine or [e for e in entries if e.entry != "manual" and adapters.available(e) is None] or [None])[0]
@@ -271,7 +278,7 @@ def look(store: Store, s: dict, items: list[inbox.Item], low: dict) -> str | Non
         s = {**s, **changes}
     if status in ("blocked", "working", "unknown"):
         return None
-    if s["host"] in low and s["role"] != "coordinator":
+    if s["host"] in low and s["role"] in SWITCHING:
         return close_session(store, s, low[s["host"]]["reason"] + "; reopened on another model")
     due = _due(s, items, config)
     if not due:
@@ -281,7 +288,11 @@ def look(store: Store, s: dict, items: list[inbox.Item], low: dict) -> str | Non
     if _minutes(s.get("last_active_at")) >= agents_value(config, "clear_idle_minutes") and \
             (s.get("context_tokens") or 0) >= agents_value(config, "clear_context_tokens"):
         herdr.prompt(pane, "/clear")
-        time.sleep(2)
+        waits = launch.answer_new(pane, s["host"])  # a host that asks where the new conversation runs
+        if waits:
+            with store.write() as tx:
+                tx.update(s["id"], {"needs_decision": waits})
+            return f"{s['name']}: cleared; {waits}"
         with store.write() as tx:
             tx.update(s["id"], {"conversations": (s.get("conversations") or 1) + 1, "told": {}})
             tx.event("session.cleared", s["name"], "idle with a large context: a new conversation from its pack")

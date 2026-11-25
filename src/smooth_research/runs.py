@@ -42,6 +42,16 @@ def register(store: Store, actor: Actor, task_id: str, request_id: str, arm: str
              purpose: str | None = None, ticket: str | None = None, run_id: str | None = None,
              resource: str | None = None, params: dict | None = None) -> dict:
     need(actor, "researcher", "scientist", what="registering a run")
+    # the same request again returns what it made, whatever changed since (the task accepted, a finding opened)
+    payload = digest_json({"task": task_id, "arm": arm, "seed": seed, "config": config, "split": split,
+                           "commit": commit, "minutes": minutes, "trial": trial, "deviation": deviation,
+                           "purpose": purpose, "ticket": ticket, "run": run_id, "resource": resource,
+                           "params": params})
+    with store.read() as tx:
+        previous = tx.request("run.register", request_id, payload)
+    if previous:
+        return {**previous, "duplicate": True,
+                "summary": f"duplicate request {request_id}: {previous['run']} {previous['attempt']}"}
     if coordinator_is_login(store.project.config) and not resource:
         raise RLError("INVALID", "the project runs work through an executor (compute.coordinator: login): register "
                                  "with --resource <cluster resource>")
@@ -91,15 +101,11 @@ def register(store: Store, actor: Actor, task_id: str, request_id: str, arm: str
         design = {"experiment": exp["id"], "revision": exp["revision"], "manifest_digest": exp["manifest_digest"],
                   "design_commit": exp["design_commit"], "arm": manifest.arm(exp["manifest"], arm),
                   "allowed": list(exp["manifest"].get("allowed") or [])}
+    # a merge test is bound to the acceptance it tests: that delivery, that round (tasks.finish_merge)
+    acceptance = {"delivered": task["delivered_commit"], "round": task["revision"]} if purpose == "merge-test" \
+        else None
     spec = {"arm": arm, "seed": seed, "config": config, "split": split, "commit": commit, "params": params,
-            **({"design": design} if design else {})}
-    payload = digest_json({"task": task_id, "spec": spec, "run": run_id, "category": category,
-                           "resource": res.name if res else None})
-    with store.read() as tx:  # the same request again returns what it made, whatever changed since
-        previous = tx.request("run.register", request_id, payload)
-    if previous:
-        return {**previous, "duplicate": True,
-                "summary": f"duplicate request {request_id}: {previous['run']} {previous['attempt']}"}
+            **({"design": design} if design else {}), **({"acceptance": acceptance} if acceptance else {})}
     if category == "evidence":  # every new attempt, a retry of a run too: a finding opened since blocks it
         problems = manifest.check_run(exp["manifest"], arm, seed, config, split)
         with store.read() as tx:
@@ -129,7 +135,7 @@ def register(store: Store, actor: Actor, task_id: str, request_id: str, arm: str
             run = tx.require(run_id, "Run")
             if run["task_id"] != task_id:
                 raise RLError("INVALID", f"{run_id} belongs to {run['task_id']}, not {task_id}")
-            if digest_json(run["spec"]) != digest_json(spec):
+            if _comparable(run["spec"]) != _comparable(spec):
                 raise RLError("CONFLICT", f"the spec differs from {run_id}'s: a changed run is a new run (omit --run)")
             index = run["attempt_count"] + 1
             tx.update(run_id, {"attempt_count": index})
@@ -226,17 +232,18 @@ def job_rows(text: str) -> dict[str, str]:
     return {m[1]: m[2] for m in ROW.finditer(text)}
 
 
+def _comparable(spec: dict) -> str:
+    """A retry repeats its run's spec; the design the run was sealed against is the run's own, not compared (a run
+    registered before the design was kept has none)."""
+    return digest_json({k: v for k, v in spec.items() if k != "design"})
+
+
 def _finish_merge_tests(store: Store, attempts: list[str]) -> None:
-    """Acceptance that waits on a merge test: an ended attempt of exactly its merge commit decides it (tasks.py)."""
+    """Acceptance that waits on a merge test: an ended attempt of the run registered for it decides it (tasks.py
+    checks the acceptance, the round and the merge commit)."""
     from .tasks import finish_merge
     for att_id in attempts:
-        with store.read() as tx:
-            att = tx.require(att_id)
-            run = tx.require(att["run_id"])
-            task = tx.require(run["task_id"])
-        if run.get("purpose") == "merge-test" and task["state"] == "merging" and att["execution_state"] == "ended" \
-                and run.get("code_commit") == task.get("merge_commit"):
-            finish_merge(store, task["id"], att["outcome"] == "success", att.get("ended_note") or att_id)
+        finish_merge(store, att_id)
 
 
 def handled(store: Store, actor: Actor, attempts: list[str], note: str) -> dict:

@@ -40,8 +40,8 @@ coordinator, then the user (`agents.deadlines`). Every rl command warns when the
 ## Subscription usage
 
 A host whose subscription window is nearly used up (`usage.switch_left_percent`) gets no new researcher or
-reviewer sessions; open ones are closed when idle and reopened on the next entry of their role. The coordinator
-keeps its model.
+reviewer sessions; open ones are closed when idle and reopened on the next entry of their role. The coordinator,
+scientists and advisors keep their model.
 
 ## Subagents
 

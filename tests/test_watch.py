@@ -38,6 +38,10 @@ class FakeHerdr:
             if rest[0] not in self.tabs:
                 raise RLError("HERDR", "no tab", herdr_code="tab_not_found")
             return {"tab": {"tab_id": rest[0], "label": self.tabs[rest[0]]}}
+        if (group, command) == ("pane", "list"):  # one pane per tab here
+            return {"panes": [{"pane_id": t.replace(":t", ":p"), "tab_id": t,
+                               "agent": "claude" if t.replace(":t", ":p") in self.agents else None}
+                              for t in self.tabs]}
         if (group, command) == ("agent", "start"):
             name, pane = rest[0], rest[rest.index("--pane") + 1]
             if not re.fullmatch(r"[a-z][a-z0-9_-]{0,31}", name):  # herdr's grammar
@@ -179,6 +183,16 @@ def test_a_pane_id_that_now_holds_another_agent_is_left_alone(project, rl, fake)
     assert s["herdr_tab"] in fake.tabs  # not closed: not ours
     assert not any(p == s["herdr_pane"] for p, _ in fake.prompts[prompts:])
     assert not any(c[:2] == ("tab", "close") for c in fake.calls)
+
+
+def test_a_tab_with_its_label_but_another_agent_in_it_is_not_closed(project, rl, fake):
+    flow.approved(project, rl)
+    watch.beat(project)
+    s = sessions(project)["scientist-T-0002"]
+    fake.agents[s["herdr_pane"]]["name"] = "someone-else"
+    assert launch.own_tab(project, s) is None
+    fake.agents.pop(s["herdr_pane"])  # an empty pane (the agent exited): the tab is still ours to close
+    assert launch.own_tab(project, s) == s["herdr_tab"]
 
 
 def test_a_session_with_nothing_to_do_is_still_watched_for_dialogs(project, rl, fake):
