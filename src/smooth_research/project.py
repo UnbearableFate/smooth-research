@@ -31,23 +31,23 @@ LAST_READ = "research/state/config.last-read.json"
 UNREAD = "_unread"  # in a loaded configuration: why the file could not be read
 
 # Model entries are "<entry>:<model>[@effort]"; entry is claude, codex, pi or manual (a person does the work).
-# Each role's sessions use the first available entry of its list; the watcher moves a session to the next one
-# when its host's subscription runs low (watch.py). agents.args are extra launch arguments per host for the
-# sessions the watcher opens in herdr panes. agents.* times are the watcher's (design 11.2, 11.3, 7.7, 8.8):
-# beat_seconds between beats; clear_idle_minutes and clear_context_tokens: a session idle longer than the first
-# (the prompt cache is gone) whose context is larger than the second is cleared before it is woken, and reads its
-# pack again; user_quiet_minutes: the coordinator's pane gets a reminder only when the user has not typed there for
-# this long; heartbeat_minutes: a watcher heartbeat older than this counts as stopped; page_minutes: the research
-# page is drawn again at least this often; deadlines: minutes a to-do item may wait before it is escalated, by
-# item type (default for the rest). limits: trial_minutes is the longest a trial run may be registered for;
-# fast_lane is the largest estimate (by unit) a task may have to skip a new review round (6.6); scientists is the
-# phase's default limit of scientists at work; envelope_lines are the shares of a hypothesis task's envelope at
-# which its usage is flagged. compute: where experiments run (compute.py). Budgets stay in docs/constraints.md.
+# A session takes the first available entry of its role's list when it is opened, a host whose subscription runs
+# low (usage.switch_left_percent) put last; an open session keeps its model (design 2026-11-27, 3.3). models.tree
+# names, per host family, the model and effort of the coordinator's subagent that drafts the hypothesis tree (7.2):
+# the entry of the coordinator's own host is used. agents.args are extra launch arguments per host for the sessions
+# rl opens in herdr panes. agents.* times: user_quiet_minutes, nothing is typed into the coordinator's pane while
+# the user typed there within it; beat_seconds, heartbeat_minutes, page_minutes and deadlines are the optional
+# observer's (rl watch): its beat, when its heartbeat counts as stopped, how often it redraws the research page,
+# and how long (minutes, by item type, default for the rest) an item waits before it is reminded once. limits:
+# envelope_lines are the shares of a hypothesis task's envelope at which its usage is flagged. compute: where
+# experiments run (compute.py). Budgets stay in docs/constraints.md.
 # compute.coordinator: login disables checkout/shell resources and requires explicit run placement.
 # compute.tests: local (rl runs semantic tests and done checks itself) or job (they run as short jobs).
-# compute.repository: when a remote resource fetches code by git and the git remote is missing, rl resume creates
-# it (github-private: gh repo create --private) or leaves it (none).
-# Every key here is read by the CLI; docs/configuration.md explains each one.
+# compute.repository: when a remote resource fetches code by git and the git remote is missing, rl compute sync
+# creates it (github-private: gh repo create --private) or leaves it (none).
+# Every key here is read by the CLI; docs/configuration.md explains each one. Keys an older version read
+# (limits.scientists, limits.trial_minutes, limits.fast_lane, agents.clear_idle_minutes,
+# agents.clear_context_tokens) are reported as unknown and have no effect.
 DEFAULT_CONFIG: dict = {
     "version": 1,
     "models": {
@@ -56,20 +56,22 @@ DEFAULT_CONFIG: dict = {
         "researcher": ["claude:claude-sonnet-5-5@medium", "codex:gpt-6-astra@medium"],
         "reviewer": ["codex:gpt-6-astra@medium", "claude:claude-opus-5-5@medium"],
         "advisor": ["codex:gpt-6-astra@high", "claude:claude-fable-5-2@high"],
+        # the tree subagent: the best model of each family at xhigh (7.2); change it when a better one comes out
+        "tree": ["claude:claude-fable-5-2@xhigh", "codex:gpt-6.2-astra@xhigh"],
     },
     "agents": {"args": {"claude": ["--permission-mode", "auto"], "codex": [], "pi": []}, "beat_seconds": 30,
-               "clear_idle_minutes": 60, "clear_context_tokens": 120000, "user_quiet_minutes": 3,
-               "heartbeat_minutes": 5, "page_minutes": 15, "deadlines": {"default": 240}},
-    "limits": {"trial_minutes": 30, "fast_lane": {}, "scientists": 2, "envelope_lines": [0.8, 1.0, 1.5]},
+               "user_quiet_minutes": 3, "heartbeat_minutes": 5, "page_minutes": 15, "deadlines": {"default": 240}},
+    "limits": {"envelope_lines": [0.8, 1.0, 1.5]},
     "usage": {"switch_left_percent": 10},
     "compute": {"coordinator": "local", "default": "local", "repository": "none", "tests": "local",
                 "resources": {"local": {"kind": "local"}}},
 }
 MODEL_ROLES = ("coordinator", "scientist", "researcher", "reviewer", "advisor")
+MODEL_LISTS = MODEL_ROLES + ("tree",)  # models.tree is no role: the coordinator's tree subagent
 # Mappings the file replaces as a whole instead of merging into the defaults: compute.resources names the user's
 # own resources (a project without the default local one leaves it out), and their keys are not the defaults';
-# deadlines and fast_lane are keyed by item type and by unit.
-WHOLE = ("compute.resources", "agents.deadlines", "limits.fast_lane")
+# deadlines are keyed by item type.
+WHOLE = ("compute.resources", "agents.deadlines")
 
 RESEARCH_DIRS = ("state", "documents/objects", "snapshots", "literature", "artifacts", "work")
 DOCS_DIRS = ("explanations",)
@@ -200,9 +202,9 @@ def config_warnings(config: dict) -> list[str]:
 
     walk(config, DEFAULT_CONFIG, "")
     models = config.get("models")
-    for role in MODEL_ROLES if isinstance(models, dict) else ():
+    for role in MODEL_LISTS if isinstance(models, dict) else ():
         value = models.get(role)
-        if not isinstance(value, (str, list)):
+        if value is not None and not isinstance(value, (str, list)):
             out.append(f"{CONFIG_NAME}: models.{role} must be a list of model entries, not {value!r}; using the "
                        f"defaults {model_entries(config, role)}")
         for text in model_entries(config, role):
@@ -211,8 +213,7 @@ def config_warnings(config: dict) -> list[str]:
             except RLError as exc:
                 out.append(f"{CONFIG_NAME}: models.{role}: {exc.message}; it is skipped")
     agents = config.get("agents") if isinstance(config.get("agents"), dict) else {}
-    for key in ("beat_seconds", "clear_idle_minutes", "clear_context_tokens", "user_quiet_minutes",
-                "heartbeat_minutes", "page_minutes"):
+    for key in ("beat_seconds", "user_quiet_minutes", "heartbeat_minutes", "page_minutes"):
         value = agents.get(key)
         if value is not None and not (_minutes(value) and value > 0):
             out.append(f"{CONFIG_NAME}: agents.{key} must be a positive number, not {value!r}; using "
@@ -228,19 +229,10 @@ def config_warnings(config: dict) -> list[str]:
             out.append(f"{CONFIG_NAME}: agents.args.{host} must be a list of arguments, not {value!r}; using "
                        f"{agent_args(config, host)}")
     limits = config.get("limits") if isinstance(config.get("limits"), dict) else {}
-    for key in ("trial_minutes", "scientists"):
-        value = limits.get(key)
-        if value is not None and not (_minutes(value) and value > 0):
-            out.append(f"{CONFIG_NAME}: limits.{key} must be a positive number, not {value!r}; using "
-                       f"{DEFAULT_CONFIG['limits'][key]}")
     value = limits.get("envelope_lines")
     if value is not None and not (isinstance(value, list) and value and all(_minutes(v) and v > 0 for v in value)):
         out.append(f"{CONFIG_NAME}: limits.envelope_lines must be a list of positive shares, not {value!r}; using "
                    f"{DEFAULT_CONFIG['limits']['envelope_lines']}")
-    fast = limits.get("fast_lane")
-    for unit, value in fast.items() if isinstance(fast, dict) else ():
-        if not _minutes(value):
-            out.append(f"{CONFIG_NAME}: limits.fast_lane.{unit} must be a number, not {value!r}; ignored")
     usage = config.get("usage")
     for key in DEFAULT_CONFIG["usage"]:
         value = usage.get(key) if isinstance(usage, dict) else None
@@ -302,14 +294,15 @@ def agent_args(config: dict, host: str) -> list[str]:
 
 
 def agents_value(config: dict, key: str) -> float:
-    """A positive number from agents.* (beat_seconds, clear_idle_minutes, ...), else its default."""
+    """A positive number from agents.* (beat_seconds, user_quiet_minutes, ...), else its default."""
     agents = config.get("agents")
     value = agents.get(key) if isinstance(agents, dict) else None
     return float(value) if _minutes(value) and value > 0 else float(DEFAULT_CONFIG["agents"][key])
 
 
 def deadline_minutes(config: dict, item_type: str) -> float:
-    """How long a to-do item of this type may wait before it is escalated (agents.deadlines)."""
+    """How long a to-do item of this type may wait before the observer reminds its recipient once
+    (agents.deadlines)."""
     agents = config.get("agents")
     given = agents.get("deadlines") if isinstance(agents, dict) else None
     given = given if isinstance(given, dict) else {}
@@ -321,16 +314,24 @@ def deadline_minutes(config: dict, item_type: str) -> float:
 
 
 def limit(config: dict, key: str):
-    """limits.trial_minutes, limits.scientists, limits.envelope_lines or limits.fast_lane, else the default."""
+    """limits.envelope_lines, else the default."""
     limits = config.get("limits")
     value = limits.get(key) if isinstance(limits, dict) else None
     default = DEFAULT_CONFIG["limits"][key]
-    if key == "fast_lane":
-        return {str(k): float(v) for k, v in value.items() if _minutes(v)} if isinstance(value, dict) else {}
-    if key == "envelope_lines":
-        ok = isinstance(value, list) and value and all(_minutes(v) and v > 0 for v in value)
-        return sorted(float(v) for v in value) if ok else list(default)
-    return value if _minutes(value) and value > 0 else default
+    ok = isinstance(value, list) and value and all(_minutes(v) and v > 0 for v in value)
+    return sorted(float(v) for v in value) if ok else list(default)
+
+
+def tree_entry(config: dict, host: str | None) -> Entry | None:
+    """The tree subagent's model for a coordinator on this host (models.tree: the entry of the same host, else the
+    first one); None when the list holds none that parses."""
+    entries = []
+    for text in model_entries(config, "tree"):
+        try:
+            entries.append(Entry.parse(text))
+        except RLError:
+            continue
+    return next((e for e in entries if e.entry == host), entries[0] if entries else None)
 
 
 def tests_mode(config: dict) -> str:
@@ -610,11 +611,14 @@ def _in_main(candidate: Path) -> tuple[Path, Path] | None:
 
 
 def _checkout(root: Path, here: Path) -> Path:
-    if os.environ.get(ENV_CHECKOUT):
-        return Path(os.environ[ENV_CHECKOUT]).expanduser().resolve()
+    """The caller's checkout: the worktree of this project the current directory is in, else the one the session
+    was opened in (SMOOTH_RESEARCH_CHECKOUT), else the project root. A scientist working in its execute task's
+    worktree names files there, though its session was opened in its hypothesis task's (design 2026-11-27, 8.5)."""
     linked = linked_worktree(here)
     if linked and repo_top(root) == linked[1]:
         return linked[0] / root.relative_to(linked[1])
+    if os.environ.get(ENV_CHECKOUT):
+        return Path(os.environ[ENV_CHECKOUT]).expanduser().resolve()
     return root
 
 
@@ -655,10 +659,10 @@ def write_default_config(root: Path) -> Path:
         text = ("# Smooth Research configuration. Resource limits and scope live in docs/constraints.md; the\n"
                 "# layout is fixed: experiment code in src/, documents for people in docs/, records in research/.\n"
                 "# models: <entry>:<model>[@effort] per role (coordinator, scientist, researcher, reviewer,\n"
-                "# advisor); entry is claude, codex, pi or manual; the first available one is used.\n"
-                "# agents: launch arguments per host and the watcher's times (docs/configuration.md).\n"
-                "# limits: trial_minutes (longest trial run), fast_lane (largest estimate per unit that skips a\n"
-                "# new review round, e.g. {MIG·h: 0.5}), scientists (default per phase), envelope_lines.\n"
+                "# advisor); entry is claude, codex, pi or manual; the first available one is used when a\n"
+                "# session opens. models.tree: the coordinator's tree subagent, one entry per host family.\n"
+                "# agents: launch arguments per host, and the times of the optional observer (rl watch)\n"
+                "# (docs/configuration.md). limits: envelope_lines (shares of an envelope that are flagged).\n"
                 "# compute: where experiments run; rl connects to none of them (rl compute steps prints how to\n"
                 "# stage a commit there). compute.tests: local, or job when even tests must run as jobs.\n")
         path.write_text(text + yaml.safe_dump(DEFAULT_CONFIG, sort_keys=False, allow_unicode=True), encoding="utf-8")

@@ -14,36 +14,48 @@ from smooth_research import compute, gitops, manifest, runs, usage_view
 
 
 def test_acceptance_merges_the_delivery_not_a_later_commit(project, rl):
-    flow.tree(project, rl)
-    wt = flow.worktree(project, "T-0001")
+    """Merging a commit that was not delivered would record a false acceptance: refused."""
+    flow.delivered(project, rl)
+    wt = flow.worktree(project, "T-0003")
     (wt / "elsewhere.txt").write_text("not delivered\n")
     git(wt, "add", "-A")
     git(wt, "commit", "-qm", "after delivery")
     top = gitops.top(project.project)
     before = git(top, "rev-parse", "HEAD")
-    code, _, err = rl("task", "accept", "T-0001", who="coordinator")
+    code, _, err = rl("task", "accept", "T-0003", who="scientist-T-0002")
     assert code == 3 and "not at its delivery" in err
     assert git(top, "rev-parse", "HEAD") == before and not (top / "elsewhere.txt").exists()
     with project.read() as tx:
-        assert tx.require("T-0001")["state"] == "delivered"
+        assert tx.require("T-0003")["state"] == "delivered"
 
 
-def test_a_later_failing_test_or_a_changed_command_needs_a_new_pass(project, rl):
+
+def passed(project, rl, rv: str, tid: str = "T-0003") -> None:
+    ok(rl("review", "answer", rv, "--verdict", "pass", "--at", flow.head(project, tid)[:12], who=f"reviewer-{rv}"))
+
+
+def test_a_later_failing_test_flags_the_dispatch(project, rl):
     flow.designed(project, rl)
     s = "scientist-T-0002"
     ok(rl("review", "request", "T-0003", who=s))
-    ok(rl("review", "answer", "RV-0002", "--verdict", "pass", who="reviewer-RV-0002"))
+    passed(project, rl, "RV-0001")
     ok(rl("experiment", "set", "E-0001", "--semantic-tests", "false", who=s))
     rl("task", "test", "T-0003", who=s)  # fails
-    code, _, err = rl("task", "dispatch", "T-0003", who=s)
-    assert code == 1 and "did not pass" in err
+    out = ok(rl("task", "dispatch", "T-0003", who=s))
+    assert "flag: [untested]" in out and "no passing test" in out
+
+
+def test_a_changed_test_command_after_the_review_flags_the_dispatch(project, rl):
+    flow.designed(project, rl)
+    s = "scientist-T-0002"
+    ok(rl("review", "request", "T-0003", who=s))
+    passed(project, rl, "RV-0001")
+    ok(rl("experiment", "set", "E-0001", "--semantic-tests", "false", who=s))
     ok(rl("experiment", "set", "E-0001", "--semantic-tests", "cd src/avg && python3 test_sim.py", who=s))
     ok(rl("task", "test", "T-0003", who=s))
-    code, _, err = rl("task", "dispatch", "T-0003", who=s)  # edited and restored after the review: review again
-    assert code == 1 and "the draft changed since" in err
-    ok(rl("review", "request", "T-0003", who=s))
-    ok(rl("review", "answer", "RV-0003", "--verdict", "pass", who="reviewer-RV-0003"))
-    ok(rl("task", "dispatch", "T-0003", who=s))
+    out = ok(rl("task", "dispatch", "T-0003", who=s))  # edited and restored after the review: flagged
+    assert "flag: [unreviewed]" in out and "the draft changed since" in out
+
 
 
 def _job_tests(project) -> None:
@@ -88,7 +100,7 @@ def test_a_run_that_names_only_its_arm_runs_the_arm_and_a_split_is_always_checke
     assert "lr (1 → 2)" in manifest.check_run(m, "a", 0, {"lr": 2}, None)[0]
 
 
-def test_a_result_that_does_not_say_what_it_ran_is_not_evidence(project, rl):
+def test_a_result_that_does_not_say_what_it_ran_is_flagged_as_evidence(project, rl):
     flow.dispatched(project, rl)
     r = "researcher-T-0003"
     out = ok(rl("--json", "run", "register", "--task", "T-0003", "--request-id", "a", "--arm", "single", "--seed", "0",
@@ -99,9 +111,10 @@ def test_a_result_that_does_not_say_what_it_ran_is_not_evidence(project, rl):
     out = ok(rl("--json", "run", "import-result", "--attempt", "ATT-0001-1", "--request-id", "i", "--manifest",
                 json.dumps({"status": "complete", "metrics": {"abs_error": 0.1}}), who=r))
     assert "unverified" in json.loads(out)["summary"]
-    code, _, err = rl("evidence", "add", "--task", "T-0003", "--summary", "s", "--level", "diagnostic", "--results",
-                      json.loads(out)["result"], who=r)
-    assert code == 1 and "cannot be checked against its run" in err
+    out = ok(rl("evidence", "add", "--task", "T-0003", "--summary", "s", "--level", "diagnostic", "--results",
+                json.loads(out)["result"], who=r))
+    assert "flag: [not-evidence]" in out and "cannot be checked against its run" in out
+
 
 
 def test_a_result_is_checked_against_the_revision_its_run_was_registered_with(project, rl):
@@ -121,40 +134,38 @@ def test_a_result_is_checked_against_the_revision_its_run_was_registered_with(pr
     assert "E-0001@1 (as sealed for this task)" in out and "config {'k': 1}" in out
 
 
-def test_a_known_finding_blocks_a_retry_and_the_fast_lane(project, rl):
+def test_a_known_finding_flags_a_retry(project, rl):
     flow.dispatched(project, rl)
     r = "researcher-T-0003"
     ok(rl("run", "register", "--task", "T-0003", "--request-id", "a", "--arm", "single", "--seed", "0", who=r))
     ok(rl("review", "request", "T-0003", who=r))
     finding = [{"category": "method", "severity": "high", "text": "the seed is reused", "loc": "src/avg/sim.py::error"}]
-    ok(rl("review", "answer", "RV-0003", "--verdict", "fail", "--findings", json.dumps(finding),
-          who="reviewer-RV-0003"))
-    code, _, err = rl("run", "register", "--task", "T-0003", "--request-id", "b", "--arm", "single", "--seed", "0",
-                      "--run", "RUN-0001", who=r)
-    assert code == 1 and "no evidence run" in err
-    with project.write() as tx:  # as if dispatched on the fast lane
-        tx.update("T-0003", {"fast_lane": True})
-    code, _, err = rl("run", "register", "--task", "T-0003", "--request-id", "c", "--arm", "mean3", "--seed", "0",
-                      who=r)
-    assert code == 1 and "RV-0003#F1" in err
+    ok(rl("review", "answer", "RV-0002", "--verdict", "fail", "--at", flow.head(project, "T-0003")[:12], "--findings",
+          json.dumps(finding), who="reviewer-RV-0002"))
+    out = ok(rl("run", "register", "--task", "T-0003", "--request-id", "b", "--arm", "single", "--seed", "0",
+                "--run", "RUN-0001", who=r))
+    assert "flag: [" in out and "RV-0002#F1" in out
     # the same request again returns the attempt it made, without new checks
     out = ok(rl("run", "register", "--task", "T-0003", "--request-id", "a", "--arm", "single", "--seed", "0", who=r))
     assert "duplicate request" in out
 
 
+
 def test_a_verdict_reviewed_for_one_statement_is_not_finalized_for_another(project, rl):
+    """A final verdict on a statement it was not written for would be false: refused."""
     flow.delivered(project, rl)
     s = "scientist-T-0002"
     ok(rl("task", "accept", "T-0003", who=s))
     ok(rl("decide", "--kind", "verdict", "--targets", "H-0001", "--status", "supported", "--rationale", "x",
           "--supports", "EV-0001", "--did", "d", "--means", "m", who=s))
-    ok(rl("review", "request", "D-0003", "--kind", "conclusion", who=s))
-    ok(rl("review", "answer", "RV-0003", "--verdict", "pass", who="reviewer-RV-0003"))
+    ok(rl("review", "request", "D-0003", who=s))
+    ok(rl("review", "answer", "RV-0002", "--verdict", "pass", "--at", "D-0003", who="reviewer-RV-0002"))
     ok(rl("hypothesis", "revise", "H-0001", "--statement", "the mean of 5 beats 1", "--reason", "broader", who=s))
     code, _, err = rl("decide", "--final", "D-0003", who=s)
-    assert code == 1 and "reviewed for another statement" in err
+    assert code == 1 and "statement" in err
     with project.read() as tx:
         assert tx.require("H-0001")["evidence_status"] == "untested"
+
 
 
 def test_compute_steps_read_the_commit_the_run_was_registered_with(project, rl):
@@ -223,7 +234,7 @@ def test_a_delivery_already_on_the_mainline_is_accepted_without_a_merge(project,
     assert task["state"] == "accepted" and git(top, "rev-parse", "HEAD") == delivered
 
 
-def test_a_changed_design_is_handed_over_again_before_evidence(project, rl):
+def test_a_changed_design_is_handed_over_again_and_a_run_before_that_deviates(project, rl):
     flow.dispatched(project, rl)
     r, s = "researcher-T-0003", "scientist-T-0002"
     ok(rl("task", "block", "T-0003", "--reason", "design", "--note", "the arms need a third seed", who=r))
@@ -233,14 +244,13 @@ def test_a_changed_design_is_handed_over_again_before_evidence(project, rl):
     with project.read() as tx:
         task = tx.require("T-0003")
     assert task["holder"] == s and task["state"] == "active" and not task.get("sealed_design")
-    code, _, err = rl("run", "register", "--task", "T-0003", "--request-id", "a", "--arm", "single", "--seed", "0",
-                      who=r)
-    assert code == 1
-    with project.write() as tx:  # a revision changed without a blocker: evidence still waits for the handoff
+    with project.write() as tx:  # a revision changed without a handover: the run is recorded as a deviation
         tx.update("T-0003", {"holder": r, "sealed_design": {**_sealed_r1(), "revision": 1}})
-    code, _, err = rl("run", "register", "--task", "T-0003", "--request-id", "b", "--arm", "single", "--seed", "0",
-                      who=r)
-    assert code == 1 and "evidence waits until the new revision is handed over" in err
+    code, out, err = rl("--json", "run", "register", "--task", "T-0003", "--request-id", "b", "--arm", "single",
+                        "--seed", "0", who=r)
+    assert code == 0, err
+    assert json.loads(out)["deviates"] and "unsealed" in [f["code"] for f in json.loads(out)["flags"]]
+
 
 
 def _sealed_r1() -> dict:
@@ -253,13 +263,14 @@ def test_a_test_job_records_the_command_it_ran_not_the_one_set_since(project, rl
     s = "scientist-T-0002"
     _job_tests(project)
     ok(rl("review", "request", "T-0003", who=s))
-    ok(rl("review", "answer", "RV-0002", "--verdict", "pass", who="reviewer-RV-0002"))
+    passed(project, rl, "RV-0001")
     att = json.loads(ok(rl("--json", "run", "register", "--task", "T-0003", "--request-id", "t1", "--purpose",
                            "design-test", "--minutes", "5", who=s)))["attempt"]
     ok(rl("experiment", "set", "E-0001", "--semantic-tests", "false", who=s))
     ok(rl("task", "test", "T-0003", "--record", "pass", "--attempt", att, who=s))
-    code, _, err = rl("task", "dispatch", "T-0003", who=s)  # the pass is of the old command
-    assert code == 1 and "`false`" in err
+    out = ok(rl("task", "dispatch", "T-0003", who=s))  # the pass is of the old command
+    assert "flag: [untested]" in out and "`false`" in out
+
 
 
 def test_a_null_config_is_not_a_reported_config(project, rl):
@@ -334,32 +345,32 @@ def test_one_test_job_gives_one_result(project, rl):
     s = "scientist-T-0002"
     _job_tests(project)
     ok(rl("review", "request", "T-0003", who=s))
-    ok(rl("review", "answer", "RV-0002", "--verdict", "pass", who="reviewer-RV-0002"))
+    passed(project, rl, "RV-0001")
     atts = [json.loads(ok(rl("--json", "run", "register", "--task", "T-0003", "--request-id", f"t{n}", "--purpose",
                              "design-test", "--minutes", "5", who=s)))["attempt"] for n in (1, 2)]
     ok(rl("task", "test", "T-0003", "--record", "pass", "--attempt", atts[0], who=s))
     ok(rl("task", "test", "T-0003", "--record", "fail", "--attempt", atts[1], who=s))
     assert "recorded already" in ok(rl("task", "test", "T-0003", "--record", "pass", "--attempt", atts[0], who=s))
-    code, _, err = rl("task", "dispatch", "T-0003", who=s)
-    assert code == 1 and "did not pass" in err
+    out = ok(rl("task", "dispatch", "T-0003", who=s))
+    assert "flag: [untested]" in out and "no passing test" in out
+
 
 
 def test_a_review_and_a_test_clear_one_revision_of_the_design(project, rl):
     flow.designed(project, rl)
     s = "scientist-T-0002"
     ok(rl("review", "request", "T-0003", who=s))
-    ok(rl("review", "answer", "RV-0002", "--verdict", "pass", who="reviewer-RV-0002"))
+    passed(project, rl, "RV-0001")
     ok(rl("task", "test", "T-0003", who=s))
-    ok(rl("task", "dispatch", "T-0003", who=s))
+    assert "flag:" not in ok(rl("task", "dispatch", "T-0003", who=s))
     r = "researcher-T-0003"
     ok(rl("task", "block", "T-0003", "--reason", "design", "--note", "another manifest", who=r))
     ok(rl("experiment", "set", "E-0001", "--question", "revision 2", "--reason", "new arms", who=s))
     ok(rl("task", "answer", "T-0003", "--text", "use revision 2", who=s))
-    code, _, err = rl("task", "dispatch", "T-0003", who=s)  # the old test and review were of revision 1
-    assert code == 1
     ok(rl("task", "test", "T-0003", who=s))
-    code, _, err = rl("task", "dispatch", "T-0003", who=s)
-    assert code == 1 and "E-0001@2" in err
+    out = ok(rl("task", "dispatch", "T-0003", who=s))  # the review was of revision 1
+    assert "flag: [unreviewed]" in out and "E-0001@2" in out
+
 
 
 def test_a_retry_of_another_design_revision_is_a_new_run():
@@ -373,17 +384,18 @@ def test_a_draft_changed_after_its_review_needs_a_new_review(project, rl):
     flow.designed(project, rl)
     s = "scientist-T-0002"
     ok(rl("review", "request", "T-0003", who=s))
-    ok(rl("review", "answer", "RV-0002", "--verdict", "pass", who="reviewer-RV-0002"))
+    passed(project, rl, "RV-0001")
     wt = flow.worktree(project, "T-0003")
     (wt / "src" / "avg" / "other.yaml").write_text((wt / "src" / "avg" / "arms.yaml").read_text())
     git(wt, "add", "-A")
     git(wt, "commit", "-qm", "a second manifest")
     ok(rl("review", "request", "T-0003", who=s))
-    ok(rl("review", "answer", "RV-0003", "--verdict", "pass", who="reviewer-RV-0003"))
+    passed(project, rl, "RV-0002")
     ok(rl("experiment", "set", "E-0001", "--manifest", "src/avg/other.yaml", who=s))  # same commit, same revision
     ok(rl("task", "test", "T-0003", who=s))
-    code, _, err = rl("task", "dispatch", "T-0003", who=s)
-    assert code == 1 and "the draft changed since" in err
+    out = ok(rl("task", "dispatch", "T-0003", who=s))
+    assert "flag: [unreviewed]" in out and "the draft changed since" in out
+
 
 
 def test_a_failure_in_the_same_second_as_the_pass_needs_another_pass():
@@ -494,7 +506,7 @@ def test_a_researchers_passed_review_wakes_the_researcher(project, rl):
     git(wt, "add", "-A")
     git(wt, "commit", "-qm", "a change")
     ok(rl("review", "request", "T-0003", who=r))
-    ok(rl("review", "answer", "RV-0003", "--verdict", "pass", who="reviewer-RV-0003"))
+    passed(project, rl, "RV-0002")
     assert "review-verdict" in flow.types(project, r)
 
 
@@ -802,13 +814,13 @@ def test_a_run_on_this_machine_counts_no_usage_and_is_not_unreported(project, rl
 
 
 def test_a_session_works_in_the_worktree_of_the_project_it_runs_in(project, rl):
-    """A project restored elsewhere: the worktree recorded at the claim names the original."""
-    from smooth_research import watch
+    """A project restored elsewhere: the worktree recorded at the release names the original."""
+    from smooth_research import sessions
     flow.approved(project, rl)
-    ok(rl("task", "claim", "T-0002", who="scientist-T-0002"))
     with project.write() as tx:
         tx.update("T-0002", {"worktree": "/elsewhere/original/.worktrees/T-0002"})
-        assert watch.folder(project, tx, "scientist-T-0002") == str(gitops.checkout_in(project.project, "T-0002"))
+        assert sessions.folder(project, tx, "scientist-T-0002") == str(gitops.checkout_in(project.project, "T-0002"))
+
 
 
 def test_staging_archives_from_the_repository_top_and_ends_its_heredoc_at_column_one(tmp_path):

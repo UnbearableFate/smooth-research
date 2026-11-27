@@ -53,8 +53,8 @@ def task_lines(tx: Tx, project: Project, task: dict) -> list[str]:
         severe = [f for f in open_findings(r) if f["severity"] in ("medium", "high")]
         lines.append(f"review     {r['id']} {r['status']} · method {len(method)} open · {len(severe)} medium+ open"
                      + (f" · {len(blocking(r))} blocking" if blocking(r) else ""))
-    elif task.get("fast_lane"):
-        lines.append("review     fast lane (6.6): the last passed review of this experiment covers it")
+    elif task.get("fast_lane"):  # older records: the fast lane was removed (2026-11-27 design 8.1)
+        lines.append("review     fast lane (an older record): the last passed review of this experiment covered it")
     else:
         lines.append("review     none")
     exp = task_design(tx, tid) if task["kind"] == "execute" else None  # as handed over to this task
@@ -88,7 +88,14 @@ def task_lines(tx: Tx, project: Project, task: dict) -> list[str]:
                                                             + (" ..." if len(outputs) > 4 else "") if outputs else ""))
     if task.get("merge_state"):
         lines.append(f"merge      {task['merge_state']}" + (f": {task['merge_note']}" if task.get("merge_note") else ""))
+    lines += _flag_lines(task)
     return lines
+
+
+def _flag_lines(*recs: dict) -> list[str]:
+    """The process flags of the records (5.1): what was not done by the process, for the one who reads on."""
+    from .flags import line
+    return [f"flag       {r['id']} {line(f)}" for r in recs for f in r.get("flags") or []]
 
 
 def hypothesis_lines(tx: Tx, task: dict) -> list[str]:
@@ -146,4 +153,5 @@ def hypothesis_lines(tx: Tx, task: dict) -> list[str]:
     proposed = [p for p in proposed if p["disposition"] == "candidate"]
     if proposed:
         lines.append("next         proposed children " + ", ".join(p["id"] for p in proposed))
+    lines += _flag_lines(task, *hyps, *decs, *kids)
     return lines

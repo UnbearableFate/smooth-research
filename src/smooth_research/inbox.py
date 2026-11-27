@@ -19,12 +19,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-from .project import deadline_minutes, limit
-from .reviews import blocking, last_pass, open_findings
+from .project import limit
+from .reviews import ENDED, ended, open_findings, pass_key, target_text
 from .roles import session_name
 from .schema import TASK_DONE
-from .store import Tx, id_order
-from .util import now_utc, parse_time
+from .store import Tx
+from .util import RLError, now_utc, parse_time
 
 
 @dataclass
@@ -37,18 +37,17 @@ class Item:
     since: str
     note: str | None = None
     frm: str | None = None
-    timed: bool = True  # counts toward the deadline (False while it waits for a session slot)
-    level: int = 0  # escalation level for a timeout item (1 the creator, 2 the coordinator, 3 the user)
     extra: dict = field(default_factory=dict)
 
     def key(self) -> str:
-        """The item's identity for the watcher's told record; a review item carries its pass, so a recheck on the
+        """The item's identity for the sessions' told record; a review item carries its pass, so a recheck on the
         same ticket is news to the reviewer and its verdict to the author; an item about a task its revision, so a
         task delivered again or returned again is news to the one it goes to."""
         base = f"{self.type}:{self.subject}:{self.to}"
         if "pass" in self.extra:
             return f"{base}#{self.extra['pass']}"
-        return f"{base}@{self.extra['rev']}" if self.extra.get("rev") is not None else base
+        base = f"{base}@{self.extra['rev']}" if self.extra.get("rev") is not None else base
+        return base + ("+prerequisites" if self.extra.get("prerequisites") else "")
 
 
 TEST_PURPOSES = ("merge-test", "design-test", "review-test")  # runs that are not the task's evidence
@@ -97,6 +96,7 @@ class Rules:
         self.decisions = tx.all("Decision")
         self.messages = tx.all("Message")
         self.sessions = tx.all("Session")
+        self.project = getattr(tx, "project", None)
         self.now = datetime.now(timezone.utc)
         self.items: list[Item] = []
 
@@ -130,7 +130,7 @@ class Rules:
                 and (t.get("task_id") in task_ids)]
 
     def open_asks(self, tid: str) -> list[dict]:
-        return [a for a in self.asks if a["task_id"] == tid and a["kind"] == "decision"
+        return [a for a in self.asks if a.get("task_id") == tid and a["kind"] == "decision"
                 and a["state"] in ("open", "forwarded")]
 
     def scientist_waits(self, task: dict) -> str | None:
@@ -180,28 +180,29 @@ class Rules:
     def run(self) -> list[Item]:
         for rule in (self.scientist_tasks, self.researcher_tasks, self.task_results, self.reviews, self.advice,
                      self.jobs, self.coordinator, self.user, self.asks_answered, self.upstream, self.usage,
-                     self.dialogue, self.sessions_blocked):
+                     self.dialogue, self.sessions_blocked, self.stopped):
             rule()
-        self.items += escalations(self.items, self.config, self.now, self.by_id)
         return self.items
 
     def scientist_tasks(self) -> None:
-        """Hypothesis, tree and phase tasks and handed-over public prep tasks, on the scientist's list unless they
-        wait on others; released ones not yet claimed wait for a session slot."""
+        """Hypothesis and phase tasks (tree tasks in older records) and handed-over public prep tasks, on the
+        scientist's list unless they wait on others."""
         for t in self.tasks:
             if t["kind"] in ("hypothesis", "tree", "phase"):
                 who = session_name("scientist", t["id"])
-                if t["state"] == "open" and self.ready(t):
-                    self.add(type=f"{t['kind']}-task", to=who, subject=t["id"], ask=f"work on {t['id']}",
-                             cmd="rl pack", since=t.get("released_at") or now_utc(), frm="coordinator", timed=False,
-                             note=t.get("reason"))
+                if t["state"] == "open" and not t.get("holder") and t.get("released_at") and self.ready(t):
+                    # released before its prerequisites were accepted, and not handed on since (older records, or
+                    # a worktree that could not be made): its session takes it
+                    self.add(type=f"{t['kind']}-task", to=who, subject=t["id"], ask=f"claim {t['id']}, then work on it",
+                             cmd=f"rl task claim {t['id']}", since=t.get("released_at") or now_utc(),
+                             frm="coordinator", note=t.get("reason"))
                 elif t["state"] == "active" and t.get("holder") == who:
                     waits = self.scientist_waits(t)
                     if waits:
                         continue
                     targets = ', '.join(e['id'] for e in self.tx.out(t['id'], 'targets'))
-                    ask = {"hypothesis": f"test {targets}",
-                           "tree": "build the hypothesis tree", "phase": "write the phase conclusion"}[t["kind"]]
+                    ask = {"hypothesis": f"test {targets}", "tree": "an older tree task: deliver or ask the "
+                           "coordinator to cancel it", "phase": "write the phase conclusion"}[t["kind"]]
                     kids = self.children(t["id"])
                     ended = [k for k in kids if k["state"] in TASK_DONE]
                     if kids and len(ended) == len(kids) and t["kind"] == "hypothesis":
@@ -214,12 +215,12 @@ class Rules:
                              subject=t["id"], ask=ask, cmd=f"rl task deliver {t['id']}",
                              extra={"rev": rev} if rev is not None else {},
                              since=self.since([t["id"]] + [k["id"] for k in self.children(t["id"])]),
-                             frm="coordinator", note=t.get("return_note"))
+                             frm="coordinator", note=_with_flags(t, t.get("return_note")))
             elif t["kind"] == "prep" and t["creator"] == "coordinator" and t.get("scientist_session") \
                     and t["state"] not in TASK_DONE:
-                if t["state"] == "blocked" or any(r["status"] == "escalated" for r in self.tickets
-                                                  if r.get("task_id") == t["id"]):
+                if t["state"] == "blocked":
                     self.add(type="prep-to-scientist", to=t["scientist_session"], subject=t["id"],
+                             extra={"rev": t["revision"]},
                              ask="answer the blocker, change the requirement or done check, or cancel",
                              cmd=f"rl task answer {t['id']} | rl task cancel {t['id']}", since=self.since([t["id"]]),
                              frm="coordinator", note=t.get("block_note"))
@@ -229,128 +230,179 @@ class Rules:
             if t["kind"] not in ("execute", "prep"):
                 continue
             who = session_name("researcher", t["id"])
-            if t["state"] == "open" and t["creator"] == "coordinator" and t.get("released_at"):
-                if self.ready(t):
-                    self.add(type="prep-task", to=who, subject=t["id"], ask="write the code, run it until the done "
-                             "check passes, deliver", cmd=f"rl task deliver {t['id']}", since=t["released_at"],
-                             frm="coordinator", timed=False, note=t.get("requirement"))
+            if t["state"] == "open" and t["creator"] == "coordinator" and t.get("released_at") and not t.get("holder") \
+                    and self.ready(t):
+                # released before its prerequisites were accepted and not handed on since: its session takes it
+                self.add(type="prep-task", to=who, subject=t["id"], ask=f"claim {t['id']}, write the code, run it "
+                         "until the done check passes, deliver", cmd=f"rl task claim {t['id']}",
+                         since=t["released_at"], frm="coordinator", note=t.get("requirement"))
             if t["state"] == "active" and t.get("holder") == who and not self.researcher_waits(t):
                 kind = "returned" if t.get("return_note") else "merge-conflict" if t.get("merge_state") == "conflict" \
                     else "task-card"
                 note = t.get("return_note") or t.get("merge_note") or t.get("answer_note") or t.get("dispatch_note")
-                self.add(type=kind, to=who, subject=t["id"],
-                         extra={"rev": t["revision"]} if kind == "returned" else {},
+                deps = self.deps(t)
+                waiting = [d for d in deps if d["state"] != "accepted"]
+                extra = {"rev": t["revision"]}  # an answer to its blocker or a return is news on the same card
+                if waiting:  # handed on before its prerequisites were accepted (5.2): who it waits on
+                    note = (f"waits on {', '.join(d['id'] for d in waiting)} (not accepted yet): merge the mainline "
+                            "into the branch once it is" + (f" · {note}" if note else ""))
+                elif deps and any(f["code"] == "prerequisite" for f in t.get("flags") or []):
+                    note = (f"{', '.join(d['id'] for d in deps)} accepted now: merge the mainline into the branch"
+                            + (f" · {note}" if note else ""))
+                    extra = {**extra, "prerequisites": "in"}  # news to a researcher told while it waited
+                self.add(type=kind, to=who, subject=t["id"], extra=extra,
                          ask="fix engineering findings, run, deliver"
                          if t["kind"] == "execute" else "write the code, pass the done check, deliver",
-                         cmd=f"rl task deliver {t['id']}", since=self.since([t["id"]]), frm=t["creator"], note=note)
+                         cmd=f"rl task deliver {t['id']}", since=self.since([t["id"]]), frm=t["creator"],
+                         note=_with_flags(t, note))
 
     def task_results(self) -> None:
-        """What comes back to the scientist who made a task: its conclusion, a merge conflict, a blocker, its
+        """What comes back to the one who made a task: its conclusion, a merge conflict, a blocker, its
         prerequisites accepted."""
         for t in self.tasks:
             if t["kind"] not in ("execute", "prep"):
                 continue
             sci = self.scientist_for(t)
-            if t["state"] == "delivered" and t["creator"] != "coordinator":
+            public = t["creator"] == "coordinator"
+            if t["state"] == "delivered" and (not public or t.get("merge_state") == "conflict"
+                                              or any(f["code"] == "done-check" for f in t.get("flags") or [])):
                 conflict = t.get("merge_state") == "conflict"
-                self.add(type="merge-conflict" if conflict else "task-conclusion", to=sci, subject=t["id"],
+                # a public preparation task: its failed merge tests wait on the coordinator (tasks.decider); its
+                # failed done check on the one who receives it (the coordinator, or the scientist it was handed to)
+                to = sci if not public else "coordinator" if conflict else (t.get("scientist_session") or "coordinator")
+                self.add(type="merge-conflict" if conflict else "task-conclusion", to=to, subject=t["id"],
                          extra={"rev": t["revision"]},
                          ask=f"accept {t['id']} (it merges) or return it" if not conflict else
-                         "open a small task to resolve it, or fix and accept again",
-                         cmd=f"rl task accept {t['id']} | rl task return {t['id']} --reason ..",
+                         "its tests fail on the merge commit: accept it all the same (--force --reason) or return it"
+                         if public else "open a small task to resolve it, or fix and accept again",
+                         cmd=f"rl task accept {t['id']} | rl task return {t['id']} --reason .." if not conflict
+                         else f"rl task accept {t['id']} --force --reason .. | rl task return {t['id']} --reason .."
+                         if public else f"rl task accept {t['id']} | rl task return {t['id']} --reason ..",
                          since=t.get("delivered_at") or now_utc(), frm=t.get("holder"),
-                         note=t.get("merge_note") if conflict else t.get("state_note") or t.get("conclusion"))
+                         note=_with_flags(t, t.get("merge_note") if conflict else t.get("state_note")
+                                          or t.get("conclusion")))
             elif t["state"] == "blocked":
                 self.add(type=f"{t.get('block_reason') or 'design'}-block", to=sci, subject=t["id"],
+                         extra={"rev": t["revision"]},  # blocked again later: news again
                          ask="answer, change the design or mandate, or cancel"
                          if sci != "coordinator" else f"hand it to a scientist: rl task release {t['id']} --to "
                                                       "scientist",
                          cmd=f"rl task answer {t['id']} --text .." if sci != "coordinator"
                          else f"rl task release {t['id']} --to scientist",
                          since=self.since([t["id"]]), frm=t.get("holder"), note=t.get("block_note"))
-            elif t["state"] == "open" and t["creator"] != "coordinator" and not t.get("holder"):
-                deps = [self.by_id.get(e["id"]) for e in self.tx.out(t["id"], "depends_on")]
+            elif t["state"] == "open" and not public and not t.get("holder"):
+                deps = self.deps(t)
                 if self.ready(t):
                     self.add(type="prerequisites-accepted", to=t["creator"], subject=t["id"],
                              ask=f"claim {t['id']}, write its code or dispatch it", cmd=f"rl task claim {t['id']}",
                              since=self.since([d["id"] for d in deps], t.get("created_at")), frm="cli")
 
     def reviews(self) -> None:
+        """Review rounds (2026-11-27, chapter 6). The reviewer has the review that waits. The author has the verdict
+        while the round waits on it (findings open after the first review: fix and ask for the recheck, or go on).
+        When a round ends, its next step is an item on the work it reviewed (the task, or the draft): dispatch, go
+        on, or finalize, until the author moves on; the ended round itself is on no list (4). Nothing of a round is
+        on anyone's list once its task ended or a newer round on the same work was opened, nor once its author went
+        on (dispatched, ran, delivered, wrote a newer draft): those rounds rest until their task ends (self.resting,
+        which rl doctor reads)."""
+        self.resting: set[str] = set()
+        decisions = {d["id"]: d for d in self.decisions}
         for r in self.tickets:
             if r["kind"] != "review":
                 continue
+            task = self.by_id.get(r.get("task_id") or "")
+            if task and task["state"] in TASK_DONE:
+                self.resting.add(r["id"])
+                continue
             reviewer = session_name("reviewer", r["id"])
+            p = (r.get("passes") or [{}])[-1]
             if r["status"] == "waiting":
                 tests = [a for a in self.attempts if self.runs.get(a["run_id"], {}).get("ticket_id") == r["id"]]
                 running = [a for a in tests if a["execution_state"] != "ended"
                            and a.get("expected_end") and _ts(a["expected_end"]) > self.now]
                 if running:
                     continue
-                lp = (r.get("passes") or [{}])[-1]
-                self.add(type="review-request", to=reviewer, subject=r["id"], ask="review",
-                         cmd=f"rl review answer {r['id']} --verdict pass|fail ..",
-                         since=lp.get("requested_at") or r["created_at"], frm=lp.get("requested_by"),
-                         note=lp.get("question"), extra=pass_of(r))
+                at, n = target_text(p), len(r.get("passes") or [])
+                note = p.get("question")
+                moved = (p.get("retargeted") or [{}])[-1]
+                if p.get("retargeted"):
+                    diff = f"git diff {moved['commit'][:12]} {p['commit'][:12]}" if moved.get("commit") and \
+                        p.get("commit") else f"rl show {p.get('target')}"
+                    note = f"moved from {target_text(moved)} to {at} by {moved.get('by')}: {diff}" + (
+                        f" · {note}" if note else "")
+                self.add(type="review-request", to=reviewer, subject=r["id"],
+                         ask=f"{'recheck' if n > 1 else 'review'} {r.get('target_id')} at {at} (review {n} of 2)",
+                         cmd=f"rl review answer {r['id']} --at {at} --verdict pass|fail ..",
+                         since=p.get("retargeted_at") or p.get("requested_at") or r["created_at"],
+                         frm=p.get("requested_by"), note=_with_flags(r, note), extra={"pass": pass_key(r)})
+                continue
+            if r.get("review_kind") not in ("design", "conclusion") or r["status"] == "escalated":
+                self.resting.add(r["id"])  # older records: tree rounds, escalated rounds
+                continue
+            newest = self.latest.get((r.get("task_id"), r.get("review_kind"))) if r.get("task_id") else None
+            if newest and newest["id"] != r["id"]:
+                self.resting.add(r["id"])  # a newer round on the same work says what comes next
                 continue
             author = self.round_author(r)
-            if r["status"] == "answered":
-                self.add(type="review-verdict", extra=pass_of(r), to=author, subject=r["id"],
-                         ask="fix, then request a recheck" if blocking(r) else "go on: dispatch, run or deliver",
-                         cmd=f"rl review request {r.get('target_id')} --recheck-of {r['id']}",
-                         since=r.get("answered_at") or now_utc(), frm=reviewer,
-                         note=f"{len(open_findings(r))} open finding(s), {len(blocking(r))} blocking")
-            elif r["status"] == "passed" and r.get("review_kind") == "conclusion":
-                d = next((x for x in self.decisions if x["id"] == r.get("target_id")), None)
-                if d and d["state"] == "draft":
-                    self.add(type="review-verdict", extra=pass_of(r), to=author, subject=r["id"],
-                             ask=f"finalize {d['id']}", cmd=f"rl decide --final {d['id']}",
-                             since=r.get("answered_at") or now_utc(), frm=reviewer)
-            elif r["status"] == "passed" and r.get("review_kind") == "design":
-                t = self.by_id.get(r.get("task_id"))
-                if t and self.latest.get((t["id"], "design"), {}).get("id") != r["id"]:
-                    continue  # a newer round of the task decides (one that failed says fix, not go on)
-                if t and t["state"] == "active" and t.get("holder", "").startswith("scientist-") \
-                        and last_pass(r) and last_pass(r).get("segment") == "scientist":
-                    self.add(type="review-verdict", extra=pass_of(r), to=t["holder"], subject=r["id"],
-                             ask=f"dispatch {t['id']}", cmd=f"rl task dispatch {t['id']} --note ..",
-                             since=r.get("answered_at") or now_utc(), frm=reviewer)
-                elif t and t["state"] == "active" and t.get("holder", "").startswith("researcher-") \
-                        and last_pass(r) and last_pass(r).get("segment") == "researcher":
-                    # the researcher waits on this pass to run; its task card stays the item that times. An
-                    # attempt of a run of the task registered after the pass (by the event order) shows it went on.
-                    if self.went_on(t["id"], r["id"]):
-                        continue
-                    self.add(type="review-verdict", extra=pass_of(r), to=t["holder"], subject=r["id"],
-                             ask=f"the review passed: go on with {t['id']} (run, then deliver)",
-                             cmd="rl pack", since=r.get("answered_at") or now_utc(), frm=reviewer, timed=False)
-            elif r["status"] == "passed" and r.get("review_kind") == "tree":
-                t = self.by_id.get(r.get("task_id"))
-                # only the task's latest tree round says deliver
-                if t and t["state"] == "active" and t.get("holder") and \
-                        self.latest.get((t["id"], "tree"), {}).get("id") == r["id"]:
-                    self.add(type="review-verdict", extra=pass_of(r), to=t["holder"], subject=r["id"],
-                             ask=f"deliver {t['id']}", cmd=f"rl task deliver {t['id']} ..",
-                             since=r.get("answered_at") or now_utc(), frm=reviewer)
-            elif r["status"] == "escalated" and r.get("segment") == "researcher":
-                t = self.by_id.get(r.get("task_id"))
-                if t:
-                    self.add(type="review-escalation", to=self.scientist_for(t), subject=r["id"],
-                             ask="decide the open findings (settle, change the design, or cancel)",
-                             cmd=f"rl review settle {r['id']}#F<n> ..", since=r.get("answered_at") or now_utc(),
-                             frm="cli")
-            elif r["status"] == "closed" and r.get("ruled"):
-                newer = [x for x in self.tickets if x["kind"] == "review" and x.get("task_id") == r.get("task_id")
-                         and x.get("review_kind") == r.get("review_kind") and id_order(x["id"]) > id_order(r["id"])]
-                if not newer:
-                    self.add(type="ruling", to=author, subject=r["id"],
-                             ask="the ruling upheld findings: change the work and open a new round, or make a "
-                                 "decision request", cmd=f"rl show {r['ruled'].get('by')}",
-                             since=r["ruled"].get("at") or now_utc(), frm=r["ruled"].get("by"))
+            left = open_findings(r)
+            over = r["status"] in ENDED
+            how = (f"{r['id']} passed" if r["status"] == "passed" and not left else
+                   f"{r['id']} ended ({r['status']}) with {len(left)} finding(s) open, flagged on it")
+            since = r.get("answered_at") or now_utc()
+            if r["review_kind"] == "design":
+                if not task or task["state"] != "active" or task.get("holder") != author \
+                        or self.went_on(task["id"], r["id"]):
+                    self.resting.add(r["id"])  # its author went on (or the task is with someone else now)
+                    continue
+                work = task["id"]
+                if not over:
+                    self.add(type="review-verdict", to=author, subject=r["id"], frm=reviewer, since=since,
+                             ask=(f"{len(left)} finding(s) open: fix them (or reject one with its reason: rl review "
+                                  f"reject {r['id']}#Fn --reason ..), then ask for the recheck; or go on, and they "
+                                  "stay on the record") if left else
+                             "it failed without findings: read the answer, fix, then ask for the recheck",
+                             cmd=f"rl review request {work} --recheck-of {r['id']}",
+                             note=_with_flags(r, "; ".join(f"F{f['n']} {f['category']}/{f['severity']}/{f['status']}"
+                                                           f": {f['text'][:80]}" for f in left[:4]) or None),
+                             extra={"pass": pass_key(r)})
+                elif author.startswith("scientist-"):
+                    self.add(type="review-verdict", to=author, subject=work, frm=reviewer, since=since,
+                             ask=f"{how}: dispatch {work}", cmd=f"rl task dispatch {work} --note ..",
+                             note=_with_flags(r, None), extra={"pass": f"{r['id']}.{pass_key(r)}"})
+                else:
+                    self.add(type="review-verdict", to=author, subject=work, frm=reviewer, since=since,
+                             ask=f"{how}: go on with {work} ("
+                                 + ("run, then deliver)" if task["kind"] == "execute" else "pass the done check, "
+                                                                                          "deliver)"),
+                             cmd="rl pack", note=_with_flags(r, None), extra={"pass": f"{r['id']}.{pass_key(r)}"})
+                continue
+            d = decisions.get(p.get("target") or r.get("target_id") or "")
+            newer = [x for x in self.decisions if r.get("task_id") and x.get("task_id") == r["task_id"] and d
+                     and x["id"] != d["id"] and x["kind"] in ("verdict", "stop") and x["created_at"] > since]
+            if not d or d["state"] != "draft" or newer or (task and task["state"] not in ("active", "blocked")):
+                self.resting.add(r["id"])  # finalized, superseded by a newer draft, or its task delivered
+                continue
+            if not over:
+                self.add(type="review-verdict", to=author, subject=r["id"], frm=reviewer, since=since,
+                         ask=f"{len(left)} finding(s) open: write the revised draft (rl decide ..) and ask for the "
+                             f"recheck, or reject a finding with its reason (rl review reject {r['id']}#Fn --reason ..)"
+                             "; or go on, and they stay on the record",
+                         cmd=f"rl review request D-y --recheck-of {r['id']}",
+                         note=_with_flags(r, "; ".join(f"F{f['n']} {f['category']}/{f['severity']}/{f['status']}: "
+                                                       f"{f['text'][:80]}" for f in left[:4]) or None),
+                         extra={"pass": pass_key(r)})
+            else:
+                self.add(type="review-verdict", to=author, subject=d["id"], frm=reviewer, since=since,
+                         ask=f"{how}: finalize {d['id']}" + ("" if r["status"] == "passed" and not left else
+                                                             " (the flags go with it), or write a new draft and "
+                                                             "open a new round"),
+                         cmd=f"rl decide --final {d['id']}", note=_with_flags(r, None),
+                         extra={"pass": f"{r['id']}.{pass_key(r)}"})
 
     def went_on(self, task_id: str, rv: str) -> bool:
-        """An attempt of a non-test run of the task was registered after the round's last answer or settlement, by
-        event seq (two in the same second keep their order)."""
-        # the change that made the round pass: the reviewer's answer, or the scientist settling the last finding
+        """An attempt of a non-test run of the task was registered after the round's last answer, by event seq (two
+        in the same second keep their order)."""
+        # review.settled: older records (an escalated finding settled by the scientist)
         answered = [e["seq"] for kind in ("review.answered", "review.settled")
                     for e in self.tx.all("Event", entity_id=rv, type=kind)]
         if not answered:
@@ -361,6 +413,9 @@ class Rules:
                    for e in self.tx.all("Event", entity_id=att, type="run.register"))
 
     def round_author(self, r: dict) -> str:
+        """The session that opened the round (reviews.round_author; older records: the design task's holder)."""
+        if r.get("author"):
+            return r["author"]
         if r.get("review_kind") == "design":
             t = self.by_id.get(r.get("task_id"))
             if t and t.get("holder"):
@@ -368,15 +423,15 @@ class Rules:
         return (r.get("passes") or [{}])[-1].get("requested_by") or r["requested_by"]
 
     def advice(self) -> None:
+        """A consultation waits on its advisor; its advice waits on whoever asked until it decides after it. Ruling
+        tickets are older records only (schema 6 closed the ones that waited)."""
         for t in self.tickets:
-            if t["kind"] != "advice":
+            if t["kind"] != "advice" or t.get("advice_kind") == "ruling":
                 continue
             if t["status"] == "waiting":
-                self.add(type="ruling-request" if t.get("advice_kind") == "ruling" else "consultation",
-                         to=session_name("advisor", t["id"]), subject=t["id"],
-                         ask="rule on each blocking finding" if t.get("advice_kind") == "ruling" else "advise",
+                self.add(type="consultation", to=session_name("advisor", t["id"]), subject=t["id"], ask="advise",
                          cmd=f"rl advise answer {t['id']} --doc ..", since=t["created_at"], frm=t["requested_by"],
-                         note=t.get("question"))
+                         note=_with_flags(t, t.get("question")))
             elif t["status"] == "closed" and t.get("advice_kind") == "consult":
                 later = [d for d in self.decisions if d.get("author") == t["requested_by"]
                          and d["created_at"] > (t.get("answered_at") or "")]
@@ -431,31 +486,27 @@ class Rules:
             if t["state"] != "delivered" or t["kind"] not in ("hypothesis", "tree", "phase"):
                 continue
             kind = {"hypothesis": "hypothesis-conclusion", "tree": "tree", "phase": "phase-conclusion"}[t["kind"]]
-            report = next((a["id"] for a in self.asks if a["kind"] == "report" and a["task_id"] == t["id"]
+            report = next((a["id"] for a in self.asks if a["kind"] == "report" and a.get("task_id") == t["id"]
                            and a["state"] == "open"), None)
             self.add(type=kind, to="coordinator", subject=t["id"], ask=f"receive {t['id']} or return it",
                      extra={"rev": t["revision"]},  # each delivery (or a changed acceptance) is news
                      cmd=f"rl task accept {t['id']} | rl task return {t['id']} --reason ..",
-                     since=t.get("delivered_at") or now_utc(), frm=t.get("holder"), note=(t.get("state_note")
-                     or t.get("conclusion") or "") + (f" · the user reads its report ({report}); record what they "
-                     f"say: rl request answer {report} --by user --text .." if report else ""))
-        from .tasks import approval, latest_tree, phase_ended
-        tree = latest_tree(self.tx)
-        if tree and tree["state"] == "accepted":
-            asks = [a for a in self.asks if a["task_id"] == tree["id"] and a["kind"] == "approval"]
-            if approval(self.tx, tree):
-                queued = [t for t in self.tasks if t["state"] == "queued" and t["kind"] in ("hypothesis", "prep")]
-                if queued and not any(t.get("released_at") for t in self.tasks if t["kind"] == "hypothesis"):
-                    self.add(type="tree-approved", to="coordinator", subject=tree["id"],
-                             ask="release the first phase", cmd="rl task release T-x ...",
-                             since=asks[-1]["answered_at"], frm="user", note=asks[-1]["answer"])
-            elif not asks or asks[-1]["state"] == "answered":
-                pass  # the coordinator's next step after receiving the tree is its own (schedule, ask the user)
+                     since=t.get("delivered_at") or now_utc(), frm=t.get("holder"), note=_with_flags(t, (
+                         t.get("state_note") or t.get("conclusion") or "") + (
+                         f" · the user reads its report ({report}); record what they say: rl request answer "
+                         f"{report} --by user --text .." if report else "")))
+        for t in self.tasks:  # an older tree task still open: the tree is drafted by a subagent now (7.2)
+            if t["kind"] == "tree" and t["state"] in ("queued", "open"):
+                self.add(type="old-tree-task", to="coordinator", subject=t["id"], ask=f"cancel {t['id']}: the tree "
+                         "is drafted by your subagent now (rl tree prompt)", cmd=f"rl task cancel {t['id']} --reason "
+                         "\"the tree is drafted by a subagent\"", since=t.get("created_at") or now_utc(), frm="cli")
+        self.tree_item()
         for a in self.asks:
             if a["state"] == "open" and a["kind"] == "decision":
                 self.add(type="decision-request", to="coordinator", subject=a["id"], ask="decide, or forward to "
                          "the user", cmd=f"rl request answer {a['id']} --by coordinator .. | rl request forward "
                          f"{a['id']}", since=a["created_at"], frm=a["by"], note=a["stuck"])
+        from .tasks import phase_ended
         for ph in self.tx.all("Phase"):
             if phase_ended(self.tx, ph["id"]):
                 done = [t for t in self.tasks if t["kind"] == "phase" and t["state"] != "cancelled"
@@ -466,7 +517,7 @@ class Rules:
                              cmd=f"rl task create --kind phase --phase {ph['id']} ..", since=self.since(
                                  [t["id"] for t in self.tasks if self.tx.out(t["id"], "in_phase")
                                   and self.tx.out(t["id"], "in_phase")[0]["id"] == ph["id"]]), frm="cli")
-        for h in self.tx.all("Hypothesis"):
+        for h in self.tx.all("Hypothesis"):  # composite hypotheses of older records
             if not h.get("composite") or h["evidence_status"] != "untested" or h["disposition"] in ("paused",
                                                                                                     "retired"):
                 continue
@@ -488,9 +539,9 @@ class Rules:
     def user(self) -> None:
         for a in self.asks:
             if a["kind"] == "approval" and a["state"] == "forwarded":
-                self.add(type="tree-approval", to="user", subject=a["task_id"], ask="approve or change the tree and "
-                         "the first phase; decide the flagged hypotheses", cmd="tell the coordinator",
-                         since=a["created_at"], frm="coordinator", note=a["stuck"])
+                self.add(type="approval", to="user", subject=a["id"], ask="approve or change: "
+                         + (a.get("stuck") or ""), cmd="tell the coordinator", since=a["created_at"],
+                         frm="coordinator", note=a.get("recommend"))
             elif a["kind"] == "decision" and a["state"] == "forwarded":
                 self.add(type="decision-request", to="user", subject=a["id"], ask="decide",
                          cmd="tell the coordinator", since=a.get("forwarded_at") or a["created_at"],
@@ -499,16 +550,15 @@ class Rules:
                 self.add(type="phase-report", to="user", subject=a["id"], ask="read the phase report on the "
                          "research page; say in the coordinator's pane that you read it, or what to change",
                          cmd=f"tell the coordinator (it records your words: rl request answer {a['id']} --by user "
-                         "--text ..)", since=a["created_at"], frm="cli", timed=False,
+                         "--text ..)", since=a["created_at"], frm="cli",
                          note=f"{a['stuck']} ({a['task_id']})")
 
     def asks_answered(self) -> None:
-        """An answer stays with the scientist until it writes a decision citing the task after it (52); on a tree
-        task, delivering the tree counts too."""
+        """An answer stays with the scientist until it writes a decision citing the task after it (52)."""
         for a in self.asks:
             if a["kind"] != "decision" or a["state"] != "answered":
                 continue
-            task = self.by_id.get(a["task_id"])
+            task = self.by_id.get(a.get("task_id"))
             if not task or task["state"] in TASK_DONE or not task.get("holder"):
                 continue
             if task["kind"] == "tree" and task["state"] == "delivered":
@@ -571,18 +621,24 @@ class Rules:
                          note=f"past {top:.0%} of the envelope", extra=line)
 
     def dialogue(self) -> None:
-        """Questions, review discussion and consultations: an entry waits for its addressee's reply (8.7)."""
+        """Questions, review discussion and consultations: an entry waits for its addressee's reply (8.7); an answer
+        waits for whoever asked to read it and close the question. Discussion in a round that has ended, or whose
+        task ended, is on nobody's list: the same condition under which rl reply and rl discuss tell nobody (4)."""
+        rounds = {t["id"]: t for t in self.tickets}
         replied = {m["in_reply_to"] for m in self.messages if m.get("in_reply_to")}
         for m in self.messages:
             if m["id"] in replied:
                 continue
             if m["kind"] == "answer":
-                if m["to_role"] == "coordinator" and not m.get("closed_at"):
-                    self.add(type="answer", to="coordinator", subject=m["subject"], ask="read the answer, then close "
+                if not m.get("closed_at"):
+                    self.add(type="answer", to=m["to_role"], subject=m["subject"], ask="read the answer, then close "
                              "the question", cmd=f"rl question --close {m['in_reply_to']}", since=m["created_at"],
                              frm=m["from_role"], note=m["text"][:300])
                 continue
             if m.get("closed_at"):
+                continue
+            r = rounds.get(m["subject"].split("#")[0]) if m["kind"] == "discussion" else None
+            if r and ended(r, self.by_id.get(r.get("task_id") or "")):
                 continue
             self.add(type={"question": "question", "discussion": "review-discussion",
                            "consult": "consultation"}[m["kind"]], to=m["to_role"],
@@ -598,36 +654,54 @@ class Rules:
                          cmd=f"rl agent answer {s['name']} \"<option>\" --reason ..", since=s.get("last_active_at")
                          or now_utc(), frm="watch", note=s["needs_decision"][:300])
 
+    def deps(self, task: dict) -> list[dict]:
+        return [d for d in (self.by_id.get(e["id"]) for e in self.tx.out(task["id"], "depends_on")) if d]
 
-ESCALATION = ("the session itself", "who made the task", "the coordinator", "the user")
+    def tree_item(self) -> None:
+        """No hypotheses yet: build the tree with a subagent (7.2), or, with a draft written, have the user look at
+        it (so a restarted coordinator does not open a second subagent)."""
+        if any(True for _ in self.tx.all("Hypothesis")):
+            return
+        from . import tree
+        from .project import tree_entry
+        draft = tree.has_draft(self.project) if self.project else False
+        coordinator = next((s for s in reversed(self.sessions) if s["name"] == "coordinator"), None)
+        host = (coordinator or {}).get("host") or "claude"
+        entry = tree_entry(self.config, host)
+        model = f"{entry.model}" + (f" at effort {entry.effort}" if entry and entry.effort else "") if entry else \
+            "the best model of your family at effort xhigh"
+        if draft:
+            self.add(type="tree-draft", to="coordinator", subject="tree", ask="have the user read the tree draft on "
+                     "the research page (rl view draws it); change it with a subagent as they say, record it once "
+                     "they approve", cmd="rl tree record --approval \"<the user's words>\"",
+                     since=now_utc(), frm="cli", note="a draft is in research/tree-draft/tree.yaml")
+        else:
+            self.add(type="build-tree", to="coordinator", subject="tree", ask=f"open a subagent ({model}) and tell "
+                     "it: run `rl tree prompt`, do what it says, hand back the summary it asks for",
+                     cmd="rl tree prompt [--from <document>...]", since=now_utc(), frm="cli",
+                     note="it drafts the hypothesis tree in research/tree-draft/; you show the user the draft")
 
+    def stopped(self) -> None:
+        """A session still open on a task cancelled, or taken from it (3.2): told once to stop working on it; the
+        item leaves when its session closes."""
+        open_names = {s["name"] for s in self.sessions if s["status"] == "open"}
+        for t in self.tasks:
+            for role in ("researcher", "scientist"):
+                who = session_name(role, t["id"])
+                if who not in open_names or (role == "scientist" and t["kind"] in ("execute", "prep")
+                                             and t.get("scientist_session") != who):
+                    continue
+                if t["state"] == "cancelled":
+                    self.add(type="task-cancelled", to=who, subject=t["id"], ask=f"stop working on {t['id']}: it was "
+                             "cancelled; end your turn", cmd=f"rl show {t['id']}", since=self.since([t["id"]]),
+                             frm="cli", note=t.get("cancel_reason"))
+                elif t["state"] in ("active", "blocked") and t.get("holder") and t["holder"] != who and any(
+                        h.get("holder") == who for h in t.get("holders") or []) and not (
+                        role == "scientist" and t["kind"] in ("execute", "prep")):
+                    self.add(type="task-taken", to=who, subject=t["id"], ask=f"stop working on {t['id']}: "
+                             f"{t['holder']} holds it now; end your turn", cmd=f"rl show {t['id']}",
+                             since=self.since([t["id"]]), frm=t["holder"], extra={"rev": t["revision"]})
 
-def escalations(items: list[Item], config: dict, now: datetime, by_id: dict) -> list[Item]:
-    """Items past their deadline go up a fixed ladder (8.8): the holder is reminded first, then the one who made
-    the task, then the coordinator, then the user. The coordinator's own overdue items go to the user. A phase
-    report never escalates."""
-    out = []
-    for it in items:
-        if not it.timed or it.type in ("phase-report", "timeout"):
-            continue
-        limit_m = deadline_minutes(config, it.type)
-        waited = minutes_since(it.since, now)
-        if waited < limit_m:
-            continue
-        steps = int(waited // limit_m)  # 1: remind the holder (the watcher does), 2: creator, 3: coordinator, 4: user
-        ladder = []
-        task = by_id.get(it.subject)
-        if it.to == "coordinator":
-            ladder = ["user"]
-        elif it.to != "user":
-            creator = task.get("creator") if task else None
-            ladder = list(dict.fromkeys(x for x in (creator, "coordinator", "user") if x and x != it.to))
-        for level, who in enumerate(ladder[:max(0, steps - 1)], start=1):
-            out.append(Item(type="timeout", to=who, subject=it.subject, ask=f"{it.type} for {it.to} waits "
-                            f"{waited / 60:.1f} h: handle it, or restart the session on it",
-                            cmd=f"rl inbox --for {it.to}", since=it.since, frm="watch", level=level,
-                            note=f"{it.type}: {it.ask}"))
-    return out
 
 
 def all_items(tx: Tx, config: dict) -> list[Item]:
@@ -636,6 +710,18 @@ def all_items(tx: Tx, config: dict) -> list[Item]:
 
 def for_recipient(tx: Tx, config: dict, who: str) -> list[Item]:
     return [i for i in all_items(tx, config) if i.to == who]
+
+
+def recipients(tx: Tx, config: dict, types: tuple[str, ...]) -> list[str]:
+    """The sessions that have items of these types now (a command tells them: 3.2)."""
+    return sorted({i.to for i in all_items(tx, config) if i.type in types and i.to != "user"})
+
+
+def _with_flags(rec: dict, note: str | None) -> str | None:
+    """A to-do note with the record's process flags after it (5.1: the receiver sees them)."""
+    from .flags import short
+    found = short(rec)
+    return " · ".join(x for x in (note, found) if x) or None
 
 
 def age(minutes: float) -> str:
@@ -654,7 +740,7 @@ def render(items: list[Item], who: str) -> str:
     for n, it in enumerate(items, 1):
         lines.append(f"{n} {it.type}  {it.subject}")
         lines.append(f"  ask   {it.ask}")
-        lines.append(f"  from  {it.frm or '-'} · {age(minutes_since(it.since))}" + ("" if it.timed else " (untimed)"))
+        lines.append(f"  from  {it.frm or '-'} · {age(minutes_since(it.since))}")
         if it.note:
             lines.append(f"  note  {' '.join(str(it.note).split())[:300]}")
     return "\n".join(lines)
@@ -685,15 +771,40 @@ def unwatched(tx: Tx, config: dict) -> list[str]:
         if t["state"] == "active" and t.get("holder") and t["holder"] in {i.to for i in items}:
             continue
         out.append(f"{t['id']} {t['kind']}/{t['state']} waits on nobody")
+    resting = getattr(rules, "resting", set())
     for r in rules.tickets:
-        if r["status"] in ("waiting", "answered", "escalated") and r["id"] not in subjects:
-            if r["status"] == "escalated" and any(x.get("ruling_of") == r["id"] and x["status"] == "waiting"
-                                                  for x in rules.tickets):
-                continue
-            if r["status"] == "waiting":
-                continue  # a running test job on it
-            out.append(f"{r['id']} {r['status']} waits on nobody")
+        if r["status"] not in ("waiting", "answered") or r["id"] in subjects:
+            continue
+        if r["id"] in resting:
+            continue  # its task ended, a newer round took over, or its author went on: it ends with its task (3.3)
+        if r["status"] == "waiting":
+            continue  # a running test job on the round; an older ruling (schema 6 closed those)
+        out.append(f"{r['id']} {r['status']} waits on nobody")
     for a in rules.asks:
-        if a["state"] in ("open", "forwarded") and a["id"] not in subjects and a["task_id"] not in subjects:
+        if a["state"] in ("open", "forwarded") and a["id"] not in subjects and a.get("task_id") not in subjects:
             out.append(f"{a['id']} {a['state']} waits on nobody")
+    return out
+
+
+ABOUT_SESSIONS = ("task-cancelled", "task-taken", "session-needs-decision")  # items about a session, not a record
+
+
+def leftovers(tx: Tx, config: dict) -> list[str]:
+    """The reverse check of rl doctor (4): no to-do item on a record that has ended (a task accepted or cancelled,
+    a round passed or closed, a request answered or closed)."""
+    out = []
+    for i in all_items(tx, config):
+        if i.type in ABOUT_SESSIONS:
+            continue
+        try:
+            rec = tx.get(i.subject.split("#")[0])
+        except RLError:  # a subject that names no record (the tree, a session)
+            rec = None
+        if rec is None:
+            continue
+        ended = (rec["_label"] == "Task" and rec["state"] in TASK_DONE) or \
+            (rec["_label"] == "Ticket" and rec["status"] in ("passed", "closed")) or \
+            (rec["_label"] == "Ask" and rec["state"] in ("answered", "closed") and i.type != "request-answered")
+        if ended:
+            out.append(f"{i.type} for {i.to} on {i.subject}, which is {rec.get('state') or rec.get('status')}")
     return out

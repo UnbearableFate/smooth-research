@@ -3,11 +3,13 @@
 Nothing here starts, polls, retries, cancels, downloads or validates external work. Executors run work with their
 own tools and hand the facts to register / record / import-result / ended.
 
-A run is one of three categories. A trial (tests, smoke runs, timing) needs no review, may last at most
-limits.trial_minutes, and is never evidence. A preparation run belongs to a preparation task and is never evidence.
-An evidence run is an arm of its experiment's sealed manifest: the review must cover the code commit (no open method
-finding, nothing medium or higher open) or the fast lane apply, and its configuration must match the manifest; a
-run that does not match may still be registered as deviating (--deviation), and is not evidence.
+A run is one of three categories. A trial (tests, smoke runs, timing) needs no review and is never evidence. A
+preparation run belongs to a preparation task and is never evidence. An evidence run is an arm of its experiment's
+sealed manifest. Usually a review covers its code commit (no open method finding) and its configuration matches the
+manifest; when not, it is registered all the same and flagged (2026-11-27 design 5.2): one that does not match the
+manifest is registered as deviating (not evidence), one registered before its design was sealed or after it was
+revised as unsealed. What is refused is what would be recorded falsely: an evidence or preparation run from a
+worktree with uncommitted changes (its commit is not the code that runs).
 """
 
 from __future__ import annotations
@@ -18,9 +20,10 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from . import compute, gitops, manifest
-from .project import Project, coordinator_is_login, limit
+from .flags import Flags
+from .project import Project, coordinator_is_login
 from .research import brief, recheck_dependents, task_design, task_experiment
-from .reviews import covers, open_blockers
+from .reviews import review_flags
 from .roles import Actor, need
 from .schema import ENUMS
 from .store import Store, Tx
@@ -41,7 +44,8 @@ def register(store: Store, actor: Actor, task_id: str, request_id: str, arm: str
              minutes: float | None = None, trial: bool = False, deviation: str | None = None,
              purpose: str | None = None, ticket: str | None = None, run_id: str | None = None,
              resource: str | None = None, params: dict | None = None) -> dict:
-    need(actor, "researcher", "scientist", what="registering a run")
+    fl = Flags(actor.name if actor else "?")
+    need(actor, "researcher", "scientist", what="registering a run", flags=fl)
     # the same request again returns what it made, whatever changed since (the task accepted, a finding opened)
     payload = digest_json({"task": task_id, "arm": arm, "seed": seed, "config": config, "split": split,
                            "commit": commit, "minutes": minutes, "trial": trial, "deviation": deviation,
@@ -53,8 +57,8 @@ def register(store: Store, actor: Actor, task_id: str, request_id: str, arm: str
         return {**previous, "duplicate": True,
                 "summary": f"duplicate request {request_id}: {previous['run']} {previous['attempt']}"}
     if coordinator_is_login(store.project.config) and not resource:
-        raise RLError("INVALID", "the project runs work through an executor (compute.coordinator: login): register "
-                                 "with --resource <cluster resource>")
+        fl.add("no-executor", "registered without --resource although the project runs work through an executor "
+                              "(compute.coordinator: login): it runs where it is started")
     if purpose and purpose not in PURPOSES:
         raise RLError("INVALID", f"--purpose is one of {', '.join(PURPOSES)}")
     if purpose:
@@ -66,23 +70,15 @@ def register(store: Store, actor: Actor, task_id: str, request_id: str, arm: str
         live = task_experiment(tx, task_id)
     holder_ok = task.get("holder") == actor.name or (purpose == "merge-test" and actor.name == task["creator"])
     if not holder_ok:
-        raise RLError("INVALID", f"{task_id} is held by {task.get('holder') or 'nobody'}: its holder registers runs")
+        fl.add("not-holder", f"{task_id} is held by {task.get('holder') or 'nobody'}; {actor.name} registered a run")
     if purpose == "merge-test":
         if task["state"] != "merging" or not task.get("merge_commit"):
-            raise RLError("INVALID", f"{task_id} is {task['state']}: a merge test runs while its acceptance waits on it")
+            raise RLError("CONFLICT", f"{task_id} is {task['state']}: a merge test is bound to an acceptance that "
+                                      "waits on it, and none does")
         if commit and gitops.rev(store.project, commit) != task["merge_commit"]:
             raise RLError("INVALID", f"a merge test of {task_id} tests its merge commit {task['merge_commit'][:12]}, "
                                      f"not {commit[:12]}")
         commit = task["merge_commit"]
-    if commit is None:
-        if gitops.dirty(store.project, task_id) and not trial:
-            raise RLError("INVALID", f"{task_id}'s worktree has uncommitted changes: runs use committed code")
-        commit = task.get("merge_commit") if purpose == "merge-test" else gitops.head(store.project, task_id)
-    if not FULL_COMMIT.match(commit or ""):
-        resolved = gitops.rev(store.project, commit) if commit else None
-        if not resolved:
-            raise RLError("INVALID", f"--commit {commit!r} is not a commit of the repository")
-        commit = resolved
     category = "trial" if trial else "prep" if task["kind"] == "prep" else "evidence" if task["kind"] == "execute" \
         else None
     if run_id:  # a retry is an attempt of the same run: its category is the run's, whatever flags it gives
@@ -90,26 +86,36 @@ def register(store: Store, actor: Actor, task_id: str, request_id: str, arm: str
             category = tx.require(run_id, "Run")["category"]
     if category is None:
         raise RLError("INVALID", f"runs belong to execute or prep tasks (or are trials); {task_id} is {task['kind']}")
-    cap = float(limit(store.project.config, "trial_minutes"))
-    if category == "trial" and (minutes is None or minutes > cap):
-        raise RLError("INVALID", f"a trial run gives --minutes, at most limits.trial_minutes ({cap:g}); a longer run "
-                                 "is an evidence or preparation run")
+    # a run here runs the worktree, whatever --commit says (an executor checks out the commit it is given)
+    if category != "trial" and (commit is None or res is None) and gitops.dirty(store.project, task_id):
+        raise RLError("INVALID", f"{task_id}'s worktree has uncommitted changes: the run would be recorded at "
+                                 "a commit that is not the code it runs; commit first (trials are not checked)")
+    if commit is None:
+        commit = task.get("merge_commit") if purpose == "merge-test" else gitops.head(store.project, task_id)
+    resolved = gitops.rev(store.project, commit) if commit else None  # a full id too: it must name a commit here
+    if not resolved:
+        raise RLError("INVALID", f"--commit {commit!r} is not a commit of the repository")
+    commit = resolved
     deviates = None
     design = None
+    unsealed = None
     if category == "evidence":
-        if not exp or not exp.get("design_commit") or not task.get("design_commit"):
-            raise RLError("INVALID", f"{task_id}'s experiment is not sealed: it is sealed when the task is dispatched")
-        if live and live["revision"] != exp["revision"]:
-            raise RLError("INVALID", f"{exp['id']} is at revision {live['revision']} now, and {task_id} was "
-                                     f"dispatched with revision {exp['revision']}: evidence waits until the new "
-                                     "revision is handed over (block the task for its scientist)")
-        if arm is None:
-            raise RLError("INVALID", "an evidence run names its arm (--arm) from the manifest")
-        config, split = manifest.effective(exp["manifest"], arm, config, split)
-        # what this run is checked against later, whatever the experiment becomes: its sealed revision and arm
-        design = {"experiment": exp["id"], "revision": exp["revision"], "manifest_digest": exp["manifest_digest"],
-                  "design_commit": exp["design_commit"], "arm": manifest.arm(exp["manifest"], arm),
-                  "allowed": list(exp["manifest"].get("allowed") or [])}
+        if not exp or not exp.get("design_commit") or not exp.get("manifest") or not task.get("design_commit"):
+            unsealed = f"{task_id}'s experiment is not sealed (it is sealed when the task is dispatched)"
+        elif live and live["revision"] != exp["revision"]:
+            unsealed = (f"{exp['id']} is at revision {live['revision']} now, and {task_id} was dispatched with "
+                        f"revision {exp['revision']}")
+        if unsealed:
+            fl.add("unsealed", unsealed + "; the run is registered as deviating, not evidence")
+            deviates, deviation = True, deviation or unsealed
+        else:
+            if arm is None:
+                raise RLError("INVALID", "an evidence run names its arm (--arm) from the manifest")
+            config, split = manifest.effective(exp["manifest"], arm, config, split)
+            # what this run is checked against later, whatever the experiment becomes: its sealed revision and arm
+            design = {"experiment": exp["id"], "revision": exp["revision"], "manifest_digest": exp["manifest_digest"],
+                      "design_commit": exp["design_commit"], "arm": manifest.arm(exp["manifest"], arm),
+                      "allowed": list(exp["manifest"].get("allowed") or [])}
     # a merge test is bound to the acceptance it tests: that delivery, that round (tasks.finish_merge); a test
     # job to the command it runs (tasks.test --record)
     acceptance = {"delivered": task["delivered_commit"], "round": task["revision"]} if purpose == "merge-test" \
@@ -123,19 +129,15 @@ def register(store: Store, actor: Actor, task_id: str, request_id: str, arm: str
     spec = {"arm": arm, "seed": seed, "config": config, "split": split, "commit": commit, "params": params,
             **({"design": design} if design else {}), **({"acceptance": acceptance} if acceptance else {}),
             **({"test": tested} if tested else {})}
-    changed: list[str] = []
-    if category == "evidence":  # every new attempt, a retry of a run too: a finding opened since blocks it
+    if category == "evidence" and not unsealed:  # every new attempt, a retry of a run too
         problems = manifest.check_run(exp["manifest"], arm, seed, config, split)
-        if task.get("fast_lane"):
-            changed = gitops.protected_changes(store.project, task["design_commit"], commit,
-                                               list(exp.get("protected") or []))
         with store.read() as tx:
-            _evidence_allowed(tx, task, commit, changed)
+            _review_flag(tx, task, commit, fl, store.project)
         if problems:
             if not deviation:
-                raise RLError("INVALID", "the run does not match the sealed manifest: " + "; ".join(problems)
-                              + ". Fix the run's configuration, or register it as deviating (--deviation '<why>'), "
-                                "which is not evidence")
+                fl.add("deviates", "the run does not match the sealed manifest: " + "; ".join(problems)
+                       + "; registered as deviating, not evidence")
+                deviation = "does not match the sealed manifest: " + "; ".join(problems)
             deviates = True
     with store.write() as tx:
         previous = tx.request("run.register", request_id, payload)
@@ -147,14 +149,13 @@ def register(store: Store, actor: Actor, task_id: str, request_id: str, arm: str
             if now["state"] != "merging" or now.get("merge_commit") != commit or now["revision"] != acceptance["round"]:
                 raise RLError("CONFLICT", f"{task_id}'s acceptance changed meanwhile (now {now['state']}): nothing was "
                                           "registered")
-        if category == "evidence":  # again under the write lock: a finding or a revision recorded meanwhile
+        if category == "evidence" and not unsealed:  # again under the write lock: a revision recorded meanwhile
             now = tx.require(task_id, "Task")
             sealed, live_now = task_design(tx, task_id), task_experiment(tx, task_id)
             if now.get("holder") != task.get("holder") or (sealed or {}).get("revision") != exp["revision"] \
                     or (live_now or {}).get("revision") != exp["revision"]:
                 raise RLError("CONFLICT", f"{task_id} changed meanwhile (its holder or its experiment's revision): "
                                           "nothing was registered; look at it again")
-            _evidence_allowed(tx, now, commit, changed)
         if run_id:
             run = tx.require(run_id, "Run")
             if run["task_id"] != task_id:
@@ -183,27 +184,23 @@ def register(store: Store, actor: Actor, task_id: str, request_id: str, arm: str
                               "issues": [], "resource": placed, "expected_end": expected,
                               "submitted_by": actor.name})
         tx.link("of_run", attempt, run_id)
+        fl.write(tx, run_id)
         result = {"run": run_id, "attempt": attempt, "category": category, "deviates": bool(deviates)}
         tx.remember("run.register", request_id, payload, result)
         tx.event("run.register", attempt, f"{run_id} {category}{' (deviates)' if deviates else ''} attempt {index}")
     note = (f"\nresource {res.name}: how to stage, run and fetch: rl compute steps --attempt {attempt}" if res and
             res.remote else "")
-    return {**result, "summary": f"{run_id} {attempt} {category}" + (" DEVIATES (not evidence)" if deviates else "")
+    return {**result, **({"flags": fl.items} if fl else {}),
+            "summary": f"{run_id} {attempt} {category}" + (" DEVIATES (not evidence)" if deviates else "")
                                  + f" at {commit[:12]}" + (f", expected end {expected[11:16]} UTC" if expected else "")
                                  + ". Nothing was started: start it with your own tool, then rl run record" + note}
 
 
-def _evidence_allowed(tx: Tx, task: dict, commit: str, changed: list[str]) -> None:
-    """An evidence run needs a review that covers its commit, or the fast lane with no open blocker and the
-    protected scope unchanged since the design (changed: the protected units the commit changed)."""
-    ok, why = covers(tx, task["id"], commit, for_evidence=True)
-    if not ok and task.get("fast_lane"):
-        blockers = open_blockers(tx, task["id"], for_evidence=True)
-        ok = not blockers and not changed
-        why = blockers or (f"protected scope changed: {', '.join(changed)}" if changed else why)
-    if not ok:
-        raise RLError("INVALID", f"no evidence run at {commit[:12]}: {why}. Smoke and timing runs are trials "
-                                 "(--trial --minutes N)")
+def _review_flag(tx: Tx, task: dict, commit: str, fl: Flags, project: Project | None = None) -> None:
+    """An evidence run usually has a review that covers its commit with no open method finding, nor one of medium
+    or higher severity (5.2: flagged when not, as unreviewed or open-findings)."""
+    for code, text in review_flags(tx, task["id"], commit, True, project):
+        fl.add(code, f"evidence run at {commit[:12]}: {text}")
 
 
 def ended(store: Store, raw: str | None = None, attempt: str | None = None, outcome: str | None = None,
@@ -260,10 +257,10 @@ def ended(store: Store, raw: str | None = None, attempt: str | None = None, outc
         with store.write() as tx:
             tx.update(att_id, {"ended_note": (note or text)[:500] or None})
         done.append(att_id)
-    _finish_merge_tests(store, [a for a, _ in found])  # also those ended before: acceptance may still wait on them
-    return {"recorded": done, "pending": pending, "ambiguous": ambiguous,
+    merged = _finish_merge_tests(store, [a for a, _ in found])  # also those ended before: acceptance may wait on them
+    return {"recorded": done, "pending": pending, "ambiguous": ambiguous, **_to_tell(store, done, merged),
             "summary": f"ended: {', '.join(done) or 'nothing new'}"
-            + (f"; still running or unknown: {', '.join(pending)}" if pending else "") + unsure}
+            + (f"; still running or unknown: {', '.join(pending)}" if pending else "") + unsure + merged["summary"]}
 
 
 TERMINAL = ("success", "failed", "cancelled")
@@ -298,12 +295,36 @@ def _comparable(spec: dict, other: dict) -> str:
     return digest_json({k: v for k, v in spec.items() if keep_design or k != "design"})
 
 
-def _finish_merge_tests(store: Store, attempts: list[str]) -> None:
+def _finish_merge_tests(store: Store, attempts: list[str]) -> dict:
     """Acceptance that waits on a merge test: an ended attempt of the run registered for it decides it (tasks.py
-    checks the acceptance, the round and the merge commit)."""
-    from .tasks import finish_merge
+    checks the acceptance, the round and the merge commit). What the acceptances hand on (tasks._after_accept)."""
+    from .tasks import _add_after, _after_accept, decider, finish_merge
+    out: dict = {"summary": ""}
     for att_id in attempts:
-        finish_merge(store, att_id)
+        said = finish_merge(store, att_id)
+        if not said:
+            continue
+        out["summary"] += f"\n{said}"
+        with store.read() as tx:
+            task = tx.require(tx.require(tx.require(att_id, "Attempt")["run_id"], "Run")["task_id"], "Task")
+        if task["state"] == "accepted":
+            _add_after(out, _after_accept(store, task["id"]))
+        elif task["state"] == "delivered" and task.get("merge_state") == "conflict":  # its job failed: who decides
+            out["wake"] = list(out.get("wake") or []) + [decider(task)]
+    return out
+
+
+def _to_tell(store: Store, attempts: list[str], merged: dict) -> dict:
+    """The sessions an attempt's end is news to (3.2): its submitter (a test job of a review round: its reviewer),
+    and those an acceptance it finished hands work to. The caller itself is left out by rl."""
+    with store.read() as tx:
+        names = []
+        for a in attempts:
+            att = tx.require(a, "Attempt")
+            run = tx.require(att["run_id"], "Run")
+            names.append(f"reviewer-{run['ticket_id']}" if run.get("ticket_id") else att.get("submitted_by"))
+    return {"wake": [n for n in names if n] + list(merged.get("wake") or []), "close": merged.get("close"),
+            "next": merged.get("next")}
 
 
 def handled(store: Store, actor: Actor, attempts: list[str], note: str) -> dict:
@@ -474,12 +495,15 @@ def record(store: Store, obs: dict) -> dict:
         if obs.get("usage"):
             usage = _usage(tx, obs["usage"], [att["id"]])
         tx.event("run.record", att["id"], f"{obs['record_id']} {obs['execution_state']}/{obs['outcome']} -> {effect}")
+    tell: dict = {}
+    merged = {"summary": ""}
     if att["execution_state"] == "ended":
-        _finish_merge_tests(store, [att["id"]])
+        merged = _finish_merge_tests(store, [att["id"]])
+        tell = _to_tell(store, [att["id"]], merged)
     return {"record_id": obs["record_id"], "effect": effect, "attempt": brief(att), "execution_ref": xid,
-            "usage": usage, "warnings": warnings,
+            "usage": usage, "warnings": warnings, **tell,
             "summary": f"{obs['record_id']} {effect}; {brief(att)}" + (f"; {issues[0]}" if issues else "")
-                       + (f"; bound to {xid} now, in place of {replaced}" if replaced else "")}
+                       + (f"; bound to {xid} now, in place of {replaced}" if replaced else "") + merged["summary"]}
 
 
 def executor_hint(store: Store, attempt: str) -> str | None:
@@ -734,10 +758,13 @@ def _usage(tx: Tx, usage: dict, attempts: list[str], revise: bool = False) -> di
 
 
 def add_usage(store: Store, usage: dict, attempts: list[str], revise: bool = False) -> dict:
+    from .inbox import recipients
     with store.write() as tx:
         out = _usage(tx, usage, attempts, revise)
-    return {**out, "summary": f"{out['usage']} {'already recorded' if out['duplicate'] else 'recorded'} "
-                              f"({usage['quantity']} {usage['unit']}, {usage['accounting_ref']})"}
+    with store.read() as tx:  # a line crossed is news to the hypothesis task's holder, the top one to the coordinator
+        tell = recipients(tx, store.project.config, ("usage-line",))
+    return {**out, "wake": tell, "summary": f"{out['usage']} {'already recorded' if out['duplicate'] else 'recorded'} "
+                                            f"({usage['quantity']} {usage['unit']}, {usage['accounting_ref']})"}
 
 
 def usage_summary(tx: Tx) -> dict:

@@ -1,12 +1,13 @@
 {
   "hooks": {
     "SessionStart": [
-      {
-        "matcher": "startup|resume|clear|compact",
-        "hooks": [
-          {"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/rl\" hook session-start --host claude", "timeout": 30}
-        ]
-      }
+      {"matcher": "startup|resume|clear|compact", "hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/rl\" hook session-start --host claude", "timeout": 30}]}
+    ],
+    "Stop": [
+      {"hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/rl\" hook stop --host claude", "timeout": 30}]}
+    ],
+    "UserPromptSubmit": [
+      {"hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/rl\" hook user-prompt --host claude", "timeout": 30}]}
     ]
   }
 }

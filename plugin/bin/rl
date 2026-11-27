@@ -236,9 +236,13 @@ target=$(find_project "$@") || target=
 if own_env; then
   if ! project_ready; then
     case ${1-} in
-      hook)  # never block or break the host session: update in the background, say so
+      hook)  # never block or break the host session: update in the background, say so (at session start only)
         ( project_env auto >/dev/null 2>&1 & ) >/dev/null 2>&1
-        printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"Smooth Research plugin: the Python environment of this project (%s/.venv) is being updated for this plugin version in the background; the first %s command waits for it. Then read the session notes with %s status."}}\n' "$target" "$here/rl" "$here/rl"
+        if [ "${2-}" = session-start ]; then
+          printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"Smooth Research plugin: the Python environment of this project (%s/.venv) is being updated for this plugin version in the background; the first %s command waits for it. Then read the session notes with %s status."}}\n' "$target" "$here/rl" "$here/rl"
+        else
+          echo '{}'  # Stop, UserPromptSubmit: nothing to hand over until the records can be read
+        fi
         exit 0
         ;;
       usage) [ "${2-}" = statusline ] && exit 0 ;;  # the status line never waits for a build
@@ -256,9 +260,13 @@ fi
 
 if ! plugin_ready; then
   case ${1-} in
-    hook)  # never block or break the host session: build in the background, say so
+    hook)  # never block or break the host session: build in the background, say so (at session start only)
       ( plugin_env auto >/dev/null 2>&1 & ) >/dev/null 2>&1
-      printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"Smooth Research plugin: the CLI environment of this plugin version is being built in the background; the first %s command waits for it (needs uv; %s setup rebuilds it). Then read the session notes with %s status."}}\n' "$here/rl" "$here/rl" "$here/rl"
+      if [ "${2-}" = session-start ]; then
+        printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"Smooth Research plugin: the CLI environment of this plugin version is being built in the background; the first %s command waits for it (needs uv; %s setup rebuilds it). Then read the session notes with %s status."}}\n' "$here/rl" "$here/rl" "$here/rl"
+      else
+        echo '{}'  # Stop, UserPromptSubmit: nothing to hand over until the records can be read
+      fi
       exit 0
       ;;
     usage) [ "${2-}" = statusline ] && exit 0 ;;

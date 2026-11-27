@@ -6,8 +6,9 @@ Three kinds:
   the symbol too. A branch name is replaced by the commit it points at when written;
 - a file, `DOC-0031` (a record) or an output a task registered, `research/work/T-0042/report.md`.
 
-A locator that does not resolve, more than MAX_REFS of them, or a note over the character cap is refused with a hint
-of where the content belongs instead: a finding, evidence, a decision, or a document on the subject.
+A locator that does not resolve is refused (it cannot be recorded: it points at nothing), with a hint of where the
+content belongs instead. How many locators and how long a note are not checked here: a long note is kept and flagged
+by the command that writes it (2026-11-27, 5.1). note_cap is for a caller that still wants the old cap.
 """
 
 from __future__ import annotations
@@ -19,7 +20,6 @@ from .project import Project
 from .store import Tx, label_of
 from .util import RLError
 
-MAX_REFS = 8
 NOTE_CHARS = 300
 RECORD = re.compile(r"^([A-Z]+-[0-9]{3,6}(?:\.[0-9]+)*)(?:#F([0-9]+))?$")
 CODE = re.compile(r"^([^\s:]+):([^\s:][^\s]*?)(?:::([A-Za-z_][\w.]*))?$")
@@ -34,12 +34,10 @@ def _outputs(tx: Tx) -> set[str]:
     return out
 
 
-def check(tx: Tx, project: Project, refs: list[str], note: str | None = None, note_cap: int | None = NOTE_CHARS
+def check(tx: Tx, project: Project, refs: list[str], note: str | None = None, note_cap: int | None = None
           ) -> list[str]:
     """Validate locators (and a note's length); return them normalised: branch names pinned to commits."""
     refs = [r.strip() for r in refs if r and r.strip()]
-    if len(refs) > MAX_REFS:
-        raise RLError("INVALID", f"{len(refs)} locators: at most {MAX_REFS}; {WHERE}")
     if note and note_cap and len(note) > note_cap:
         raise RLError("INVALID", f"the note has {len(note)} characters, at most {note_cap}; {WHERE}")
     out, bad = [], []

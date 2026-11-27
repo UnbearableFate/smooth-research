@@ -1,6 +1,7 @@
-"""The watcher against a fake herdr: a beat opens a session for work nobody holds (claiming its task), tells an idle
-agent each item once, records a dialog for the coordinator, reopens a session whose agent is gone and closes the
-ones whose work is finished."""
+"""Sessions and the observer against a fake herdr (design 2026-11-27, 3.2, 3.3): a session's record follows its
+agent (bound again when herdr renumbered it, ended when its agent is gone, opened again by the next command that has
+work for it); nothing is done to a pane or tab another agent holds; the observer notes dialogs and redraws the page,
+and opens, claims and closes nothing. The FakeHerdr here is shared with test_handoff.py."""
 
 import json
 import re
@@ -8,7 +9,7 @@ import re
 import flow
 import pytest
 
-from smooth_research import adapters, herdr, launch, page, usage, watch
+from smooth_research import adapters, herdr, launch, page, sessions, usage, watch
 from smooth_research.util import RLError
 
 
@@ -73,224 +74,19 @@ class FakeHerdr:
 def fake(monkeypatch):
     h = FakeHerdr()
     monkeypatch.setattr(herdr, "call", h.call)
+    monkeypatch.setattr(herdr, "problem", lambda: None)
     monkeypatch.setattr(herdr, "read", lambda target: "Do you want to proceed?\n❯ 1. Yes\n  2. No")
     monkeypatch.setattr(adapters, "available", lambda entry: None)  # every configured host is installed
     monkeypatch.setattr(usage, "low_hosts", lambda store: {})
     return h
 
 
-def sessions(store) -> dict[str, dict]:
+def opened(store) -> dict[str, dict]:
     with store.read() as tx:
         return {s["name"]: s for s in tx.all("Session") if s["status"] == "open"}
 
 
-def test_a_beat_opens_a_session_that_claims_its_task_and_tells_it_once(project, rl, fake):
-    flow.approved(project, rl)
-    out = watch.beat(project)
-    assert any(a.startswith("scientist-T-0002: opened") for a in out["actions"]), out
-    with project.read() as tx:
-        task = tx.require("T-0002")
-    assert task["holder"] == "scientist-T-0002" and task["state"] == "active"
-    s = sessions(project)["scientist-T-0002"]
-    assert s["cwd"] == task["worktree"] and s["herdr_pane"] in fake.agents
-    created = next(c for c in fake.calls if c[:2] == ("tab", "create"))
-    env = [created[i + 1] for i, a in enumerate(created) if a == "--env"]
-    assert "SMOOTH_RESEARCH_SESSION=scientist-T-0002" in env and created[created.index("--cwd") + 1] == s["cwd"]
-    [(pane, first)] = fake.prompts
-    assert pane == s["herdr_pane"] and "You are scientist-T-0002" in first and "rl pack" in first
-    assert "coordinator" not in sessions(project)  # rl resume opens the coordinator's pane, not the beat
-
-    again = watch.beat(project)
-    assert len(fake.prompts) == 1, again  # told once; nothing new
-    assert json.loads(watch.heartbeat_path(project).read_text())["at"]
-    assert watch.alive(project)
-
-
-def test_a_new_item_is_typed_into_an_idle_pane_and_held_while_it_works(project, rl, fake):
-    flow.approved(project, rl)
-    watch.beat(project)
-    pane = sessions(project)["scientist-T-0002"]["herdr_pane"]
-    flow.ok(rl("question", "--to", "scientist-T-0002", "--on", "T-0002", "--text", "which arm first?",
-               who="coordinator"))
-    fake.set(pane, "working")
-    watch.beat(project)
-    assert len(fake.prompts) == 1  # it works: nothing typed
-    fake.set(pane, "idle")
-    watch.beat(project)
-    assert len(fake.prompts) == 2 and "question T-0002" in fake.prompts[-1][1]
-    assert "which arm first?" in fake.prompts[-1][1]
-
-
-def test_a_dialog_goes_to_the_coordinator_and_clears_when_answered(project, rl, fake):
-    flow.approved(project, rl)
-    watch.beat(project)
-    pane = sessions(project)["scientist-T-0002"]["herdr_pane"]
-    fake.set(pane, "blocked")
-    watch.beat(project)
-    assert "Do you want to proceed?" in sessions(project)["scientist-T-0002"]["needs_decision"]
-    assert "session-needs-decision" in flow.types(project, "coordinator")
-    fake.set(pane, "idle")
-    watch.beat(project)
-    assert sessions(project)["scientist-T-0002"].get("needs_decision") is None
-    assert "session-needs-decision" not in flow.types(project, "coordinator")
-
-
-def test_a_gone_agent_ends_its_session_and_the_next_beat_opens_it_again(project, rl, fake):
-    flow.approved(project, rl)
-    watch.beat(project)
-    first = sessions(project)["scientist-T-0002"]
-    del fake.agents[first["herdr_pane"]]
-    out = watch.beat(project)
-    assert any("its agent is gone" in a for a in out["actions"])
-    watch.beat(project)
-    again = sessions(project)["scientist-T-0002"]
-    assert again["id"] != first["id"] and again["conversations"] == 2
-    with project.read() as tx:
-        assert tx.require("T-0002")["holder"] == "scientist-T-0002"  # still its task
-
-
-def test_a_session_being_started_is_left_to_its_opener(project, rl, fake):
-    """rl resume writes the coordinator's record before its agent starts; a beat meanwhile neither ends it (which
-    would orphan the agent) nor opens another."""
-    flow.tree(project, rl)
-    with project.write() as tx:
-        tx.create("Session", {"id": tx.next_id("Session"), "name": "coordinator", "role": "coordinator",
-                              "subject": "project", "host": "claude", "entry": "claude:m", "status": "open",
-                              "cwd": str(project.project.root)})
-    out = watch.beat(project)
-    assert not any("closed" in a for a in out["actions"]), out
-    assert "coordinator" in sessions(project) and not fake.prompts
-    assert watch.ensure_coordinator(project) == "the coordinator is being started"
-
-
-def test_a_coordinator_whose_record_ended_while_its_agent_lives_is_bound_again(project, rl, fake):
-    flow.tree(project, rl)  # the delivered tree waits on the coordinator
-    name = launch.herdr_name(project, "coordinator")
-    with project.write() as tx:
-        tx.create("Session", {"id": tx.next_id("Session"), "name": "coordinator", "role": "coordinator",
-                              "subject": "project", "host": "claude", "entry": "claude:m", "status": "ended",
-                              "cwd": str(project.project.root)})
-    fake.tabs["w1:t7"] = name
-    fake.agents["w1:p7"] = {"name": name, "agent_status": "idle", "state_change_seq": 1}
-    out = watch.beat(project)
-    assert "coordinator: bound again to its live agent in w1:p7" in out["actions"], out
-    s = sessions(project)["coordinator"]
-    assert s["herdr_pane"] == "w1:p7" and s["herdr_tab"] == "w1:t7"
-    assert [p for p, _ in fake.prompts] == ["w1:p7"] and "T-0001" in fake.prompts[0][1]
-    assert not any(c[:2] == ("agent", "start") for c in fake.calls)  # no second agent under its name
-    with project.write() as tx:  # ended again: rl resume binds it too, rather than starting another
-        tx.update(s["id"], {"status": "ended"})
-    assert watch.ensure_coordinator(project) == "the coordinator runs in pane w1:p7 (its session bound again)"
-
-
-def test_a_live_agent_in_a_tab_rl_did_not_make_is_not_bound(project, rl, fake):
-    flow.tree(project, rl)
-    name = launch.herdr_name(project, "coordinator")
-    with project.write() as tx:
-        tx.create("Session", {"id": tx.next_id("Session"), "name": "coordinator", "role": "coordinator",
-                              "subject": "project", "host": "claude", "entry": "claude:m", "status": "ended",
-                              "cwd": str(project.project.root)})
-    fake.tabs["w1:t7"] = "someone else's"
-    fake.agents["w1:p7"] = {"name": name, "agent_status": "idle", "state_change_seq": 1}
-    watch.beat(project)
-    assert "coordinator" not in sessions(project) and not fake.prompts
-
-
-def test_a_finished_session_is_closed_with_its_tab(project, rl, fake):
-    flow.tree(project, rl)
-    with project.write() as tx:  # the tree task's scientist ran in a session of its own
-        tx.create("Session", {"id": tx.next_id("Session"), "name": "scientist-T-0001", "role": "scientist",
-                              "subject": "T-0001", "host": "claude", "entry": "claude:m", "status": "open",
-                              "cwd": str(project.project.root), "herdr_tab": "w1:t9", "herdr_pane": "w1:p9"})
-    fake.tabs["w1:t9"] = launch.herdr_name(project, "scientist-T-0001")
-    fake.agents["w1:p9"] = {"name": launch.herdr_name(project, "scientist-T-0001"), "agent_status": "idle",
-                            "state_change_seq": 1}
-    flow.ok(rl("task", "accept", "T-0001", who="coordinator"))
-    out = watch.beat(project)
-    assert "scientist-T-0001: closed (its work is finished)" in out["actions"]
-    assert "w1:t9" not in fake.tabs and "scientist-T-0001" not in sessions(project)
-
-
-def test_herdr_names_are_lowercase_short_and_differ_between_projects(project, tmp_path):
-    name = launch.herdr_name(project, "researcher-T-10003")
-    assert re.fullmatch(r"[a-z][a-z0-9_-]{0,31}", name) and name.endswith("-researcher-t-10003")
-    other = type(project.project)(tmp_path / "elsewhere" / "proj", {})
-    assert launch.herdr_name(type(project)(other, "t"), "coordinator") != launch.herdr_name(project, "coordinator")
-
-
-def test_a_pane_id_that_now_holds_another_agent_is_left_alone(project, rl, fake):
-    """After a herdr restart ids start again: the saved pane and tab may hold another project's agent."""
-    flow.approved(project, rl)
-    watch.beat(project)
-    s = sessions(project)["scientist-T-0002"]
-    fake.agents[s["herdr_pane"]]["name"] = "other1234-scientist-t-0002"
-    fake.tabs[s["herdr_tab"]] = "other1234-scientist-t-0002"
-    prompts = len(fake.prompts)
-    out = watch.beat(project)
-    assert any("its agent is gone" in a for a in out["actions"])
-    assert s["herdr_tab"] in fake.tabs  # not closed: not ours
-    assert not any(p == s["herdr_pane"] for p, _ in fake.prompts[prompts:])
-    assert not any(c[:2] == ("tab", "close") for c in fake.calls)
-
-
-def test_a_tab_with_its_label_but_another_agent_in_it_is_not_closed(project, rl, fake):
-    flow.approved(project, rl)
-    watch.beat(project)
-    s = sessions(project)["scientist-T-0002"]
-    fake.agents[s["herdr_pane"]]["name"] = "someone-else"
-    assert launch.own_tab(project, s) is None
-    fake.agents.pop(s["herdr_pane"])  # an empty pane (the agent exited): the tab is still ours to close
-    assert launch.own_tab(project, s) == s["herdr_tab"]
-
-
-def test_a_session_with_nothing_to_do_is_still_watched_for_dialogs(project, rl, fake):
-    flow.dispatched(project, rl)
-    with project.write() as tx:  # the scientist waits on its researcher: no items, an open session
-        tx.create("Session", {"id": tx.next_id("Session"), "name": "scientist-T-0002", "role": "scientist",
-                              "subject": "T-0002", "host": "claude", "entry": "claude:m", "status": "open",
-                              "cwd": str(project.project.root), "herdr_tab": "w1:t9", "herdr_pane": "w1:p9"})
-    fake.agents["w1:p9"] = {"name": launch.herdr_name(project, "scientist-T-0002"), "agent_status": "blocked",
-                            "state_change_seq": 2}
-    assert flow.types(project, "scientist-T-0002") == []
-    watch.beat(project)
-    assert "session-needs-decision" in flow.types(project, "coordinator")
-
-
-def test_a_claim_that_fails_does_not_stop_the_beat(project, rl, fake, monkeypatch):
-    flow.approved(project, rl)
-    from smooth_research import tasks
-
-    def taken(store, tid, holder):
-        raise tasks.RLError("CONFLICT", f"{tid} is active, held by someone")
-    monkeypatch.setattr(tasks, "claim", taken)
-    out = watch.beat(project)
-    assert any("not opened" in a for a in out["actions"]) and watch.alive(project)
-    assert "scientist-T-0002" not in sessions(project)
-
-
-def test_the_page_is_drawn_again_only_when_the_records_changed(project, rl, fake, monkeypatch):
-    flow.approved(project, rl)
-    watch.beat(project)
-    drawn = []
-    monkeypatch.setattr(page, "write", lambda store: drawn.append(1))
-    pane = sessions(project)["scientist-T-0002"]["herdr_pane"]
-    fake.set(pane, "working")
-    watch.beat(project)  # the session's seq moved: a record changed
-    watch.beat(project)
-    watch.beat(project)
-    assert len(drawn) == 1
-
-
-def test_the_watcher_needs_herdr(project):
-    with pytest.raises(RLError, match="needs herdr"):
-        watch.run(project, once=True)
-
-
-def test_a_stale_heartbeat_makes_every_command_say_the_watcher_stopped(project, rl):
-    assert watch.stale_note(project) is None  # never started: nothing to say
-    watch.heartbeat_path(project).write_text(json.dumps({"at": "2026-01-01T00:00:00+00:00", "pid": 1}))
-    code, out, _ = rl("status")
-    assert code == 0 and "warning: the watcher is not running: run `rl resume`" in out
+S = "scientist-T-0002"
 
 
 def _coordinator_row(project, status, pane=None):
@@ -303,34 +99,149 @@ def _coordinator_row(project, status, pane=None):
     return sid
 
 
+def _live_coordinator(project, fake, n=7):
+    name = launch.herdr_name(project, "coordinator")
+    fake.tabs[f"w1:t{n}"] = name
+    fake.agents[f"w1:p{n}"] = {"name": name, "agent_status": "idle", "state_change_seq": 1}
+
+
+def test_a_gone_agent_ends_its_record_and_the_next_command_for_it_opens_it_again(project, rl, fake):
+    flow.approved(project, rl)  # release opened the scientist
+    first = opened(project)[S]
+    del fake.agents[first["herdr_pane"]]
+    watch.beat(project)  # the observer opens nothing
+    assert not [c for c in fake.calls if c[:2] == ("agent", "start")][1:]
+    flow.ok(rl("question", "--to", S, "--on", "T-0002", "--text", "which arm first?", who="coordinator"))
+    again = opened(project)[S]
+    assert again["id"] != first["id"] and again["conversations"] == 2
+    assert "which arm first?" in fake.prompts[-1][1]
+    with project.read() as tx:
+        assert tx.require("T-0002")["holder"] == S  # still its task
+
+
+def test_a_session_being_started_is_left_to_its_opener(project, rl, fake):
+    """rl resume writes the coordinator's record before its agent starts; meanwhile nothing ends it (which would
+    orphan the agent) or opens another."""
+    flow.tree(project, rl)
+    _coordinator_row(project, "open")
+    out = watch.beat(project)
+    assert not any("closed" in a for a in out["actions"]), out
+    assert "coordinator" in opened(project) and not fake.prompts
+    assert sessions.ensure_coordinator(project) == "the coordinator is being started"
+    assert sessions.wake(project, "coordinator").startswith("coordinator: being started")
+
+
+def test_a_coordinator_whose_record_ended_while_its_agent_lives_is_bound_again(project, rl, fake):
+    flow.tree(project, rl)
+    _coordinator_row(project, "ended")
+    _live_coordinator(project, fake)
+    assert sessions.ensure_coordinator(project) == "the coordinator runs in pane w1:p7"
+    s = opened(project)["coordinator"]
+    assert s["herdr_pane"] == "w1:p7" and s["herdr_tab"] == "w1:t7"
+    assert not any(c[:2] == ("agent", "start") for c in fake.calls)  # no second agent under its name
+
+
+def test_a_live_agent_in_a_tab_rl_did_not_make_is_not_bound(project, rl, fake):
+    flow.tree(project, rl)
+    _coordinator_row(project, "ended")
+    _live_coordinator(project, fake)
+    fake.tabs["w1:t7"] = "someone else's"
+    assert sessions.rebind(project, "coordinator") is None
+    watch.beat(project)
+    assert "coordinator" not in opened(project) and not fake.prompts
+
+
+def test_herdr_names_are_lowercase_short_and_differ_between_projects(project, tmp_path):
+    name = launch.herdr_name(project, "researcher-T-10003")
+    assert re.fullmatch(r"[a-z][a-z0-9_-]{0,31}", name) and name.endswith("-researcher-t-10003")
+    other = type(project.project)(tmp_path / "elsewhere" / "proj", {})
+    assert launch.herdr_name(type(project)(other, "t"), "coordinator") != launch.herdr_name(project, "coordinator")
+
+
+def test_a_pane_id_that_now_holds_another_agent_is_left_alone(project, rl, fake):
+    """After a herdr restart ids start again: the saved pane and tab may hold another project's agent."""
+    flow.approved(project, rl)
+    s = opened(project)[S]
+    fake.agents[s["herdr_pane"]]["name"] = "other1234-scientist-t-0002"
+    fake.tabs[s["herdr_tab"]] = "other1234-scientist-t-0002"
+    prompts = len(fake.prompts)
+    watch.beat(project)
+    assert sessions.close(project, S, "test") == f"{S}: closed (test)"  # the record ends; the tab is not ours
+    assert s["herdr_tab"] in fake.tabs
+    assert not any(p == s["herdr_pane"] for p, _ in fake.prompts[prompts:])
+    assert not any(c[:2] == ("tab", "close") for c in fake.calls)
+
+
+def test_a_tab_with_its_label_but_another_agent_in_it_is_not_closed(project, rl, fake):
+    flow.approved(project, rl)
+    s = opened(project)[S]
+    fake.agents[s["herdr_pane"]]["name"] = "someone-else"
+    assert launch.own_tab(project, s) is None
+    fake.agents.pop(s["herdr_pane"])  # an empty pane (the agent exited): the tab is still ours to close
+    assert launch.own_tab(project, s) == s["herdr_tab"]
+
+
+def test_a_session_with_nothing_to_do_is_still_watched_for_dialogs(project, rl, fake):
+    flow.dispatched(project, rl)  # the scientist waits on its researcher: no items, an open session
+    assert flow.types(project, S) == []
+    fake.set(opened(project)[S]["herdr_pane"], "blocked")
+    watch.beat(project)
+    assert "Do you want to proceed?" in opened(project)[S]["needs_decision"]
+    assert "session-needs-decision" in flow.types(project, "coordinator")
+    fake.set(opened(project)[S]["herdr_pane"], "idle")
+    watch.beat(project)
+    assert opened(project)[S].get("needs_decision") is None
+    assert "session-needs-decision" not in flow.types(project, "coordinator")
+
+
+def test_the_page_is_drawn_again_only_when_the_records_changed(project, rl, fake, monkeypatch):
+    flow.approved(project, rl)
+    watch.beat(project)
+    drawn = []
+    monkeypatch.setattr(page, "write", lambda store: drawn.append(1))
+    fake.set(opened(project)[S]["herdr_pane"], "working")
+    watch.beat(project)  # the session's seq moved: a record changed
+    watch.beat(project)
+    watch.beat(project)
+    assert len(drawn) == 1
+
+
+def test_without_herdr_the_observer_still_draws_the_page(project, rl, monkeypatch):
+    drawn = []
+    monkeypatch.setattr(page, "write", lambda store: drawn.append(1))
+    assert watch.run(project, once=True)["summary"] == "nothing to do" and drawn
+    assert watch.alive(project)
+
+
+def test_an_observer_that_stopped_is_no_warning(project, rl):
+    """The observer is optional: a stale heartbeat is a status line, not a warning on every command."""
+    watch.heartbeat_path(project).write_text(json.dumps({"at": "2026-01-01T00:00:00+00:00", "pid": 1}))
+    code, out, _ = rl("status")
+    assert code == 0 and "warning:" not in out and "observer: not running (optional" in out
+
+
 def test_an_open_session_whose_pane_id_went_stale_is_bound_to_its_live_agent(project, rl, fake):
     flow.tree(project, rl)
-    name = launch.herdr_name(project, "coordinator")
     sid = _coordinator_row(project, "open", pane="w1:p3")  # herdr renumbered: its agent now lives in w1:p7
-    fake.tabs["w1:t7"] = name
-    fake.agents["w1:p7"] = {"name": name, "agent_status": "idle", "state_change_seq": 1}
-    assert watch.ensure_coordinator(project) == "the coordinator runs in pane w1:p7 (its session bound again)"
-    assert sessions(project)["coordinator"]["id"] == sid and "w1:t7" in fake.tabs
+    _live_coordinator(project, fake)
+    assert sessions.ensure_coordinator(project) == "the coordinator runs in pane w1:p7"
+    assert opened(project)["coordinator"]["id"] == sid and "w1:t7" in fake.tabs
     assert not any(c[:2] in (("tab", "close"), ("agent", "start")) for c in fake.calls)
 
 
 def test_a_session_bound_meanwhile_is_returned_and_not_started_again(project, rl, fake):
     flow.tree(project, rl)
-    name = launch.herdr_name(project, "coordinator")
     _coordinator_row(project, "open", pane="w1:p7")
-    fake.tabs["w1:t7"] = name
-    fake.agents["w1:p7"] = {"name": name, "agent_status": "idle", "state_change_seq": 1}
-    assert watch.rebind(project, "coordinator")["herdr_pane"] == "w1:p7"  # the watcher bound it a moment ago
-    out = watch.open_session(project, "coordinator", [], {})  # rl resume, on its older reading
+    _live_coordinator(project, fake)
+    assert sessions.rebind(project, "coordinator")["herdr_pane"] == "w1:p7"
+    out = sessions.open_session(project, "coordinator")  # a command, on its older reading
     assert out.startswith("coordinator: runs already") and not any(c[:2] == ("agent", "start") for c in fake.calls)
 
 
-def test_a_tab_lookup_herdr_cannot_answer_closes_nothing(project, rl, fake, monkeypatch):
+def test_a_tab_lookup_herdr_cannot_answer_closes_and_starts_nothing(project, rl, fake, monkeypatch):
     flow.tree(project, rl)
-    name = launch.herdr_name(project, "coordinator")
     _coordinator_row(project, "open", pane="w1:p3")  # stale: its agent lives in w1:p7
-    fake.tabs["w1:t7"] = name
-    fake.agents["w1:p7"] = {"name": name, "agent_status": "idle", "state_change_seq": 1}
+    _live_coordinator(project, fake)
     real, failed = fake.call, []
 
     def timeout_once(*args, timeout=90):
@@ -339,28 +250,24 @@ def test_a_tab_lookup_herdr_cannot_answer_closes_nothing(project, rl, fake, monk
             raise RLError("HERDR", "timed out", herdr_code="timeout")
         return real(*args, timeout=timeout)
     monkeypatch.setattr(herdr, "call", timeout_once)
-    assert "could not be checked" in watch.ensure_coordinator(project)
+    assert "could not be checked" in sessions.ensure_coordinator(project)
     assert "w1:t7" in fake.tabs and not any(c[:2] in (("tab", "close"), ("agent", "start")) for c in fake.calls)
-    assert watch.ensure_coordinator(project).endswith("(its session bound again)")  # the next look binds it
+    assert sessions.ensure_coordinator(project) == "the coordinator runs in pane w1:p7"  # the next look binds it
 
 
 def test_an_old_race_that_left_two_records_binds_the_open_one(project, rl, fake):
     flow.tree(project, rl)
-    name = launch.herdr_name(project, "coordinator")
     first = _coordinator_row(project, "open", pane="w1:p3")
     _coordinator_row(project, "ended")  # the failed second start of the old race
-    fake.tabs["w1:t7"] = name
-    fake.agents["w1:p7"] = {"name": name, "agent_status": "idle", "state_change_seq": 1}
-    watch.ensure_coordinator(project)
-    assert sessions(project)["coordinator"]["id"] == first
+    _live_coordinator(project, fake)
+    sessions.ensure_coordinator(project)
+    assert opened(project)["coordinator"]["id"] == first
     with project.read() as tx:
         assert [s["status"] for s in tx.all("Session", name="coordinator")] == ["open", "ended"]
 
 
 def test_a_close_herdr_cannot_answer_keeps_the_session_open(project, rl, fake, monkeypatch):
     flow.approved(project, rl)
-    watch.beat(project)
-    s = sessions(project)["scientist-T-0002"]
     real = fake.call
 
     def timeout(*args, timeout=90):
@@ -368,29 +275,27 @@ def test_a_close_herdr_cannot_answer_keeps_the_session_open(project, rl, fake, m
             raise RLError("HERDR", "timed out", herdr_code="timeout")
         return real(*args, timeout=timeout)
     monkeypatch.setattr(herdr, "call", timeout)
-    assert "not closed yet" in watch.close_session(project, s, "its work is finished")
-    assert "scientist-T-0002" in sessions(project)
+    assert "not closed" in sessions.close(project, S, "its work is finished")
+    assert S in opened(project)
 
 
 def test_nothing_is_typed_into_a_dialog_herdr_reports_as_idle(project, rl, fake, monkeypatch):
     """Codex trial, 11-25: a Codex session at its hook review is idle to herdr; the review request typed into it was
     lost while it counted as told."""
     flow.approved(project, rl)
-    watch.beat(project)
-    s = sessions(project)["scientist-T-0002"]
+    s = opened(project)[S]
     with project.write() as tx:
         tx.update(s["id"], {"host": "codex"})
     screen = {"text": "Hooks need review\n1 hook is new or changed.\n› 1. Review hooks"}
     monkeypatch.setattr(herdr, "read", lambda target: screen["text"])
-    flow.ok(rl("question", "--to", "scientist-T-0002", "--on", "T-0002", "--text", "which arm first?",
-               who="coordinator"))
     fake.set(s["herdr_pane"], "idle")
-    watch.beat(project)
-    assert len(fake.prompts) == 1  # held: only the first item, before the dialog
-    assert "Hooks need review" in sessions(project)["scientist-T-0002"]["needs_decision"]
+    out = flow.ok(rl("question", "--to", S, "--on", "T-0002", "--text", "which arm first?", who="coordinator"))
+    mine = lambda: [t for p, t in fake.prompts if p == s["herdr_pane"]]  # noqa: E731
+    assert "waits at a dialog" in out and len(mine()) == 1  # held: only the first prompt, before the dialog
+    assert "Hooks need review" in opened(project)[S]["needs_decision"]
     assert "session-needs-decision" in flow.types(project, "coordinator")
     screen["text"] = ("• read the reviewer's screen: Hooks need review / 1 hook is new or changed.\n"
                       "› Ask Codex to do anything\n  GPT-Reserve medium · /tmp/x\n  ← for agents · ? for shortcuts")
     watch.beat(project)  # its own transcript quotes another's dialog: it takes prompts
-    assert sessions(project)["scientist-T-0002"].get("needs_decision") is None
-    assert len(fake.prompts) == 2 and "which arm first?" in fake.prompts[-1][1]
+    assert opened(project)[S].get("needs_decision") is None
+    assert len(mine()) == 2 and "which arm first?" in mine()[-1]

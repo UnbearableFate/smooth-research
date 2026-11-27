@@ -1,0 +1,1031 @@
+{
+ "format": "smooth-research-snapshot/1",
+ "exported_at": "20261127T074306Z",
+ "schema_version": 6,
+ "meta": {
+  "schema_version": 6,
+  "data_version": 31,
+  "last_build": "dev",
+  "created_at": "2026-11-27T07:43:03+00:00",
+  "updated_at": "2026-11-27T07:43:06+00:00",
+  "title": "toy",
+  "seq_DOC": 1,
+  "seq_EVT": 37,
+  "plan_ref": "DOC-0001@1",
+  "plan_source": "/tmp/pytest-of-yu/pytest-418/test_make0/proj/plan.md",
+  "seq_D": 3,
+  "seq_H": 1,
+  "seq_T": 3,
+  "seq_RQ": 1,
+  "seq_PH": 1,
+  "seq_E": 1,
+  "seq_RV": 2,
+  "seq_RUN": 2,
+  "seq_RES": 2,
+  "seq_EV": 1,
+  "seq_MSG": 2
+ },
+ "nodes": {
+  "Hypothesis": [
+   {
+    "created_at": "2026-11-27T07:43:04+00:00",
+    "updated_at": "2026-11-27T07:43:06+00:00",
+    "id": "H-0001",
+    "label": "H1",
+    "title": "Averaging helps",
+    "statement": "mean of 3 beats 1",
+    "scope": "N(5,1)",
+    "source": "docs/plan.md § Averaging",
+    "purpose": "whether averaging is worth it",
+    "evidence_status": "supported",
+    "disposition": "active",
+    "revision": 1,
+    "cost": "about 0.01 cpu·h",
+    "kind": "main",
+    "origin": "D-0001"
+   }
+  ],
+  "Experiment": [
+   {
+    "created_at": "2026-11-27T07:43:04+00:00",
+    "updated_at": "2026-11-27T07:43:04+00:00",
+    "id": "E-0001",
+    "label": "EH1/1",
+    "title": "Sim",
+    "question": "is mean3 better?",
+    "revision": 1,
+    "manifest_path": "src/avg/arms.yaml",
+    "protected": "[\"src/avg/sim.py::error\"]",
+    "semantic_tests": "cd src/avg && python3 test_sim.py",
+    "edit_seq": 1,
+    "design_commit": "11afc966215b5d68122b8788e51a886ddc983983",
+    "sealed_at": "2026-11-27T07:43:04+00:00",
+    "sealed_by": "T-0003",
+    "manifest": "{\"arms\": [{\"config\": {\"k\": 1}, \"name\": \"single\", \"seeds\": [0]}, {\"config\": {\"k\": 3}, \"name\": \"mean3\", \"seeds\": [0]}], \"metrics\": [\"abs_error\"], \"stop_when\": \"the test fails\"}",
+    "manifest_digest": "blake2b:02a8ed250d901495412e1431a1d03c7f9eb43f87ff2070a805591253d5806021"
+   }
+  ],
+  "Evidence": [
+   {
+    "created_at": "2026-11-27T07:43:05+00:00",
+    "updated_at": "2026-11-27T07:43:05+00:00",
+    "id": "EV-0001",
+    "summary": "mean3 error lower",
+    "validity": "valid",
+    "evidence_level": "diagnostic",
+    "task_id": "T-0003"
+   }
+  ],
+  "Decision": [
+   {
+    "created_at": "2026-11-27T07:43:04+00:00",
+    "updated_at": "2026-11-27T07:43:04+00:00",
+    "id": "D-0001",
+    "kind": "route",
+    "state": "final",
+    "rationale": "The plan makes one claim, that averaging lowers the error; one hypothesis covers it.",
+    "author": "coordinator",
+    "final_at": "2026-11-27T07:43:04+00:00"
+   },
+   {
+    "created_at": "2026-11-27T07:43:04+00:00",
+    "updated_at": "2026-11-27T07:43:04+00:00",
+    "id": "D-0002",
+    "kind": "route",
+    "state": "final",
+    "rationale": "simulate",
+    "task_id": "T-0002",
+    "author": "scientist-T-0002",
+    "final_at": "2026-11-27T07:43:04+00:00"
+   },
+   {
+    "created_at": "2026-11-27T07:43:05+00:00",
+    "updated_at": "2026-11-27T07:43:06+00:00",
+    "id": "D-0003",
+    "kind": "verdict",
+    "state": "final",
+    "rationale": "lower",
+    "evidence_status_set": "supported",
+    "did": "simulated both arms",
+    "means": "averaging helps here",
+    "task_id": "T-0002",
+    "supports": "[\"EV-0001\"]",
+    "author": "scientist-T-0002",
+    "final_at": "2026-11-27T07:43:06+00:00"
+   }
+  ],
+  "Paper": [],
+  "Task": [
+   {
+    "created_at": "2026-11-27T07:43:04+00:00",
+    "updated_at": "2026-11-27T07:43:06+00:00",
+    "id": "T-0001",
+    "title": "Python check",
+    "kind": "prep",
+    "state": "active",
+    "revision": 3,
+    "creator": "coordinator",
+    "requirement": "a python3 that runs the simulator",
+    "done_check": "python3 -c \"print('ok')\"",
+    "reason": "shared preparation of the tree (D-0001)",
+    "released_at": "2026-11-27T07:43:06+00:00",
+    "holder": "researcher-T-0001",
+    "holders": "[{\"at\": \"2026-11-27T07:43:06+00:00\", \"holder\": \"researcher-T-0001\"}]",
+    "branch": "sr/T-0001",
+    "worktree": "/tmp/pytest-of-yu/pytest-418/test_make0/proj-worktrees/T-0001",
+    "flags": "[{\"at\": \"2026-11-27T07:43:06+00:00\", \"by\": \"scientist-T-0002\", \"code\": \"role\", \"text\": \"releasing a task is the coordinator's step; scientist-T-0002 did it\"}]"
+   },
+   {
+    "created_at": "2026-11-27T07:43:04+00:00",
+    "updated_at": "2026-11-27T07:43:06+00:00",
+    "id": "T-0002",
+    "title": "Test Averaging helps",
+    "kind": "hypothesis",
+    "state": "delivered",
+    "revision": 4,
+    "creator": "coordinator",
+    "priority": 1,
+    "envelope": "about 1 cpu·h",
+    "reason": "the only one",
+    "released_at": "2026-11-27T07:43:04+00:00",
+    "holder": "scientist-T-0002",
+    "holders": "[{\"at\": \"2026-11-27T07:43:04+00:00\", \"holder\": \"scientist-T-0002\"}]",
+    "branch": "sr/T-0002",
+    "worktree": "/tmp/pytest-of-yu/pytest-418/test_make0/proj-worktrees/T-0002",
+    "conclusion": "averaging helps",
+    "delivered_commit": "ddcb6d5bc9bde0edcc7c96d37b8e714655aad39d",
+    "delivered_at": "2026-11-27T07:43:06+00:00",
+    "state_note": null,
+    "return_note": null
+   },
+   {
+    "created_at": "2026-11-27T07:43:04+00:00",
+    "updated_at": "2026-11-27T07:43:05+00:00",
+    "id": "T-0003",
+    "title": "Run sim",
+    "kind": "execute",
+    "state": "accepted",
+    "revision": 6,
+    "creator": "scientist-T-0002",
+    "estimate": "0.01 cpu·h",
+    "holder": "researcher-T-0003",
+    "holders": "[{\"at\": \"2026-11-27T07:43:04+00:00\", \"holder\": \"scientist-T-0002\"}, {\"at\": \"2026-11-27T07:43:04+00:00\", \"holder\": \"researcher-T-0003\"}]",
+    "branch": "sr/T-0003",
+    "worktree": "/tmp/pytest-of-yu/pytest-418/test_make0/proj-worktrees/T-0003",
+    "tests": "[{\"at\": \"2026-11-27T07:43:04+00:00\", \"by\": \"scientist-T-0002\", \"command\": \"cd src/avg && python3 test_sim.py\", \"commit\": \"11afc966215b5d68122b8788e51a886ddc983983\", \"design\": \"E-0001@1#blake2b:a327649d85a96e196cbb6a3b82a4d0baa8ba195145c1b1b37ea3524d5ab6648d\", \"detail\": \"ok\", \"outcome\": \"pass\"}]",
+    "dispatch_note": "both arms",
+    "design_commit": "11afc966215b5d68122b8788e51a886ddc983983",
+    "sealed_design": "{\"brief_ref\": null, \"design_commit\": \"11afc966215b5d68122b8788e51a886ddc983983\", \"edit_seq\": 1, \"id\": \"E-0001\", \"label\": \"EH1/1\", \"manifest\": {\"arms\": [{\"config\": {\"k\": 1}, \"name\": \"single\", \"seeds\": [0]}, {\"config\": {\"k\": 3}, \"name\": \"mean3\", \"seeds\": [0]}], \"metrics\": [\"abs_error\"], \"stop_when\": \"the test fails\"}, \"manifest_digest\": \"blake2b:02a8ed250d901495412e1431a1d03c7f9eb43f87ff2070a805591253d5806021\", \"manifest_path\": \"src/avg/arms.yaml\", \"protected\": [\"src/avg/sim.py::error\"], \"question\": \"is mean3 better?\", \"revision\": 1, \"semantic_tests\": \"cd src/avg && python3 test_sim.py\"}",
+    "conclusion": "mean3 lowers the error (EV-0001)",
+    "limitations": "one seed",
+    "delivered_commit": "f30c7ea2316179803062843b5b06362c12911361",
+    "delivered_at": "2026-11-27T07:43:05+00:00",
+    "state_note": null,
+    "return_note": null,
+    "outputs": "[{\"path\": \"research/work/T-0003/mean3-0.json\"}]",
+    "merge_state": "merged",
+    "merge_note": null,
+    "merge_commit": "3b6e29bf785986ba5c34b0edfb09f2434cf94fcb"
+   }
+  ],
+  "Phase": [
+   {
+    "created_at": "2026-11-27T07:43:04+00:00",
+    "updated_at": "2026-11-27T07:43:04+00:00",
+    "id": "PH-0001",
+    "title": "Phase 1"
+   }
+  ],
+  "Ask": [
+   {
+    "created_at": "2026-11-27T07:43:04+00:00",
+    "updated_at": "2026-11-27T07:43:04+00:00",
+    "id": "RQ-0001",
+    "kind": "approval",
+    "decision_id": "D-0001",
+    "state": "answered",
+    "by": "coordinator",
+    "stuck": "approve the hypothesis tree (1 hypotheses, 1 shared preparation tasks)",
+    "options": "approve | change",
+    "recommend": "approve",
+    "answer": "approve",
+    "answered_by": "user",
+    "answered_at": "2026-11-27T07:43:04+00:00",
+    "forwarded_at": "2026-11-27T07:43:04+00:00",
+    "choice": "approve"
+   }
+  ],
+  "Document": [
+   {
+    "created_at": "2026-11-27T07:43:04+00:00",
+    "updated_at": "2026-11-27T07:43:04+00:00",
+    "id": "DOC-0001",
+    "path": "docs/plan.md",
+    "doc_type": "plan",
+    "owner": "project",
+    "latest_revision": 1,
+    "latest_digest": "blake2b:cdd285a86747ded9bfe0663743ed649e1c9db69e8f8f39ae6099b41d396e3534"
+   }
+  ],
+  "DocRevision": [
+   {
+    "created_at": "2026-11-27T07:43:04+00:00",
+    "updated_at": "2026-11-27T07:43:04+00:00",
+    "id": "DOC-0001@1",
+    "document_id": "DOC-0001",
+    "revision": 1,
+    "digest": "blake2b:cdd285a86747ded9bfe0663743ed649e1c9db69e8f8f39ae6099b41d396e3534",
+    "object_path": "research/documents/objects/cdd285a86747ded9bfe0663743ed649e1c9db69e8f8f39ae6099b41d396e3534.md",
+    "source_path": "docs/plan.md",
+    "size": 98
+   }
+  ],
+  "Session": [],
+  "Message": [
+   {
+    "created_at": "2026-11-27T07:43:06+00:00",
+    "updated_at": "2026-11-27T07:43:06+00:00",
+    "id": "MSG-0001",
+    "kind": "question",
+    "subject": "T-0002",
+    "from_role": "coordinator",
+    "to_role": "scientist-T-0002",
+    "text": "why two arms?"
+   },
+   {
+    "created_at": "2026-11-27T07:43:06+00:00",
+    "updated_at": "2026-11-27T07:43:06+00:00",
+    "id": "MSG-0002",
+    "kind": "answer",
+    "subject": "T-0002",
+    "from_role": "scientist-T-0002",
+    "to_role": "coordinator",
+    "text": "a baseline and the change",
+    "in_reply_to": "MSG-0001"
+   }
+  ],
+  "Run": [
+   {
+    "created_at": "2026-11-27T07:43:04+00:00",
+    "updated_at": "2026-11-27T07:43:04+00:00",
+    "id": "RUN-0001",
+    "task_id": "T-0003",
+    "experiment_id": "E-0001",
+    "category": "evidence",
+    "arm": "single",
+    "seed": "0",
+    "request_id": "r-single-0",
+    "spec": "{\"arm\": \"single\", \"commit\": \"11afc966215b5d68122b8788e51a886ddc983983\", \"config\": {\"k\": 1}, \"design\": {\"allowed\": [], \"arm\": {\"config\": {\"k\": 1}, \"name\": \"single\", \"seeds\": [0]}, \"design_commit\": \"11afc966215b5d68122b8788e51a886ddc983983\", \"experiment\": \"E-0001\", \"manifest_digest\": \"blake2b:02a8ed250d901495412e1431a1d03c7f9eb43f87ff2070a805591253d5806021\", \"revision\": 1}, \"params\": null, \"seed\": \"0\", \"split\": null}",
+    "spec_digest": "blake2b:f0092813d3aaf5f8ed380a8ee8577deaad900c0e4eb46715edd329bb1d604dd2",
+    "attempt_count": 1,
+    "code_commit": "11afc966215b5d68122b8788e51a886ddc983983",
+    "minutes": 1.0
+   },
+   {
+    "created_at": "2026-11-27T07:43:05+00:00",
+    "updated_at": "2026-11-27T07:43:05+00:00",
+    "id": "RUN-0002",
+    "task_id": "T-0003",
+    "experiment_id": "E-0001",
+    "category": "evidence",
+    "arm": "mean3",
+    "seed": "0",
+    "request_id": "r-mean3-0",
+    "spec": "{\"arm\": \"mean3\", \"commit\": \"11afc966215b5d68122b8788e51a886ddc983983\", \"config\": {\"k\": 3}, \"design\": {\"allowed\": [], \"arm\": {\"config\": {\"k\": 3}, \"name\": \"mean3\", \"seeds\": [0]}, \"design_commit\": \"11afc966215b5d68122b8788e51a886ddc983983\", \"experiment\": \"E-0001\", \"manifest_digest\": \"blake2b:02a8ed250d901495412e1431a1d03c7f9eb43f87ff2070a805591253d5806021\", \"revision\": 1}, \"params\": null, \"seed\": \"0\", \"split\": null}",
+    "spec_digest": "blake2b:43188fc3df0afb1beb528cb0ee0a56c3e1b9af9f952f69ee96c63a05a32405b9",
+    "attempt_count": 1,
+    "code_commit": "11afc966215b5d68122b8788e51a886ddc983983",
+    "minutes": 1.0
+   }
+  ],
+  "Attempt": [
+   {
+    "created_at": "2026-11-27T07:43:04+00:00",
+    "updated_at": "2026-11-27T07:43:05+00:00",
+    "id": "ATT-0001-1",
+    "run_id": "RUN-0001",
+    "index": 1,
+    "request_id": "r-single-0",
+    "execution_state": "ended",
+    "outcome": "success",
+    "result_status": "complete",
+    "issues": "[]",
+    "expected_end": "2026-11-27T07:44:04+00:00",
+    "submitted_by": "researcher-T-0003",
+    "last_observed_at": "2026-11-27T07:43:05+00:00",
+    "last_record_id": "OBS-57cf445ed4fa3029",
+    "last_source": "local-shell",
+    "last_sequence": null,
+    "last_trusted_state": "ended",
+    "last_trusted_at": "2026-11-27T07:43:05+00:00",
+    "closed_at": "2026-11-27T07:43:05+00:00"
+   },
+   {
+    "created_at": "2026-11-27T07:43:05+00:00",
+    "updated_at": "2026-11-27T07:43:05+00:00",
+    "id": "ATT-0002-1",
+    "run_id": "RUN-0002",
+    "index": 1,
+    "request_id": "r-mean3-0",
+    "execution_state": "ended",
+    "outcome": "success",
+    "result_status": "complete",
+    "issues": "[]",
+    "expected_end": "2026-11-27T07:44:05+00:00",
+    "submitted_by": "researcher-T-0003",
+    "last_observed_at": "2026-11-27T07:43:05+00:00",
+    "last_record_id": "OBS-7072232b9ba4690a",
+    "last_source": "local-shell",
+    "last_sequence": null,
+    "last_trusted_state": "ended",
+    "last_trusted_at": "2026-11-27T07:43:05+00:00",
+    "closed_at": "2026-11-27T07:43:05+00:00"
+   }
+  ],
+  "ExecRef": [],
+  "Observation": [
+   {
+    "created_at": "2026-11-27T07:43:05+00:00",
+    "updated_at": "2026-11-27T07:43:05+00:00",
+    "id": "OBS-57cf445ed4fa3029",
+    "attempt_id": "ATT-0001-1",
+    "source": "local-shell",
+    "observed_at": "2026-11-27T07:43:05+00:00",
+    "received_at": "2026-11-27T07:43:05+00:00",
+    "execution_state": "ended",
+    "outcome": "success",
+    "content_digest": "blake2b:57cf445ed4fa3029b517edef154f068567eee9d60c242249c9281f50100e278d",
+    "effect": "applied"
+   },
+   {
+    "created_at": "2026-11-27T07:43:05+00:00",
+    "updated_at": "2026-11-27T07:43:05+00:00",
+    "id": "OBS-7072232b9ba4690a",
+    "attempt_id": "ATT-0002-1",
+    "source": "local-shell",
+    "observed_at": "2026-11-27T07:43:05+00:00",
+    "received_at": "2026-11-27T07:43:05+00:00",
+    "execution_state": "ended",
+    "outcome": "success",
+    "content_digest": "blake2b:7072232b9ba4690a5b79ebb7b3da37929e5557654b51bf2e77f6d5895387b217",
+    "effect": "applied"
+   }
+  ],
+  "Result": [
+   {
+    "created_at": "2026-11-27T07:43:05+00:00",
+    "updated_at": "2026-11-27T07:43:05+00:00",
+    "id": "RES-0001",
+    "attempt_id": "ATT-0001-1",
+    "request_id": "i-single-0",
+    "revision": 1,
+    "status": "complete",
+    "manifest": "{\"arm\": \"single\", \"commit\": \"11afc966215b5d68122b8788e51a886ddc983983\", \"config\": {\"k\": 1}, \"metrics\": {\"abs_error\": 0.8166823906321087}, \"seed\": 0, \"status\": \"complete\"}",
+    "manifest_digest": "blake2b:c9af145232a5f2c7f7c77f401d8f16414008979f88af41d300b771b0279f48f7",
+    "spec_match": true,
+    "verification": "[]",
+    "verification_scope": "no artifacts",
+    "usable": true
+   },
+   {
+    "created_at": "2026-11-27T07:43:05+00:00",
+    "updated_at": "2026-11-27T07:43:05+00:00",
+    "id": "RES-0002",
+    "attempt_id": "ATT-0002-1",
+    "request_id": "i-mean3-0",
+    "revision": 1,
+    "status": "complete",
+    "manifest": "{\"arm\": \"mean3\", \"commit\": \"11afc966215b5d68122b8788e51a886ddc983983\", \"config\": {\"k\": 3}, \"metrics\": {\"abs_error\": 0.4347457206965267}, \"seed\": 0, \"status\": \"complete\"}",
+    "manifest_digest": "blake2b:1e49cc70e756f73276496e994a590fd3b546ea2f8ac00ad683f19f29086562fc",
+    "spec_match": true,
+    "verification": "[]",
+    "verification_scope": "no artifacts",
+    "usable": true
+   }
+  ],
+  "Usage": [],
+  "Ticket": [
+   {
+    "created_at": "2026-11-27T07:43:04+00:00",
+    "updated_at": "2026-11-27T07:43:04+00:00",
+    "id": "RV-0001",
+    "kind": "review",
+    "status": "passed",
+    "review_kind": "design",
+    "task_id": "T-0003",
+    "target_id": "T-0003",
+    "passes": "[{\"answered_at\": \"2026-11-27T07:43:04+00:00\", \"by\": \"reviewer-RV-0001\", \"commit\": \"11afc966215b5d68122b8788e51a886ddc983983\", \"design\": \"E-0001@1#blake2b:a327649d85a96e196cbb6a3b82a4d0baa8ba195145c1b1b37ea3524d5ab6648d\", \"design_snapshot\": {\"brief_ref\": null, \"design_commit\": null, \"edit_seq\": 1, \"id\": \"E-0001\", \"label\": \"EH1/1\", \"manifest\": null, \"manifest_digest\": null, \"manifest_path\": \"src/avg/arms.yaml\", \"protected\": [\"src/avg/sim.py::error\"], \"question\": \"is mean3 better?\", \"revision\": 1, \"semantic_tests\": \"cd src/avg && python3 test_sim.py\"}, \"n\": 1, \"question\": null, \"requested_at\": \"2026-11-27T07:43:04+00:00\", \"requested_by\": \"scientist-T-0002\", \"target\": \"T-0003\", \"verdict\": \"pass\"}]",
+    "findings": "[]",
+    "requested_by": "scientist-T-0002",
+    "author": "scientist-T-0002",
+    "verdict": "pass",
+    "answered_at": "2026-11-27T07:43:04+00:00"
+   },
+   {
+    "created_at": "2026-11-27T07:43:05+00:00",
+    "updated_at": "2026-11-27T07:43:06+00:00",
+    "id": "RV-0002",
+    "kind": "review",
+    "status": "passed",
+    "review_kind": "conclusion",
+    "task_id": "T-0002",
+    "target_id": "D-0003",
+    "passes": "[{\"answered_at\": \"2026-11-27T07:43:06+00:00\", \"by\": \"reviewer-RV-0002\", \"commit\": null, \"n\": 1, \"question\": null, \"requested_at\": \"2026-11-27T07:43:05+00:00\", \"requested_by\": \"scientist-T-0002\", \"target\": \"D-0003\", \"verdict\": \"pass\"}]",
+    "findings": "[]",
+    "requested_by": "scientist-T-0002",
+    "author": "scientist-T-0002",
+    "verdict": "pass",
+    "answered_at": "2026-11-27T07:43:06+00:00"
+   }
+  ],
+  "Event": [
+   {
+    "created_at": "2026-11-27T07:43:04+00:00",
+    "updated_at": "2026-11-27T07:43:04+00:00",
+    "id": "EVT-000001",
+    "seq": 1,
+    "type": "doc.sealed",
+    "entity_id": "DOC-0001@1",
+    "actor": "coordinator",
+    "summary": "docs/plan.md (plan) cdd285a86747"
+   },
+   {
+    "created_at": "2026-11-27T07:43:04+00:00",
+    "updated_at": "2026-11-27T07:43:04+00:00",
+    "id": "EVT-000002",
+    "seq": 2,
+    "type": "project.init",
+    "actor": "coordinator",
+    "summary": "plan DOC-0001@1; environment: Python 3.13.14, latticedb 0.15.0 on /home/yu/workspace/smooth-research/.venv, not the project's own: rl init in the project root makes one (uv init, uv add of rl's dependencies)"
+   },
+   {
+    "created_at": "2026-11-27T07:43:04+00:00",
+    "updated_at": "2026-11-27T07:43:04+00:00",
+    "id": "EVT-000003",
+    "seq": 3,
+    "type": "hypothesis.added",
+    "entity_id": "H-0001",
+    "actor": "coordinator",
+    "summary": "H1: Averaging helps (tree D-0001)"
+   },
+   {
+    "created_at": "2026-11-27T07:43:04+00:00",
+    "updated_at": "2026-11-27T07:43:04+00:00",
+    "id": "EVT-000004",
+    "seq": 4,
+    "type": "task.created",
+    "entity_id": "T-0001",
+    "actor": "coordinator",
+    "summary": "prep: Python check"
+   },
+   {
+    "created_at": "2026-11-27T07:43:04+00:00",
+    "updated_at": "2026-11-27T07:43:04+00:00",
+    "id": "EVT-000005",
+    "seq": 5,
+    "type": "ask.answered",
+    "entity_id": "RQ-0001",
+    "actor": "coordinator",
+    "summary": "by user: approve"
+   },
+   {
+    "created_at": "2026-11-27T07:43:04+00:00",
+    "updated_at": "2026-11-27T07:43:04+00:00",
+    "id": "EVT-000006",
+    "seq": 6,
+    "type": "decision",
+    "entity_id": "D-0001",
+    "actor": "coordinator",
+    "summary": "route H-0001: The plan makes one claim, that averaging lowers the error; one hypothesis covers it."
+   },
+   {
+    "created_at": "2026-11-27T07:43:04+00:00",
+    "updated_at": "2026-11-27T07:43:04+00:00",
+    "id": "EVT-000007",
+    "seq": 7,
+    "type": "tree.recorded",
+    "entity_id": "D-0001",
+    "actor": "coordinator",
+    "summary": "1 hypotheses, 1 prep tasks, approved (RQ-0001)"
+   },
+   {
+    "created_at": "2026-11-27T07:43:04+00:00",
+    "updated_at": "2026-11-27T07:43:04+00:00",
+    "id": "EVT-000008",
+    "seq": 8,
+    "type": "phase.created",
+    "entity_id": "PH-0001",
+    "actor": "coordinator",
+    "summary": "Phase 1"
+   },
+   {
+    "created_at": "2026-11-27T07:43:04+00:00",
+    "updated_at": "2026-11-27T07:43:04+00:00",
+    "id": "EVT-000009",
+    "seq": 9,
+    "type": "task.created",
+    "entity_id": "T-0002",
+    "actor": "coordinator",
+    "summary": "hypothesis: Test Averaging helps"
+   },
+   {
+    "created_at": "2026-11-27T07:43:04+00:00",
+    "updated_at": "2026-11-27T07:43:04+00:00",
+    "id": "EVT-000010",
+    "seq": 10,
+    "type": "task.released",
+    "entity_id": "T-0002",
+    "actor": "coordinator",
+    "summary": "Test Averaging helps; to scientist-T-0002"
+   },
+   {
+    "created_at": "2026-11-27T07:43:04+00:00",
+    "updated_at": "2026-11-27T07:43:04+00:00",
+    "id": "EVT-000011",
+    "seq": 11,
+    "type": "decision",
+    "entity_id": "D-0002",
+    "actor": "scientist-T-0002",
+    "summary": "route H-0001: simulate"
+   },
+   {
+    "created_at": "2026-11-27T07:43:04+00:00",
+    "updated_at": "2026-11-27T07:43:04+00:00",
+    "id": "EVT-000012",
+    "seq": 12,
+    "type": "experiment.added",
+    "entity_id": "E-0001",
+    "actor": "scientist-T-0002",
+    "summary": "EH1/1: Sim"
+   },
+   {
+    "created_at": "2026-11-27T07:43:04+00:00",
+    "updated_at": "2026-11-27T07:43:04+00:00",
+    "id": "EVT-000013",
+    "seq": 13,
+    "type": "task.created",
+    "entity_id": "T-0003",
+    "actor": "scientist-T-0002",
+    "summary": "execute: Run sim"
+   },
+   {
+    "created_at": "2026-11-27T07:43:04+00:00",
+    "updated_at": "2026-11-27T07:43:04+00:00",
+    "id": "EVT-000014",
+    "seq": 14,
+    "type": "task.tested",
+    "entity_id": "T-0003",
+    "actor": "scientist-T-0002",
+    "summary": "pass at 11afc966215b: cd src/avg && python3 test_sim.py"
+   },
+   {
+    "created_at": "2026-11-27T07:43:04+00:00",
+    "updated_at": "2026-11-27T07:43:04+00:00",
+    "id": "EVT-000015",
+    "seq": 15,
+    "type": "review.requested",
+    "entity_id": "RV-0001",
+    "actor": "scientist-T-0002",
+    "summary": "design of T-0003 at 11afc966215b"
+   },
+   {
+    "created_at": "2026-11-27T07:43:04+00:00",
+    "updated_at": "2026-11-27T07:43:04+00:00",
+    "id": "EVT-000016",
+    "seq": 16,
+    "type": "review.answered",
+    "entity_id": "RV-0001",
+    "actor": "reviewer-RV-0001",
+    "summary": "pass at 11afc966215b; 0 new finding(s), 0 closed -> passed"
+   },
+   {
+    "created_at": "2026-11-27T07:43:04+00:00",
+    "updated_at": "2026-11-27T07:43:04+00:00",
+    "id": "EVT-000017",
+    "seq": 17,
+    "type": "experiment.sealed",
+    "entity_id": "E-0001",
+    "actor": "scientist-T-0002",
+    "summary": "@1 at 11afc966215b by dispatch of T-0003"
+   },
+   {
+    "created_at": "2026-11-27T07:43:04+00:00",
+    "updated_at": "2026-11-27T07:43:04+00:00",
+    "id": "EVT-000018",
+    "seq": 18,
+    "type": "task.dispatched",
+    "entity_id": "T-0003",
+    "actor": "scientist-T-0002",
+    "summary": "both arms"
+   },
+   {
+    "created_at": "2026-11-27T07:43:04+00:00",
+    "updated_at": "2026-11-27T07:43:04+00:00",
+    "id": "EVT-000019",
+    "seq": 19,
+    "type": "run.register",
+    "entity_id": "ATT-0001-1",
+    "actor": "researcher-T-0003",
+    "summary": "RUN-0001 evidence attempt 1"
+   },
+   {
+    "created_at": "2026-11-27T07:43:05+00:00",
+    "updated_at": "2026-11-27T07:43:05+00:00",
+    "id": "EVT-000020",
+    "seq": 20,
+    "type": "run.record",
+    "entity_id": "ATT-0001-1",
+    "actor": "researcher-T-0003",
+    "summary": "OBS-57cf445ed4fa3029 ended/success -> applied"
+   },
+   {
+    "created_at": "2026-11-27T07:43:05+00:00",
+    "updated_at": "2026-11-27T07:43:05+00:00",
+    "id": "EVT-000021",
+    "seq": 21,
+    "type": "run.import_result",
+    "entity_id": "ATT-0001-1",
+    "actor": "researcher-T-0003",
+    "summary": "RES-0001 complete (no artifacts)"
+   },
+   {
+    "created_at": "2026-11-27T07:43:05+00:00",
+    "updated_at": "2026-11-27T07:43:05+00:00",
+    "id": "EVT-000022",
+    "seq": 22,
+    "type": "run.register",
+    "entity_id": "ATT-0002-1",
+    "actor": "researcher-T-0003",
+    "summary": "RUN-0002 evidence attempt 1"
+   },
+   {
+    "created_at": "2026-11-27T07:43:05+00:00",
+    "updated_at": "2026-11-27T07:43:05+00:00",
+    "id": "EVT-000023",
+    "seq": 23,
+    "type": "run.record",
+    "entity_id": "ATT-0002-1",
+    "actor": "researcher-T-0003",
+    "summary": "OBS-7072232b9ba4690a ended/success -> applied"
+   },
+   {
+    "created_at": "2026-11-27T07:43:05+00:00",
+    "updated_at": "2026-11-27T07:43:05+00:00",
+    "id": "EVT-000024",
+    "seq": 24,
+    "type": "run.import_result",
+    "entity_id": "ATT-0002-1",
+    "actor": "researcher-T-0003",
+    "summary": "RES-0002 complete (no artifacts)"
+   },
+   {
+    "created_at": "2026-11-27T07:43:05+00:00",
+    "updated_at": "2026-11-27T07:43:05+00:00",
+    "id": "EVT-000025",
+    "seq": 25,
+    "type": "evidence.added",
+    "entity_id": "EV-0001",
+    "actor": "researcher-T-0003",
+    "summary": "diagnostic: mean3 error lower"
+   },
+   {
+    "created_at": "2026-11-27T07:43:05+00:00",
+    "updated_at": "2026-11-27T07:43:05+00:00",
+    "id": "EVT-000026",
+    "seq": 26,
+    "type": "task.delivered",
+    "entity_id": "T-0003",
+    "actor": "researcher-T-0003",
+    "summary": "mean3 lowers the error (EV-0001)"
+   },
+   {
+    "created_at": "2026-11-27T07:43:05+00:00",
+    "updated_at": "2026-11-27T07:43:05+00:00",
+    "id": "EVT-000027",
+    "seq": 27,
+    "type": "task.merging",
+    "entity_id": "T-0003",
+    "actor": "scientist-T-0002",
+    "summary": "candidate 3b6e29bf7859 of delivery f30c7ea23161"
+   },
+   {
+    "created_at": "2026-11-27T07:43:05+00:00",
+    "updated_at": "2026-11-27T07:43:05+00:00",
+    "id": "EVT-000028",
+    "seq": 28,
+    "type": "task.accepted",
+    "entity_id": "T-0003",
+    "actor": "scientist-T-0002",
+    "summary": "merged at 3b6e29bf7859"
+   },
+   {
+    "created_at": "2026-11-27T07:43:05+00:00",
+    "updated_at": "2026-11-27T07:43:05+00:00",
+    "id": "EVT-000029",
+    "seq": 29,
+    "type": "decision.draft",
+    "entity_id": "D-0003",
+    "actor": "scientist-T-0002",
+    "summary": "verdict H-0001: lower"
+   },
+   {
+    "created_at": "2026-11-27T07:43:05+00:00",
+    "updated_at": "2026-11-27T07:43:05+00:00",
+    "id": "EVT-000030",
+    "seq": 30,
+    "type": "review.requested",
+    "entity_id": "RV-0002",
+    "actor": "scientist-T-0002",
+    "summary": "conclusion of D-0003 at D-0003"
+   },
+   {
+    "created_at": "2026-11-27T07:43:06+00:00",
+    "updated_at": "2026-11-27T07:43:06+00:00",
+    "id": "EVT-000031",
+    "seq": 31,
+    "type": "review.answered",
+    "entity_id": "RV-0002",
+    "actor": "reviewer-RV-0002",
+    "summary": "pass at D-0003; 0 new finding(s), 0 closed -> passed"
+   },
+   {
+    "created_at": "2026-11-27T07:43:06+00:00",
+    "updated_at": "2026-11-27T07:43:06+00:00",
+    "id": "EVT-000032",
+    "seq": 32,
+    "type": "decision",
+    "entity_id": "D-0003",
+    "actor": "scientist-T-0002",
+    "summary": "verdict final: H-0001 supported"
+   },
+   {
+    "created_at": "2026-11-27T07:43:06+00:00",
+    "updated_at": "2026-11-27T07:43:06+00:00",
+    "id": "EVT-000033",
+    "seq": 33,
+    "type": "task.delivered",
+    "entity_id": "T-0002",
+    "actor": "scientist-T-0002",
+    "summary": "averaging helps"
+   },
+   {
+    "created_at": "2026-11-27T07:43:06+00:00",
+    "updated_at": "2026-11-27T07:43:06+00:00",
+    "id": "EVT-000034",
+    "seq": 34,
+    "type": "dialogue.question",
+    "entity_id": "T-0002",
+    "actor": "coordinator",
+    "summary": "MSG-0001 coordinator -> scientist-T-0002"
+   },
+   {
+    "created_at": "2026-11-27T07:43:06+00:00",
+    "updated_at": "2026-11-27T07:43:06+00:00",
+    "id": "EVT-000035",
+    "seq": 35,
+    "type": "dialogue.answer",
+    "entity_id": "T-0002",
+    "actor": "scientist-T-0002",
+    "summary": "MSG-0002 scientist-T-0002 -> coordinator"
+   },
+   {
+    "created_at": "2026-11-27T07:43:06+00:00",
+    "updated_at": "2026-11-27T07:43:06+00:00",
+    "id": "EVT-000036",
+    "seq": 36,
+    "type": "flag",
+    "entity_id": "T-0001",
+    "actor": "scientist-T-0002",
+    "summary": "[role] releasing a task is the coordinator's step; scientist-T-0002 did it"
+   },
+   {
+    "created_at": "2026-11-27T07:43:06+00:00",
+    "updated_at": "2026-11-27T07:43:06+00:00",
+    "id": "EVT-000037",
+    "seq": 37,
+    "type": "task.released",
+    "entity_id": "T-0001",
+    "actor": "scientist-T-0002",
+    "summary": "Python check; to researcher-T-0001"
+   }
+  ],
+  "Request": [
+   {
+    "created_at": "2026-11-27T07:43:04+00:00",
+    "updated_at": "2026-11-27T07:43:04+00:00",
+    "id": "run.register:r-single-0",
+    "op": "run.register",
+    "request_id": "r-single-0",
+    "digest": "blake2b:dee760c321e419aa78cf38bf1d5e30126a08f6783ad86c3238a570cabc4fa027",
+    "result": "{\"attempt\": \"ATT-0001-1\", \"category\": \"evidence\", \"deviates\": false, \"run\": \"RUN-0001\"}"
+   },
+   {
+    "created_at": "2026-11-27T07:43:05+00:00",
+    "updated_at": "2026-11-27T07:43:05+00:00",
+    "id": "run.import-result:i-single-0",
+    "op": "run.import-result",
+    "request_id": "i-single-0",
+    "digest": "blake2b:aa1ba4a8793e974ae906ab66fe55977171363ea31509ad1d12620190a0a09bbb",
+    "result": "{\"attempt\": \"ATT-0001-1\", \"result\": \"RES-0001\"}"
+   },
+   {
+    "created_at": "2026-11-27T07:43:05+00:00",
+    "updated_at": "2026-11-27T07:43:05+00:00",
+    "id": "run.register:r-mean3-0",
+    "op": "run.register",
+    "request_id": "r-mean3-0",
+    "digest": "blake2b:17def24b28b16d2ac47be4ded573565b34f44e9d74d378edf3733df6f7672940",
+    "result": "{\"attempt\": \"ATT-0002-1\", \"category\": \"evidence\", \"deviates\": false, \"run\": \"RUN-0002\"}"
+   },
+   {
+    "created_at": "2026-11-27T07:43:05+00:00",
+    "updated_at": "2026-11-27T07:43:05+00:00",
+    "id": "run.import-result:i-mean3-0",
+    "op": "run.import-result",
+    "request_id": "i-mean3-0",
+    "digest": "blake2b:1505b86781178fa6d3abbbaf20a7be0d78f938867f587a262ac80f53f74d8bff",
+    "result": "{\"attempt\": \"ATT-0002-1\", \"result\": \"RES-0002\"}"
+   }
+  ]
+ },
+ "edges": [
+  {
+   "source": "E-0001",
+   "source_label": "Experiment",
+   "edge": "TESTS",
+   "target": "H-0001",
+   "target_label": "Hypothesis",
+   "props": {
+    "revision": 1
+   }
+  },
+  {
+   "source": "E-0001",
+   "source_label": "Experiment",
+   "edge": "MOTIVATED_BY",
+   "target": "D-0002",
+   "target_label": "Decision",
+   "props": {}
+  },
+  {
+   "source": "EV-0001",
+   "source_label": "Evidence",
+   "edge": "FROM_RESULT",
+   "target": "RES-0001",
+   "target_label": "Result",
+   "props": {}
+  },
+  {
+   "source": "EV-0001",
+   "source_label": "Evidence",
+   "edge": "FROM_RESULT",
+   "target": "RES-0002",
+   "target_label": "Result",
+   "props": {}
+  },
+  {
+   "source": "EV-0001",
+   "source_label": "Evidence",
+   "edge": "ABOUT",
+   "target": "E-0001",
+   "target_label": "Experiment",
+   "props": {}
+  },
+  {
+   "source": "EV-0001",
+   "source_label": "Evidence",
+   "edge": "SUPPORTS",
+   "target": "H-0001",
+   "target_label": "Hypothesis",
+   "props": {
+    "revision": 1
+   }
+  },
+  {
+   "source": "D-0001",
+   "source_label": "Decision",
+   "edge": "DECIDES",
+   "target": "H-0001",
+   "target_label": "Hypothesis",
+   "props": {
+    "revision": 1
+   }
+  },
+  {
+   "source": "D-0002",
+   "source_label": "Decision",
+   "edge": "DECIDES",
+   "target": "H-0001",
+   "target_label": "Hypothesis",
+   "props": {
+    "revision": 1
+   }
+  },
+  {
+   "source": "D-0003",
+   "source_label": "Decision",
+   "edge": "DECIDES",
+   "target": "H-0001",
+   "target_label": "Hypothesis",
+   "props": {
+    "revision": 1
+   }
+  },
+  {
+   "source": "D-0003",
+   "source_label": "Decision",
+   "edge": "BASED_ON",
+   "target": "EV-0001",
+   "target_label": "Evidence",
+   "props": {}
+  },
+  {
+   "source": "D-0003",
+   "source_label": "Decision",
+   "edge": "BASED_ON",
+   "target": "RV-0002",
+   "target_label": "Ticket",
+   "props": {}
+  },
+  {
+   "source": "T-0002",
+   "source_label": "Task",
+   "edge": "TARGETS",
+   "target": "H-0001",
+   "target_label": "Hypothesis",
+   "props": {}
+  },
+  {
+   "source": "T-0002",
+   "source_label": "Task",
+   "edge": "IN_PHASE",
+   "target": "PH-0001",
+   "target_label": "Phase",
+   "props": {}
+  },
+  {
+   "source": "T-0003",
+   "source_label": "Task",
+   "edge": "TARGETS",
+   "target": "E-0001",
+   "target_label": "Experiment",
+   "props": {}
+  },
+  {
+   "source": "T-0003",
+   "source_label": "Task",
+   "edge": "PART_OF",
+   "target": "T-0002",
+   "target_label": "Task",
+   "props": {}
+  },
+  {
+   "source": "RUN-0001",
+   "source_label": "Run",
+   "edge": "OF_TASK",
+   "target": "T-0003",
+   "target_label": "Task",
+   "props": {}
+  },
+  {
+   "source": "RUN-0001",
+   "source_label": "Run",
+   "edge": "OF_EXPERIMENT",
+   "target": "E-0001",
+   "target_label": "Experiment",
+   "props": {}
+  },
+  {
+   "source": "RUN-0002",
+   "source_label": "Run",
+   "edge": "OF_TASK",
+   "target": "T-0003",
+   "target_label": "Task",
+   "props": {}
+  },
+  {
+   "source": "RUN-0002",
+   "source_label": "Run",
+   "edge": "OF_EXPERIMENT",
+   "target": "E-0001",
+   "target_label": "Experiment",
+   "props": {}
+  },
+  {
+   "source": "ATT-0001-1",
+   "source_label": "Attempt",
+   "edge": "OF_RUN",
+   "target": "RUN-0001",
+   "target_label": "Run",
+   "props": {}
+  },
+  {
+   "source": "ATT-0002-1",
+   "source_label": "Attempt",
+   "edge": "OF_RUN",
+   "target": "RUN-0002",
+   "target_label": "Run",
+   "props": {}
+  }
+ ]
+}

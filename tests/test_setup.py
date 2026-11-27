@@ -66,8 +66,9 @@ def test_init_makes_the_project_environment_before_the_records(tmp_path):
     assert again.returncode == 0 and "already initialized" in again.stdout and again.stderr == ""
 
     # a role writes records on the same environment
-    made = rl(root, "--as", "coordinator", "task", "create", "--kind", "tree", "--title", "Tree")
-    assert made.returncode == 0 and "T-0001" in made.stdout, made.stderr
+    made = rl(root, "--as", "coordinator", "hypothesis", "add", "--title", "Noise hurts", "--statement",
+              "more noise, more error", "--purpose", "whether noise matters")
+    assert made.returncode == 0 and "H-0001" in made.stdout, made.stderr
 
 
 def test_a_project_inside_another_uv_project_gets_its_own_environment(tmp_path):

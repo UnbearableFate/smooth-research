@@ -1,6 +1,6 @@
 """Model entries: which agent (Claude Code, Codex, pi, or a person for manual) and which model a role runs on.
 
-Every session is an interactive agent in a herdr pane (watch.py); rl calls no model itself (design 11.2).
+Every session is an interactive agent in a herdr pane (sessions.py); rl calls no model itself (design 11.2).
 """
 
 from __future__ import annotations

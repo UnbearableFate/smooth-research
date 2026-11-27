@@ -1,6 +1,6 @@
 [project]
 name = "smooth-research"
-version = "0.2.0"
+version = "0.3.0"
 description = "Lean ML research records and workflow plugin core for Claude Code and Codex"
 readme = "README.md"
 authors = [

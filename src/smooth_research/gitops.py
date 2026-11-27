@@ -103,13 +103,20 @@ def dirty(project: Project, task_id: str) -> list[str]:
 
 
 def show(project: Project, commit: str, path: str) -> str | None:
-    """A file of the project (path relative to the project) at a commit, or None when it is not there."""
+    """A file of the project (path relative to the project) at a commit, or None when it is not there. Read as
+    bytes: a binary file (a protected checkpoint, an image) does not stop the reader; bytes that are not UTF-8 come
+    back as surrogate escapes."""
     try:
         out = subprocess.run(["git", "show", f"{commit}:{prefix(project)}{path}"], cwd=top(project),
-                             capture_output=True, text=True, timeout=60)
+                             capture_output=True, timeout=60)
     except (OSError, subprocess.SubprocessError):
         return None
-    return out.stdout if out.returncode == 0 else None
+    if out.returncode != 0:
+        return None
+    try:
+        return out.stdout.decode("utf-8")
+    except UnicodeDecodeError:
+        return out.stdout.decode("utf-8", errors="surrogateescape")
 
 
 def exists(project: Project, commit: str) -> bool:

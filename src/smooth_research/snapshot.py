@@ -130,10 +130,11 @@ def doctor(store: Store) -> dict:
                         pass
                 if f.is_file() and digest_file(f) != v["local_digest"]:
                     dangling.append(f"{res['id']}: {v['path']} changed since import ({f})")
-    from .inbox import unwatched
+    from .inbox import leftovers, unwatched
     with store.read() as tx:
         missed = unwatched(tx, store.project.config)
-    dangling += [f"missed: {m}" for m in missed]
+        left = leftovers(tx, store.project.config)
+    dangling += [f"missed: {m}" for m in missed] + [f"left over: {m}" for m in left]
     lines = [f"{check['documents']} sealed object(s) checked"]
     lines += [f"problem: {p}" for p in check["problems"] + dangling]
     if check["unregistered_objects"]:

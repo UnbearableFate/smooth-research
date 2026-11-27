@@ -1,21 +1,29 @@
-"""Dialogue entries: review discussion, the coordinator's questions and their answers (design 8.7, 8.9).
+"""Dialogue entries: review discussion, questions and their answers (design 8.7, 8.9; 2026-11-27, 3.2 and 4).
 
 Notices are not stored: the rules table (inbox.py) computes them from record states. The Message table holds only
 dialogue, which is content in itself, each entry on a subject record (a task, a review round or one of its
-findings, an advice ticket). An entry waits in its addressee's inbox until a reply to it comes.
+findings, an advice ticket). An entry waits in its addressee's to-do list until a reply to it comes, and each entry
+tells its addressee's session when it is written (result wake).
 
-- The coordinator asks any session a question; the answer is the only entry anyone writes to the coordinator, one
-  per question (9.1). The coordinator closes the question once it read the answer.
-- In an open review round the reviewer and the owner of a finding discuss it: a method finding's owner is the
-  scientist, an engineering finding's the task's holder (5.3); an entry on the round itself goes to its author.
-  What the discussion changes goes into the finding's status (rl review answer --close), not into the entry.
-- A consultation is the AD ticket's question; the advisor's answer is a document on the ticket.
+- The coordinator asks a session a question; the answer goes back to whoever asked, who closes the question once it
+  read the answer. A reply to an answer is a follow-up question.
+- In a review round the reviewer and the owner of a finding discuss it: a method finding's owner is the scientist
+  who made the task, an engineering finding's (or the round's as a whole) the round's author. What the discussion
+  changes goes into the finding (rl review answer --close, rl review reject), not into the entry.
+- Discussion in a round that has ended (or whose task ended) is still recorded, but goes in nobody's to-do list and
+  tells nobody (4: the same condition for rl discuss, rl reply and the inbox).
+
+Nothing here refuses who writes an entry: an entry by another session than the one the process names is recorded
+with a flag on its subject record.
 """
 
 from __future__ import annotations
 
 from . import refs as locators
-from .roles import Actor
+from .flags import Flags
+from .reviews import finding_owner, round_author, round_ended
+from .roles import Actor, need, parse, session_name
+from .schema import ROLES
 from .store import Store, Tx
 from .util import RLError, now_utc
 
@@ -30,100 +38,111 @@ def _entry(tx: Tx, kind: str, subject: str, actor: Actor, to: str, text: str, re
 
 
 def ask(store: Store, actor: Actor, to: str, subject: str, text: str, refs: list[str] = ()) -> dict:
-    """The coordinator's question to a session, on the record it is about."""
-    if actor.role != "coordinator":
-        raise RLError("INVALID", "only the coordinator asks questions; other roles use their records (a decision "
-                                 "request, a review discussion, a consultation)")
-    if to in ("coordinator", "user"):
-        raise RLError("INVALID", "ask a session: scientist-T-x, researcher-T-x, reviewer-RV-x or advisor-AD-x")
+    """The coordinator's question to a session, on the record it is about; the session is told."""
+    fl = Flags(actor.name if actor else "?")
+    need(actor, "coordinator", what="a question to a session", flags=fl)
+    if to == "user":
+        raise RLError("INVALID", "the user is not a session: ask the user in the coordinator's pane, or record a "
+                                 "request (rl request --kind approval|decision)")
+    parse(to)  # a session name, or nothing could deliver it
+    if to == actor.name:
+        raise RLError("INVALID", f"{to} is the session asking: ask another session")
     with store.write() as tx:
-        tx.require(subject.split("#")[0])
+        base = subject.split("#")[0]
+        tx.require(base)
         clean = locators.check(tx, store.project, list(refs), note_cap=None)
         rec = _entry(tx, "question", subject, actor, to, text, clean)
-    return {"id": rec["id"], "summary": f"{rec['id']} question to {to} on {subject}"}
+        written = fl.write(tx, base) if fl else []
+    return {"id": rec["id"], "summary": f"{rec['id']} question to {to} on {subject}", "flags": written,
+            "wake": [to]}
 
 
 def reply(store: Store, actor: Actor, mid: str, text: str, refs: list[str] = ()) -> dict:
+    """A reply to an entry addressed to the caller: an answer to a question, a follow-up question to an answer, the
+    next entry of a review discussion. In a round that has ended it is recorded and tells nobody."""
+    need(actor, *ROLES, what="a reply")
+    fl = Flags(actor.name)
+    warnings: list[str] = []
     with store.write() as tx:
         m = tx.require(mid, "Message")
         if m["to_role"] != actor.name:
-            raise RLError("INVALID", f"{mid} is addressed to {m['to_role']}, not to {actor.name}")
-        if m["kind"] == "answer":
-            raise RLError("INVALID", f"{mid} is an answer; the question it answers is closed by the coordinator")
-        if any(x.get("in_reply_to") == mid for x in tx.all("Message", subject=m["subject"])):
-            raise RLError("CONFLICT", f"{mid} already has a reply (each entry is answered once)")
+            fl.add("not-holder", f"{mid} is addressed to {m['to_role']}; {actor.name} replied to it")
+        earlier = [x["id"] for x in tx.all("Message", subject=m["subject"]) if x.get("in_reply_to") == mid]
+        if earlier:
+            warnings.append(f"{mid} has a reply already ({earlier[-1]}): this one is recorded after it")
         clean = locators.check(tx, store.project, list(refs), note_cap=None)
-        kind = "answer" if m["kind"] == "question" else m["kind"]
-        if m["kind"] == "discussion":
-            _open_round(tx, m["subject"])
+        kind = {"question": "answer", "answer": "question"}.get(m["kind"], m["kind"])
+        over = m["kind"] == "discussion" and _round_over(tx, m["subject"])
+        if over:
+            warnings.append(f"{m['subject'].split('#')[0]} has ended: the reply is recorded and goes in no to-do list")
         rec = _entry(tx, kind, m["subject"], actor, m["from_role"], text, clean, in_reply_to=mid,
                      finding=m.get("finding"))
-    return {"id": rec["id"], "summary": f"{rec['id']} reply to {mid} ({m['from_role']})"}
+        written = fl.write(tx, m["subject"].split("#")[0]) if fl else []
+    return {"id": rec["id"], "summary": f"{rec['id']} reply to {mid} ({m['from_role']})", "flags": written,
+            "warnings": warnings, "wake": [] if over else [m["from_role"]]}
 
 
 def close(store: Store, actor: Actor, mid: str) -> dict:
-    """The coordinator read the answer to its question: the question and its answer leave the inbox."""
-    if actor.role != "coordinator":
-        raise RLError("INVALID", "the coordinator closes its questions")
+    """Whoever asked read the answer to its question: the question and its answers leave the to-do lists."""
+    need(actor, *ROLES, what="closing a question")
+    fl = Flags(actor.name)
     with store.write() as tx:
         m = tx.require(mid, "Message")
-        if m["kind"] != "question" or m["from_role"] != "coordinator":
-            raise RLError("INVALID", f"{mid} is not a question of the coordinator")
+        if m["kind"] != "question":
+            raise RLError("INVALID", f"{mid} is a {m['kind']} entry: --close takes a question (MSG-x)")
+        if m["from_role"] != actor.name:
+            fl.add("not-holder", f"{mid} was asked by {m['from_role']}; {actor.name} closed it")
         stamp = now_utc()
         tx.update(mid, {"closed_at": stamp})
         for a in tx.all("Message", subject=m["subject"]):
             if a.get("in_reply_to") == mid:
                 tx.update(a["id"], {"closed_at": stamp})
+        written = fl.write(tx, m["subject"].split("#")[0]) if fl else []
         tx.event("dialogue.closed", m["subject"], mid)
-    return {"id": mid, "summary": f"{mid} closed"}
+    return {"id": mid, "summary": f"{mid} closed", "flags": written}
 
 
-def _open_round(tx: Tx, subject: str) -> dict:
-    rv = tx.require(subject.split("#")[0], "Ticket")
-    if rv["kind"] != "review" or rv["status"] not in ("waiting", "answered"):
-        raise RLError("INVALID", f"review discussion happens in an open review round; {rv['id']} is {rv['status']}")
-    return rv
+def _round_over(tx: Tx, subject: str) -> bool:
+    rv = tx.get(subject.split("#")[0])
+    return bool(rv) and rv["_label"] == "Ticket" and rv["kind"] == "review" and round_ended(tx, rv)
 
 
 def discuss(store: Store, actor: Actor, subject: str, text: str, refs: list[str] = ()) -> dict:
-    """An entry in an open review round (RV-x) or on one of its findings (RV-x#Fn), between the reviewer and the
-    finding's owner."""
+    """An entry in a review round (RV-x) or on one of its findings (RV-x#Fn), between the reviewer and the finding's
+    owner (the round's author for the round as a whole); the other side is told. In a round that has ended it is
+    recorded and tells nobody."""
+    need(actor, *ROLES, what="review discussion")
+    fl = Flags(actor.name)
+    warnings: list[str] = []
     with store.write() as tx:
-        rv = _open_round(tx, subject)
+        rv = tx.require(subject.split("#")[0], "Ticket")
+        if rv["kind"] != "review":
+            raise RLError("INVALID", f"{rv['id']} is an advice ticket: discussion is on a review round (RV-x or "
+                                     "RV-x#Fn)")
         finding = None
         if "#F" in subject:
-            n = int(subject.split("#F")[1])
-            finding = next((f for f in rv.get("findings") or [] if f["n"] == n), None)
+            n = subject.split("#F", 1)[1]
+            finding = next((f for f in rv.get("findings") or [] if n.isdigit() and f["n"] == int(n)), None)
             if finding is None:
                 raise RLError("NOT_FOUND", f"{subject} does not exist")
-        owner = _owner(tx, rv, finding)
-        reviewer = f"reviewer-{rv['id']}"
+        owner = finding_owner(tx, rv, finding)
+        reviewer = session_name("reviewer", rv["id"])
         if actor.name == reviewer:
             to = owner
-        elif actor.name in (owner, _author(tx, rv)):
-            to = reviewer
         else:
-            raise RLError("INVALID", f"the discussion of {subject} is between {reviewer} and {owner}")
+            to = reviewer
+            if actor.name not in (owner, round_author(tx, rv)):
+                fl.add("not-holder", f"the discussion of {subject} is between {reviewer} and {owner}; {actor.name} "
+                                     "wrote in it")
+        over = round_ended(tx, rv)
+        if over:
+            warnings.append(f"{rv['id']} has ended: the entry is recorded and goes in no to-do list")
         clean = locators.check(tx, store.project, list(refs), note_cap=None)
         rec = _entry(tx, "discussion", rv["id"], actor, to, text, clean,
                      finding=f"#F{finding['n']}" if finding else None)
-    return {"id": rec["id"], "summary": f"{rec['id']} discussion on {subject} to {to}"}
-
-
-def _author(tx: Tx, rv: dict) -> str:
-    task = tx.get(rv.get("task_id") or "")
-    if rv.get("review_kind") == "design" and task and task.get("holder"):
-        return task["holder"]
-    return (rv.get("passes") or [{}])[-1].get("requested_by") or rv["requested_by"]
-
-
-def _owner(tx: Tx, rv: dict, finding: dict | None) -> str:
-    """A method finding belongs to the scientist, an engineering one to the task's holder (5.3)."""
-    task = tx.get(rv.get("task_id") or "")
-    if finding and finding.get("category") == "method" and task and task.get("kind") in ("execute", "prep"):
-        return task.get("scientist_session") if task["creator"] == "coordinator" and task.get("scientist_session") \
-            else task["creator"]
-    return _author(tx, rv)
+        written = fl.write(tx, rv["id"]) if fl else []
+    return {"id": rec["id"], "summary": f"{rec['id']} discussion on {subject} to {to}", "flags": written,
+            "warnings": warnings, "wake": [] if over else [to]}
 
 
 def thread(tx: Tx, subject: str) -> list[dict]:

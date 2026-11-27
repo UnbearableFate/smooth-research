@@ -2,6 +2,12 @@
   "hooks": {
     "SessionStart": [
       {"hooks": [{"type": "command", "command": "\"${PLUGIN_ROOT}/bin/rl\" hook session-start --host codex", "timeout": 30}]}
+    ],
+    "Stop": [
+      {"hooks": [{"type": "command", "command": "\"${PLUGIN_ROOT}/bin/rl\" hook stop --host codex", "timeout": 30}]}
+    ],
+    "UserPromptSubmit": [
+      {"hooks": [{"type": "command", "command": "\"${PLUGIN_ROOT}/bin/rl\" hook user-prompt --host codex", "timeout": 30}]}
     ]
   }
 }

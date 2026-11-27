@@ -7,10 +7,12 @@ was cut); what else can be fetched by id. Nothing here is stored.
 
 from __future__ import annotations
 
+
 from . import documents, gitops, inbox, refs
 from .cards import card
+from .flags import line as flagline
 from .research import brief, task_design, task_experiment, tree_lines
-from .reviews import blocking, open_findings, task_rounds
+from .reviews import REVIEWS_PER_ROUND, blocking, open_findings, round_ended, target_text, task_rounds
 from .roles import Actor, parse
 from .schema import TASK_DONE
 from .store import Store, Tx
@@ -105,10 +107,13 @@ def _coordinator(store: Store, tx: Tx) -> list[tuple[str, list[str], bool]]:
     for ph in tx.all("Phase"):
         ts = phase_tasks(tx, ph["id"])
         done = len([t for t in ts if t["state"] in TASK_DONE])
-        phases.append(f"{ph['id']} {ph['title']} · {done}/{len(ts)} done · scientists ≤{ph.get('scientist_limit')}"
+        phases.append(f"{ph['id']} {ph['title']} · {done}/{len(ts)} done"
                       + (f" · budget (shown only) {ph['budget']}" if ph.get("budget") else ""))
-    trees = [t for t in tx.all("Task", kind="tree")]
-    other = [f"{t['id']} tree/{t['state']}" + (f" ({t['holder']})" if t.get("holder") else "") for t in trees]
+    from .tree import has_draft
+    other = ["tree draft: research/tree-draft/tree.yaml (not recorded yet; rl view draws it)"] \
+        if has_draft(store.project) else []
+    other += [f"{t['id']} tree/{t['state']} (an older tree task)" for t in tx.all("Task", kind="tree")
+              if t["state"] not in TASK_DONE]
     other += [f"{t['id']} {t['kind']}/{t['state']} {t['title']}" for t in tx.all("Task")
               if t["kind"] in ("phase", "prep") and t["creator"] == "coordinator" and t["state"] not in TASK_DONE]
     cands = [brief(h) + (f" (not now: {h['defer_reason']})" if h.get("defer_reason") else "")
@@ -135,12 +140,27 @@ def _coordinator(store: Store, tx: Tx) -> list[tuple[str, list[str], bool]]:
 def _task_card(store: Store, tx: Tx, t: dict) -> list[str]:
     lines = [f"{t['id']} {t['kind']} · {t['state']}" + (f" · held by {t['holder']}" if t.get("holder") else "")
              + f" · {t['title']}"]
-    for key in ("reason", "priority", "envelope", "parallel_limit", "requirement", "done_check", "estimate",
+    for key in ("reason", "priority", "envelope", "requirement", "done_check", "estimate",
                 "block_reason", "block_note", "answer_note", "return_note", "dispatch_note", "merge_state",
                 "merge_note", "worktree", "branch"):
         if t.get(key) not in (None, ""):
             lines.append(f"{key}: {_worktree(store, t) if key == 'worktree' else t[key]}")
+    waiting = [e["id"] for e in tx.out(t["id"], "depends_on") if tx.require(e["id"])["state"] != "accepted"]
+    if waiting:
+        lines.append(f"waits on {', '.join(waiting)} (not accepted yet): merge the mainline into the branch once "
+                     "it is")
+    lines += [f"flag: {flagline(f)}" for f in t.get("flags") or []]
     return lines
+
+
+def source_lines(store: Store, h: dict) -> list[str]:
+    """Where a hypothesis comes from (7.3): its source as recorded, and the document it names (the plan when it
+    names none). The pack gives the path; the agent reads what it needs."""
+    from .tree import source_parts
+    doc, section = source_parts(store.project, h.get("source"))
+    doc = doc or store.project.rel(store.project.plan_path)
+    missing = "" if store.project.abs(doc).is_file() else " (not found)"
+    return [f"  source: {doc}{missing}" + (f" § {section}" if section else "")]
 
 
 def _worktree(store: Store, t: dict) -> str:
@@ -161,16 +181,11 @@ def _scientist(store: Store, tx: Tx, actor: Actor) -> list[tuple[str, list[str],
     t = tx.require(actor.subject, "Task")
     fetch = ("Fetch by id", ["rl show EV-x|RV-x|AD-x|D-x · rl task check T-x · rl paper search ..",
                              f"Your documents go in {work_dir(t['id'])}/ in your worktree; commit them."], False)
-    if t["kind"] == "tree":
-        plan = store.project.plan_path
-        text = plan.read_text(encoding="utf-8").splitlines() if plan.is_file() else ["(no plan file)"]
-        current = tree_lines(tx) or ["(no hypotheses yet)"]
-        return [("Tree task card", _task_card(store, tx, t) + [
-                    "Deliver: hypotheses (statement, scope, source, purpose; one primary parent each), a route "
-                    "decision on why the tree is split this way, every plan heading covered (or in left-out.md), "
-                    "flagged hypotheses with basis and options, a passed tree review."], False),
-                ("The plan (full text)", text, False),
-                ("Current tree", current, True), fetch]
+    if t["kind"] == "tree":  # older records: the tree is drafted by the coordinator's subagent now (7.2)
+        return [("Tree task card (an older task)", _task_card(store, tx, t) + [
+                    "Tree tasks are no longer worked on: the coordinator cancels this one and has the tree drafted "
+                    "by a subagent (rl tree prompt). Deliver what you have, or end your turn."], False),
+                ("Current tree", tree_lines(tx) or ["(no hypotheses yet)"], True), fetch]
     if t["kind"] == "phase":
         ph = next((tx.require(e["id"]) for e in tx.out(t["id"], "targets") if e["label"] == "Phase"), None)
         rows = []
@@ -194,6 +209,11 @@ def _scientist(store: Store, tx: Tx, actor: Actor) -> list[tuple[str, list[str],
     for h in hyps:
         cardl += [f"{h['id']} {h.get('label')}: {h['statement']}", f"  scope: {h.get('scope') or '-'} · purpose: "
                   f"{h.get('purpose') or '-'}" + (" · composite" if h.get("composite") else "")]
+        cardl += source_lines(store, h)
+        cardl += [f"  flag: {flagline(f)}" for f in h.get("flags") or []]
+    cardl += ["How you test it is yours to decide (7.3): the work it takes is tasks under this one (prep tasks for "
+              "engineering, execute tasks for experiments; --depends-on for their order; many at once), not new "
+              "hypotheses. A result that raises a new question may become a candidate hypothesis."]
     mine = {h["id"] for h in hyps}
     mark = {}
     for h in hyps:
@@ -265,9 +285,11 @@ def _researcher(store: Store, tx: Tx, actor: Actor) -> list[tuple[str, list[str]
     for r in task_rounds(tx, t["id"]):
         if r["status"] in ("passed", "closed"):
             continue
-        rounds.append(f"{r['id']} {r['status']} · segment {r.get('segment')} · passes {len(r.get('passes') or [])}/3")
+        if round_ended(tx, r):
+            continue
+        rounds.append(f"{r['id']} {r['status']} · review {len(r.get('passes') or [])} of {REVIEWS_PER_ROUND}")
         rounds += [f"  F{f['n']} {f['category']}/{f['severity']}/{f['status']}: {f['text'][:200]}"
-                   for f in r.get("findings") or [] if f["status"] in ("open", "draft")]
+                   for f in r.get("findings") or [] if f["status"] in ("open", "draft", "rejected", "disputed")]
     deps = [f"{d['id']} {tx.require(d['id'])['title']}: " + ", ".join(
         o["path"] if isinstance(o, dict) else o for o in tx.require(d["id"]).get("outputs") or [])
         for d in tx.out(t["id"], "depends_on")]
@@ -288,10 +310,13 @@ def _researcher(store: Store, tx: Tx, actor: Actor) -> list[tuple[str, list[str]
 def _reviewer(store: Store, tx: Tx, actor: Actor) -> list[tuple[str, list[str], bool]]:
     r = tx.require(actor.subject, "Ticket")
     lp = (r.get("passes") or [{}])[-1]
-    cardl = [f"{r['id']} {r.get('review_kind')} review · {r['status']} · pass {len(r.get('passes') or [])}"
-             + (f" · segment {r['segment']}" if r.get("segment") else ""),
+    cardl = [f"{r['id']} {r.get('review_kind')} review · {r['status']} · review {len(r.get('passes') or [])} of "
+             f"{REVIEWS_PER_ROUND}" + (" (the round ends with this answer)"
+                                       if len(r.get("passes") or []) >= REVIEWS_PER_ROUND else ""),
              f"target {r.get('target_id')} · task {r.get('task_id')} · requested by {lp.get('requested_by')}",
+             f"answer with --at {target_text(lp)} (what this review is of; a newer target moves it, not you)",
              f"question: {lp.get('question') or '-'}"]
+    cardl += [f"moved here from {target_text(m)} at {m.get('at')} by {m.get('by')}" for m in lp.get("retargeted") or []]
     material: list[str] = []
     kind = r.get("review_kind")
     if kind == "design":
@@ -326,20 +351,14 @@ def _reviewer(store: Store, tx: Tx, actor: Actor) -> list[tuple[str, list[str], 
                 if exp:
                     material.append(f"sealed design {exp['id']}@{exp['revision']} at "
                                     f"{(exp.get('design_commit') or '-')[:12]}: {exp['question']}")
-    elif kind == "tree":
+    elif kind == "tree":  # older records only
         material += tree_lines(tx)
-        for h in tx.all("Hypothesis"):
-            if h.get("origin") == r["task_id"]:
-                material.append(f"{h['id']} statement: {h['statement']} · source: {h.get('source')} · scope: "
-                                f"{h.get('scope')} · purpose: "
-                                f"{h.get('purpose')}" + (f" · FLAG {h['flag']}" if h.get("flag") else ""))
-        t = tx.require(r["task_id"])
-        left = gitops.checkout_in(store.project, t["id"]) / work_dir(t["id"]) / "left-out.md"
-        material += ["left out of the tree:"] + (left.read_text(encoding="utf-8").splitlines()[:40]
-                                                 if left.is_file() else ["(nothing listed)"])
-        material += [f"the plan: {store.project.rel(store.project.plan_path)} (read it whole)"]
     findings = [f"F{f['n']} {f['category']}/{f['severity']}/{f['status']}: {f['text'][:200]}"
+                + (f" — {f['status']}: the author's reason: {(f.get('rejected') or {}).get('reason')}"
+                   if f["status"] in ("rejected", "disputed") else "")
                 for f in r.get("findings") or []]
+    if any(f["status"] == "rejected" for f in r.get("findings") or []):
+        findings.append("a rejected finding you close is withdrawn (you accept the reason); one you keep is disputed")
     from .messages import thread_lines
     return [("Review card", cardl, False), ("Material", material, True),
             ("Findings so far", findings, False), ("Discussion", thread_lines(tx, r["id"]), True),
@@ -382,8 +401,12 @@ def item(store: Store, who: str, n: int) -> dict:
             raise RLError("NOT_FOUND", f"{who} has {len(items)} item(s)")
         it = items[n - 1]
         lines = inbox.render([it], who).splitlines()[1:]
-        lines += ["", "subject:"] + refs.expand(tx, store.project, [it.subject.split("#")[0]])
-        rec = tx.get(it.subject.split("#")[0])
+        try:  # a subject that names no record (the tree, a session) is shown as it is
+            rec = tx.get(it.subject.split("#")[0])
+        except RLError:
+            rec = None
+        lines += ["", "subject:"] + (refs.expand(tx, store.project, [it.subject.split("#")[0]]) if rec
+                                     else [it.subject])
         if rec and rec["_label"] == "Task":
             if rec["kind"] in ("execute", "prep"):
                 lines += ["", "check lines:"] + task_lines(tx, store.project, rec)

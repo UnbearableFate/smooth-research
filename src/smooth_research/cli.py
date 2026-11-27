@@ -27,7 +27,7 @@ ID_ARGS = ("id", "targets", "hypotheses", "parent", "assumes", "based_on", "supp
 
 
 # what rl --read-only runs: the commands that read the records and write no file (None: every action)
-READ_ONLY = {"status": None, "show": None, "history": None, "tree": None, "doctor": None, "inbox": None,
+READ_ONLY = {"status": None, "session": ("list",), "show": None, "history": None, "tree": (None, "prompt", "check"), "doctor": None, "inbox": None,
              "pack": None, "refs": None, "usage": None, "hypothesis": ("list",), "task": ("list",),
              "run": ("show",)}
 
@@ -98,11 +98,44 @@ def cmd_inbox(args):
     return {"items": [i.__dict__ for i in items], "summary": inbox.render(items, who)}
 
 
+def compute_lines(tx) -> list[str]:
+    """Compute used per phase and the cost of the hypotheses not tested yet: what the coordinator weighs a new
+    hypothesis against the initial budget with (7.2)."""
+    from .store import label_of
+    from .usage_view import fmt, task_usage
+    out = ["compute used (accounting records; runs on this machine are not counted; the initial budget is in "
+           "docs/constraints.md):"]
+    for ph in tx.all("Phase"):
+        used: dict[str, float] = {}
+        shared = False
+        for e in tx.inc(ph["id"], "in_phase"):
+            u = task_usage(tx, tx.require(e["id"]))
+            shared = shared or bool(u["shared"])
+            for unit, q in u["used"].items():
+                used[unit] = used.get(unit, 0.0) + q
+        out.append(f"  {ph['id']} {ph.get('title') or ''}: {fmt(used) if used else 'nothing counted'}"
+                   + (" (some of it shared between tasks, counted in each)" if shared else "")
+                   + (f" · budget {ph['budget']}" if ph.get("budget") else ""))
+    waiting = [h for h in tx.all("Hypothesis") if h.get("cost") and h.get("disposition") in ("active", "candidate")
+               and h.get("evidence_status") in (None, "untested")
+               and not any(label_of(e["id"]) == "Task" for e in tx.inc(h["id"], "targets"))]
+    if waiting:
+        out.append("  not tested yet: " + "; ".join(f"{h['id']} {h['cost']}" for h in waiting[:12])
+                   + (f"; … {len(waiting) - 12} more" if len(waiting) > 12 else ""))
+    return out
+
+
 def status_lines(store: Store) -> list[str]:
+    """The project for the user (8.4): what is at work, what waits on them, what was not done by the process, who
+    has work without an open session, whose work ended with the session still open; the observer only as
+    information."""
+    from . import flags as flagmod
+    from . import sessions
     with store.read() as tx:
         items = inbox.all_items(tx, store.project.config)
         lines = [f"project {store.project.root} · data_version {tx.meta().get('data_version')}"]
-        lines.append("watcher: " + ("running" if watch.alive(store) else "NOT running (rl resume starts it)"))
+        lines.append("observer: " + ("running" if watch.alive(store) else "not running (optional; rl resume starts "
+                                                                          "it, rl view redraws the page)"))
         work = [t for t in tx.all("Task") if t["kind"] in ("tree", "hypothesis", "phase") and t["state"]
                 not in TASK_DONE]
         lines.append("now:")
@@ -115,6 +148,24 @@ def status_lines(store: Store) -> list[str]:
         mine = [i for i in items if i.to == "user"]
         lines.append(f"waiting on you ({len(mine)}):")
         lines += [f"  {i.type} {i.subject}: {i.ask}" + (f" — {i.note}" if i.note else "") for i in mine]
+        flagged = flagmod.flagged(tx)
+        lines.append(f"not done by the process ({len(flagged)}):")
+        lines += [f"  {rec['id']} {flagmod.line(f)}" for rec, f in flagged[-20:]]
+        if len(flagged) > 20:
+            lines.append(f"  … {len(flagged) - 20} earlier: rl show <id> on the records")
+        opened = {x["name"]: x for x in tx.all("Session") if x["status"] == "open"}
+        idle = sorted({i.to for i in items if i.to not in opened and i.to != "user"})
+        lines.append(f"work but no open session ({len(idle)}):")
+        lines += [f"  {n}: rl session open {n} (or rl resume)" for n in idle]
+        over = sorted(n for n in opened if n not in {i.to for i in items} and sessions.finished(tx, n))
+        lines.append(f"work ended, session still open ({len(over)}):")
+        lines += [f"  {n}: rl session close {n}" for n in over]
+        dialogs = [x for x in opened.values() if x.get("needs_decision")]
+        if dialogs:
+            lines.append("at a dialog:")
+            lines += [f"  {x['name']}: {x['needs_decision'][:200]}" + (" (yours to answer)" if x["name"] ==
+                                                                       "coordinator" else "") for x in dialogs]
+        lines += compute_lines(tx)
         reports = [a for a in tx.all("Ask", kind="report")]
         since = reports[-1]["created_at"] if reports else ""
         new = [t for t in tx.all("Task", kind="hypothesis") if t["state"] == "accepted"
@@ -131,13 +182,49 @@ def cmd_status(args):
 
 
 def cmd_resume(args):
-    """Run the project on: the watcher and the coordinator's pane, then the status (8.11)."""
+    """Run the project on, once (3.3): finish interrupted acceptances, open the coordinator, tell every session with
+    work what it was not told (opening the ones not open), start the observer; then the status. Safe to run again."""
+    from . import sessions
     store = _store(args)
+    done = [x for x in [watch.retire_older(store)] if x]
+    done += [f"acceptance: {x}" for x in tasks.reconcile_merges(store)]
     problem = herdr.problem()
     if problem:
-        raise RLError("UNAVAILABLE", f"rl resume needs herdr: {problem}. Install herdr and run it inside a herdr pane")
-    done = [watch.start(store), watch.ensure_coordinator(store)]
+        done.append(f"no session was opened: {problem}. rl session open NAME --print prints the command that "
+                    "opens one by hand")
+    else:
+        done.append(sessions.ensure_coordinator(store))
+        with store.read() as tx:
+            items = inbox.all_items(tx, store.project.config)
+        done += [w for w in sessions.wake_all(store, sorted({i.to for i in items if i.to != "user"}))
+                 if not w.endswith(": told already")]
+    done.append(watch.start(store))
     return {"summary": "\n".join(done + [""] + status_lines(store))}
+
+
+def cmd_session(args):
+    """Open, close or list sessions by hand (3.3)."""
+    from . import sessions
+    store = _store(args)
+    if args.action == "list":
+        return {"summary": "\n".join(sessions.rows(store))}
+    if not args.name:
+        raise RLError("INVALID", f"rl session {args.action} NAME")
+    from .roles import parse
+    parse(args.name)  # a name rl knows (coordinator, scientist-T-x, researcher-T-x, reviewer-RV-x, advisor-AD-x)
+    if args.action == "close":
+        return {"summary": sessions.close(store, args.name, "closed by hand", force=args.force)}
+    if args.print_:
+        return {"summary": sessions.print_command(store, args.name)}
+    problem = herdr.problem()
+    if problem:
+        return {"summary": f"{args.name} was not opened: {problem}. In a terminal, run:\n"
+                           + sessions.print_command(store, args.name)}
+    with store.read() as tx:
+        live = sessions.open_record(tx, args.name)
+    if live:
+        return {"summary": sessions.wake(store, args.name)}
+    return {"summary": sessions.open_session(store, args.name)}
 
 
 def cmd_view(args):
@@ -169,9 +256,21 @@ def cmd_history(args):
 
 
 def cmd_tree(args):
-    store = _store(args)
+    """rl tree prints the recorded tree; prompt, check and record handle the subagent's draft (design 7.2)."""
+    from . import tree
+    store, a = _store(args), getattr(args, "action", None)
+    if a == "prompt":
+        return tree.prompt(store, args.from_ or [])
+    if a == "check":
+        return tree.check(store)
+    if a == "record":
+        return tree.record(store, _actor(args), args.approval)
     with store.read() as tx:
-        return {"summary": "\n".join(research.tree_lines(tx)) or "no hypotheses yet"}
+        lines = research.tree_lines(tx)
+    if tree.has_draft(store.project):
+        lines.append(f"an unrecorded draft is in {tree.DRAFT_DIR}/{tree.DRAFT_FILE} (rl tree check; rl view draws "
+                     "it on the research page)")
+    return {"summary": "\n".join(lines) or "no hypotheses yet"}
 
 
 def cmd_link(args):
@@ -203,15 +302,14 @@ def cmd_watch(args):
     if args.action == "start":
         return {"summary": watch.start(store)}
     if args.action == "once":
-        with watch.beat_lock(store) as mine:
-            if not mine:
-                return {"summary": "the watcher's own beat runs now"}
-            return watch.beat(store)
+        return watch.run(store, once=True)
     return watch.run(store)
 
 
 def cmd_hook(args):
-    return hooks.session_start(args.host, sys.stdin.read() if not sys.stdin.isatty() else "")
+    raw = sys.stdin.read() if not sys.stdin.isatty() else ""
+    handler = {"session-start": hooks.session_start, "stop": hooks.stop, "user-prompt": hooks.user_prompt}
+    return handler[args.event](args.host, raw)
 
 
 def cmd_usage(args):
@@ -242,9 +340,9 @@ def cmd_docs(args):
 def cmd_hypothesis(args):
     store, actor, a = _store(args), _actor(args), args.action
     if a == "add":
-        return research.add_hypothesis(store, actor, args.title, args.statement, args.purpose, args.scope,
-                                       args.source, args.parent, L(args.assumes), args.cost, args.composite,
-                                       motivated_by=L(args.motivated_by))
+        return research.add_hypothesis(store, actor, args.title, args.statement, args.purpose, scope=args.scope,
+                                       source=args.source, parent=args.parent, assumes=L(args.assumes),
+                                       cost=args.cost, motivated_by=L(args.motivated_by))
     if a == "revise":
         return research.revise_hypothesis(store, actor, args.id, args.reason, args.statement, args.scope, args.title,
                                           args.purpose, args.source, args.cost)
@@ -295,11 +393,10 @@ def cmd_task(args):
     store, actor, a = _store(args), _actor(args), args.action
     if a == "create":
         return tasks.create(store, actor, args.kind, args.title, L(args.targets), args.priority, args.envelope,
-                            args.parallel, args.reason, args.phase, args.experiment, args.requirement,
-                            args.done_check, args.estimate, args.mandate, L(args.depends_on))
+                            args.reason, args.phase, args.experiment, args.requirement, args.done_check,
+                            args.estimate, args.mandate, L(args.depends_on))
     if a == "claim":
-        holder = need(actor, "scientist", "researcher", what="claiming a task").name
-        return tasks.claim(store, args.id, holder)
+        return tasks.claim(store, actor, args.id)
     if a == "release":
         return tasks.release(store, actor, args.id, args.to == "scientist")
     if a == "cancel":
@@ -314,20 +411,23 @@ def cmd_task(args):
         return tasks.answer(store, actor, args.id, args.text)
     if a == "set":
         if args.envelope or args.estimate:
+            from .flags import Flags
+            fl = Flags(actor.name if actor else "?")
+            need(actor, "coordinator" if args.envelope else "scientist", what="changing a task card", flags=fl)
             with store.write() as tx:
                 t = tx.require(args.id, "Task")
-                need(actor, "coordinator" if args.envelope else "scientist", what="changing a task card")
                 tx.update(args.id, {k: v for k, v in (("envelope", args.envelope), ("estimate", args.estimate)) if v})
+                fl.write(tx, args.id)
                 tx.event("task.envelope" if args.envelope else "task.estimate", args.id,
                          args.envelope or args.estimate)
             if not (args.requirement or args.done_check):
-                return {"summary": f"{t['id']} changed"}
+                return {"summary": f"{t['id']} changed", "flags": fl.items}
         return tasks.set_prep(store, actor, args.id, args.requirement, args.done_check)
     if a == "deliver":
         return tasks.deliver(store, actor, args.id, args.conclusion, args.limitations, L(args.outputs),
                              args.reusable, args.note)
     if a == "accept":
-        return tasks.accept(store, actor, args.id)
+        return tasks.accept(store, actor, args.id, args.force, args.reason)
     if a == "return":
         return tasks.return_task(store, actor, args.id, args.reason)
     if a == "check":
@@ -344,7 +444,7 @@ def cmd_task(args):
 def cmd_phase(args):
     store, actor = _store(args), _actor(args)
     if args.action == "create":
-        return tasks.phase_create(store, actor, args.title, args.scientists, args.budget, L(args.tasks))
+        return tasks.phase_create(store, actor, args.title, args.budget, L(args.tasks))
     return tasks.phase_add(store, actor, args.id, L(args.tasks))
 
 
@@ -353,7 +453,8 @@ def cmd_request(args):
     if args.action == "forward":
         return tasks.forward(store, actor, args.id)
     if args.action == "answer":
-        return tasks.answer_ask(store, actor, args.id, args.by, args.text)
+        choice = "approve" if args.approve else "change" if args.change else None
+        return tasks.answer_ask(store, actor, args.id, args.by, args.text, choice)
     if not (args.stuck and args.options and args.recommend):
         raise RLError("INVALID", "rl request --stuck .. --options .. --recommend .. [--cost ..] [--task T-x] "
                                  "[--kind approval]")
@@ -369,19 +470,15 @@ def cmd_review(args):
         close = load_json_arg(args.close) or []
         if not isinstance(findings, list) or not isinstance(close, list):
             raise RLError("INVALID", "--findings and --close are JSON lists")
-        return reviews.answer(store, actor, args.id, args.verdict, findings, close, args.doc)
-    rv, _, n = args.id.partition("#F")
-    if not n:
-        raise RLError("INVALID", "settle names a finding: RV-x#Fn")
-    return reviews.settle(store, actor, rv, int(n), args.status, args.conditions)
+        return reviews.answer(store, actor, args.id, args.verdict, findings, close, args.doc, args.at)
+    return reviews.reject(store, actor, args.id, args.reason)
 
 
 def cmd_advise(args):
     store, actor = _store(args), _actor(args)
     if args.action == "ask":
         return reviews.consult(store, actor, args.question)
-    rulings = load_json_arg(args.rulings) or []
-    return reviews.advise(store, actor, args.id, args.doc, rulings)
+    return reviews.advise(store, actor, args.id, args.doc)
 
 
 def cmd_question(args):
@@ -395,15 +492,11 @@ def cmd_question(args):
 
 def cmd_reply(args):
     store, actor = _store(args), _actor(args)
-    if actor is None:
-        raise RLError("INVALID", "a reply is written by a session (--as <session> outside a pane)")
     return messages.reply(store, actor, args.id, args.text, L(args.ref))
 
 
 def cmd_discuss(args):
     store, actor = _store(args), _actor(args)
-    if actor is None:
-        raise RLError("INVALID", "discussion is written by a session (--as <session> outside a pane)")
     return messages.discuss(store, actor, args.id, args.text, L(args.ref))
 
 
@@ -482,10 +575,9 @@ def cmd_agent(args):
     if args.action == "dialog":
         return {"summary": launch.excerpt(herdr.read(pane), 1500)}
     actor = _actor(args)
-    if args.name == "coordinator":
-        pass  # the user answers the coordinator's own dialog in its pane; recorded here when asked to
-    else:
-        need(actor, "coordinator", what="answering a session's dialog")
+    warnings = []
+    if actor is not None and actor.role != "coordinator":  # the coordinator's step, or the user's (3.3)
+        warnings.append(f"a session's dialog is answered by the coordinator or the user; {actor.name} answered it")
     screen = herdr.read(pane)
     why = launch.select(pane, args.option, screen, lambda now: True)
     if why:
@@ -494,7 +586,7 @@ def cmd_agent(args):
     with store.write() as tx:
         tx.update(s["id"], {"needs_decision": None})
         tx.event("session.answered", args.name, f"{args.option}: {args.reason}")
-    return {"summary": f"{args.name}: answered {args.option!r}"}
+    return {"summary": f"{args.name}: answered {args.option!r}", "warnings": warnings}
 
 
 # -- parser ---------------------------------------------------------------------------------------------------
@@ -527,8 +619,16 @@ def build_parser() -> argparse.ArgumentParser:
     sp = add("inbox", cmd_inbox, "what waits on the calling session now (computed from the records)")
     sp.add_argument("--for", dest="for_", help="another recipient: a session name, or user")
     sp.add_argument("--item", type=int, help="open item N: its subject expanded, check lines, next commands")
-    add("status", cmd_status, "the project now, what waits on you, whether the watcher runs (starts nothing)")
-    add("resume", cmd_resume, "run the project on: the watcher and the coordinator's pane in herdr, then the status")
+    add("status", cmd_status, "the project now: what waits on you, what was not done by the process, sessions "
+                              "(starts nothing)")
+    add("resume", cmd_resume, "run the project on, once: the coordinator's pane, every session with work, the "
+                              "observer; then the status")
+    sp = add("session", cmd_session, "sessions by hand: open NAME (or wake it), close NAME, list")
+    sp.add_argument("action", choices=["open", "close", "list"])
+    sp.add_argument("name", nargs="?")
+    sp.add_argument("--print", dest="print_", action="store_true",
+                    help="print the command that opens it by hand (no herdr needed)")
+    sp.add_argument("--force", action="store_true", help="close it whatever its agent is doing")
     add("view", cmd_view, "draw docs/research.html now")
     add("doctor", cmd_doctor, "check sealed documents, run records and that every unfinished record waits on someone")
     sp = add("show", cmd_show, "one record with its relations (DOC ids print the sealed text)")
@@ -536,7 +636,17 @@ def build_parser() -> argparse.ArgumentParser:
     sp = add("history", cmd_history, "the event log")
     sp.add_argument("id", nargs="?")
     sp.add_argument("--limit", type=int, default=30)
-    add("tree", cmd_tree, "the hypothesis tree, one line each")
+    sp = add("tree", cmd_tree, "the hypothesis tree, one line each; prompt, check, record: its draft, written by "
+                               "the coordinator's subagent and recorded once the user approves")
+    ss = sp.add_subparsers(dest="action", metavar="{prompt,check,record}")
+    s = ss.add_parser("prompt", help="print the instructions for the tree subagent (records nothing)")
+    s.add_argument("--from", dest="from_", nargs="+", action="extend", metavar="DOC",
+                   help="the documents to draft it from (default: docs/plan.md)")
+    ss.add_parser("check", help="check the format of research/tree-draft/tree.yaml (records nothing)")
+    s = ss.add_parser("record", help="record the approved draft: hypotheses, the route decision, the shared prep "
+                                     "tasks, the user's approval; then delete the draft")
+    s.add_argument("--approval", help="the user's words approving it (without: recorded all the same, flagged "
+                                      "unapproved)")
     sp = add("refs", cmd_refs, "check locators and print their expansion")
     sp.add_argument("refs", nargs="+")
     sp = add("link", cmd_link, "relate two records: " + ", ".join(LINKABLE))
@@ -557,12 +667,13 @@ def build_parser() -> argparse.ArgumentParser:
     sp = add("upgrade", cmd_upgrade, "after a plugin update: the record format, what to adjust")
     sp.add_argument("--note")
     sp.add_argument("--move", nargs=2, metavar=("OLD", "NEW"))
-    sp = add("watch", cmd_watch, "the watcher: run (the loop), once (one beat), start (in its own herdr tab)")
+    sp = add("watch", cmd_watch, "the observer (optional, read-only): run (the loop), once (one beat), start (in "
+                                 "its own herdr tab)")
     sp.add_argument("action", nargs="?", choices=["run", "once", "start"], default="run")
     sp = add("hook", cmd_hook, "host hook handler (reads the hook event JSON on stdin)")
-    sp.add_argument("event", choices=["session-start"])
+    sp.add_argument("event", choices=["session-start", "stop", "user-prompt"])
     sp.add_argument("--host", required=True, choices=["claude", "codex"])
-    sp = add("usage", cmd_usage, "Claude Code's status line command (keeps the usage windows for the watcher)")
+    sp = add("usage", cmd_usage, "Claude Code's status line command (keeps the usage windows read when a session opens)")
     sp.add_argument("action", nargs="?", choices=["statusline"])
     sp = add("compute", cmd_compute, "compute resources: show, steps (how to stage, run and fetch), sync")
     sp.add_argument("action", nargs="?", choices=["show", "steps", "sync"], default="show")
@@ -580,12 +691,11 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--statement", required=True, help="the testable claim")
     s.add_argument("--purpose", required=True, help="one sentence: what testing it answers")
     s.add_argument("--scope")
-    s.add_argument("--source", help="where in the plan it comes from (a heading)")
+    s.add_argument("--source", help="where it comes from: '<document path> § <section>' (optional)")
     s.add_argument("--parent", help="its primary parent (the tree edge)")
     s.add_argument("--assumes", help="hypotheses it takes as premises")
     s.add_argument("--cost", help="rough cost, e.g. 'about 2 GPU·h'")
-    s.add_argument("--composite", action="store_true", help="decided by its children's verdicts")
-    s.add_argument("--motivated-by")
+    s.add_argument("--motivated-by", help="the decisions or papers it follows from (D-x,P-y)")
     s = ss.add_parser("revise")
     s.add_argument("id")
     s.add_argument("--reason", required=True)
@@ -610,7 +720,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--title", required=True)
     s.add_argument("--question", required=True)
     s.add_argument("--hypotheses", required=True)
-    s.add_argument("--motivated-by", required=True, help="the final route decision behind it")
+    s.add_argument("--motivated-by", help="the decision (usually a route decision) or paper behind it (optional)")
     s = ss.add_parser("set")
     s.add_argument("id")
     s.add_argument("--reason", help="required once sealed: a new revision")
@@ -663,7 +773,6 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--targets")
     s.add_argument("--priority", type=int)
     s.add_argument("--envelope")
-    s.add_argument("--parallel", type=int)
     s.add_argument("--reason")
     s.add_argument("--phase")
     s.add_argument("--experiment")
@@ -672,8 +781,13 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--estimate")
     s.add_argument("--mandate", help="a mandate document file")
     s.add_argument("--depends-on")
-    for name in ("claim", "accept", "check"):
+    for name in ("claim", "check"):
         ss.add_parser(name).add_argument("id")
+    s = ss.add_parser("accept")
+    s.add_argument("id")
+    s.add_argument("--force", action="store_true", help="move the mainline although the tests on the merge commit "
+                                                        "fail (with --reason; flagged)")
+    s.add_argument("--reason")
     s = ss.add_parser("release")
     s.add_argument("id")
     s.add_argument("--to", choices=["scientist"])
@@ -717,7 +831,6 @@ def build_parser() -> argparse.ArgumentParser:
     ss = subs(sp)
     s = ss.add_parser("create")
     s.add_argument("--title", required=True)
-    s.add_argument("--scientists", type=int)
     s.add_argument("--budget", help="shown only")
     s.add_argument("--tasks")
     s = ss.add_parser("add")
@@ -736,24 +849,34 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--kind", choices=["decision", "approval"], default="decision")
     sp.add_argument("--by", choices=["coordinator", "user"])
     sp.add_argument("--text")
+    choice = sp.add_mutually_exclusive_group()
+    choice.add_argument("--approve", action="store_true", help="an approval: the user approved")
+    choice.add_argument("--change", action="store_true", help="an approval: the user wants it changed")
 
-    sp = add("review", cmd_review, "review rounds: request, answer, settle")
+    sp = add("review", cmd_review, "review rounds of up to two reviews: request (a round, its recheck, or moving a "
+                                   "waiting review to a newer target), answer, reject a finding")
     ss = subs(sp)
     s = ss.add_parser("request")
-    s.add_argument("target", help="a task (design or tree review) or a draft decision (conclusion review)")
-    s.add_argument("--kind", choices=["design", "conclusion", "tree"], default="design")
+    s.add_argument("target", help="an execute or preparation task (a design review of its current commit) or a draft "
+                                  "verdict or stop D-x (a conclusion review)")
+    s.add_argument("--kind", choices=["design", "conclusion", "tree"],
+                   help="read from the target; tree is refused with what replaced it (older tree rounds stay "
+                        "readable)")
     s.add_argument("--question")
-    s.add_argument("--recheck-of")
+    s.add_argument("--recheck-of", metavar="RV-x", help="the round's second review, of the current commit or draft; "
+                   "while its review still waits, that review moves to it instead (not another review)")
     s = ss.add_parser("answer")
     s.add_argument("id")
     s.add_argument("--verdict", required=True, choices=["pass", "fail"])
+    s.add_argument("--at", help="what you reviewed: the commit (7+ characters) or, in a conclusion review, the "
+                                "draft D-x; a verdict on anything but the round's current target is refused")
     s.add_argument("--findings", help="JSON list of {category, severity, text, loc[, engineering_reason]}")
-    s.add_argument("--close", help="JSON list of {n, status: fixed|constrained|withdrawn, conditions}")
+    s.add_argument("--close", help="JSON list of {n, status: fixed|constrained|withdrawn, conditions}; withdrawn "
+                                   "accepts the author's reason for a rejected finding, leaving it open disputes it")
     s.add_argument("--doc", help="the answer document file")
-    s = ss.add_parser("settle")
+    s = ss.add_parser("reject", help="the author declines a finding with its reason (no consent needed)")
     s.add_argument("id", help="RV-x#Fn")
-    s.add_argument("--status", required=True, choices=["constrained", "withdrawn"])
-    s.add_argument("--conditions")
+    s.add_argument("--reason", required=True)
 
     sp = add("advise", cmd_advise, "advice: ask (a consultation), answer")
     ss = subs(sp)
@@ -762,7 +885,6 @@ def build_parser() -> argparse.ArgumentParser:
     s = ss.add_parser("answer")
     s.add_argument("id")
     s.add_argument("--doc", required=True)
-    s.add_argument("--rulings", help="JSON list of {n, ruling: uphold|withdraw, reason}")
 
     sp = add("question", cmd_question, "the coordinator asks a session a question; --close after reading the answer")
     sp.add_argument("--to")
@@ -790,7 +912,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--split")
     s.add_argument("--commit")
     s.add_argument("--minutes", type=float, help="expected duration (the attempt's expected end)")
-    s.add_argument("--trial", action="store_true", help="a trial run (smoke, timing): at most limits.trial_minutes")
+    s.add_argument("--trial", action="store_true", help="a trial run (tests, smoke, timing): never evidence, needs no review")
     s.add_argument("--deviation", help="register a run that differs from the manifest (not evidence)")
     s.add_argument("--purpose", choices=list(runs.PURPOSES))
     s.add_argument("--ticket")
@@ -910,16 +1032,38 @@ def main(argv: list[str] | None = None) -> int:
         return 3 if exc.code in CONFLICT_CODES else 1
     warnings = list(getattr(args, "config_warnings", None) or [])
     store = getattr(args, "store", None)
-    if store is not None and args.command not in ("watch", "hook", "usage"):
-        note = watch.stale_note(store)
-        if note:
-            warnings.append(note)
+    if store is not None and isinstance(result, dict) and (result.get("wake") or result.get("close")):
+        result["notified"] = handoff(store, args, result)
     if args.command == "hook" or args.json:
         print(json.dumps(result, ensure_ascii=False, default=str, indent=None if args.command == "hook" else 1))
     else:
         print(result.get("summary", ""))
+        for f in result.get("flags") or []:
+            print(f"flag: [{f['code']}] {f['text']}")
         for w in [*(result.get("warnings") or []), *warnings]:
             print(f"warning: {w}")
+        for line in result.get("notified") or []:
+            print(f"notice: {line}")
         for step in result.get("next") or []:
             print(f"next: {step}")
     return 0
+
+
+def handoff(store: Store, args, result: dict) -> list[str]:
+    """After a command that hands work on (design 3.2, 3.3): close the idle sessions whose work it ended
+    (result["close"]: task ids), then tell the sessions it handed work to (result["wake"]: session names; the
+    caller itself is left out). Never fails the command: what could not be done is said in the lines."""
+    from . import sessions
+    me = getattr(_actor(args), "name", None)
+    lines: list[str] = []
+    for tid in result.get("close") or []:
+        try:
+            lines += sessions.close_for_task(store, tid)
+        except Exception as exc:  # a closing that fails leaves a session open, which rl status lists
+            lines.append(f"sessions of {tid} not closed: {exc}")
+    names = [n for n in result.get("wake") or [] if n and n != me]
+    try:
+        lines += sessions.wake_all(store, names)
+    except Exception as exc:  # the records are written; the notice is only a pointer
+        lines.append(f"could not notify {', '.join(names)}: {exc}; remedy: rl resume")
+    return lines

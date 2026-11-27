@@ -90,7 +90,8 @@ def _decode(label: str, props: dict) -> dict:
 
 
 class Tx:
-    def __init__(self, txn, writable: bool, actor: str):
+    def __init__(self, txn, writable: bool, actor: str, project=None):
+        self.project = project  # the project whose records these are (for rules that read its files)
         self.txn = txn
         self.writable = writable
         self.actor = actor
@@ -419,7 +420,7 @@ class Store:
     def read(self) -> Iterator[Tx]:
         self._ready()
         with self._lock(exclusive=False), self._open(write=False) as db, db.read() as txn:
-            yield Tx(txn, False, self.actor)
+            yield Tx(txn, False, self.actor, self.project)
 
     @contextmanager
     def write(self) -> Iterator[Tx]:
@@ -433,7 +434,7 @@ class Store:
                                          f"{self.newer}; this CLI writes {SCHEMA_VERSION}): it can still be read, "
                                          "but writes need the newer plugin. Update the plugin; nothing was written")
         with self._lock(exclusive=True), self._open(write=True) as db, db.write() as txn:
-            tx = Tx(txn, True, self.actor)
+            tx = Tx(txn, True, self.actor, self.project)
             meta = tx.meta()
             yield tx
             tx.set_meta(data_version=meta["data_version"] + 1, updated_at=now_utc())

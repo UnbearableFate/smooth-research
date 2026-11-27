@@ -1,13 +1,11 @@
-"""The to-do items: who is waited on at each step, the escalation ladder, the dialogue and rl doctor's invariant."""
+"""The to-do items: who is waited on at each step, the dialogue and rl doctor's invariant."""
 
 import json
-from datetime import datetime, timedelta, timezone
 
 import flow
 import pytest
 
 from smooth_research import inbox
-from smooth_research.inbox import Item
 
 
 def unwatched(store) -> list[str]:
@@ -34,46 +32,29 @@ def test_a_delivered_result_goes_to_the_scientist_who_made_the_task(project, rl)
     assert flow.types(project, "researcher-T-0003") == []
 
 
-def at(minutes_ago: float, now: datetime) -> str:
-    return (now - timedelta(minutes=minutes_ago)).isoformat()
+def flag_codes(store, rid) -> list[str]:
+    with store.read() as tx:
+        return [f["code"] for f in tx.require(rid).get("flags") or []]
 
 
-def test_an_overdue_item_climbs_the_ladder_one_deadline_at_a_time():
-    now = datetime.now(timezone.utc)
-    config = {"agents": {"deadlines": {"default": 60, "question": 10}}}
-    task = {"id": "T-0003", "creator": "scientist-T-0002"}
-
-    def ladder(minutes: float, type_: str = "task", to: str = "researcher-T-0003") -> list[tuple[str, int]]:
-        item = Item(type=type_, to=to, subject="T-0003", ask="run it", cmd="", since=at(minutes, now))
-        return [(x.to, x.level) for x in inbox.escalations([item], config, now, {"T-0003": task})]
-
-    assert ladder(59) == []
-    assert ladder(61) == []  # the first deadline: the watcher reminds the holder
-    assert ladder(121) == [("scientist-T-0002", 1)]
-    assert ladder(181) == [("scientist-T-0002", 1), ("coordinator", 2)]
-    assert ladder(600) == [("scientist-T-0002", 1), ("coordinator", 2), ("user", 3)]
-    assert ladder(21, "question") == [("scientist-T-0002", 1)]  # its own deadline
-    assert ladder(600, to="coordinator") == [("user", 1)]
-    untimed = Item(type="task", to="researcher-T-0003", subject="T-0003", ask="", cmd="", since=at(600, now), timed=False)
-    report = Item(type="phase-report", to="coordinator", subject="PH-0001", ask="", cmd="", since=at(600, now))
-    assert inbox.escalations([untimed, report], config, now, {}) == []
-
-
-def test_a_question_is_answered_once_and_closed_by_the_coordinator(project, rl):
+def test_a_question_is_answered_and_closed_and_others_doing_it_are_flagged(project, rl):
     flow.dispatched(project, rl)
     c, s = "coordinator", "scientist-T-0002"
     out = flow.ok(rl("question", "--to", s, "--on", "T-0003", "--text", "why two arms?", who=c))
     mid = out.split()[0] if out.startswith("MSG-") else "MSG-0001"
     assert flow.types(project, s) == ["question"]
-    code, _, err = rl("question", "--to", c, "--on", "T-0003", "--text", "and you?", who=s)
-    assert code != 0 and "only the coordinator" in err
-    code, _, err = rl("reply", mid, "--text", "not mine", who="researcher-T-0003")
-    assert code != 0 and "addressed to" in err
+    out = flow.ok(rl("question", "--to", c, "--on", "T-0003", "--text", "and you?", who=s))
+    assert "flag: [role]" in out and "role" in flag_codes(project, "T-0003")
+    flow.ok(rl("reply", "MSG-0002", "--text", "later", who=c))
+    out = flow.ok(rl("reply", mid, "--text", "not mine", who="researcher-T-0003"))
+    assert "flag: [not-holder]" in out
     flow.ok(rl("reply", mid, "--text", "a baseline and the change", who=s))
+    assert flow.types(project, s) == ["answer"]  # the coordinator's answer to its own question
+    flow.ok(rl("question", "--close", "MSG-0002", who=s))
     assert flow.types(project, s) == []
-    assert [(i.type, i.note) for i in flow.items(project, c)] == [("answer", "a baseline and the change")]
-    code, _, err = rl("reply", mid, "--text", "again", who=s)
-    assert code != 0 and "already has a reply" in err
+    assert ("answer", "a baseline and the change") in [(i.type, i.note) for i in flow.items(project, c)]
+    out = flow.ok(rl("reply", mid, "--text", "again", who=s))
+    assert "has a reply already" in out  # recorded after it, said
     flow.ok(rl("question", "--close", mid, who=c))
     assert flow.types(project, c) == []
     assert unwatched(project) == []
@@ -83,61 +64,58 @@ def test_review_discussion_waits_on_the_other_side(project, rl):
     flow.designed(project, rl)
     s = "scientist-T-0002"
     flow.ok(rl("review", "request", "T-0003", who=s))
-    reviewer = "reviewer-RV-0002"
-    flow.ok(rl("discuss", "RV-0002", "--text", "is the seed fixed?", who=reviewer))
+    reviewer = "reviewer-RV-0001"
+    flow.ok(rl("discuss", "RV-0001", "--text", "is the seed fixed?", who=reviewer))
     assert "review-discussion" in flow.types(project, s)
-    code, _, err = rl("discuss", "RV-0002", "--text", "me too", who="researcher-T-0003")
-    assert code != 0 and "between" in err
+    out = flow.ok(rl("discuss", "RV-0001", "--text", "me too", who="researcher-T-0003"))
+    assert "flag: [not-holder]" in out and "between" in out
 
 
 def test_a_recheck_on_the_same_ticket_is_news_to_the_reviewer_and_its_verdict_to_the_author(project, rl):
-    """The watcher tells each item once by its key; a review item's key carries its pass."""
+    """Each item is told once by its key; a review item's key carries its review."""
     flow.designed(project, rl)
-    s, r = "scientist-T-0002", "reviewer-RV-0002"
+    s, r = "scientist-T-0002", "reviewer-RV-0001"
     flow.ok(rl("review", "request", "T-0003", who=s))
     [first] = flow.items(project, r)
-    flow.ok(rl("review", "answer", "RV-0002", "--verdict", "fail", "--findings", json.dumps(
+    at = flow.head(project, "T-0003")[:12]
+    flow.ok(rl("review", "answer", "RV-0001", "--verdict", "fail", "--at", at, "--findings", json.dumps(
         [{"category": "method", "severity": "medium", "text": "seed count", "loc": None}]), who=r))
     [failed] = [i for i in flow.items(project, s) if i.type == "review-verdict"]
-    flow.ok(rl("review", "request", "T-0003", "--recheck-of", "RV-0002", who=s))
+    flow.ok(rl("review", "request", "T-0003", "--recheck-of", "RV-0001", who=s))
     [again] = flow.items(project, r)
     assert again.key() != first.key()
-    flow.ok(rl("review", "answer", "RV-0002", "--verdict", "pass", "--close",
+    flow.ok(rl("review", "answer", "RV-0001", "--verdict", "pass", "--at", at, "--close",
                json.dumps([{"n": 1, "status": "fixed"}]), who=r))
     [passed] = [i for i in flow.items(project, s) if i.type == "review-verdict"]
     assert passed.key() != failed.key()
 
 
 @pytest.mark.parametrize("first", [1, 9999])  # 9999: the next round is RV-10000, after it by number, not as text
-def test_only_the_latest_tree_round_clears_the_delivery(project, rl, first):
-    """A tree whose newer round failed is not delivered on an older pass, nor told to be."""
+def test_only_the_latest_round_counts_for_a_dispatch(project, rl, first):
+    """A design whose newer round failed is not cleared by an older pass: its dispatch is flagged, not refused."""
     with project.write() as tx:
         tx.txn.set_property(tx._meta_node(), "seq_RV", first - 1)
-    flow.ok(rl("task", "create", "--kind", "tree", "--title", "Tree", who="coordinator"))
-    flow.ok(rl("task", "release", "T-0001", who="coordinator"))
-    s = "scientist-T-0001"
-    flow.ok(rl("task", "claim", "T-0001", who=s))
-    flow.ok(rl("hypothesis", "add", "--title", "Averaging helps", "--statement", "mean of 3 beats 1", "--purpose",
-               "whether averaging is worth it", "--scope", "N(5,1)", "--source", "Averaging", who=s))
-    flow.ok(rl("decide", "--kind", "route", "--targets", "H-0001", "--rationale", "one", who=s))
-    flow.ok(rl("review", "request", "T-0001", "--kind", "tree", who=s))
+    flow.designed(project, rl)
+    s = "scientist-T-0002"
     one, two = (f"RV-{n:04d}" for n in (first, first + 1))
-    flow.ok(rl("review", "answer", one, "--verdict", "pass", who=f"reviewer-{one}"))
-    flow.ok(rl("review", "request", "T-0001", "--kind", "tree", who=s))  # the tree changed: a new round
-    flow.ok(rl("review", "answer", two, "--verdict", "fail", "--findings", json.dumps(
-        [{"category": "method", "severity": "medium", "text": "scope too wide", "loc": None}]),
-        who=f"reviewer-{two}"))
+    flow.ok(rl("review", "request", "T-0003", who=s))
+    flow.ok(rl("review", "answer", one, "--verdict", "pass", "--at", flow.head(project, "T-0003")[:12],
+               who=f"reviewer-{one}"))
+    flow.ok(rl("review", "request", "T-0003", who=s))  # a new round on the same commit
+    flow.ok(rl("review", "answer", two, "--verdict", "fail", "--at", flow.head(project, "T-0003")[:12],
+               "--findings", json.dumps([{"category": "method", "severity": "medium", "text": "scope too wide",
+                                          "loc": None}]), who=f"reviewer-{two}"))
     assert not any(i.type == "review-verdict" and i.subject == one for i in flow.items(project, s))
-    code, _, err = rl("task", "deliver", "T-0001", "--conclusion", "x", who=s)
-    assert code == 1 and "tree review has not passed" in err
+    out = flow.ok(rl("task", "dispatch", "T-0003", who=s))
+    assert "flag: [" in out and two in out
 
 
 def test_the_researchers_go_on_item_clears_once_it_runs(project, rl):
     flow.dispatched(project, rl)
     r = "researcher-T-0003"
     flow.ok(rl("review", "request", "T-0003", who=r))
-    rv = max(i.subject for i in flow.items(project, "reviewer-RV-0003"))
-    flow.ok(rl("review", "answer", rv, "--verdict", "pass", who=f"reviewer-{rv}"))
+    flow.ok(rl("review", "answer", "RV-0002", "--verdict", "pass", "--at", flow.head(project, "T-0003")[:12],
+               who="reviewer-RV-0002"))
     assert "review-verdict" in flow.types(project, r)
     flow.run_arm(project, rl, "single")
     assert "review-verdict" not in flow.types(project, r)
@@ -153,33 +131,29 @@ def test_a_design_key_from_before_edit_seq_stays_the_same():
     assert design_key({**exp, "edit_seq": 1}) != design_key(exp)
 
 
-def test_a_delivered_tree_is_not_reviewed_again(project, rl):
-    flow.tree(project, rl)
-    code, _, err = rl("review", "request", "T-0001", "--kind", "tree", who="scientist-T-0001")
-    assert code == 1 and "delivered" in err
-
-
 def test_the_go_on_item_follows_the_latest_round_and_the_event_order(project, rl):
     flow.dispatched(project, rl)
     r = "researcher-T-0003"
     flow.run_arm(project, rl, "single")  # registered before the pass (in the same second, possibly)
     flow.ok(rl("review", "request", "T-0003", who=r))
-    flow.ok(rl("review", "answer", "RV-0003", "--verdict", "pass", who="reviewer-RV-0003"))
+    flow.ok(rl("review", "answer", "RV-0002", "--verdict", "pass", "--at", flow.head(project, "T-0003")[:12],
+               who="reviewer-RV-0002"))
     assert "review-verdict" in flow.types(project, r)  # a run before the pass does not clear it
     flow.ok(rl("review", "request", "T-0003", who=r))  # a newer round that fails says fix, not go on
-    flow.ok(rl("review", "answer", "RV-0004", "--verdict", "fail", "--findings", json.dumps(
-        [{"category": "method", "severity": "high", "text": "wrong baseline", "loc": None}]), who="reviewer-RV-0004"))
+    flow.ok(rl("review", "answer", "RV-0003", "--verdict", "fail", "--at", flow.head(project, "T-0003")[:12],
+               "--findings", json.dumps([{"category": "method", "severity": "high", "text": "wrong baseline",
+                                          "loc": None}]), who="reviewer-RV-0003"))
     verdicts = [i for i in flow.items(project, r) if i.type == "review-verdict"]
-    assert [i.subject for i in verdicts] == ["RV-0004"] and "fix" in verdicts[0].ask
+    assert [i.subject for i in verdicts] == ["RV-0003"] and "fix" in verdicts[0].ask
 
 
 def test_a_task_delivered_again_after_a_return_is_news_to_the_coordinator(project, rl):
-    flow.tree(project, rl)
+    flow.concluded(project, rl)
     [first] = flow.items(project, "coordinator")
-    flow.ok(rl("task", "return", "T-0001", "--reason", "add the second section", who="coordinator"))
-    flow.ok(rl("task", "deliver", "T-0001", "--conclusion", "one hypothesis, revised", who="scientist-T-0001"))
+    flow.ok(rl("task", "return", "T-0002", "--reason", "say what the tails do", who="coordinator"))
+    flow.ok(rl("task", "deliver", "T-0002", "--conclusion", "averaging helps, revised", who="scientist-T-0002"))
     [again] = flow.items(project, "coordinator")
-    assert again.type == first.type == "tree" and again.key() != first.key()
+    assert again.type == first.type == "hypothesis-conclusion" and again.key() != first.key()
 
 
 def test_a_settlement_after_a_trial_still_says_go_on(project, rl):
@@ -188,11 +162,12 @@ def test_a_settlement_after_a_trial_still_says_go_on(project, rl):
     flow.dispatched(project, rl)
     r = "researcher-T-0003"
     flow.ok(rl("review", "request", "T-0003", who=r))
-    flow.ok(rl("review", "answer", "RV-0003", "--verdict", "pass", who="reviewer-RV-0003"))
+    flow.ok(rl("review", "answer", "RV-0002", "--verdict", "pass", "--at", flow.head(project, "T-0003")[:12],
+               who="reviewer-RV-0002"))
     flow.ok(rl("run", "register", "--task", "T-0003", "--request-id", "smoke", "--trial", "--minutes", "1", who=r))
     assert "review-verdict" not in flow.types(project, r)
     with project.write() as tx:  # the settlement that made the round pass came after the trial
-        tx.event("review.settled", "RV-0003", "F1 withdrawn by scientist-T-0002")
+        tx.event("review.settled", "RV-0002", "F1 withdrawn by scientist-T-0002")
     assert "review-verdict" in flow.types(project, r)
 
 

@@ -40,7 +40,7 @@ def test_frozen_projects_of_earlier_formats_keep_working(frozen, tmp_path, rl, m
     for args in [*READS, *[("show", i) for i in ids]]:
         code, _, err = rl(*args)
         assert code == 0, (args, err)
-    writes = [(("task", "create", "--kind", "tree", "--title", "Second tree"), "coordinator"),
+    writes = [(("hypothesis", "add", "--title", "Another", "--statement", "s", "--purpose", "p"), "coordinator"),
               (("phase", "create", "--title", "Phase 2"), "coordinator"),
               (("question", "--close", "MSG-0001"), "coordinator")]
     for args, who in writes:
@@ -53,6 +53,13 @@ def _set_version(root: Path, version: int) -> None:
         tx.set_meta(schema_version=version)
 
 
+LATEST = f"schema-{schema.SCHEMA_VERSION}"
+
+
+def test_the_latest_format_has_a_frozen_project():
+    assert (FROZEN / LATEST / "snapshot.json").is_file()
+
+
 def test_a_project_from_before_the_redesign_is_refused_with_what_to_do(tmp_path, rl, monkeypatch):
     root, _ = restored("schema-5", tmp_path, monkeypatch)
     _set_version(root, 4)
@@ -61,16 +68,16 @@ def test_a_project_from_before_the_redesign_is_refused_with_what_to_do(tmp_path,
 
 
 def test_a_project_written_by_a_newer_plugin_is_read_but_not_written(tmp_path, rl, monkeypatch):
-    root, _ = restored("schema-5", tmp_path, monkeypatch)
+    root, _ = restored(LATEST, tmp_path, monkeypatch)
     _set_version(root, schema.SCHEMA_VERSION + 1)
     assert rl("status")[0] == 0 and rl("tree")[0] == 0
-    code, _, err = rl("task", "create", "--kind", "tree", "--title", "x", who="coordinator")
+    code, _, err = rl("phase", "create", "--title", "x", who="coordinator")
     assert code == 1 and "newer smooth-research" in err and "nothing was written" in err
 
 
 def test_a_later_format_upgrades_the_frozen_project_in_place_with_a_copy(tmp_path, rl, monkeypatch):
     """A stand-in for the next record format: its migration runs once, under the lock, with a backup."""
-    root, _ = restored("schema-5", tmp_path, monkeypatch)
+    root, _ = restored(LATEST, tmp_path, monkeypatch)
     nxt = schema.SCHEMA_VERSION + 1
     for module in (schema, store_mod, upgrade, snapshot):
         monkeypatch.setattr(module, "SCHEMA_VERSION", nxt, raising=False)
@@ -78,12 +85,12 @@ def test_a_later_format_upgrades_the_frozen_project_in_place_with_a_copy(tmp_pat
     def fill(tx) -> list[str]:
         hyps = tx.all("Hypothesis")
         return [f"{len(hyps)} hypothesis(es) looked at"]
-    monkeypatch.setattr(upgrade, "MIGRATIONS", [Migration(nxt, "a test migration", fill)])
+    monkeypatch.setattr(upgrade, "MIGRATIONS", [*upgrade.MIGRATIONS, Migration(nxt, "a test migration", fill)])
     code, out, err = rl("upgrade")
     assert code == 0, err
     assert f"schema {nxt}" in out and "project.upgrade" in out
     backups = list((root / "research/state/backups").iterdir())
-    assert [b.name.split("-")[1] for b in backups] == ["5"]
+    assert [b.name.split("-")[1] for b in backups] == [str(nxt - 1)]
     with Store(find_project(), "test").read() as tx:
         assert tx.meta()["schema_version"] == nxt
         events = [e["summary"] for e in tx.all("Event") if e["type"] == "project.upgrade"]

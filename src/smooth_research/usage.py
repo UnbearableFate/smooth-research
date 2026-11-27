@@ -9,9 +9,9 @@ was written last); one older than STALE_MINUTES is stale. A stale or missing rea
 it is shown as such (rl agent list); a window whose reset time has passed with no reading since is shown as reset,
 with no reading yet, and is not low.
 
-A host is low when one of its windows has usage.switch_left_percent (10) or less left. Then the watcher moves the
-sessions on it to the next model entry of their role: it ends the old conversation and starts the new one from the
-session's pack, with no handover document (design 11.3). pi reports no windows.
+A host is low when one of its windows has usage.switch_left_percent (10) or less left. Then a session opened
+afterwards takes the first entry of its role on another host (sessions.choose_entry); an open session keeps its
+model (2026-11-27 design 3.3). pi reports no windows.
 """
 
 from __future__ import annotations

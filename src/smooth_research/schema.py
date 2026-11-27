@@ -1,4 +1,4 @@
-"""Record types, enumerations and relations of the research graph (schema 5).
+"""Record types, enumerations and relations of the research graph (schema 6).
 
 Hypotheses, experiments, evidence, decisions, tasks, papers and phases are graph nodes; documents, runs, attempts,
 execution references, observations, results, usage, sessions, dialogue entries, asks, tickets and events are
@@ -13,14 +13,15 @@ from dataclasses import dataclass, field
 
 # The record format. A change that older records do not already satisfy raises it and adds a migration to
 # upgrade.MIGRATIONS; tests open the frozen project of every supported earlier version (tests/fixtures/projects/).
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 # Projects made before the 2026-11 redesign (schema < 5) are not opened: they continue with the plugin that made
-# them (design 10.4).
+# them (design 10.4; a one-time exception, 2026-11-25). Schema 5 projects are upgraded in place (upgrade.py).
 MIN_SCHEMA_VERSION = 5
 
 ENUMS: dict[str, tuple[str, ...]] = {
     "evidence_status": ("untested", "supported", "challenged", "inconclusive"),
     "disposition": ("candidate", "active", "paused", "retired"),
+    # tree: read in older records only (the tree is drafted by the coordinator's subagent now, 11-27 design 7.2)
     "task_kind": ("tree", "hypothesis", "phase", "prep", "execute"),
     # queued: made by the coordinator, not released; open: released or made, nobody holds it; active: held;
     # blocked: its researcher waits on the scientist; delivered: waits for acceptance (or a merge conflict);
@@ -33,16 +34,21 @@ ENUMS: dict[str, tuple[str, ...]] = {
     "decision_state": ("draft", "final"),
     "ask_kind": ("decision", "approval", "report"),
     "ask_state": ("open", "forwarded", "answered", "closed"),
+    "ask_choice": ("approve", "change"),
     "answerer": ("coordinator", "user"),
     "ticket_kind": ("review", "advice"),
+    # tree: older records only (a tree is approved by the user now)
     "review_kind": ("design", "conclusion", "tree"),
+    # ruling: older records only (a round no longer escalates)
     "advice_kind": ("consult", "ruling"),
-    # waiting: the reviewer or advisor works on it; answered: a verdict is in, the author acts; passed: closed with a
-    # pass; escalated: out of passes, a ruling or the scientist decides; closed: advice given or round abandoned
+    # waiting: the reviewer or advisor works on it; answered: a verdict is in, the author acts; passed: ended with a
+    # pass; closed: ended otherwise (its second review is in, advice given, round abandoned); escalated: older
+    # records only (schema 6 turns them into closed)
     "ticket_status": ("waiting", "answered", "passed", "escalated", "closed"),
-    "segment": ("scientist", "researcher"),
+    "segment": ("scientist", "researcher"),  # older records only
     "finding_category": ("method", "engineering"),
-    "finding_status": ("draft", "open", "fixed", "constrained", "withdrawn", "ruled"),
+    # rejected: the author declined it with a reason; disputed: the reviewer kept it open after that (6)
+    "finding_status": ("draft", "open", "fixed", "constrained", "withdrawn", "ruled", "rejected", "disputed"),
     "severity": ("low", "medium", "high"),
     "session_status": ("open", "ended"),
     "message_kind": ("question", "answer", "discussion", "consult"),
@@ -61,6 +67,8 @@ ENUMS: dict[str, tuple[str, ...]] = {
 }
 
 FINDING_CLOSED = ("fixed", "constrained", "withdrawn", "ruled")
+# The records that carry process flags ({code, text, at, by}: a rule not followed, recorded, never refused; 5.1)
+FLAGGED = ("Task", "Ticket", "Decision", "Evidence", "Run", "Hypothesis", "Experiment", "Ask")
 TASK_OPEN = ("queued", "open", "active", "blocked", "delivered", "merging")
 TASK_DONE = ("accepted", "cancelled")
 
@@ -93,19 +101,19 @@ ENTITIES: dict[str, Entity] = {e.label: e for e in [
        source=F(), purpose=F(required=True), evidence_status=F(required=True, enum="evidence_status"),
        disposition=F(required=True, enum="disposition"), revision=F("int", True), label=F(required=True),
        composite=F("bool"), cost=F(), flag=F("json"), defer_reason=F(), origin=F(), needs_recheck=F("bool"),
-       recheck_reason=F()),
+       recheck_reason=F(), kind=F(), flags=F("json")),
     _e("Experiment", "E", graph=True, title=F(required=True), question=F(required=True), label=F(required=True),
        revision=F("int", True), revision_reason=F(), brief_ref=F(), manifest_path=F(), manifest_digest=F(),
        manifest=F("json"), protected=F("json"), semantic_tests=F(), design_commit=F(), sealed_at=F(),
-       sealed_by=F(), estimate=F(), edit_seq=F("int")),
+       sealed_by=F(), estimate=F(), edit_seq=F("int"), flags=F("json")),
     _e("Evidence", "EV", graph=True, summary=F(required=True), validity=F(required=True, enum="validity"),
        evidence_level=F(required=True, enum="evidence_level"), scope=F(), artifact_refs=F("json"), doc_ref=F(),
-       validity_reason=F(), task_id=F(), needs_recheck=F("bool"), recheck_reason=F()),
+       validity_reason=F(), task_id=F(), needs_recheck=F("bool"), recheck_reason=F(), flags=F("json")),
     _e("Decision", "D", graph=True, kind=F(required=True, enum="decision_kind"),
        state=F(required=True, enum="decision_state"), rationale=F(required=True), rationale_ref=F(),
        evidence_status_set=F(enum="evidence_status"), disposition_set=F(enum="disposition"), did=F(), means=F(),
        highlights=F("json"), supports=F("json"), challenges=F("json"), task_id=F(), author=F(), final_at=F(),
-       needs_recheck=F("bool"), recheck_reason=F()),
+       needs_recheck=F("bool"), recheck_reason=F(), flags=F("json")),
     _e("Paper", "P", graph=True, title=F(required=True), authors=F("json"), year=F("int"), doi=F(), arxiv_id=F(),
        arxiv_version=F(), url=F(), metadata_status=F(required=True, enum="metadata_status"),
        fulltext_access=F(required=True, enum="fulltext_access"), metadata_source=F(), fetched_at=F(),
@@ -117,11 +125,15 @@ ENTITIES: dict[str, Entity] = {e.label: e for e in [
        answer_note=F(), return_note=F(), branch=F(), worktree=F(), design_commit=F(), delivered_commit=F(),
        merge_state=F(enum="merge_state"), merge_note=F(), merge_commit=F(), requirement=F(), done_check=F(),
        mandate_ref=F(), estimate=F(), released_at=F(), delivered_at=F(), outputs=F("json"), tests=F("json"),
-       fast_lane=F("bool"), scientist_session=F(), dispatch_note=F(), state_note=F(), sealed_design=F("json")),
-    _e("Phase", "PH", graph=True, title=F(required=True), budget=F(), scientist_limit=F("int", True)),
-    _e("Ask", "RQ", kind=F(required=True, enum="ask_kind"), task_id=F(required=True),
+       fast_lane=F("bool"), scientist_session=F(), dispatch_note=F(), state_note=F(), sealed_design=F("json"),
+       flags=F("json"), merge_proc=F("json")),
+    # scientist_limit: older records only (schema 6 removes it)
+    _e("Phase", "PH", graph=True, title=F(required=True), budget=F(), scientist_limit=F("int")),
+    # an ask is on a task, or (the user's approval of a recorded tree) on a decision
+    _e("Ask", "RQ", kind=F(required=True, enum="ask_kind"), task_id=F(), decision_id=F(),
        state=F(required=True, enum="ask_state"), by=F(required=True), stuck=F(required=True), options=F(),
-       recommend=F(), cost=F(), answer=F(), answered_by=F(enum="answerer"), answered_at=F(), forwarded_at=F()),
+       recommend=F(), cost=F(), answer=F(), answered_by=F(enum="answerer"), answered_at=F(), forwarded_at=F(),
+       choice=F(enum="ask_choice"), flags=F("json")),
     _e("Document", "DOC", path=F(required=True), doc_type=F(required=True, enum="doc_type"),
        owner=F(required=True), latest_revision=F("int", True), latest_digest=F(required=True)),
     _e("DocRevision", "DOC", document_id=F(required=True), revision=F("int", True), digest=F(required=True),
@@ -130,14 +142,14 @@ ENTITIES: dict[str, Entity] = {e.label: e for e in [
        host=F(required=True), entry=F(), model=F(), effort=F(), status=F(required=True, enum="session_status"),
        herdr_pane=F(), herdr_tab=F(), host_session_id=F(), cwd=F(), ended_at=F(), last_prompt_at=F(),
        last_seq=F("int"), last_user_at=F(), last_active_at=F(), conversations=F("int"), needs_decision=F(),
-       context_tokens=F("int"), told=F("json")),
+       context_tokens=F("int"), told=F("json"), reminded=F("json")),
     _e("Message", "MSG", kind=F(required=True, enum="message_kind"), subject=F(required=True),
        from_role=F(required=True), to_role=F(required=True), text=F(required=True), refs=F("json"),
        in_reply_to=F(), finding=F(), closed_at=F()),
     _e("Run", "RUN", task_id=F(required=True), experiment_id=F(), category=F(required=True, enum="run_category"),
        arm=F(), seed=F(), deviates=F("bool"), deviation=F(), request_id=F(required=True), spec=F("json", True),
        spec_digest=F(required=True), attempt_count=F("int", True), code_commit=F(), minutes=F("float"),
-       purpose=F(), ticket_id=F()),
+       purpose=F(), ticket_id=F(), flags=F("json")),
     _e("Attempt", "ATT", run_id=F(required=True), index=F("int", True), request_id=F(),
        execution_state=F(required=True, enum="execution_state"), outcome=F(required=True, enum="outcome"),
        result_status=F(required=True, enum="result_status"), last_trusted_state=F(), last_trusted_at=F(),
@@ -161,7 +173,7 @@ ENTITIES: dict[str, Entity] = {e.label: e for e in [
        review_kind=F(enum="review_kind"), advice_kind=F(enum="advice_kind"), task_id=F(), target_id=F(),
        segment=F(enum="segment"), passes=F("json"), findings=F("json"), requested_by=F(required=True),
        question=F(), answer_ref=F(), ruling_of=F(), ruled=F("json"), verdict=F(), answered_at=F(),
-       entry=F(), model=F()),
+       entry=F(), model=F(), author=F(), flags=F("json")),
     _e("Event", "EVT", width=6, seq=F("int", True), type=F(required=True), entity_id=F(), actor=F(), summary=F()),
     _e("Request", "REQ", op=F(required=True), request_id=F(required=True), digest=F(required=True),
        result=F("json", True)),

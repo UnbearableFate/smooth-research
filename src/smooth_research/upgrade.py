@@ -37,10 +37,53 @@ class Migration:
     apply: Callable[["Tx"], list[str]]  # returns what it changed, one line each
 
 
-# The migrations from schema 5 on, in order. Emptied with the 2026-11 redesign, which opens no earlier project
-# (design 10.4); a later change of the record format adds its migration here and freezes a fixture of the format
-# it upgrades from (tests/fixtures/projects/schema-<n>).
-MIGRATIONS: list[Migration] = []
+def _v6(tx: "Tx") -> list[str]:
+    """Schema 6 (design 2026-11-27, chapter 9): the plugin guides and records, nothing in it stops the agents.
+    Limits that no longer exist leave the records; review rounds end after two reviews and no longer escalate, so
+    escalated rounds, rounds answered twice and the rulings that waited on them are closed (their findings and any
+    ruling already given stay as they were); answered approvals get the choice their answer began with."""
+    out = []
+    limited = [t["id"] for t in tx.all("Task") if t.get("parallel_limit") is not None]
+    for tid in limited:
+        tx.update(tid, {"parallel_limit": None})
+    if limited:
+        out.append(f"parallel limit removed from {', '.join(limited)}")
+    phases = [p["id"] for p in tx.all("Phase") if p.get("scientist_limit") is not None]
+    for ph in phases:
+        tx.update(ph, {"scientist_limit": None})
+    if phases:
+        out.append(f"scientist limit removed from {', '.join(phases)}")
+    closed = []
+    for t in tx.all("Ticket"):
+        if t["kind"] == "review" and (t["status"] == "escalated"
+                                      or (t["status"] == "answered" and len(t.get("passes") or []) >= 2)):
+            tx.update(t["id"], {"status": "closed"})
+            closed.append(f"{t['id']} ({t['status']})")
+        elif t["kind"] == "advice" and t.get("advice_kind") == "ruling" and t["status"] == "waiting":
+            tx.update(t["id"], {"status": "closed"})
+            closed.append(f"{t['id']} (a ruling that waited)")
+    if closed:
+        out.append(f"closed: {', '.join(closed)}")
+    chose = []
+    for a in tx.all("Ask", kind="approval"):
+        if a["state"] == "answered" and not a.get("choice"):
+            text = (a.get("answer") or "").strip().lower()
+            choice = "approve" if text.startswith("approve") else "change" if text.startswith("change") else None
+            if choice:
+                tx.update(a["id"], {"choice": choice})
+                chose.append(f"{a['id']} {choice}")
+    if chose:
+        out.append(f"approval choices: {', '.join(chose)}")
+    return out or ["nothing to change"]
+
+
+# The migrations from schema 5 on, in order (schema 5 is the oldest format opened: design 10.4). A change of the
+# record format adds its migration here and freezes a fixture of the format it upgrades from
+# (tests/fixtures/projects/schema-<n>).
+MIGRATIONS: list[Migration] = [
+    Migration(6, "the plugin guides and records: limits removed, review rounds of two reviews, approval choices",
+              _v6),
+]
 
 
 def environment(project) -> tuple[str, bool]:
@@ -98,6 +141,11 @@ def migrate(store: "Store") -> dict | None:
             tx.event("project.upgrade", None, f"schema {version} -> {SCHEMA_VERSION} by build {build()}; copy of the "
                                               f"old database: {rel}; " + "; ".join(c.strip() for c in changes))
             txn.commit()
+    if version < 6:  # a watcher of the old rules still running would go on scheduling (2026-11-27, 3.4)
+        from .watch import retire_older
+        stopped = retire_older(store)
+        if stopped:
+            changes.append(stopped)
     return {"from": version, "to": SCHEMA_VERSION, "backup": str(backup), "changes": changes}
 
 

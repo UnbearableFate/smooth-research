@@ -1,0 +1,57 @@
+# Smooth Research configuration. Resource limits and scope live in docs/constraints.md; the
+# layout is fixed: experiment code in src/, documents for people in docs/, records in research/.
+# models: <entry>:<model>[@effort] per role (coordinator, scientist, researcher, reviewer,
+# advisor); entry is claude, codex, pi or manual; the first available one is used when a
+# session opens. models.tree: the coordinator's tree subagent, one entry per host family.
+# agents: launch arguments per host, and the times of the optional observer (rl watch)
+# (docs/configuration.md). limits: envelope_lines (shares of an envelope that are flagged).
+# compute: where experiments run; rl connects to none of them (rl compute steps prints how to
+# stage a commit there). compute.tests: local, or job when even tests must run as jobs.
+version: 1
+models:
+  coordinator:
+  - claude:claude-opus-5-5@high
+  - codex:gpt-6-astra@high
+  scientist:
+  - claude:claude-opus-5-5@high
+  - codex:gpt-6-astra@high
+  researcher:
+  - claude:claude-sonnet-5-5@medium
+  - codex:gpt-6-astra@medium
+  reviewer:
+  - codex:gpt-6-astra@medium
+  - claude:claude-opus-5-5@medium
+  advisor:
+  - codex:gpt-6-astra@high
+  - claude:claude-fable-5-2@high
+  tree:
+  - claude:claude-fable-5-2@xhigh
+  - codex:gpt-6.2-astra@xhigh
+agents:
+  args:
+    claude:
+    - --permission-mode
+    - auto
+    codex: []
+    pi: []
+  beat_seconds: 30
+  user_quiet_minutes: 3
+  heartbeat_minutes: 5
+  page_minutes: 15
+  deadlines:
+    default: 240
+limits:
+  envelope_lines:
+  - 0.8
+  - 1.0
+  - 1.5
+usage:
+  switch_left_percent: 10
+compute:
+  coordinator: local
+  default: local
+  repository: none
+  tests: local
+  resources:
+    local:
+      kind: local

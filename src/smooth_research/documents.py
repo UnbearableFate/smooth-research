@@ -1,8 +1,9 @@
 """Sealed documents: drafts stay editable; the first formal reference freezes a content-addressed revision.
 
 Every document has an owner record and a type from a closed list (schema doc_type). Once its owner is finished (a
-task accepted or cancelled, a decision final, a ticket closed) the document takes no new revision, and no document
-takes more than MAX_REVISIONS.
+task accepted or cancelled, a decision final, a ticket closed) the document takes no new revision: what was accepted
+or decided would otherwise read differently later (2026-11-27, 5.1: "would be false"). How many revisions a document
+takes is not limited.
 
 The immutable object is written atomically before the database transaction registers it. A crash in between
 leaves at most an unregistered object (reported by `rl doctor`), never a registered reference without content.
@@ -18,7 +19,6 @@ from .project import Project
 from .store import Tx
 from .util import RLError, atomic_write, digest_bytes, digest_file, parse_ref, short
 
-MAX_REVISIONS = 12
 PROJECT = "project"  # the owner of the plan and the constraints
 
 
@@ -88,9 +88,6 @@ def register(tx: Tx, prep: Prepared, owner: str) -> str:
         if why := _finished(tx, doc["owner"]):
             raise RLError("CONFLICT", f"{prep.source_path} ({doc['id']}) belongs to {doc['owner']}, and {why}: its "
                                       "documents are read only now. Write a new file for new work")
-        if doc["latest_revision"] >= MAX_REVISIONS:
-            raise RLError("CONFLICT", f"{doc['id']} has {MAX_REVISIONS} revisions, the most a document takes: put "
-                                      "what changed in a new record (a decision, a finding, a new experiment revision)")
         revision = doc["latest_revision"] + 1
         tx.update(doc["id"], {"latest_revision": revision, "latest_digest": prep.digest})
         doc_id = doc["id"]

@@ -25,9 +25,10 @@ stop_when: the positive control of the first seed fails
 ```
 
 An evidence run names its arm and seed; the arm's config and split are recorded with it. A run with another
-configuration or split is refused, or registered with `--deviation "<why>"` and is then not evidence. Each run
-keeps the revision and the arm it was registered against: a later revision of the experiment does not change how
-its result is checked.
+configuration or split is registered as deviating and is not evidence: give `--deviation "<why>"`, or it is
+flagged `deviates`. Each run keeps the revision and the arm it was registered against: a later revision of the
+experiment does not change how its result is checked. An evidence or prep run is registered at the worktree's
+committed head: one with uncommitted changes is refused (commit first).
 
 ## A local run, end to end (a researcher in its worktree)
 
@@ -43,7 +44,7 @@ rl run import-result --attempt ATT-0001-1 --request-id i-base-0 --manifest @rese
 rl evidence add --task T-0003 --summary "..." --level screening --results RES-0001,RES-0002
 ```
 
-Trial runs (smoke, timing) are `--trial --minutes N` (at most `limits.trial_minutes`) and are never evidence.
+Trial runs (smoke, timing) are `--trial --minutes N` and are never evidence.
 A retry of a run is `--run RUN-x` with a new request id; the same request id with the same content returns the
 attempt it made.
 
@@ -203,8 +204,11 @@ With `compute.tests: job` a task's tests are jobs too. Register one with `{{rl}}
 executor); its run keeps the test command, commit and experiment revision of that moment. Run the command at that
 commit, then `{{rl}} task test T-x --record pass|fail --attempt <ATT>` (once per job). A command or revision changed
 afterwards needs a new job. An acceptance waits on its merge test the same way (`--purpose merge-test`): the
-candidate is the branch `sr-accept/<project tag>/T-x`, which `{{rl}} compute sync` pushes for a git resource; the watcher
-finishes the acceptance when the job's end is recorded.
+candidate is the branch `sr-accept/<project tag>/T-x`, which `{{rl}} compute sync` pushes for a git resource. The
+command that records the job's end (`{{rl}} run ended` or `{{rl}} run record`) finishes the acceptance; running
+`{{rl}} task accept T-x` again goes on with an interrupted one, and so does `{{rl}} resume`. When the merge test
+fails, `{{rl}} task accept T-x --force --reason ..` still moves the mainline (flagged); a merge conflict is never
+forced: resolve it on the branch and deliver again.
 
 ### Jobs through an external executor
 
@@ -235,11 +239,13 @@ one.
    format below. Use `hpc_job`, the executor namespace and the full job id, never the login process PID; take the
    id from the executor's output, never from memory (`{{rl}} run record --exec-id` reminds you on such a resource).
    Queued is not running. Import measured usage once; unknown usage is not zero.
-6. Nobody waits in a pane. Configure the executor's completion notification with its `command` delivery
+6. Do not wait in a pane for a long job. Configure the executor's completion notification with its `command` delivery
    running `rl run ended --namespace <executor namespace>` in the project (the notification JSON on stdin): rl
    finds the attempts by the job ids bound to them in that namespace and ends each job by its own status row; a job whose row says it is still running or unknown
-   stays pending, and a state-unknown notice ends nothing. The submitter then sees a `job-ended` item and the
-   watcher wakes it. While a task's runs are queued or running, its session has nothing to do and ends its turn.
+   stays pending, and a state-unknown notice ends nothing. The submitter then has a `job-ended` item, and
+   `{{rl}} run ended` tells its session (it types into the pane, or the Stop hook hands it over, or it opens the
+   session). While a task's runs are queued or running, its session has nothing to do and ends its turn; a short
+   job it may wait for. Without a completion notification, record the end yourself when you see it.
 7. Verify application outputs after completion: scheduler success alone is insufficient. With a shared
    filesystem, import `@<workspace>/runs/<ATT>/manifest.json` directly; use absolute shared paths for artifacts, so no download is needed.
    Relative artifact paths are always resolved from the research project root, not the manifest directory. Otherwise fetch the manifest and its small files into
@@ -276,7 +282,9 @@ Runs on this machine count no usage: record none for them. For a job on a remote
 scheduler accounted (an executor export records it for you): `{{rl}} run usage --accounting-ref "<scheduler>:<job
 id>" --quantity 0.17 --unit node_hours --resource-type compute --hardware "<node type>" --basis measured --attempts
 ATT-0001-1`. A shared job: one accounting ref, several `--attempts`, counted once; never split it into invented
-per-run numbers. Different units are never added, and unreported usage is not zero.
+per-run numbers. Different units are never added, and unreported usage is not zero. When the recorded use of a
+hypothesis task crosses a line of its envelope (`limits.envelope_lines`), its holder is told; at the last line the
+coordinator too. Nothing is stopped for it.
 
 ## After a plugin update
 

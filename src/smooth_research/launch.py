@@ -2,8 +2,8 @@
 
 The agent runs in its own tab, with the environment that names its project, session and checkout, and with the
 command line its entry and role call for. A host's question whether to trust the folder rl opened the session
-in is answered by rl; any other dialog is recorded as the session needing a decision (design 11.3), which the
-coordinator answers (rl agent answer), or the user for the coordinator's own session.
+in is answered by rl; any other dialog is recorded as the session needing a decision, which the coordinator
+answers (rl agent answer), or the user for the coordinator's own session.
 """
 
 from __future__ import annotations
@@ -101,22 +101,25 @@ def decide(name: str) -> str:
             "answers it (only what only the user can decide goes to the user)")
 
 
-def launch_args(store: Store, entry: adapters.Entry, kind: str, name: str, host_session: str | None) -> list[str]:
-    """The agent's own command-line arguments: model, effort, session id and name; tools by role (reviewers do
-    not get file edit tools, Codex advisors get web search); the subscription usage (usage.py): Claude Code
-    reports it through rl's status line, and Codex does not offer a cheaper model in a dialog when it runs low
-    (rl hands the work over instead); then agents.args.<host> from the configuration."""
+def launch_args(store: Store, entry: adapters.Entry, kind: str, name: str, host_session: str | None,
+                resume: bool = False) -> list[str]:
+    """The agent's own command-line arguments: model, effort, session id and name (resume: go on with the host's
+    conversation host_session instead of starting one, design 2026-11-27 3.2); tools by role (reviewers do not get
+    file edit tools, Codex advisors get web search); the subscription usage (usage.py): Claude Code reports it
+    through rl's status line, and Codex does not offer a cheaper model in a dialog when it runs low; then
+    agents.args.<host> from the configuration."""
     if entry.entry == "claude":
-        args = ["--model", entry.model, "--session-id", host_session, "-n", name]
+        args = ["--model", entry.model, "--resume" if resume else "--session-id", host_session, "-n", name]
         args += ["--effort", entry.effort] if entry.effort else []
         args += ["--disallowedTools", "Edit,Write,NotebookEdit"] if kind == "reviewer" else []
         args += ["--settings", json.dumps({"statusLine": usage.statusline_setting(rl_command())})]
     elif entry.entry == "codex":
-        args = ["-m", entry.model] + (["-c", f'model_reasoning_effort="{entry.effort}"'] if entry.effort else [])
+        args = (["resume", host_session] if resume and host_session else []) + ["-m", entry.model]
+        args += ["-c", f'model_reasoning_effort="{entry.effort}"'] if entry.effort else []
         args += ["-c", "notice.hide_rate_limit_model_nudge=true"]
         args += ["--search"] if kind == "advisor" else []
     else:
-        args = ["--model", entry.model, "--session-id", host_session, "--name", name]
+        args = ["--model", entry.model, "--session" if resume else "--session-id", host_session, "--name", name]
         args += ["--thinking", entry.effort] if entry.effort else []
     return args + agent_args(store.project.config, entry.entry)
 
@@ -174,22 +177,25 @@ def new_tab(store: Store, s: dict) -> dict:
                          *[a for k, v in env.items() for a in ("--env", f"{k}={v}")])
 
 
-def start_agent(store: Store, s: dict, timeout: int = 90, tab: str | None = None, pane: str | None = None) -> dict:
-    """Start the session's agent in a new conversation: in the pane given (of the tab given), else in a new tab;
-    answer the host's question whether to trust the session's folder. Returns the tab, the pane, the host session
-    id, and why the agent still waits when it is not ready (a dialog someone decides). When the agent does not
-    start, a tab made here is closed and the error raised."""
+def start_agent(store: Store, s: dict, timeout: int = 90, tab: str | None = None, pane: str | None = None,
+                resume: str | None = None) -> dict:
+    """Start the session's agent: in the pane given (of the tab given), else in a new tab; in a new conversation,
+    or going on with the host's conversation resume (the session's earlier one); answer the host's question
+    whether to trust the session's folder. Returns the tab, the pane, the host session id, and why the agent still
+    waits when it is not ready (a dialog someone decides). When the agent does not start, a tab made here is closed
+    and the error raised."""
     name, entry = s["name"], adapters.Entry.parse(s["entry"])
     agent_name = herdr_name(store, name)
     made = not pane
     if made:
         created = new_tab(store, s)
         tab, pane = created["tab"]["tab_id"], created["root_pane"]["pane_id"]
-    host_session = str(uuid.uuid4()) if entry.entry in ("claude", "pi") else None
+    host_session = resume or (str(uuid.uuid4()) if entry.entry in ("claude", "pi") else None)
     waiting = None
     try:
         herdr.call("agent", "start", agent_name, "--kind", entry.entry, "--pane", pane, "--timeout", str(timeout * 1000),
-                   "--", *launch_args(store, entry, s["role"], name, host_session), timeout=timeout + 30)
+                   "--", *launch_args(store, entry, s["role"], name, host_session, resume=bool(resume)),
+                   timeout=timeout + 30)
     except RLError as exc:
         if exc.details.get("herdr_code") != "agent_not_ready":
             if made:
@@ -272,7 +278,7 @@ def answer_trust(name: str, host: str, folder: Path, timeout: int, label: str | 
             if state in ("idle", "done"):
                 return None
             if state == "gone":
-                return f"{name} exited at the folder trust question; the watcher opens it again when it has work"
+                return f"{name} exited at the folder trust question; rl session open {name} opens it again"
             # blocked on something else for a few looks in a row (not the moment the trust dialog goes away)
             other = other + 1 if state == "blocked" and question not in herdr.read(pane) else 0
             if other >= 6:

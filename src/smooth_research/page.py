@@ -7,8 +7,10 @@ page is rendered. The page is generated, ignored by git.
 Four parts: Now (each hypothesis at work: its step, who it waits on and since when; the last 24 hours), Findings
 (phase conclusions first, then reviewed hypothesis conclusions, then accepted task conclusions of hypotheses still
 at work, marked as interim), Waiting on you (the user's inbox), and the tree with its costs, drawn by the
-bypass-lora template's script from the records as JSON. "Waited for" is computed in the page when it is opened and
-every minute; the generation time doubles as the watcher's heartbeat.
+bypass-lora template's script from the records as JSON. While a tree draft waits for the user's approval
+(research/tree-draft/tree.yaml, not a record), it comes first, in full, marked as a draft (design 2026-11-27, 7.2).
+"Waited for" is computed in the page when it is opened and every minute; a page older than two redraw intervals
+says when it was generated and that rl view refreshes it.
 """
 
 from __future__ import annotations
@@ -18,7 +20,7 @@ import json
 from datetime import datetime, timedelta, timezone
 from importlib import resources
 
-from . import inbox
+from . import inbox, tree
 from .project import agents_value
 from .research import children, parent_of
 from .reviews import open_findings
@@ -112,12 +114,49 @@ def _iso_ms(at: str | None) -> str:
     return (at or now_utc())
 
 
+def draft_panel(store: Store) -> str:
+    """The unrecorded tree draft (research/tree-draft/tree.yaml), in full and marked as a draft: the user reads it
+    here before approving it (design 2026-11-27, 7.2). Empty when there is none."""
+    if not tree.has_draft(store.project):
+        return ""
+    d = tree.read(store.project)
+    rel = f"{tree.DRAFT_DIR}/{tree.DRAFT_FILE}"
+    head = (f"<section class=\"panel draft\" aria-label=\"建树草稿\"><h2>建树草稿 <span class=\"badge\">草稿，还没有记录"
+            f"</span></h2><p class=\"muted\"><span class=\"mono\">{esc(rel)}</span> · 你批准以后，协调者用 "
+            "<span class=\"mono\">rl tree record</span> 一次记下；这之前要改哪里，告诉协调者，改多少次都行。</p>")
+    problems = ("<div class=\"problems\"><b>格式问题（记录之前要改好）：</b><ul>"
+                + "".join(f"<li>{esc(p)}</li>" for p in d.problems) + "</ul></div>") if d.problems else ""
+    if not d.parsed:
+        return head + problems + f"<pre class=\"gl\">{esc(d.raw)}</pre></section>"
+    kind = {"main": "主假设", "competing": "竞争解释"}
+    lack = {"novelty": "新颖性", "feasibility": "可行性"}
+    hyps = []
+    for h in d.hypotheses:
+        rows = "".join(f"<dt>{name}</dt><dd>{esc(h.get(key))}</dd>" for name, key in (
+            ("命题", "statement"), ("范围", "scope"), ("目的", "purpose"), ("出处", "source"), ("挂在", "parent"),
+            ("预计用量", "cost")) if h.get(key))
+        doubt = h.get("doubt")
+        hyps.append(f"<article class=\"dh\"><h4><span class=\"mono\">{esc(h['key'])}</span> {esc(h.get('title'))} "
+                    f"<span class=\"tag\">{esc(kind.get(h.get('kind') or '', h.get('kind') or '?'))}</span></h4>"
+                    f"<dl>{rows}</dl>" + (f"<p class=\"doubt\"><b>存疑（{esc(lack.get(doubt.get('lack') or '', doubt.get('lack')))}"
+                                          f"不足）</b>：{esc(doubt.get('basis'))}<br><span class=\"muted\">选项：</span>"
+                                          f"{esc(doubt.get('options'))}</p>" if doubt else "") + "</article>")
+    prep = "".join(f"<li><b>{esc(p.get('title'))}</b>：{esc(p.get('requirement'))}<br><span class=\"muted\">完成检查："
+                   f"</span><code>{esc(p.get('done_check'))}</code></li>" for p in d.prep)
+    questions = "".join(f"<li>{esc(q)}</li>" for q in d.questions)
+    return (head + problems + f"<h3>为什么是这几个假设</h3><p>{esc(d.why or '（没写）')}</p>"
+            f"<h3>假设（{len(d.hypotheses)}）</h3>{''.join(hyps) or '<p>没有。</p>'}"
+            f"<h3>共用的准备工作</h3><ul>{prep or '<li>没有。</li>'}</ul>"
+            f"<h3>要问你的事</h3><ul>{questions or '<li>没有。</li>'}</ul></section>")
+
+
 def render(store: Store) -> str:
     c = collect(store)
     hyps, exps, tasks = c["hyps"], c["exps"], c["tasks"]
     by_id = {t["id"]: t for t in tasks}
     now = datetime.now(timezone.utc)
     every = agents_value(store.project.config, "page_minutes")
+    draft = draft_panel(store)
 
     # -- tree data for page-main.js ------------------------------------------------------------------------------
     def item(hid: str) -> list:
@@ -226,7 +265,7 @@ def render(store: Store) -> str:
 
     # -- waiting on you ----------------------------------------------------------------------------------------
     mine = [i for i in c["items"] if i.to == "user"]
-    ask_by = {a["task_id"]: a for a in c["asks"]}
+    ask_by = {a.get("task_id"): a for a in c["asks"]}
     ask_by.update({a["id"]: a for a in c["asks"]})
     you = []
     for i in mine:
@@ -277,7 +316,12 @@ def render(store: Store) -> str:
 .panel table{{width:100%;border-collapse:collapse;font-size:.92rem}}
 .panel td,.panel th{{padding:.3rem .4rem;border-bottom:1px solid var(--line, #8883);text-align:left;vertical-align:top}}
 .panel tr.late td{{color:#c33}} .muted{{opacity:.7}} .mono{{font-family:ui-monospace,monospace}}
-#stale{{background:#c33;color:#fff;padding:.5rem 1rem;border-radius:8px}} pre.gl{{white-space:pre-wrap}}
+#stale{{background:#8883;padding:.5rem 1rem;border-radius:8px}} pre.gl{{white-space:pre-wrap}}
+.draft{{border:2px dashed #c80}} .draft .badge{{background:#c80;color:#fff;font-size:.8rem;padding:.1rem .5rem;border-radius:6px;vertical-align:middle}}
+.draft .dh{{margin:.8rem 0;padding:.6rem .8rem;border-left:3px solid #c808}} .draft .dh h4{{margin:.2rem 0 .4rem}}
+.draft dl{{display:grid;grid-template-columns:max-content 1fr;gap:.2rem .8rem;margin:0}} .draft dt{{opacity:.7}} .draft dd{{margin:0}}
+.draft .tag{{font-size:.8rem;border:1px solid currentColor;border-radius:6px;padding:0 .4rem;opacity:.8}}
+.draft .doubt{{color:#b60}} .draft .problems{{color:#c33}}
 </style>
 </head>
 <body data-generated="{esc(now_utc())}" data-every="{every:g}">
@@ -285,9 +329,10 @@ def render(store: Store) -> str:
 <p class="kicker">smooth-research 研究页 · 生成于 {esc(now_utc()[:16])} UTC</p>
 <h1>{esc(title)}</h1>
 <p class="lede">{esc(lede)}</p>
-<p id="stale" hidden>监视可能停了：运行 rl resume。</p>
+<p id="stale" hidden>本页生成于 {esc(now_utc()[:16])} UTC；运行 rl view 刷新。</p>
 </div></header>
 <main class="wrap">
+{draft}
 <section class="panel" aria-label="现在"><h2>现在</h2>
 <table><thead><tr><th>任务</th><th>目标</th><th>走到哪一步</th><th>在等谁</th><th>等了多久</th><th>花费/信封</th></tr></thead>
 <tbody>{''.join(now_rows) or '<tr><td colspan="6">没有在做的假设任务。</td></tr>'}</tbody></table>{'<p class="muted">花费后面带 * 的：其中有的用量记录同时覆盖别的任务的运行，在每个任务里都按全额算，几个任务的花费不能相加。</p>' if any(str(v).split('/')[0].endswith('*') for v in c['usage'].values()) else ''}
@@ -323,7 +368,7 @@ def render(store: Store) -> str:
 </article></aside></div></section>
 {gloss}
 </main>
-<footer class="wrap foot"><p>由记录生成（data_version {esc(c['meta'].get('data_version'))}）。不要手改：监视会重画。</p></footer>
+<footer class="wrap foot"><p>由记录生成（data_version {esc(c['meta'].get('data_version'))}）。不要手改：rl view（或观察者）会重画。</p></footer>
 <script type="application/json" id="tree-data">{data_json}</script>
 <script>{_asset('page-main.js')}</script>
 <script>{script}</script>
